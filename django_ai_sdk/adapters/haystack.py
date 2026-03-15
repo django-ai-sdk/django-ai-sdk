@@ -1,0 +1,510 @@
+import asyncio
+import traceback
+import uuid
+from asyncio import Queue
+from collections.abc import AsyncGenerator, Callable
+from typing import TYPE_CHECKING, Any, Union
+
+from haystack.components.agents import Agent
+from haystack.dataclasses import ChatMessage as HaystackChatMessage
+
+from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.utils import merge_messages
+from django_ai_sdk.common import (
+    ChatMessage,
+    MessageChunk,
+    StreamWriter,
+)
+from django_ai_sdk.events import (
+    ErrorEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    StreamEndEvent,
+    StreamEvent,
+    TextChunkEvent,
+    ToolCallStartEvent,
+    ToolInputCompleteEvent,
+    ToolOutputEvent,
+)
+from django_ai_sdk.logger import get_logger
+from django_ai_sdk.tracking.utils import track_llm
+
+if TYPE_CHECKING:
+    from django_ai_sdk.storage.base import BaseStorageAdapter
+
+logger = get_logger(__name__)
+
+
+class HaystackAdapter(BasePipelineAdapter):
+    """
+    Adapter for Haystack pipelines that emits events.
+    """
+
+    def __init__(
+        self,
+        pipeline: Any,
+        generator_component: Any,
+        store: bool = True,
+        storage_adapter: Union["BaseStorageAdapter", None] = None,
+        rag_pipeline: Any = None,
+    ) -> None:
+        self.pipeline = pipeline
+        self.generator = generator_component
+        self.store = store
+        self.storage_adapter = storage_adapter
+        self.rag_pipeline = (
+            rag_pipeline  # TODO: we probably don't need this, we can check pipeline directly
+        )
+        self.message_result: ChatMessage | None = None
+        self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
+
+        # Check if first component is an Agent
+        self.agent_component = None
+        self.model_name = None
+
+        if self.first_component:
+            component = pipeline.get_component(self.first_component)
+
+            # Check if first component is an Agent
+            # TODO: this logic should be refactored, it should be moved to a separate method
+            if isinstance(component, Agent):
+                self.agent_component = component
+                # Try to get model name from chat_generator
+                if hasattr(component, "chat_generator"):
+                    cg = component.chat_generator
+                    self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
+                logger.debug(
+                    f"Detected Agent component: {self.first_component}, model: {self.model_name}"
+                )
+
+        logger.debug(
+            f"Haystack adapter initialized: store={store}, first_component={self.first_component}, agent_component={self.agent_component is not None}, storage_adapter={type(storage_adapter).__name__ if storage_adapter else None}"
+        )
+
+    @staticmethod
+    def _run_agent(
+        agent: Any,
+        messages: list[Any],
+        callback: Any,
+    ) -> Any:
+        """Helper method to run agent."""
+        return agent.run(messages=messages, streaming_callback=callback)
+
+    def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
+        """Convert internal messages to Haystack ChatMessage format.
+
+        Message merging is controlled by merge_messages flag (default: False).
+        """
+        logger.debug(
+            f"Converting {len(messages)} internal messages to Haystack format (merge={self.merge_messages})"
+        )
+
+        # Filter to user/assistant only
+        conversation = [m for m in messages if m.role in ("user", "assistant")]
+
+        converted_messages: list[HaystackChatMessage] = []
+
+        # Determine which messages to convert
+        if self.merge_messages:
+            filtered_messages = merge_messages(conversation)
+        else:
+            filtered_messages = [(msg.role, msg.content) for msg in conversation]
+
+        # Convert to Haystack format
+        for role, content in filtered_messages:
+            if role == "user":
+                converted_messages.append(HaystackChatMessage.from_user(content))
+            elif role == "assistant":
+                converted_messages.append(HaystackChatMessage.from_assistant(content))
+
+        logger.debug(f"Haystack message conversion complete: final_count={len(converted_messages)}")
+
+        # Ensure we have at least one message
+        # TODO: we now return a system message instead of a user message, this is a temporary fix
+        # In real-world scenarios: the assistant could be working without user input, it might be
+        # handed of from another assistant or system. We should support this case gracefully.
+        if not converted_messages:
+            logger.warning("No messages available for Haystack pipeline!")
+            converted_messages.append(HaystackChatMessage.from_system("No messages available."))
+
+        return converted_messages
+
+    def _create_text_chunk(self, content: str) -> MessageChunk:
+        """Create a text MessageChunk."""
+        return MessageChunk(
+            type="text",
+            content=content,
+            metadata={"source": "haystack_adapter"},
+        )
+
+    def _create_reasoning_chunk(self, content: str) -> MessageChunk:
+        """Create a reasoning MessageChunk."""
+        return MessageChunk(
+            type="reasoning",
+            content=content,
+            metadata={"source": "haystack_adapter"},
+        )
+
+    def _create_tool_chunks_from_message(self, message: Any) -> list[MessageChunk]:
+        """Convert Haystack message tool calls to MessageChunks."""
+        chunks = []
+
+        # Tool call starts and inputs
+        for tool_call in message.tool_calls:
+            chunks.append(
+                MessageChunk(
+                    type="tool_call_start",
+                    content={
+                        "tool_call_id": tool_call.id,
+                        "tool_name": tool_call.tool_name,
+                    },
+                    metadata={"source": "haystack_adapter"},
+                )
+            )
+
+            chunks.append(
+                MessageChunk(
+                    type="tool_input",
+                    content={
+                        "tool_call_id": tool_call.id,
+                        "tool_name": tool_call.tool_name,
+                        "tool_input": tool_call.arguments,
+                    },
+                    metadata={"source": "haystack_adapter"},
+                )
+            )
+
+        # Tool outputs
+        for tool_result in message.tool_call_results:
+            chunks.append(
+                MessageChunk(
+                    type="tool_output",
+                    content={
+                        "tool_call_id": tool_result.origin.id,
+                        "tool_output": tool_result.to_dict(),
+                    },
+                    metadata={"source": "haystack_adapter"},
+                )
+            )
+
+        return chunks
+
+    # TODO: rename this function, it's not a good name for this generator
+    def emit_tool_events_from_message(self, message: Any) -> Any:
+        """Emit tool events from a Haystack ChatMessage using its built-in properties."""
+        for tool_call in message.tool_calls:
+            yield ToolCallStartEvent(tool_call_id=tool_call.id, tool_name=tool_call.tool_name)
+            yield ToolInputCompleteEvent(
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.tool_name,
+                tool_input=tool_call.arguments,
+            )
+
+        # Emit tool results
+        for tool_result in message.tool_call_results:
+            yield ToolOutputEvent(
+                tool_call_id=tool_result.origin.id, tool_output=tool_result.to_dict()
+            )
+
+    @track_llm
+    async def stream(
+        self,
+        input: list[ChatMessage],
+    ) -> AsyncGenerator[StreamEvent, None]:
+        logger.debug(f"Starting Haystack stream with {len(input)} input messages")
+
+        # Convert messages
+        messages = self.get_messages(input)
+
+        # Note: RAG is handled at pipeline level via get_rag_pipeline() in Assistant
+        # The retriever is added to the pipeline before creating the adapter
+        logger.debug(f"Converted to {len(messages)} Haystack messages")
+
+        # Generate message ID
+        message_id = str(uuid.uuid4())
+        logger.debug(f"Generated message ID: {message_id}")
+
+        # Create StreamWriter with pre-generated ID
+        stream_writer = None
+        if self.store and self.storage_adapter:
+            stream_writer = StreamWriter(
+                adapter_type="haystack",
+                message_id=message_id,
+                model="haystack-pipeline",
+                role="assistant",
+                storage_callback=self.storage_adapter.storage_callback,
+            )
+            logger.debug(f"StreamWriter configured with ID: {message_id}")
+        else:
+            logger.debug("Message storage disabled or no storage adapter")
+
+        _finalize_called = False
+
+        # Queue for token chunks
+        queue: Queue[str] = Queue()
+        pipeline_finished = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        logger.debug("Token queue and pipeline event initialized")
+
+        # Create callback as bound method to avoid closure capturing issues
+        def make_callback(
+            queue_ref: Queue[str], event_ref: asyncio.Event, loop_ref: asyncio.AbstractEventLoop
+        ) -> Callable[[Any], None]:
+            """Factory function to create callback with explicit references."""
+
+            def callback(haystack_chunk: Any) -> None:
+                token = getattr(haystack_chunk, "content", None)
+                if token:
+                    queue_ref.put_nowait(token)
+                    logger.debug(f"Token queued: {token[:20]}...")
+                if getattr(haystack_chunk, "finish_reason", None):
+                    logger.debug(
+                        f"Pipeline finished with reason: {getattr(haystack_chunk, 'finish_reason')}"
+                    )
+                    loop_ref.call_soon_threadsafe(event_ref.set)
+
+            return callback
+
+        # Create callback with explicit references for thread safety
+        streaming_callback = make_callback(queue, pipeline_finished, loop)
+
+        # Attach callback to the component
+        self.generator.streaming_callback = streaming_callback
+        logger.debug("Streaming callback attached to generator component")
+
+        # Warm up the generator for async compatibility
+        if hasattr(self.generator, "warm_up"):
+            logger.debug("Warming up generator component")
+            self.generator.warm_up()
+
+        try:
+            # Start message - use same ID generated at adapter level
+            logger.debug(f"Starting message stream with ID: {message_id}")
+            yield MessageStartEvent(message_id=message_id)
+
+            # Debug: Log what we're about to send
+            logger.debug(
+                f"About to run {len(messages)} messages, model: {getattr(self, 'model_name', 'unknown')}"
+            )
+            for i, msg in enumerate(messages):
+                msg_text = getattr(msg, "text", "") or ""
+                logger.debug(
+                    f"  Message {i}: role={msg.role}, content={msg_text[:50] if msg_text else 'empty'}..."
+                )
+
+            # Run the pipeline or Agent directly
+            # When we have an Agent component, run it directly with streaming_callback
+            if self.agent_component:
+                logger.debug("Running Agent component directly with streaming_callback")
+                pipeline_task = loop.run_in_executor(
+                    None,
+                    lambda: self._run_agent(self.agent_component, messages, streaming_callback),
+                )
+            else:
+                # Run through Pipeline
+                pipeline_input = {"messages": messages}
+                logger.debug("Using default pipeline input format")
+                logger.debug("Starting pipeline execution in thread executor")
+                pipeline_task = loop.run_in_executor(
+                    None, lambda: self.pipeline.run(pipeline_input)
+                )
+
+            token_count = 0
+            # Yield tokens as they arrive in real-time
+            while not pipeline_finished.is_set() or not queue.empty():
+                # Check if pipeline task has completed (succeeded or failed) even if finish_reason wasn't set
+                if pipeline_task.done():
+                    try:
+                        # Check if it failed with an exception
+                        pipeline_task.result()
+                        logger.debug("Pipeline task completed successfully, exiting token loop")
+                    except Exception as pipeline_error:
+                        logger.error(f"Pipeline task failed: {pipeline_error}")
+                        # Emit error and exit loop
+                        yield ErrorEvent(
+                            error_message=f"Pipeline failed: {type(pipeline_error).__name__}: {str(pipeline_error)}"
+                        )
+                        yield StreamEndEvent()
+                        return
+                    break
+                try:
+                    # Use queue.get with timeout instead of busy-wait pattern
+                    # This is more efficient than polling with sleep
+                    token = await asyncio.wait_for(queue.get(), timeout=0.1)
+
+                    # TODO: debugging only, but i need to remove it before stable release
+                    token_count += 1
+                    if token_count % 50 == 0:
+                        logger.debug(f"Processed {token_count} tokens so far")
+
+                    if stream_writer:
+                        text_chunk = self._create_text_chunk(token)
+                        stream_writer.add_chunk(text_chunk)
+
+                    yield TextChunkEvent(content=token)
+
+                except TimeoutError:
+                    # No token available yet, continue loop
+                    continue
+                except Exception as streaming_error:
+                    logger.error(
+                        f"Exception occurred in streaming loop: {type(streaming_error).__name__}: {streaming_error}"
+                    )
+                    logger.error(f"Stack trace: {traceback.format_exc()}")
+                    # Check if pipeline completed
+                    if pipeline_task.done() and not pipeline_finished.is_set():
+                        logger.warning("Pipeline completed during exception, setting finished flag")
+                        pipeline_finished.set()
+
+            try:
+                # Get pipeline results to handle tool events
+                logger.debug("Retrieving pipeline results for tool processing")
+                pipeline_result = await pipeline_task
+                logger.debug("Pipeline execution completed, processing results")
+
+                # Extract RAG sources if retriever component exists
+                if self.rag_pipeline:
+                    # Check if retriever is in pipeline result
+                    if "retriever" in pipeline_result:
+                        retrieved_docs = pipeline_result["retriever"].get("documents", [])
+                        if retrieved_docs and stream_writer:
+                            sources = []
+                            for doc in retrieved_docs:
+                                sources.append(
+                                    {
+                                        "id": str(doc.id),
+                                        "content": doc.content,
+                                        "metadata": doc.meta or {},
+                                    }
+                                )
+                            stream_writer.message.sources = sources
+                            logger.debug(f"Extracted {len(sources)} RAG sources from pipeline")
+
+                # Extract response messages from pipeline result
+                if self.first_component and self.first_component in pipeline_result:
+                    response_messages = pipeline_result[self.first_component].get("messages", [])
+                    logger.debug(
+                        f"Found {len(response_messages)} response messages from component {self.first_component}"
+                    )
+                else:
+                    response_messages = pipeline_result.get("messages", [])
+                    logger.debug(
+                        f"Found {len(response_messages)} response messages from pipeline root"
+                    )
+
+                tool_events_count = 0
+                # Process tool events from response messages
+                for message_index, message in enumerate(response_messages):
+                    if hasattr(message, "tool_calls") or hasattr(message, "tool_call_results"):
+                        tool_call_count = len(getattr(message, "tool_calls", []))
+                        tool_result_count = len(getattr(message, "tool_call_results", []))
+                        logger.debug(
+                            f"Message {message_index}: {tool_call_count} tool calls, {tool_result_count} tool results"
+                        )
+
+                        # Create tool chunks and add to stream writer
+                        if stream_writer:
+                            tool_chunks = self._create_tool_chunks_from_message(message)
+                            logger.debug(
+                                f"Created {len(tool_chunks)} tool chunks for message {message_index}"
+                            )
+                            for chunk in tool_chunks:
+                                stream_writer.add_chunk(chunk)
+
+                        # Emit tool events
+                        for event in self.emit_tool_events_from_message(message):
+                            tool_events_count += 1
+                            yield event
+
+                logger.debug(f"Tool processing complete: {tool_events_count} events emitted")
+                # NOTE: Don't finalize yet, there might be remaining text chunks to process
+
+            except Exception as pipeline_processing_error:
+                logger.error(
+                    f"Exception processing pipeline results: {type(pipeline_processing_error).__name__}: {pipeline_processing_error}"
+                )
+                logger.debug(f"Stack trace: {traceback.format_exc()}")
+
+                # Handle error in stream writer
+                if stream_writer:
+                    error_chunk = MessageChunk(
+                        type="error",
+                        content={
+                            "error_message": str(pipeline_processing_error),
+                            "error_type": type(pipeline_processing_error).__name__,
+                        },
+                        metadata={"source": "haystack_adapter"},
+                    )
+                    stream_writer.add_chunk(error_chunk)
+                    self.message_result = await stream_writer.finalize("error")
+                    _finalize_called = True
+
+                yield ErrorEvent(
+                    error_message=f"{type(pipeline_processing_error).__name__}: {str(pipeline_processing_error)}"
+                )
+                yield StreamEndEvent()
+                return
+
+            # Yield any remaining chunks that arrived after finished signal
+            remaining_tokens = 0
+            while not queue.empty():
+                token = queue.get_nowait()
+                remaining_tokens += 1
+
+                if stream_writer:
+                    text_chunk = self._create_text_chunk(token)
+                    stream_writer.add_chunk(text_chunk)
+
+                yield TextChunkEvent(content=token)
+
+            if remaining_tokens > 0:
+                logger.debug(f"Processed {remaining_tokens} remaining tokens from queue")
+            logger.debug(f"Total tokens processed: {token_count + remaining_tokens}")
+
+            # finalize message after all text chunks are processed
+            if stream_writer:
+                logger.debug("Finalizing stored message")
+                self.message_result = await stream_writer.finalize("stop")
+                logger.debug(
+                    f"Message finalized with {len(self.message_result.content)} characters"
+                )
+            _finalize_called = True  # Mark as finalized even if no stream_writer (success path)
+
+            # End message
+            logger.debug("Emitting message end event")
+            yield MessageEndEvent()
+
+        except Exception as critical_error:
+            logger.error(
+                f"Critical error in stream method: {type(critical_error).__name__}: {critical_error}"
+            )
+            logger.error(f"Critical error traceback: {traceback.format_exc()}")
+
+            # Handle error in stream writer
+            # TODO: same as above we should consider hiding this behind a debug flag
+            if stream_writer:
+                error_chunk = MessageChunk(
+                    type="error",
+                    content={
+                        "error_message": str(critical_error),
+                        "error_type": type(critical_error).__name__,
+                    },
+                    metadata={"source": "haystack_adapter"},
+                )
+                stream_writer.add_chunk(error_chunk)
+                self.message_result = await stream_writer.finalize("error")
+                _finalize_called = True
+
+            yield ErrorEvent(
+                error_message=f"{type(critical_error).__name__}: {str(critical_error)}"
+            )
+            return
+
+        finally:
+            if stream_writer and not _finalize_called:
+                logger.debug("Finalizing with cancelled reason - connection may have dropped")
+                self.message_result = await stream_writer.finalize("cancelled")
+
+        logger.info("Haystack pipeline completed successfully")
+
+        yield StreamEndEvent()
