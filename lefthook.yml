@@ -1,0 +1,6 @@
+pre-commit:
+  commands:
+    lint:
+      run: make lint
+    typecheck:
+      run: make typecheck
