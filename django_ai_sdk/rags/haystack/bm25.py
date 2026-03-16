@@ -1,7 +1,3 @@
-"""
-BM25-based RAG implementation with query expansion.
-"""
-
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -16,10 +12,29 @@ from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.haystack.base import HaystackRAGBase
+from django_ai_sdk.rags.haystack.components import MultiQueryBM25Retriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
 
 logger = get_logger(__name__)
+
+
+DEFAULT_EXPANDER_PROMPT = """
+You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
+
+IMPORTANT:
+- Generate queries ONLY in the SAME language as the original query
+- If the original query is in Dutch, generate ONLY Dutch queries
+- If the original query is in English, generate ONLY English queries
+- Do NOT mix languages
+- Do NOT translate the queries
+
+Return a JSON object with the key "queries" containing the list of queries.
+
+Original query: {{query}}
+
+Generate {{n_expansions}} alternative queries in the SAME language as the original:
+"""
 
 
 class BM25QueryExpanderRAGConfig(BaseModel):
@@ -27,6 +42,8 @@ class BM25QueryExpanderRAGConfig(BaseModel):
 
     top_k: int = 5
     n_expansions: int = 4
+    expander_model: str = "gpt-4o-mini"
+    expander_prompt: str = DEFAULT_EXPANDER_PROMPT
 
 
 class BM25QueryExpanderRAG(HaystackRAGBase):
@@ -91,36 +108,21 @@ class BM25QueryExpanderRAG(HaystackRAGBase):
 
         # Create query expander
         expander_generator = OpenAIChatGenerator(
-            model="gpt-4o-mini",
+            model=self.config.expander_model,
+            # TODO: We need to configure this by passing it on to the config
             api_key=Secret.from_env_var("OPENAI_API_KEY"),
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
 
         # Custom prompt that forces same-language expansion
-        expander_prompt = """You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
-
-IMPORTANT: 
-- Generate queries ONLY in the SAME language as the original query
-- If the original query is in Dutch, generate ONLY Dutch queries
-- If the original query is in English, generate ONLY English queries
-- Do NOT mix languages
-- Do NOT translate the queries
-
-Return a JSON object with the key "queries" containing the list of queries.
-
-Original query: {{query}}
-
-Generate {{n_expansions}} alternative queries in the SAME language as the original:"""
 
         query_expander = QueryExpander(
             chat_generator=expander_generator,
             n_expansions=self.config.n_expansions,
-            prompt_template=expander_prompt,
+            prompt_template=self.config.expander_prompt,
         )
 
         # Create BM25 retriever
-        from django_ai_sdk.rags.haystack.components import MultiQueryBM25Retriever
-
         retriever = MultiQueryBM25Retriever(
             document_store=document_store,
             top_k=self.config.top_k,
@@ -133,7 +135,6 @@ Generate {{n_expansions}} alternative queries in the SAME language as the origin
 
         # Connect: expander -> retriever
         pipeline.connect("expander.queries", "retriever.queries")
-
         logger.debug("BM25 RAG pipeline built successfully")
         return pipeline
 

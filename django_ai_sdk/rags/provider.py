@@ -1,11 +1,3 @@
-"""
-RAG Provider pattern for the Django AI SDK.
-
-Provides a framework-agnostic interface for RAG (Retrieval-Augmented Generation)
-functionality. Different adapters (Haystack, OpenAI, LangChain, etc.) can provide
-their own RAGProvider implementations.
-"""
-
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -142,7 +134,6 @@ class RAGProvider(BaseRAGProvider):
 
     def __init__(self) -> None:
         """Initialize provider with empty cache."""
-        # Cache: key = "{class_name}_{silo_id}", value = BaseRAGAdapter instance
         self._cache: dict[str, Any] = {}
         logger.debug("RAGProvider initialized")
 

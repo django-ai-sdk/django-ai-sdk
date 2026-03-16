@@ -1,9 +1,3 @@
-"""
-Qdrant Hybrid RAG implementation combining sparse (BM42) and dense (multilingual) embeddings.
-Uses Reciprocal Rank Fusion (RRF) for combining results.
-Supports multilingual retrieval (Dutch, English, etc.) with query expansion.
-"""
-
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -30,11 +24,28 @@ from django_ai_sdk.rags.utils import rag_document_to_haystack
 
 logger = get_logger(__name__)
 
+DEFAULT_EXPANDER_PROMPT = """
+You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
+
+IMPORTANT:
+- Generate queries ONLY in the SAME language as the original query
+- If the original query is in Dutch, generate ONLY Dutch queries
+- If the original query is in English, generate ONLY English queries
+- Do NOT mix languages
+- Do NOT translate the queries
+
+Return a JSON object with the key "queries" containing the list of queries.
+
+Original query: {{query}}
+
+Generate {{n_expansions}} alternative queries in the SAME language as the original:
+"""
+
 
 class QdrantBM25HybridRAGConfig(BaseModel):
     """Configuration for Qdrant Hybrid RAG (BM42 Sparse + Dense)."""
 
-    # Preselected multilingual models for sparse and dense embeddings that work well together
+    # Preselected multilingual models
     sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions"
     dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
@@ -47,6 +58,7 @@ class QdrantBM25HybridRAGConfig(BaseModel):
 
     # Expander settings
     expander_model: str = "gpt-4o-mini"
+    expander_prompt: str = DEFAULT_EXPANDER_PROMPT
     n_expansions: int = 4
 
 
@@ -147,7 +159,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             document_store = self._cached_document_store
             logger.debug("Using cached document store")
         else:
-            logger.debug("No cached document store, building fresh (warmup needed)")
+            logger.debug("No cached document store, building fresh")
             document_store = QdrantDocumentStore(
                 ":memory:",
                 recreate_index=True,
@@ -200,29 +212,15 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
+            # TODO: make this configurable
             api_key=Secret.from_env_var("OPENAI_API_KEY"),
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
 
-        expander_prompt = """You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
-
-IMPORTANT:
-- Generate queries ONLY in the SAME language as the original query
-- If the original query is in Dutch, generate ONLY Dutch queries
-- If the original query is in English, generate ONLY English queries
-- Do NOT mix languages
-- Do NOT translate the queries
-
-Return a JSON object with the key "queries" containing the list of queries.
-
-Original query: {{query}}
-
-Generate {{n_expansions}} alternative queries in the SAME language as the original:"""
-
         query_expander = QueryExpander(
             chat_generator=expander_generator,
             n_expansions=self.config.n_expansions,
-            prompt_template=expander_prompt,
+            prompt_template=self.config.expander_prompt,
         )
 
         query_pipeline = Pipeline()

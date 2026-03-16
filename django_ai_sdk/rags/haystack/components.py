@@ -1,7 +1,3 @@
-"""
-Reusable Haystack components for RAG pipelines.
-"""
-
 from typing import Any
 
 from haystack import component
@@ -13,7 +9,7 @@ from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetri
 
 @component
 class MultiQueryChromaRetriever:
-    """Retriever that runs multiple queries and deduplicates results (for ChromaDB)."""
+    """Retriever that runs multiple queries and deduplicates results for ChromaDB"""
 
     def __init__(
         self,
@@ -22,7 +18,10 @@ class MultiQueryChromaRetriever:
     ) -> None:
         self.document_store = document_store
         self.top_k = top_k
-        self.retriever = ChromaQueryTextRetriever(document_store=document_store, top_k=top_k)
+        self.retriever = ChromaQueryTextRetriever(
+            document_store=document_store,
+            top_k=top_k,
+        )
 
     @component.output_types(documents=list[HaystackDocument])
     def run(
@@ -44,7 +43,7 @@ class MultiQueryChromaRetriever:
 
 @component
 class MultiQueryBM25Retriever:
-    """Retriever that runs multiple queries and deduplicates results (for BM25)."""
+    """Retriever that runs multiple queries and deduplicates results for BM25."""
 
     def __init__(
         self,

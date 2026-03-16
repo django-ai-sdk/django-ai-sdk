@@ -1,10 +1,3 @@
-"""
-Base RAG (Retrieval Augmented Generation) adapter for the Django AI SDK.
-
-Provides a generic interface for RAG implementations that can retrieve
-documents and format them for injection into LLM prompts.
-"""
-
 from abc import ABC, abstractmethod
 from typing import Any
 

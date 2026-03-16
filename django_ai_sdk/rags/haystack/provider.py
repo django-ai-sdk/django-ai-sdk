@@ -1,10 +1,8 @@
-"""
-Haystack-specific RAG provider for the Django AI SDK.
-
-Implements the RAGProvider interface for Haystack pipelines.
-"""
-
 from typing import TYPE_CHECKING, Any
+
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.tools import ComponentTool
+from haystack.utils import Secret
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.provider import BaseRAGProvider
@@ -45,11 +43,7 @@ class HaystackRAGProvider(BaseRAGProvider):
         cache_key = self._get_cache_key(assistant, silo_id)
         logger.info(f"Warming up Haystack RAG for {cache_key}")
 
-        # Import Haystack-specific components
-        from haystack.components.generators.chat import OpenAIChatGenerator
-        from haystack.utils import Secret
-
-        # Create generator (needed for ComponentTool)
+        # Create generator
         generator = OpenAIChatGenerator(
             model=assistant.get_model(),
             api_key=Secret.from_env_var("OPENAI_API_KEY"),
@@ -62,32 +56,22 @@ class HaystackRAGProvider(BaseRAGProvider):
     async def get_rag_instance(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
         """
         Get the Haystack RAG instance.
-
-        Returns the raw RAG adapter (not wrapped as a tool).
         """
         return await self._get_or_create_rag(assistant, silo_id, generator=None)
 
     async def build_tool(self, rag_instance: Any, generator: Any | None = None) -> Any:
         """
         Build a ComponentTool from the Haystack RAG instance.
-
         If the rag_instance is already a ComponentTool, returns it directly.
         Otherwise, calls rag_instance.as_tool() to build the tool.
-
-        Note: The generator parameter is accepted for interface compatibility
-        but Haystack RAG implementations create ComponentTools internally
-        without needing an external generator.
         """
         if rag_instance is None:
             return None
 
-        # Check if already a ComponentTool
-        from haystack.tools import ComponentTool
-
         if isinstance(rag_instance, ComponentTool):
             return rag_instance
 
-        # Build tool - generator is not needed for Haystack as_tool()
+        # Build tool
         if hasattr(rag_instance, "as_tool"):
             return rag_instance.as_tool()
 
@@ -120,6 +104,8 @@ class HaystackRAGProvider(BaseRAGProvider):
         logger.info(f"Haystack RAG reindexed for {cache_key}")
         return result
 
+    # TODO: this needs to be more independent, it now requires a silo_id, but
+    # it should support any string based id.
     def _get_cache_key(self, assistant: "Assistant", silo_id: str | None) -> str:
         """Generate cache key for this assistant and silo."""
         return f"{assistant.__class__.__name__}_{silo_id or 'default'}"
@@ -145,13 +131,13 @@ class HaystackRAGProvider(BaseRAGProvider):
             rag = await assistant.get_rag_pipeline(silo_id)
 
             if rag is not None:
-                # Warm up the RAG (build indexes)
+                # Warm up the RAG
                 if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
                     if rag.needs_warmup:
                         logger.debug(f"Warming up RAG for {cache_key}")
                         rag.warmup()
 
-                # Build tool - generator is not needed for Haystack as_tool()
+                # Build tool
                 if hasattr(rag, "as_tool"):
                     logger.debug(f"Building ComponentTool for {cache_key}")
                     self._cache[cache_key] = rag.as_tool()
@@ -175,6 +161,5 @@ class HaystackRAGProvider(BaseRAGProvider):
 
     def _is_component_tool(self, obj: Any) -> bool:
         """Check if object is a Haystack ComponentTool."""
-        from haystack.tools import ComponentTool
 
         return isinstance(obj, ComponentTool)

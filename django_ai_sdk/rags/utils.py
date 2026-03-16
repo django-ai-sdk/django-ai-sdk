@@ -1,7 +1,3 @@
-"""
-Utility functions for RAG adapters.
-"""
-
 from typing import Any
 
 from haystack import Document as HaystackDocument
@@ -29,13 +25,14 @@ def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
     )
 
 
+# TODO: this might become extraction to rag documents, it is now our Document queryset
+# But it now depends heavily on the Document model itself.
+# A true queryset_to_rag_documents should be generic and work with any queryset
 async def queryset_to_rag_documents(queryset: Any, silo_id: Any = None) -> list[RagDocument]:
     """
     Convert Django QuerySet to list of RagDocuments.
-
     This is the vendor-neutral way to get documents for RAG.
     The returned RagDocuments can be passed to any RAG adapter
-    (Haystack, BM25, ChromaDB, Qdrant, etc.)
 
     Args:
         queryset: Django QuerySet of Document objects (async iterable)

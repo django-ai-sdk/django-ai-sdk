@@ -1,7 +1,3 @@
-"""
-Base classes for Haystack RAG implementations.
-"""
-
 from abc import ABC, abstractmethod
 
 from haystack import Pipeline
