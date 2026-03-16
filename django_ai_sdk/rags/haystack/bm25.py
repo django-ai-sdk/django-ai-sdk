@@ -8,10 +8,9 @@ from haystack.dataclasses import Document as HaystackDocument
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack.tools import ComponentTool
 from haystack.utils import Secret
-from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.haystack.base import HaystackRAGBase
+from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryBM25Retriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
@@ -19,31 +18,10 @@ from django_ai_sdk.rags.utils import rag_document_to_haystack
 logger = get_logger(__name__)
 
 
-DEFAULT_EXPANDER_PROMPT = """
-You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
-
-IMPORTANT:
-- Generate queries ONLY in the SAME language as the original query
-- If the original query is in Dutch, generate ONLY Dutch queries
-- If the original query is in English, generate ONLY English queries
-- Do NOT mix languages
-- Do NOT translate the queries
-
-Return a JSON object with the key "queries" containing the list of queries.
-
-Original query: {{query}}
-
-Generate {{n_expansions}} alternative queries in the SAME language as the original:
-"""
-
-
-class BM25QueryExpanderRAGConfig(BaseModel):
+class BM25QueryExpanderRAGConfig(BaseHaystackRAGConfig):
     """Configuration for BM25 Query Expander RAG."""
 
-    top_k: int = 5
-    n_expansions: int = 4
-    expander_model: str = "gpt-4o-mini"
-    expander_prompt: str = DEFAULT_EXPANDER_PROMPT
+    pass
 
 
 class BM25QueryExpanderRAG(HaystackRAGBase):

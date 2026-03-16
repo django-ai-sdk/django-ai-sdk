@@ -14,52 +14,38 @@ from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseDocumentEmbedder,
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from pydantic import BaseModel
+from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.haystack.base import HaystackRAGBase
+from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
 
 logger = get_logger(__name__)
 
-DEFAULT_EXPANDER_PROMPT = """
-You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
 
-IMPORTANT:
-- Generate queries ONLY in the SAME language as the original query
-- If the original query is in Dutch, generate ONLY Dutch queries
-- If the original query is in English, generate ONLY English queries
-- Do NOT mix languages
-- Do NOT translate the queries
-
-Return a JSON object with the key "queries" containing the list of queries.
-
-Original query: {{query}}
-
-Generate {{n_expansions}} alternative queries in the SAME language as the original:
-"""
-
-
-class QdrantBM25HybridRAGConfig(BaseModel):
+class QdrantBM25HybridRAGConfig(BaseHaystackRAGConfig):
     """Configuration for Qdrant Hybrid RAG (BM42 Sparse + Dense)."""
 
     # Preselected multilingual models
-    sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions"
-    dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    sparse_embedder_model: str = Field(
+        default="Qdrant/bm42-all-minilm-l6-v2-attentions",
+        description="Sparse embedder model for BM42 keyword matching",
+    )
+    dense_embedder_model: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        description="Dense embedder model for semantic matching",
+    )
 
     # Qdrant's BM42-based settings
-    embedding_dim: int = 384
-    top_k: int = 5
-    chunk_size: int = 500
-    chunk_overlap: int = 150
-    meta_fields_to_embed: list[str] = ["title"]
-
-    # Expander settings
-    expander_model: str = "gpt-4o-mini"
-    expander_prompt: str = DEFAULT_EXPANDER_PROMPT
-    n_expansions: int = 4
+    embedding_dim: int = Field(default=384, ge=1, description="Embedding dimension")
+    chunk_size: int = Field(default=500, ge=1, description="Document chunk size")
+    chunk_overlap: int = Field(default=150, ge=0, description="Overlap between chunks")
+    meta_fields_to_embed: list[str] = Field(
+        default=["title"],
+        description="Metadata fields to include in embeddings",
+    )
 
 
 class QdrantBM25HybridRAG(HaystackRAGBase):
