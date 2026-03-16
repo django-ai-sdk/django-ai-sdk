@@ -64,15 +64,6 @@ class BaseRAGAdapter(ABC):
 
     _is_warmed_up: bool = False
 
-    def __init__(self, config: BaseModel | None = None) -> None:
-        """
-        Initialize the RAG adapter.
-
-        Args:
-            config: Configuration model (RAGConfig, BM25Config, or custom)
-        """
-        self.config = config
-
     @abstractmethod
     def warmup(self) -> None:
         """

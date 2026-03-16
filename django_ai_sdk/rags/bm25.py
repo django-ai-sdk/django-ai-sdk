@@ -1,14 +1,6 @@
-"""
-BM25-based RAG implementation using bm25s library.
-
-Lightweight keyword search without complex pipelines.
-Perfect for OpenAI integration and simple use cases.
-
-This is a direct/custom RAG implementation that inherits from BaseRAGAdapter.
-"""
-
 from typing import Any
 
+import bm25s
 from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
@@ -45,8 +37,6 @@ class BM25RAG(BaseRAGAdapter):
     - Fast keyword-based retrieval
     - No GPU required
     - Minimal dependencies (just bm25s)
-    - Compatible with OpenAIAdapter context injection
-    - Can be exposed as OpenAI function tool via BaseRAGProvider
 
     Example:
         from django_ai_sdk.rags import RagDocument
@@ -69,8 +59,6 @@ class BM25RAG(BaseRAGAdapter):
         print(result.context)
     """
 
-    # Explicitly type the config field for BM25Config
-    config: BM25Config
     documents: list[RagDocument]
     _bm25: Any | None
     _corpus_tokens: Any | None
@@ -87,12 +75,8 @@ class BM25RAG(BaseRAGAdapter):
             documents: List of RagDocument objects
             config: Configuration for retrieval parameters (defaults to BM25Config())
         """
-        # Ensure we have a valid BM25Config
-        effective_config = config or BM25Config()
-        super().__init__(config=effective_config)
-        # Cast config to BM25Config for proper typing
-        self.config: BM25Config = effective_config  # type: ignore[assignment]
-        # Ensure all documents are RagDocument instances
+        self.config: BM25Config = config or BM25Config()  # type: ignore[assignment]
+
         self.documents = [
             doc if isinstance(doc, RagDocument) else RagDocument.from_dict(doc) for doc in documents
         ]
@@ -103,15 +87,8 @@ class BM25RAG(BaseRAGAdapter):
     def warmup(self) -> None:
         """
         Warm up by building the BM25 index.
-
         This tokenizes all documents and builds the BM25 index.
         It's an expensive operation that should be cached by the provider.
-
-        Implementation details:
-        - Uses bm25s.tokenize() for corpus tokenization
-        - Creates bm25s.BM25() instance with k1, b parameters
-        - Calls index() to build the searchable structure
-        - Sets _is_warmed_up = True when complete
         """
         if self._is_warmed_up:
             logger.debug("BM25RAG already warmed up, skipping")
@@ -119,16 +96,13 @@ class BM25RAG(BaseRAGAdapter):
 
         logger.debug(f"Warming up BM25RAG with {len(self.documents)} documents")
 
-        import bm25s
-
         # Extract content from RagDocument objects
         corpus = [doc.content for doc in self.documents]
 
         # Tokenize and build index
         self._corpus_tokens = bm25s.tokenize(corpus)
-        bm25_instance = bm25s.BM25(k1=self.config.k1, b=self.config.b)
-        bm25_instance.index(self._corpus_tokens)
-        self._bm25 = bm25_instance
+        self._bm25 = bm25s.BM25(k1=self.config.k1, b=self.config.b)
+        self._bm25.index(self._corpus_tokens)
 
         self._is_warmed_up = True
         logger.debug("BM25RAG warmup complete")
@@ -144,20 +118,14 @@ class BM25RAG(BaseRAGAdapter):
 
         Returns:
             RAGResult with documents, context, and sources
-
-        Example:
-            result = await rag.retrieve("pirate treasure")
-            # result.documents = [{"content": "...", "score": 0.95}, ...]
-            # result.context = formatted string for LLM
-            # result.sources = [RAGSource, ...]
         """
+
+        # TODO: not sure if this is a good location to warmup
         if self.needs_warmup:
             self.warmup()
 
         if not self._bm25:
             raise RuntimeError("BM25 not initialized. Call warmup() first.")
-
-        import bm25s
 
         logger.debug(f"Retrieving documents for query: {query[:50]}...")
 
@@ -172,7 +140,7 @@ class BM25RAG(BaseRAGAdapter):
         sources = []
 
         for i, idx in enumerate(results[0]):
-            idx = int(idx)  # Convert from numpy array if needed
+            idx = int(idx)
             doc = self.documents[idx]
             score = float(scores[0][i])
 
@@ -187,7 +155,7 @@ class BM25RAG(BaseRAGAdapter):
         # Create RAGResult
         result = RAGResult(
             documents=documents,
-            context="",  # Will be formatted by format_context
+            context="",
             sources=sources,
             query=query,
         )
@@ -197,6 +165,9 @@ class BM25RAG(BaseRAGAdapter):
 
         return result
 
+    # TODO: add self.config.context_prompt
+    # And we might want to pass this function from config as well
+    # That way SDK users can override the formatting logic
     def format_context(self, result: RAGResult) -> str:
         """
         Format retrieval results as context string.
@@ -209,16 +180,19 @@ class BM25RAG(BaseRAGAdapter):
         Returns:
             Formatted context string suitable for LLM injection
         """
+
+        # TODO: we probably want to raise some Exception, like RetrievalError
+        # Because we might want stream different messages from the adapter.
         if not result.documents:
             return ""
 
-        context_parts = ["Relevant information from knowledge base:\n"]
+        parts = ["Relevant information from knowledge base:\n"]
 
         for i, doc in enumerate(result.documents, 1):
             content = doc.get("content", "")
             score = doc.get("score", 0)
 
-            context_parts.append(f"\n[{i}] (relevance: {score:.2f})")
-            context_parts.append(f"{content}")
+            parts.append(f"\n[{i}] (relevance: {score:.2f})")
+            parts.append(f"{content}")
 
-        return "\n".join(context_parts)
+        return "\n".join(parts)
