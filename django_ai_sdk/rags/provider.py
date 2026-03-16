@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class RAGProvider(ABC):
+class BaseRAGProvider(ABC):
     """
     Abstract base class for RAG providers.
 
@@ -108,9 +108,9 @@ class RAGProvider(ABC):
         """
 
 
-class BaseRAGProvider(RAGProvider):
+class RAGProvider(BaseRAGProvider):
     """
-    RAG provider for custom/direct RAG implementations (non-Haystack).
+    RAG provider for custom/direct RAG implementations.
 
     This provider handles RAG implementations that inherit from BaseRAGAdapter
     and don't use Haystack pipelines. Examples: BM25RAG, custom vector stores, etc.
@@ -123,7 +123,7 @@ class BaseRAGProvider(RAGProvider):
 
     Usage:
         class MyAssistant(Assistant):
-            rag_provider = BaseRAGProvider()
+            rag_provider = RAGProvider()
 
             async def get_rag_pipeline(self, silo_id=None):
                 documents = await self.get_rag_documents(silo_id)
@@ -136,7 +136,7 @@ class BaseRAGProvider(RAGProvider):
         4. build_tool() → Creates OpenAI function (optional)
 
     Comparison with HaystackRAGProvider:
-        - BaseRAGProvider: For direct/custom RAG (BM25, etc.)
+        - RAGProvider: For direct/custom RAG (BM25, etc.)
         - HaystackRAGProvider: For Haystack pipeline RAG (QdrantBM25HybridRAG, etc.)
     """
 
@@ -144,7 +144,7 @@ class BaseRAGProvider(RAGProvider):
         """Initialize provider with empty cache."""
         # Cache: key = "{class_name}_{silo_id}", value = BaseRAGAdapter instance
         self._cache: dict[str, Any] = {}
-        logger.debug("BaseRAGProvider initialized")
+        logger.debug("RAGProvider initialized")
 
     async def warmup(self, assistant: "Assistant", silo_id: str | None = None) -> None:
         """

@@ -7,7 +7,7 @@ Implements the RAGProvider interface for Haystack pipelines.
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.provider import RAGProvider
+from django_ai_sdk.rags.provider import BaseRAGProvider
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class HaystackRAGProvider(RAGProvider):
+class HaystackRAGProvider(BaseRAGProvider):
     """
     RAG provider for Haystack pipelines.
 

@@ -75,7 +75,7 @@ class BM25RAG(BaseRAGAdapter):
             documents: List of RagDocument objects
             config: Configuration for retrieval parameters (defaults to BM25Config())
         """
-        self.config: BM25Config = config or BM25Config()  # type: ignore[assignment]
+        self.config: BM25Config = config or BM25Config()
 
         self.documents = [
             doc if isinstance(doc, RagDocument) else RagDocument.from_dict(doc) for doc in documents
