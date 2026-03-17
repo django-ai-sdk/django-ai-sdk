@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,8 @@ if TYPE_CHECKING:
     from .storage.base import BaseStorageAdapter
 
 from .assistants.registry import registry
+from .protocols.vercel import VercelProtocolHandler
+from .storage.memory import MemoryStorageAdapter
 from .storage.schemas import ThreadDetail
 
 logger = get_logger(__name__)
@@ -77,10 +80,9 @@ class Assistant(ABC, AssistantInfoMixin):
     description: str | None = None
     model: str | None = None
     instructions: list[str] | str | None = None
-    protocol = None
 
-    # Storage adapter class
-    storage_adapter: type["BaseStorageAdapter"] | None = None
+    protocol = None
+    storage: type["BaseStorageAdapter"] | None = None
 
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
@@ -152,19 +154,21 @@ class Assistant(ABC, AssistantInfoMixin):
 
         return await assistant.rag_provider.reindex(assistant, silo_id)
 
-    def __init__(self, protocol_handler: Any = None, storage_adapter: Any = None) -> None:
+    def __init__(self) -> None:
         # Protocol handler setup
-        if protocol_handler is None:
-            if hasattr(self, "protocol") and self.protocol is not None:
-                protocol_handler = self.protocol()
-            else:
-                # TODO: need some better way to handle default protocol
-                from .protocols.vercel import VercelProtocolHandler
+        self.protocol_handler = (
+            self.protocol()
+            if hasattr(self, "protocol") and self.protocol is not None
+            else VercelProtocolHandler()
+        )
 
-                protocol_handler = VercelProtocolHandler()
+        # Storage adapter setup
+        self.storage_adapter = (
+            self.storage_adapter
+            if hasattr(self, "storage_adapter") and self.storage_adapter is not None
+            else MemoryStorageAdapter
+        )
 
-        self.protocol_handler = protocol_handler
-        self.storage_adapter = storage_adapter
         self.tools = self.get_tools()
 
         if self.warmup_on_init and self.rag_provider is not None:
@@ -200,16 +204,6 @@ class Assistant(ABC, AssistantInfoMixin):
             thread = await adapter_class.get_thread(thread_id)
             if thread:
                 return adapter_class(thread_id)
-
-        # Thread not found in any storage
-        # TODO: this is unclear and breaks the convention by falling back to memory
-        if self.storage_adapter is not None:
-            return self.storage_adapter(thread_id)
-
-        # TODO: agian we need a better way to fall back to memory
-        from .storage.memory import MemoryStorageAdapter
-
-        return MemoryStorageAdapter(thread_id)
 
     def get_name(self) -> str:
         """Return the assistant's display name."""
@@ -416,6 +410,8 @@ class Assistant(ABC, AssistantInfoMixin):
                 logger.debug(
                     f"Storing last user message: {len(last_user_message.content)} characters"
                 )
+                # FIXME: we need a better way on how to create a id for the user messages
+                last_user_message.id = str(uuid.uuid4())
                 await storage_adapter.store_chat_message(last_user_message)
             else:
                 logger.debug("No user messages found to store")
