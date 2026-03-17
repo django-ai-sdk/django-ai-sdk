@@ -60,7 +60,7 @@ class ToolInputCompleteEvent(StreamEvent):
     event_type: Literal["tool_input_complete"] = "tool_input_complete"
     tool_call_id: str
     tool_name: str
-    tool_input: dict[str, Any]
+    tool_input: dict[str, Any] | str
 
 
 class ToolOutputEvent(StreamEvent):
