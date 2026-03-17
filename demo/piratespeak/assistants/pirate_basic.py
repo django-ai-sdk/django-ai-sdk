@@ -16,6 +16,7 @@ from django_ai_sdk.rags.haystack import (
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
 from django_ai_sdk.silos.models import Document
+from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import ComponentTool, Tool
@@ -61,6 +62,7 @@ class PirateBasicAssistant(Assistant):
     ]
 
     protocol = VercelProtocolHandler
+    storage_adapter = DbStorageAdapter
 
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
