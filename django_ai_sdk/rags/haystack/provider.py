@@ -1,7 +1,5 @@
 from typing import TYPE_CHECKING, Any
 
-from haystack.tools import ComponentTool
-
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.provider import BaseRAGProvider
 

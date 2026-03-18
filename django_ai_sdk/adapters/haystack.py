@@ -334,8 +334,6 @@ class HaystackAdapter(BasePipelineAdapter):
 
                             # Emit ToolInputCompleteEvent
                             if payload.arguments:
-                                tool_input = payload.arguments
-
                                 yield ToolInputCompleteEvent(
                                     tool_call_id=tool_call_id,
                                     tool_name=tool_name,
@@ -431,7 +429,7 @@ class HaystackAdapter(BasePipelineAdapter):
                             for chunk in tool_chunks:
                                 stream_writer.add_chunk(chunk)
 
-                logger.debug(f"Tool storage complete: stored tool chunks from pipeline result")
+                logger.debug("Tool storage complete: stored tool chunks from pipeline result")
 
             except Exception as pipeline_processing_error:
                 logger.error(

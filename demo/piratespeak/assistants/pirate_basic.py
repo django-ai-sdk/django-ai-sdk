@@ -20,7 +20,7 @@ from django_ai_sdk.silos.models import Document, Silo, ThreadSilo
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.tools import ComponentTool, Tool
+from haystack.tools import Tool
 from haystack.utils import Secret
 
 

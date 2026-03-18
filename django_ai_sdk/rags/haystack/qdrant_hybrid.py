@@ -50,9 +50,9 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         documents: list[RagDocument],
         config: QdrantBM25HybridRAGConfig | None = None,
     ) -> None:
-        self.config = config or QdrantBM25HybridRAGConfig()
-        self.documents = documents
-        self._cached_document_store = None
+        self.config: QdrantBM25HybridRAGConfig = config or QdrantBM25HybridRAGConfig()
+        self.documents: list[RagDocument] = documents
+        self._cached_document_store: QdrantDocumentStore | None = None
         self._is_warmed_up = False
         logger.debug(f"QdrantBM25HybridRAG initialized with {len(documents)} documents")
 
@@ -88,12 +88,9 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
                 embedding_dim=self.config.embedding_dim,
             )
 
-    def _has_existing_index(self, document_store) -> bool:
+    def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
-        try:
-            return document_store.count_documents() > 0
-        except:
-            return False
+        return document_store.count_documents() > 0
 
     def warmup(self) -> None:
         """Build or load indexed document store."""

@@ -4,6 +4,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
+from django_ai_sdk.rags.schemas import ToolSpec
 from django_ai_sdk.silos.schemas import DocumentExtraction
 
 
@@ -25,10 +26,8 @@ class Silo(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    async def get_tool_spec(self) -> "ToolSpec":
+    async def get_tool_spec(self) -> ToolSpec:
         """Generate ToolSpec for this silo."""
-        from django_ai_sdk.rags.schemas import ToolSpec
-
         doc_count = await Document.objects.filter(silo_id=self.id).acount()
 
         return ToolSpec(

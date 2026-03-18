@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
 from typing import Literal
+
 from django.conf import settings
+from pydantic import BaseModel, Field
 
 
 class VectorDBStorageConfig(BaseModel):

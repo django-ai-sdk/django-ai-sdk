@@ -280,7 +280,6 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         k = top_k if top_k is not None else self.top_k
 
         # Run hybrid search for all queries
-
         results: list[dict[str, list[HaystackDocument]]] = []
         for query in queries:
             sparse_result = self._sparse_embedder.run(text=query)
