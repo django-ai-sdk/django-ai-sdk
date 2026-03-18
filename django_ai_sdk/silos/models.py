@@ -25,6 +25,24 @@ class Silo(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    async def get_tool_spec(self) -> "ToolSpec":
+        """Generate ToolSpec for this silo."""
+        from django_ai_sdk.rags.schemas import ToolSpec
+
+        doc_count = await Document.objects.filter(silo_id=self.id).acount()
+
+        return ToolSpec(
+            name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
+            description=(
+                f"Search knowledge base: {self.name}. "
+                f"Contains {doc_count} documents. "
+                f"{self.description[:80] if self.description else ''} "
+                f"Use this when you need information from {self.name}."
+            ),
+            doc_count=doc_count,
+            metadata={"silo_id": str(self.id), "silo_name": self.name},
+        )
+
 
 class Document(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

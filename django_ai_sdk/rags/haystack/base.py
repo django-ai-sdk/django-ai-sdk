@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from haystack import Pipeline
 from haystack.tools import ComponentTool
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from django_ai_sdk.rags.schemas import ToolSpec
 
 # TODO: move into prompts.py file, this should make maintenance easier.
 DEFAULT_EXPANDER_PROMPT = """
@@ -96,3 +99,10 @@ class HaystackRAGBase(ABC):
             A ComponentTool wrapping the RAG pipeline.
         """
         pass
+
+    def get_tool(self, spec: "ToolSpec") -> ComponentTool:
+        """Get tool with custom specification."""
+        tool = self.as_tool()
+        tool.name = spec.name
+        tool.description = spec.description
+        return tool

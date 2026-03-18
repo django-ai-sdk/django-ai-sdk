@@ -112,3 +112,12 @@ class RagDocument(BaseModel):
             "source": self.source,
             "score": self.score,
         }
+
+
+class ToolSpec(BaseModel):
+    """Specification for RAG tool presentation to LLM."""
+
+    name: str = Field(description="Tool name for function calling")
+    description: str = Field(description="Tool description for LLM")
+    doc_count: int | None = Field(default=None, description="Number of documents")
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")

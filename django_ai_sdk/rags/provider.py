@@ -66,7 +66,7 @@ class BaseRAGProvider(ABC):
         """
 
     @abstractmethod
-    async def build_tool(self, rag_instance: Any, generator: Any | None = None) -> Any:
+    async def build_tool(self, rag_instance: Any) -> Any:
         """
         Build a tool from the RAG instance (framework-specific).
 
@@ -76,7 +76,6 @@ class BaseRAGProvider(ABC):
 
         Args:
             rag_instance: The RAG instance from get_rag_instance()
-            generator: Optional LLM generator (framework-specific)
 
         Returns:
             Tool object ready for use in the framework's pipeline/agent, or None
@@ -192,113 +191,32 @@ class RAGProvider(BaseRAGProvider):
 
         return self._cache.get(cache_key)
 
-    async def build_tool(self, rag_instance: Any, generator: Any | None = None) -> Callable | None:
+    async def build_tool(self, rag_instance: Any) -> Callable | None:
         """
-        Build an OpenAI-compatible function tool from the RAG instance.
+        Build a tool from the RAG instance using RAG's as_tool() method.
 
-        This creates a callable that can be used as an OpenAI function tool.
-        Supports both JSON schema format and Assistants API format.
-
-        The returned callable has a __tool_schema__ attribute containing
-        the OpenAI function schema definition.
+        The RAG instance (e.g., BM25RAG) should have as_tool() and get_tool() methods
+        to create OpenAI-compatible function tools.
 
         Args:
             rag_instance: The RAG instance from get_rag_instance()
-            generator: Optional generator (not used for direct RAG, kept for interface compatibility)
 
         Returns:
-            Callable with __tool_schema__ attribute, or None if no RAG
-
-        Example:
-            rag = await provider.get_rag_instance(assistant)
-            tool = await provider.build_tool(rag)
-
-            # Use with OpenAI
-            result = await tool("pirate treasure")  # Returns JSON string
+            Callable with name/description attributes, or None if no RAG
         """
         if rag_instance is None:
             return None
 
-        # Check if RAG has retrieve method
-        if not hasattr(rag_instance, "retrieve"):
-            logger.warning("RAG instance does not have retrieve() method")
+        # Check if RAG has as_tool method
+        if not hasattr(rag_instance, "as_tool"):
+            logger.warning("RAG instance does not have as_tool() method")
             return None
 
-        logger.debug("Building OpenAI-compatible tool for Base RAG")
+        logger.debug("Building tool using RAG's as_tool() method")
 
-        # Tool schema - supports both old and new OpenAI formats
-        tool_schema = {
-            "type": "function",
-            "function": {
-                "name": "search_documents",
-                "description": "Search through the knowledge base for relevant documents. Use this when you need specific information from the available documents.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query. Be specific and include keywords from the user's question.",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            },
-        }
-
-        # Create executor function
-        async def execute_search(query: str) -> str:
-            """
-            Execute document search and return results as JSON.
-
-            Returns a JSON string containing:
-            - context: Formatted context for LLM
-            - sources: List of source documents
-            - document_count: Number of documents found
-            """
-            if not query or not query.strip():
-                return json.dumps(
-                    {
-                        "error": "Empty query provided",
-                        "context": "",
-                        "sources": [],
-                        "document_count": 0,
-                    }
-                )
-
-            try:
-                # Retrieve documents
-                result = await rag_instance.retrieve(query)
-
-                # Build response
-                response = {
-                    "context": result.context,
-                    "sources": [
-                        {
-                            "id": s.id,
-                            "content": s.content[:200] + "..."
-                            if len(s.content) > 200
-                            else s.content,
-                            "metadata": s.metadata,
-                        }
-                        for s in result.sources
-                    ],
-                    "document_count": len(result.documents),
-                    "query": query,
-                }
-
-                return json.dumps(response, indent=2)
-
-            except Exception as e:
-                logger.error(f"Error in RAG search: {e}")
-                return json.dumps(
-                    {"error": str(e), "context": "", "sources": [], "document_count": 0}
-                )
-
-        # Attach schema to function
-        execute_search.__tool_schema__ = tool_schema
-
-        logger.debug("OpenAI-compatible tool created successfully")
-        return execute_search
+        # Use RAG's as_tool() method
+        tool = rag_instance.as_tool()
+        return tool
 
     async def reindex(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
         """

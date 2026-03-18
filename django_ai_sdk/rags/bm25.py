@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import bm25s
 from pydantic import BaseModel
@@ -6,6 +6,9 @@ from pydantic import BaseModel
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import BaseRAGAdapter, RAGResult, RAGSource
 from django_ai_sdk.rags.schemas import RagDocument
+
+if TYPE_CHECKING:
+    from django_ai_sdk.rags.schemas import ToolSpec
 
 logger = get_logger(__name__)
 
@@ -164,6 +167,43 @@ class BM25RAG(BaseRAGAdapter):
         result.context = self.format_context(result)
 
         return result
+
+    def as_tool(self) -> Callable:
+        """
+        Return BM25 RAG as a tool callable.
+
+        Returns:
+            Callable that accepts query and returns documents.
+        """
+
+        async def search(query: str) -> dict:
+            result = await self.retrieve(query)
+            return {
+                "documents": [
+                    {"id": d["id"], "content": d["content"], "score": d.get("score", 0)}
+                    for d in result.documents
+                ]
+            }
+
+        # Create a function-like object with metadata
+        search.name = "bm25_search"
+        search.description = "Search documents using BM25 keyword retrieval"
+        return search
+
+    def get_tool(self, spec: "ToolSpec") -> Callable:
+        """
+        Get tool with custom specification.
+
+        Args:
+            spec: ToolSpec with name and description.
+
+        Returns:
+            Tool callable with customized name/description.
+        """
+        tool = self.as_tool()
+        tool.name = spec.name
+        tool.description = spec.description
+        return tool
 
     # TODO: add self.config.context_prompt
     # And we might want to pass this function from config as well

@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from django_ai_sdk.rags.schemas import ToolSpec
 
 
 class RAGSource(BaseModel):
@@ -41,6 +44,8 @@ class BaseRAGAdapter(ABC):
     - warmup(): Build search index (expensive, called once)
     - retrieve(): Search documents (fast, called per query)
     - format_context(): Format results for LLM
+    - as_tool(): Return tool for function calling
+    - get_tool(spec): Return tool with custom specification
 
     Example:
         class MyRAG(BaseRAGAdapter):
@@ -109,15 +114,29 @@ class BaseRAGAdapter(ABC):
 
         return "\n".join(context_parts)
 
-    def get_retriever(
-        self,
-    ) -> Any:
+    @abstractmethod
+    def as_tool(self) -> Callable:
         """
-        Return a Haystack retriever component for pipeline integration.
-
-        Override in subclasses that need Haystack compatibility.
+        Return the RAG as a tool callable for function calling.
 
         Returns:
-            Haystack retriever component or None
+            Callable that accepts query and returns documents.
         """
-        return None
+        pass
+
+    def get_tool(self, spec: "ToolSpec") -> Callable:
+        """
+        Get tool with custom specification.
+
+        Args:
+            spec: ToolSpec with name and description.
+
+        Returns:
+            Tool callable with customized name/description.
+        """
+        tool = self.as_tool()
+        if hasattr(tool, "name"):
+            tool.name = spec.name
+        if hasattr(tool, "description"):
+            tool.description = spec.description
+        return tool
