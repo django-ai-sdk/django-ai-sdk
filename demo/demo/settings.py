@@ -128,24 +128,24 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 
-# LLM
+# AI SDK Configuration
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default=None)
 OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 
-# TODO: Implelement LLM configuration enums
-
+# Default model
 AI_SDK_DEFAULT_MODEL = "zai-org/GLM-5-FP8"
-
 # AI_SDK_DEFAULT_MODEL = "mistralai/Ministral-3-14B-Instruct-2512"
 # AI_SDK_DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 # AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-
-# AI SDK Configuration
+# Default asssitants
 AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.pirate_basic.PirateBasicAssistant",
     "piratespeak.assistants.pirate_openai.PirateOpenAIAssistant",
     "piratespeak.assistants.pirate_agent.PirateAgentAssistant",
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
+
+# Default vector store path
+AI_SDK_VECTOR_STORE_PATH = "stores/"

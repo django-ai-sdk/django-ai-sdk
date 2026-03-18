@@ -222,6 +222,7 @@ tmp/
 
 # Local
 demo/silos
+demo/stores
 
 # Ideas directory for exploration documents
 ideas/
