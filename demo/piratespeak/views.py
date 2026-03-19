@@ -10,7 +10,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.storage import ThreadService
-from django_ai_sdk.storage.schemas import ThreadDetail
+from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
 from ninja import Field, Router, Schema
 from pydantic import BaseModel
 
@@ -75,6 +75,24 @@ class ThreadListResponse(Schema):
 
 class CreateThreadResponse(Schema):
     thread_id: str | None = None
+
+
+class ThreadSiloInfo(Schema):
+    """Silo information included in thread history."""
+
+    id: str
+    name: str
+    description: str
+    document_count: int
+    active: bool
+
+
+class ThreadDetailWithSilos(Schema):
+    """Thread detail with silos included."""
+
+    thread: ThreadInfo
+    silos: list[ThreadSiloInfo]
+    messages: list
 
 
 # ============================================================================
@@ -236,14 +254,17 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> CreateThr
     return CreateThreadResponse(thread_id=thread_id)
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetail, 404: Error})
-async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetail | Error:
+@router.get("/threads/{thread_id}/", response={200: ThreadDetailWithSilos, 404: Error})
+async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetailWithSilos | Error:
     """
     Get conversation history for a specific thread.
 
-    Returns thread metadata and message history in JSON format.
+    Returns thread metadata, connected silos, and message history in JSON format.
     Uses Assistant.history() to support any storage adapter.
     """
+    from django.db.models import Count
+    from django_ai_sdk.silos.models import ThreadSilo
+
     # Find thread and assistant using ThreadService
     thread = await ThreadService.get_assistant(thread_id)
     if not thread:
@@ -258,7 +279,32 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDeta
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     # Get history via assistant (returns ThreadDetail with thread metadata and messages)
-    return await assistant.history(thread_id)
+    thread_detail = await assistant.history(thread_id)
+
+    # Get connected silos with document count - use async for iteration
+    thread_silos_query = (
+        ThreadSilo.objects.filter(thread_id=thread_id)
+        .select_related("silo")
+        .annotate(document_count=Count("silo__documents"))
+    )
+
+    silos = []
+    async for ts in thread_silos_query:
+        silos.append(
+            ThreadSiloInfo(
+                id=str(ts.silo.id),
+                name=ts.silo.name,
+                description=ts.silo.description,
+                document_count=ts.document_count,
+                active=ts.active,
+            )
+        )
+
+    return ThreadDetailWithSilos(
+        thread=thread_detail.thread,
+        silos=silos,
+        messages=thread_detail.messages,
+    )
 
 
 @router.post("/threads/{thread_id}/", response={404: Error})

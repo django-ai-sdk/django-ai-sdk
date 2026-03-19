@@ -111,6 +111,7 @@ class ThreadSilo(models.Model):
         related_name="silo_links",
     )
     silo = models.ForeignKey(Silo, on_delete=models.CASCADE, related_name="thread_links")
+    active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

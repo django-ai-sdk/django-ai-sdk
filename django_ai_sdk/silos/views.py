@@ -9,9 +9,12 @@ from ninja.files import UploadedFile
 
 from django_ai_sdk.silos.models import Document, Silo, ThreadSilo
 from django_ai_sdk.silos.schemas import (
+    BulkConnectSilosIn,
     DocumentOut,
     SiloIn,
     SiloOut,
+    ThreadSiloOut,
+    ToggleSiloActiveIn,
 )
 
 router = Router()
@@ -205,5 +208,90 @@ async def link_thread(request: HttpRequest, silo_id: str, thread_id: str) -> tup
 async def unlink_thread(request: HttpRequest, silo_id: str, thread_id: str) -> tuple[int, None]:
     """Unlink a silo from a thread."""
     link = await ThreadSilo.objects.aget(silo_id=silo_id, thread_id=thread_id)
+    await link.adelete()
+    return 204, None
+
+
+# ============================================================================
+# Thread-Silo Management Endpoints
+# ============================================================================
+
+
+@router.get("/thread/{thread_id}", response=list[ThreadSiloOut])
+async def list_thread_silos(request: HttpRequest, thread_id: str) -> list[ThreadSiloOut]:
+    """List all silos connected to a thread with their active status."""
+    thread_silos_query = (
+        ThreadSilo.objects.filter(thread_id=thread_id)
+        .select_related("silo")
+        .annotate(document_count=Count("silo__documents"))
+    )
+
+    silos = []
+    async for ts in thread_silos_query:
+        silos.append(
+            ThreadSiloOut(
+                id=str(ts.silo.id),
+                name=ts.silo.name,
+                description=ts.silo.description,
+                document_count=ts.document_count,
+                active=ts.active,
+                created_at=ts.created_at.isoformat(),
+            )
+        )
+
+    return silos
+
+
+@router.post("/thread/{thread_id}/bulk", response=list[ThreadSiloOut])
+async def bulk_connect_silos(
+    request: HttpRequest, thread_id: str, payload: BulkConnectSilosIn
+) -> list[ThreadSiloOut]:
+    """Connect multiple silos to a thread at once."""
+    from django_ai_sdk.conversation.models import Thread
+
+    thread = await Thread.objects.aget(id=thread_id)
+
+    # Get or create links for all silos
+    for silo_id in payload.silo_ids:
+        silo = await Silo.objects.aget(id=silo_id)
+        await ThreadSilo.objects.aget_or_create(
+            thread=thread,
+            silo=silo,
+            defaults={"active": True},
+        )
+
+    # Return updated list
+    return await list_thread_silos(request, thread_id)
+
+
+@router.patch("/thread/{thread_id}/{silo_id}", response=ThreadSiloOut)
+async def toggle_silo_active(
+    request: HttpRequest, thread_id: str, silo_id: str, payload: ToggleSiloActiveIn
+) -> ThreadSiloOut:
+    """Toggle the active status of a silo for a thread."""
+    thread_silo = await ThreadSilo.objects.aget(thread_id=thread_id, silo_id=silo_id)
+    thread_silo.active = payload.active
+    await thread_silo.asave()
+
+    # Fetch silo separately using async ORM
+    silo = await Silo.objects.aget(id=silo_id)
+    doc_count = await Document.objects.filter(silo_id=silo_id).acount()
+
+    return ThreadSiloOut(
+        id=str(silo.id),
+        name=silo.name,
+        description=silo.description,
+        document_count=doc_count,
+        active=thread_silo.active,
+        created_at=thread_silo.created_at.isoformat(),
+    )
+
+
+@router.delete("/thread/{thread_id}/{silo_id}", response={204: None})
+async def disconnect_silo_from_thread(
+    request: HttpRequest, thread_id: str, silo_id: str
+) -> tuple[int, None]:
+    """Disconnect (delete) a silo from a thread."""
+    link = await ThreadSilo.objects.aget(thread_id=thread_id, silo_id=silo_id)
     await link.adelete()
     return 204, None
