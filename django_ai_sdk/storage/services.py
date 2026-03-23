@@ -152,3 +152,20 @@ class ThreadService:
                 return True
 
         return False
+
+    @staticmethod
+    async def delete_all_threads() -> int:
+        """
+        Delete all threads and their messages.
+
+        Returns:
+            Total number of threads deleted
+        """
+        total_deleted = 0
+        for adapter_class in StorageAdapterRegistry.get_all_adapters():
+            count = await adapter_class.delete_all_threads()
+            if count and count > 0:
+                logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
+                total_deleted += count
+
+        return total_deleted

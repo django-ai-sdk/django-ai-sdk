@@ -148,6 +148,19 @@ class DbStorageAdapter(BaseStorageAdapter):
         except Thread.DoesNotExist:
             return False
 
+    @classmethod
+    async def delete_all_threads(cls) -> int:
+        """Delete all threads and their messages from database."""
+        from django_ai_sdk.conversation.models import Message
+
+        # Get count before deleting
+        count = await Thread.objects.acount() or 0
+        # Delete all messages first
+        await Message.objects.all().adelete()
+        # Delete all threads
+        await Thread.objects.all().adelete()
+        return count
+
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
     # ============================================================================

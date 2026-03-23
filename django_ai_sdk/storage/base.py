@@ -198,6 +198,17 @@ class BaseStorageAdapter(ABC):
         """
         pass
 
+    @classmethod
+    @abstractmethod
+    async def delete_all_threads(cls) -> int:
+        """
+        Delete all threads and their messages.
+
+        Returns:
+            Number of threads deleted
+        """
+        pass
+
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
     # ============================================================================

@@ -135,6 +135,14 @@ class MemoryStore:
             return True
         return False
 
+    @classmethod
+    def delete_all_threads(cls) -> int:
+        """Delete all threads and their messages."""
+        count = len(cls.threads)
+        cls.threads.clear()
+        cls.messages.clear()
+        return count
+
     # ============================================================================
     # Message Operations
     # ============================================================================
@@ -312,6 +320,11 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     async def delete_thread(cls, thread_id: str) -> bool:
         """Delete thread and all its messages."""
         return MemoryStore.delete_thread(thread_id)
+
+    @classmethod
+    async def delete_all_threads(cls) -> int:
+        """Delete all threads and their messages."""
+        return MemoryStore.delete_all_threads()
 
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations

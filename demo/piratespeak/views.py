@@ -358,6 +358,23 @@ async def delete_thread(request: HttpRequest, thread_id: str) -> Success | Error
     return Error(message="Thread not found")
 
 
+class DeleteAllThreadsResponse(Schema):
+    success: bool
+    deleted_count: int
+
+
+@router.delete("/threads/", response={200: DeleteAllThreadsResponse})
+async def delete_all_threads(request: HttpRequest) -> DeleteAllThreadsResponse:
+    """
+    Delete all conversation threads and their messages.
+
+    Returns:
+        Number of threads deleted
+    """
+    deleted_count = await ThreadService.delete_all_threads()
+    return DeleteAllThreadsResponse(success=True, deleted_count=deleted_count)
+
+
 # ============================================================================
 # Message Management Endpoints
 # ============================================================================
