@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import traceback
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def parse_tool_result(arguments: str | None) -> dict[str, Any] | str:
+def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
     """
     Parse tool result as JSON if valid, otherwise return as string.
     """
@@ -45,6 +46,30 @@ def parse_tool_result(arguments: str | None) -> dict[str, Any] | str:
         return json.loads(str(arguments))
     except (json.JSONDecodeError, ValueError):
         return str(arguments)
+
+
+def parse_tool_output(obj: Any) -> Any:
+    """
+    Parse tool output from haystack to ensure it's JSON serializable.
+    """
+    if hasattr(obj, "to_dict"):
+        obj = obj.to_dict()
+
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        if isinstance(obj, str):
+            try:
+                return ast.literal_eval(obj)
+            except (ValueError, SyntaxError):
+                return obj
+        return obj
+
+    if isinstance(obj, dict):
+        return {k: parse_tool_output(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple)):
+        return [parse_tool_output(item) for item in obj]
+
+    return str(obj)
 
 
 class HaystackAdapter(BasePipelineAdapter):
@@ -186,12 +211,14 @@ class HaystackAdapter(BasePipelineAdapter):
 
         # Tool outputs
         for tool_result in message.tool_call_results:
+            # Ensure the output is JSON serializable
+            tool_output = parse_tool_output(tool_result.to_dict())
             chunks.append(
                 MessageChunk(
                     type="tool_output",
                     content={
                         "tool_call_id": tool_result.origin.id,
-                        "tool_output": tool_result.to_dict(),
+                        "tool_output": tool_output,
                     },
                     metadata={"source": "haystack_adapter"},
                 )
@@ -337,13 +364,14 @@ class HaystackAdapter(BasePipelineAdapter):
                                 yield ToolInputCompleteEvent(
                                     tool_call_id=tool_call_id,
                                     tool_name=tool_name,
-                                    tool_input=parse_tool_result(payload.arguments),
+                                    tool_input=parse_tool_input(payload.arguments),
                                 )
 
                         elif event_type == "tool_result":
                             # Tool result received
                             tool_call_id = payload.origin.id
-                            tool_output = payload.to_dict()
+                            # Ensure the output is JSON serializable
+                            tool_output = parse_tool_output(payload.to_dict())
 
                             yield ToolOutputEvent(
                                 tool_call_id=tool_call_id,
