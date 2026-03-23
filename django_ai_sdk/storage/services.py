@@ -16,6 +16,7 @@ class ThreadService:
         title: str,
         metadata: dict | None = None,
         user_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in the appropriate storage.
@@ -27,6 +28,7 @@ class ThreadService:
             title: Thread title (usually first user message)
             metadata: Additional metadata (will include assistant_id)
             user_id: Optional user ID for the thread owner
+            thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
@@ -51,7 +53,7 @@ class ThreadService:
         metadata["assistant_id"] = assistant_id
 
         thread_id = await storage_class.create_thread(
-            title=title, metadata=metadata, user_id=user_id
+            title=title, metadata=metadata, user_id=user_id, thread_id=thread_id
         )
 
         logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")

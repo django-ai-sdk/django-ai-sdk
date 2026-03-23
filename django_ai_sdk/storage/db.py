@@ -41,7 +41,11 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def create_thread(
-        cls, title: str, metadata: dict | None = None, user_id: str | None = None
+        cls,
+        title: str,
+        metadata: dict | None = None,
+        user_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in the database.
@@ -50,12 +54,13 @@ class DbStorageAdapter(BaseStorageAdapter):
             title: Thread title
             metadata: Should include assistant_id, model
             user_id: Optional user ID
+            thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
         """
-        # Generate UUID for thread
-        thread_id = str(uuid.uuid4())
+        # Use provided thread_id or generate new UUID
+        thread_id = thread_id or str(uuid.uuid4())
 
         # Create in database
         thread = await Thread.objects.acreate(

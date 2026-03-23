@@ -119,6 +119,7 @@ class BaseStorageAdapter(ABC):
         title: str,
         metadata: dict[str, Any] | None = None,
         user_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in this storage.
@@ -127,6 +128,7 @@ class BaseStorageAdapter(ABC):
             title: Thread title
             metadata: Optional metadata dict (should include assistant_id)
             user_id: Optional user ID for the thread owner
+            thread_id: Optional custom thread ID
 
         Returns:
             String thread_id (UUID) of the created thread
