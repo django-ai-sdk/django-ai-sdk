@@ -1,11 +1,3 @@
-"""
-Vercel AI SDK Data Stream Protocol implementation.
-
-This module combines both the protocol schemas and handler for Vercel AI SDK,
-keeping all Vercel-specific logic in one place.
-"""
-
-import json
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal, cast
@@ -27,6 +19,7 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.protocols.base import BaseProtocolHandler
+from django_ai_sdk.protocols.utils import format_sse
 
 # === Base Schema Classes ===
 
@@ -253,26 +246,6 @@ StreamChunk = (
     | AbortPart
     | DonePart
 )
-
-
-# === Protocol Handler ===
-
-
-def format_sse(data: dict | str) -> bytes:
-    """
-    Format data as Server-Sent Event.
-
-    Args:
-        data: Dictionary to serialize as SSE data, or string for [DONE]
-
-    Returns:
-        Encoded SSE bytes
-    """
-    if isinstance(data, str):
-        return f"data: {data}\n\n".encode()
-
-    payload = json.dumps(data, ensure_ascii=False)
-    return f"data: {payload}\n\n".encode()
 
 
 class VercelProtocolHandler(BaseProtocolHandler):
