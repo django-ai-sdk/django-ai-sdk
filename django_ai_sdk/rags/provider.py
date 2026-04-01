@@ -85,13 +85,17 @@ class BaseRAGProvider(ABC):
         """Clear the provider's internal cache."""
 
     @abstractmethod
-    async def reindex(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def reindex(
+        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+    ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
 
         Args:
             assistant: The assistant instance
             silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
+                          (clears persistent storage for backends that support it)
 
         Returns:
             The reindexed RAG instance
@@ -217,7 +221,9 @@ class RAGProvider(BaseRAGProvider):
         tool = rag_instance.as_tool()
         return tool
 
-    async def reindex(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def reindex(
+        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+    ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
 
@@ -226,12 +232,15 @@ class RAGProvider(BaseRAGProvider):
         Args:
             assistant: The assistant instance
             silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index.
+                          For non-Haystack RAG types (like BM25RAG), this is
+                          treated as a no-op since they don't have persistent storage.
 
         Returns:
             The reindexed RAG instance
         """
         cache_key = self._get_cache_key(assistant, silo_id)
-        logger.info(f"Reindexing Base RAG for {cache_key}")
+        logger.info(f"Reindexing Base RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
         if cache_key in self._cache:

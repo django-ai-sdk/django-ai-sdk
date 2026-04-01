@@ -42,9 +42,9 @@ class BM25QueryExpanderRAG(HaystackRAGBase):
         """Convert RagDocuments to HaystackDocuments for internal use."""
         return [rag_document_to_haystack(doc) for doc in self.documents]
 
-    def warmup(self) -> None:
+    def warmup(self, force_rebuild: bool = False) -> None:
         """Build and cache the indexed document store (expensive)."""
-        if self._is_warmed_up:
+        if self._is_warmed_up and not force_rebuild:
             logger.debug("BM25QueryExpanderRAG already warmed up, skipping")
             return
 

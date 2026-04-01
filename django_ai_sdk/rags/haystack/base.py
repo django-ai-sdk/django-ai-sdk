@@ -5,6 +5,10 @@ from haystack import Pipeline
 from haystack.tools import ComponentTool
 from pydantic import BaseModel, Field
 
+from django_ai_sdk.logger import get_logger
+
+logger = get_logger(__name__)
+
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import ToolSpec
 
@@ -67,11 +71,16 @@ class HaystackRAGBase(ABC):
     config: BaseHaystackRAGConfig
 
     @abstractmethod
-    def warmup(self) -> None:
+    def warmup(self, force_rebuild: bool = False) -> None:
         """
         Warm up the RAG by building the indexed document store (expensive).
 
         After warmup, subsequent build_pipeline() calls will use the cached store.
+
+        Args:
+            force_rebuild: If True, clears existing index and rebuilds from scratch.
+                          For persistent storage backends (like Qdrant), this will
+                          delete and recreate the entire index.
         """
         pass
 

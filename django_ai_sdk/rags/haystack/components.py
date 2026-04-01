@@ -10,6 +10,10 @@ from haystack_integrations.components.embedders.fastembed import (
 from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRetriever
 from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetriever
 
+from django_ai_sdk.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class MultiQueryDeduplicationMixin:
     """

@@ -24,12 +24,19 @@ class VectorDBStorageConfig(BaseModel):
 
     @classmethod
     def from_settings(cls, silo_id: str | None = None) -> "VectorDBStorageConfig":
-        """Create config from Django settings."""
+        """Create config from Django settings.
+
+        Args:
+            silo_id: Required. The silo ID determines the storage path.
+                     Returns in-memory config if silo_id is None or empty.
+        """
+        if not silo_id:
+            return cls(mode=":memory:")
+
         persist_path = getattr(settings, "AI_SDK_VECTOR_STORE_PATH", None)
 
-        if persist_path and silo_id:
-            return cls(mode="persistent", persist_path=f"{persist_path}/qdrant/{silo_id}")
-        elif persist_path:
-            return cls(mode="persistent", persist_path=f"{persist_path}/qdrant/default")
+        if persist_path:
+            base_path = persist_path.rstrip("/")
+            return cls(mode="persistent", persist_path=f"{base_path}/qdrant/{silo_id}")
 
         return cls(mode=":memory:")

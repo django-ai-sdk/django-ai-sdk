@@ -29,17 +29,24 @@ class HaystackRAGProvider(BaseRAGProvider):
         # Cache: key = "{class_name}_{silo_id}", value = RAG instance
         self._cache: dict[str, Any] = {}
 
-    async def warmup(self, assistant: "Assistant", silo_id: str | None = None) -> None:
+    async def warmup(
+        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+    ) -> None:
         """
         Warm up the Haystack RAG by building indexes.
 
         Gets or creates the RAG instance and caches the RAG.
+
+        Args:
+            assistant: The assistant instance
+            silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
         """
         cache_key = self._get_cache_key(assistant, silo_id)
-        logger.info(f"Warming up Haystack RAG for {cache_key}")
+        logger.info(f"Warming up Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Get or create the RAG instance
-        await self._get_or_create_rag(assistant, silo_id)
+        await self._get_or_create_rag(assistant, silo_id, force_rebuild)
         logger.info(f"Haystack RAG warmed up for {cache_key}")
 
     async def get_rag_instance(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
@@ -58,7 +65,7 @@ class HaystackRAGProvider(BaseRAGProvider):
         Returns:
             HaystackRAGBase instance (e.g., QdrantBM25HybridRAG), or None
         """
-        return await self._get_or_create_rag(assistant, silo_id)
+        return await self._get_or_create_rag(assistant, silo_id, False)
 
     async def build_tool(self, rag_instance: Any) -> Any:
         """
@@ -86,21 +93,30 @@ class HaystackRAGProvider(BaseRAGProvider):
         self._cache.clear()
         logger.debug("Haystack RAG cache cleared")
 
-    async def reindex(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def reindex(
+        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+    ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
 
-        Returns the reindexed RAG instance.
+        Args:
+            assistant: The assistant instance
+            silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
+                          (clears persistent storage for backends like Qdrant)
+
+        Returns:
+            The reindexed RAG instance.
         """
         cache_key = self._get_cache_key(assistant, silo_id)
-        logger.info(f"Reindexing Haystack RAG for {cache_key}")
+        logger.info(f"Reindexing Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
         if cache_key in self._cache:
             del self._cache[cache_key]
 
         # Warm up again (rebuilds indexes and caches)
-        await self.warmup(assistant, silo_id)
+        await self.warmup(assistant, silo_id, force_rebuild)
 
         # Return the cached RAG
         result = self._cache.get(cache_key)
@@ -117,26 +133,41 @@ class HaystackRAGProvider(BaseRAGProvider):
         self,
         assistant: "Assistant",
         silo_id: str | None,
+        force_rebuild: bool = False,
     ) -> Any:
         """
         Get cached RAG or create and cache it.
 
         Always caches the RAG instance.
+
+        Args:
+            assistant: The assistant instance
+            silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
         """
         cache_key = self._get_cache_key(assistant, silo_id)
+        logger.info(
+            f"[_get_or_create_rag] cache_key={cache_key}, silo_id={silo_id}, force_rebuild={force_rebuild}, cache_hit={cache_key in self._cache and not force_rebuild}"
+        )
 
-        if cache_key not in self._cache:
-            logger.debug(f"Creating Haystack RAG for {cache_key}")
+        if cache_key not in self._cache or force_rebuild:
+            logger.debug(f"Creating Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
             # Get RAG from assistant
+            logger.info(
+                f"[_get_or_create_rag] Calling assistant.get_rag_pipeline(silo_id={silo_id})"
+            )
             rag = await assistant.get_rag_pipeline(silo_id)
+            logger.info(f"[_get_or_create_rag] Got rag={rag is not None}")
 
             if rag is not None:
                 # Warm up the RAG
                 if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
-                    if rag.needs_warmup:
-                        logger.debug(f"Warming up RAG for {cache_key}")
-                        rag.warmup()
+                    if rag.needs_warmup or force_rebuild:
+                        logger.debug(
+                            f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})"
+                        )
+                        rag.warmup(force_rebuild)
 
                 # Cache the RAG
                 self._cache[cache_key] = rag

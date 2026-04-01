@@ -54,7 +54,12 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         self.documents: list[RagDocument] = documents
         self._cached_document_store: QdrantDocumentStore | None = None
         self._is_warmed_up = False
-        logger.debug(f"QdrantBM25HybridRAG initialized with {len(documents)} documents")
+        logger.info(f"QdrantBM25HybridRAG initialized with {len(documents)} documents")
+        for i, doc in enumerate(documents):
+            title = doc.title or (doc.metadata.get("title") if doc.metadata else None) or "N/A"
+            logger.debug(
+                f"  Document {i + 1}: id={doc.id}, title='{title}', content_len={len(doc.content)}"
+            )
 
     def _convert_documents(self) -> list[HaystackDocument]:
         """Convert RagDocuments to HaystackDocuments for internal use."""
@@ -92,21 +97,37 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         """Check if document store already has indexed documents."""
         return document_store.count_documents() > 0
 
-    def warmup(self) -> None:
-        """Build or load indexed document store."""
-        if self._is_warmed_up:
+    def warmup(self, force_rebuild: bool = False) -> None:
+        """
+        Build or load indexed document store.
+
+        Args:
+            force_rebuild: If True, clears existing index and rebuilds from scratch.
+                          This will delete all documents in the persistent storage.
+        """
+        if self._is_warmed_up and not force_rebuild:
             logger.debug("QdrantBM25HybridRAG already warmed up, skipping")
             return
 
+        if force_rebuild:
+            logger.info("Force rebuild requested, resetting Qdrant index")
+            self._is_warmed_up = False
+
         logger.debug("Warming up QdrantBM25HybridRAG - building indexed document store")
+        logger.info(
+            f"[warmup] force_rebuild={force_rebuild}, source_documents={len(self.documents)}"
+        )
 
         storage = self.config.storage
-        document_store = self._create_document_store(recreate=False)
+        document_store = self._create_document_store(recreate=force_rebuild)
 
-        if storage.is_persistent and self._has_existing_index(document_store):
+        if not force_rebuild and storage.is_persistent and self._has_existing_index(document_store):
+            existing_count = document_store.count_documents()
             self._cached_document_store = document_store
             self._is_warmed_up = True
-            logger.info(f"Using existing Qdrant index from {storage.persist_path}")
+            logger.info(
+                f"Using existing Qdrant index from {storage.persist_path} with {existing_count} chunks"
+            )
             return
 
         logger.info(
@@ -152,15 +173,19 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
         # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
+        logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
 
         logger.debug(
             f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
         )
         indexing_pipeline.run({"documents": haystack_docs})
 
+        indexed_count = document_store.count_documents()
         self._cached_document_store = document_store
         self._is_warmed_up = True
-        logger.debug("QdrantBM25HybridRAG warmup complete")
+        logger.info(
+            f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
+        )
 
     def build_pipeline(self) -> Pipeline:
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
