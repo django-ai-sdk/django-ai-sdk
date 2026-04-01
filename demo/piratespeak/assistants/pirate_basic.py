@@ -150,7 +150,9 @@ class PirateBasicAssistant(Assistant):
 
         # Add RAG tools for each silo
         if self.rag_provider and thread_id:
-            silo_links = ThreadSilo.objects.filter(thread_id=thread_id).prefetch_related("silo")
+            silo_links = ThreadSilo.objects.filter(
+                thread_id=thread_id, active=True
+            ).prefetch_related("silo")
 
             async for link in silo_links:
                 try:

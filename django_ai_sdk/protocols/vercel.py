@@ -309,6 +309,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
                     "usage": chat_message.usage,
+                    "created_at": chat_message.created_at,
                 }
             )
             logger.debug(f"Converting message {chat_message.id}: usage={chat_message.usage}")

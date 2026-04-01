@@ -23,13 +23,16 @@ class ChatMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
-    processing_time_ms: int = 0  # TODO: remove _ms suffix
-    started_at: float = Field(default_factory=time.time)
-    completed_at: float = 0
     adapter_type: str = ""
     errors: list[str] = Field(default_factory=list)
     usage: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
+
+    # Timestamps & timing
+    created_at: str = ""
+    processing_time_ms: int = 0
+    started_at: float = Field(default_factory=time.time)
+    completed_at: float = 0
 
     # Helpers
     @property
@@ -103,7 +106,9 @@ class StreamWriter:
 
         if chunk.type == "text":
             self.message.content += chunk.content
-            logger.debug(f"Added text chunk, total content length now: {len(self.message.content)}")
+            logger.debug(
+                f"Added text chunk, total content length now: {len(self.message.content)}"
+            )
 
         elif chunk.type == "reasoning":
             # Initialize reasoning field if first chunk
@@ -128,22 +133,32 @@ class StreamWriter:
         elif chunk.type == "tool_input":
             tool_call_id = chunk.content["tool_call_id"]
             if tool_call_id in self._pending_tool_calls:
-                self._pending_tool_calls[tool_call_id]["arguments"] = chunk.content["tool_input"]
+                self._pending_tool_calls[tool_call_id]["arguments"] = chunk.content[
+                    "tool_input"
+                ]
                 logger.debug(f"Added input for tool call {tool_call_id}")
             else:
-                logger.debug(f"Received tool input for unknown tool call ID: {tool_call_id}")
+                logger.debug(
+                    f"Received tool input for unknown tool call ID: {tool_call_id}"
+                )
 
         elif chunk.type == "tool_output":
             tool_call_id = chunk.content["tool_call_id"]
             if tool_call_id in self._pending_tool_calls:
-                self._pending_tool_calls[tool_call_id]["result"] = chunk.content["tool_output"]
+                self._pending_tool_calls[tool_call_id]["result"] = chunk.content[
+                    "tool_output"
+                ]
                 # Move completed tool call to message
                 completed_tool = self._pending_tool_calls[tool_call_id]
                 self.message.tool_calls.append(completed_tool)
                 del self._pending_tool_calls[tool_call_id]
-                logger.debug(f"Completed tool call: {completed_tool['name']} (ID: {tool_call_id})")
+                logger.debug(
+                    f"Completed tool call: {completed_tool['name']} (ID: {tool_call_id})"
+                )
             else:
-                logger.debug(f"Received tool output for unknown tool call ID: {tool_call_id}")
+                logger.debug(
+                    f"Received tool output for unknown tool call ID: {tool_call_id}"
+                )
 
         elif chunk.type == "error":
             error_message = chunk.content["error_message"]
@@ -154,14 +169,18 @@ class StreamWriter:
 
         return self.message
 
-    async def finalize(self, finish_reason: str = "", usage: dict | None = None) -> ChatMessage:
+    async def finalize(
+        self, finish_reason: str = "", usage: dict | None = None
+    ) -> ChatMessage:
         """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")
 
         # Add any remaining pending tool calls (in casse tool_output never came)
         pending_tools_count = len(self._pending_tool_calls)
         if pending_tools_count > 0:
-            logger.debug(f"Adding {pending_tools_count} pending tool calls to final message")
+            logger.debug(
+                f"Adding {pending_tools_count} pending tool calls to final message"
+            )
             for tool_call in self._pending_tool_calls.values():
                 self.message.tool_calls.append(tool_call)
                 logger.debug(

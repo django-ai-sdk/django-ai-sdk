@@ -105,7 +105,10 @@ class Message(models.Model):
 
     def to_chat_message(self) -> ChatMessage:
         """Convert stored JSON data to ChatMessage object."""
-        return ChatMessage.model_validate(self.result)
+        chat_message = ChatMessage.model_validate(self.result)
+        # Set created_at from the database timestamp
+        chat_message.created_at = self.created_at.isoformat() if self.created_at else ""
+        return chat_message
 
     @classmethod
     def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> "Message":
