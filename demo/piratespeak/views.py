@@ -5,12 +5,17 @@ This module defines the Ninja API router and all endpoints for the piratespeak d
 including thread management and message operations.
 """
 
+import uuid
+from typing import Any
+
 from django.http import HttpRequest, StreamingHttpResponse
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
 from django_ai_sdk.storage import ThreadService
-from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
+from django_ai_sdk.storage.schemas import ThreadInfo
 from ninja import Field, Router, Schema
 from pydantic import BaseModel
 
@@ -25,6 +30,7 @@ router = Router()
 
 class Error(Schema):
     message: str
+    code: int | None = None
 
 
 class Success(Schema):
@@ -146,16 +152,26 @@ async def reindex_assistant(
     request: HttpRequest,
     assistant_id: str,
     silo_id: str | None = None,
+    force_rebuild: bool = False,
 ) -> Success | Error:
     """Reindex the RAG pipeline for an assistant.
 
     Args:
         assistant_id: The ID of the assistant to reindex
         silo_id: Optional silo ID to limit reindexing to specific documents
+        force_rebuild: If True, forces a complete rebuild of the index
+                      (clears persistent storage for backends like Qdrant)
 
     Returns:
         Success status and message
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"[reindex_assistant] assistant_id={assistant_id}, silo_id={silo_id}, force_rebuild={force_rebuild}"
+    )
+
     if assistant_id not in registry:
         return Error(message=f"Assistant '{assistant_id}' not found")
 
@@ -165,14 +181,16 @@ async def reindex_assistant(
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     try:
-        result = await Assistant.reindex(assistant, silo_id)
+        result = await Assistant.reindex(assistant, silo_id, force_rebuild)
 
         if result is None:
             return Success(success=False, message="No RAG provider configured for this assistant")
 
+        rebuild_msg = " (force rebuild)" if force_rebuild else ""
         return Success(
             success=True,
             message="RAG pipeline reindexed successfully"
+            + rebuild_msg
             + (f" for silo {silo_id}" if silo_id else ""),
         )
     except Exception as e:
