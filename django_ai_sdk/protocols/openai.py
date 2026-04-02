@@ -109,7 +109,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         yield format_sse(start_chunk.model_dump())
 
         # Get events from adapter
-        events = adapter.stream(messages)
+        events = await adapter.stream(messages)
 
         try:
             async for event in events:

@@ -46,6 +46,8 @@ class BaseHaystackRAGConfig(BaseModel):
         n_expansions: Number of query variations to generate (1 = no expansion)
         expander_model: LLM model to use for query expansion
         expander_prompt: Prompt template for query expansion
+        chunk_size: Chunk size for document splitting
+        chunk_overlap: Chunk overlap for document splitting
     """
 
     top_k: int = Field(default=5, ge=1, description="Maximum documents to retrieve per query")
@@ -61,6 +63,16 @@ class BaseHaystackRAGConfig(BaseModel):
     expander_prompt: str = Field(
         default=DEFAULT_EXPANDER_PROMPT,
         description="Prompt template for query expansion",
+    )
+    chunk_size: int = Field(
+        default=100,
+        ge=1,
+        description="Chunk size for document splitting",
+    )
+    chunk_overlap: int = Field(
+        default=50,
+        ge=0,
+        description="Chunk overlap for document splitting",
     )
 
 

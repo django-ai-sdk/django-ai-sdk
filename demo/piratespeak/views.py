@@ -5,15 +5,10 @@ This module defines the Ninja API router and all endpoints for the piratespeak d
 including thread management and message operations.
 """
 
-import uuid
-from typing import Any
-
 from django.http import HttpRequest, StreamingHttpResponse
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.registry import registry
-from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
 from django_ai_sdk.storage import ThreadService
 from django_ai_sdk.storage.schemas import ThreadInfo
 from ninja import Field, Router, Schema

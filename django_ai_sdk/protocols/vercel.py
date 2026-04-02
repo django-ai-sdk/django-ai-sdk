@@ -410,10 +410,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_input_complete":
                     tool_input_event = cast("ToolInputCompleteEvent", event)
+                    tool_input = (
+                        tool_input_event.tool_input
+                        if isinstance(tool_input_event.tool_input, dict)
+                        else {"input": tool_input_event.tool_input}
+                    )
                     yield ToolInputAvailablePart(
                         tool_call_id=tool_input_event.tool_call_id,
                         tool_name=tool_input_event.tool_name,
-                        input=tool_input_event.tool_input,
+                        input=tool_input,
                     )
 
                 case "tool_output":

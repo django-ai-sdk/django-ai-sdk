@@ -277,6 +277,9 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         if self._sparse_embedder is None:
             self.warm_up()
 
+        if self._sparse_embedder is None or self._dense_embedder is None:
+            raise ValueError("Embedders not initialized after warm_up()")
+
         # Convert single query to list
         if isinstance(queries, str):
             queries = [queries]

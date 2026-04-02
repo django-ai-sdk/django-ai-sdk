@@ -114,6 +114,9 @@ class ThreadSilo(models.Model):
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
 
+    # Annotated field from queries
+    document_count: int
+
     class Meta:
         db_table = "django_ai_sdk_thread_silos"
         unique_together = [["thread", "silo"]]
