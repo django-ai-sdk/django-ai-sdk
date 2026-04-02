@@ -38,6 +38,17 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _log_serialize_attempt(obj: Any, context: str) -> None:
+    """Log serialization attempts to help debug pickle/serialization issues."""
+    if obj is None:
+        return
+    obj_type = type(obj).__name__
+    logger.warning(
+        f"[RAG_SERIALIZE] Serialization attempted on {obj_type} - {context} - "
+        f"Object may contain non-serializable nested functions"
+    )
+
+
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
     """
     Parse tool result as JSON if valid, otherwise return as string.
@@ -94,6 +105,8 @@ class HaystackAdapter(BasePipelineAdapter):
         )
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
+
+        _log_serialize_attempt(pipeline, "HaystackAdapter.__init__")
 
         # Check if first component is an Agent
         self.agent_component = None

@@ -4,6 +4,7 @@ from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackAdapter
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags.config import VectorDBStorageConfig
@@ -23,9 +24,12 @@ from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
 
+logger = get_logger(__name__)
+
 
 def get_datetime() -> dict:
     """Get current time and date in Europe/Amsterdam timezone."""
+    logger.debug("[RAG_SERIALIZE] get_datetime() called - creating datetime tool")
     tz = timezone.get_current_timezone()
     nowtz = timezone.now().astimezone(tz)
 
@@ -37,6 +41,7 @@ def get_datetime() -> dict:
 
 def get_today() -> Tool:
     """Current date and time tool."""
+    logger.debug("[RAG_SERIALIZE] get_today() called - creating Tool")
     return Tool(
         name="get_today",
         parameters={},

@@ -34,11 +34,17 @@ class ToolAgent:
     ) -> None:
         self.config = config
         self.generator = generator
-        logger.debug(f"ToolAgent initialized with {len(config.tools)} tools")
+        tool_names = [getattr(t, "name", type(t).__name__) for t in config.tools]
+        logger.debug(
+            f"[RAG_SERIALIZE] ToolAgent initialized with {len(config.tools)} tools: {tool_names}"
+        )
+        for i, tool in enumerate(config.tools):
+            tool_type = type(tool).__name__
+            logger.debug(f"[RAG_SERIALIZE] Tool #{i}: {tool_type}")
 
     def pipeline(self) -> Pipeline:
         """Build and return the fully connected pipeline."""
-        logger.debug("Building ToolAgent pipeline")
+        logger.debug("[RAG_SERIALIZE] Building ToolAgent pipeline")
 
         agent = HaystackAgent(
             chat_generator=self.generator,
@@ -50,5 +56,5 @@ class ToolAgent:
         pipeline = Pipeline()
         pipeline.add_component("agent", agent)
 
-        logger.debug("ToolAgent pipeline built successfully")
+        logger.debug("[RAG_SERIALIZE] ToolAgent pipeline built successfully")
         return pipeline

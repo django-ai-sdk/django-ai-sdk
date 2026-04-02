@@ -9,6 +9,15 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _log_serialize_attempt(obj: Any, context: str) -> None:
+    """Log serialization attempts to help debug pickle/serialization issues."""
+    obj_type = type(obj).__name__
+    logger.warning(
+        f"[RAG_SERIALIZE] Serialization attempted on {obj_type} - {context} - "
+        f"Object may contain non-serializable nested functions"
+    )
+
+
 class HaystackRAGProvider(BaseRAGProvider):
     """
     RAG provider for Haystack pipelines.
@@ -26,8 +35,8 @@ class HaystackRAGProvider(BaseRAGProvider):
     """
 
     def __init__(self) -> None:
-        # Cache: key = "{class_name}_{silo_id}", value = RAG instance
         self._cache: dict[str, Any] = {}
+        logger.debug("[RAG_SERIALIZE] RAG cache initialized (empty)")
 
     async def warmup(
         self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
@@ -90,8 +99,9 @@ class HaystackRAGProvider(BaseRAGProvider):
 
     def clear_cache(self) -> None:
         """Clear the RAG cache."""
+        logger.debug("[RAG_SERIALIZE] Clearing RAG cache")
         self._cache.clear()
-        logger.debug("Haystack RAG cache cleared")
+        logger.debug("[RAG_SERIALIZE] Haystack RAG cache cleared")
 
     async def reindex(
         self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
@@ -170,12 +180,16 @@ class HaystackRAGProvider(BaseRAGProvider):
                         rag.warmup(force_rebuild)
 
                 # Cache the RAG
+                logger.debug(f"[RAG_SERIALIZE] Caching RAG instance: {cache_key}")
+                _log_serialize_attempt(rag, f"caching as {cache_key}")
                 self._cache[cache_key] = rag
             else:
+                logger.debug(f"[RAG_SERIALIZE] No RAG to cache for: {cache_key}")
                 self._cache[cache_key] = None
 
             logger.debug(f"Haystack RAG created and cached for {cache_key}")
         else:
-            logger.debug(f"Using cached Haystack RAG for {cache_key}")
-
-        return self._cache[cache_key]
+            cached_rag = self._cache.get(cache_key)
+            logger.debug(f"[RAG_SERIALIZE] Using cached Haystack RAG for {cache_key}")
+            _log_serialize_attempt(cached_rag, f"retrieving from cache as {cache_key}")
+            return cached_rag
