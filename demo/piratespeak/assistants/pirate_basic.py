@@ -64,6 +64,7 @@ class PirateBasicAssistant(Assistant):
 
     protocol = VercelProtocolHandler
     storage_adapter = DbStorageAdapter
+    max_history = 20
 
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
