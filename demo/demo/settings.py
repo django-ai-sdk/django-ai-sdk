@@ -134,7 +134,8 @@ OPENAI_API_KEY = env("OPENAI_API_KEY", default=None)
 OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 
 # Default model
-AI_SDK_DEFAULT_MODEL = "zai-org/GLM-5-FP8"
+AI_SDK_DEFAULT_MODEL = "google/gemma-4-31B-it"
+# AI_SDK_DEFAULT_MODEL = "zai-org/GLM-5-FP8"
 # AI_SDK_DEFAULT_MODEL = "mistralai/Ministral-3-14B-Instruct-2512"
 # AI_SDK_DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 # AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"

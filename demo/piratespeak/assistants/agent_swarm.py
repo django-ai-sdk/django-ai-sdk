@@ -2,6 +2,7 @@ import random
 from typing import Annotated
 
 from django.conf import settings
+from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackAdapter
 from django_ai_sdk.assistants import auto_register
@@ -28,6 +29,17 @@ def find_treasure(location: Annotated[str, "Location to search for treasure"]) -
     }
 
 
+def get_datetime() -> dict:
+    """Get current time and date in Europe/Amsterdam timezone."""
+    tz = timezone.get_current_timezone()
+    nowtz = timezone.now().astimezone(tz)
+
+    return {
+        "today": nowtz.date().isoformat(),
+        "current_time": nowtz.timetz().isoformat(),
+    }
+
+
 @auto_register
 class AgentSwarmAssistant(Assistant):
     """
@@ -43,6 +55,7 @@ class AgentSwarmAssistant(Assistant):
         "Decide whether the user wants:",
         "- pirate boat expertise (call pirate_boat_expert)",
         "- treasure finding (call find_treasure)",
+        "- date and time information (call get_datetime)",
         "- or general pirate help",
         "",
         "Always respond as a pirate and use your tools when appropriate.",
@@ -54,10 +67,10 @@ class AgentSwarmAssistant(Assistant):
         return [
             self._create_boat_expert_tool(),
             self._create_treasure_tool(),
+            self._create_date_tool(),
         ]
 
     # TODO: convert in utility function
-    # Haystack Tool helpers
     def _create_boat_expert_tool(self) -> Tool:
         """Create Haystack tool for boat expertise."""
         return Tool(
@@ -92,6 +105,15 @@ class AgentSwarmAssistant(Assistant):
                 "required": ["location"],
             },
             function=find_treasure,
+        )
+
+    def _create_date_tool(self) -> Tool:
+        """Get current time and date in Europe/Amsterdam timezone."""
+        return Tool(
+            name="Today, current date",
+            description="Get current date and time",
+            parameters={},
+            function=get_datetime,
         )
 
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> "HaystackAdapter":
