@@ -28,57 +28,40 @@ def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
     )
 
 
-# TODO: this might become extraction to rag documents, it is now our Document queryset
-# But it now depends heavily on the Document model itself.
-# A true queryset_to_rag_documents should be generic and work with any queryset
-async def queryset_to_rag_documents(queryset: Any, memory_id: Any = None) -> list[RagDocument]:
+async def queryset_to_rag_documents(queryset: Any, **kwargs: Any) -> list[RagDocument]:
     """
-    Convert Django QuerySet to list of RagDocuments.
-    This is the vendor-neutral way to get documents for RAG.
-    The returned RagDocuments can be passed to any RAG adapter
+    Convert any Django QuerySet to a list of RagDocuments.
+
+    Each item in the queryset must implement ``to_rag_document() -> RagDocument``.
+    Works with Entry, Document (alias), or any proxy subclass (NoteEntry, etc.).
+
+    The ``memory_id`` keyword arg is accepted for backward compatibility with
+    callers that still pass it — it is not used here because each model's own
+    ``to_rag_document()`` knows how to populate metadata.
 
     Args:
-        queryset: Django QuerySet of Document objects (async iterable)
-        memory_id: Optional memory_id for metadata
+        queryset: Django QuerySet whose items implement to_rag_document()
+        **kwargs: Ignored (backward-compat for memory_id callers)
 
     Returns:
-        List of RagDocuments with metadata:
-        - file_name, memory_id, keywords, facts
+        List of RagDocuments (vendor-neutral)
 
     Example:
-        documents = await queryset_to_rag_documents(queryset, memory_id)
+        documents = await queryset_to_rag_documents(Entry.objects.filter(memory_id=...))
     """
-    from django_ai_sdk.memories.utils import get_prompt_metadata
-
     rag_docs = []
     skipped_count = 0
-    async for doc in queryset:
-        if not doc.content.strip():
+    async for obj in queryset:
+        try:
+            doc = obj.to_rag_document()
+            if doc.content.strip():
+                rag_docs.append(doc)
+            else:
+                skipped_count += 1
+        except (AttributeError, NotImplementedError):
             skipped_count += 1
-            continue
-
-        extraction = doc.extraction
-        if extraction:
-            combined_content = get_prompt_metadata(doc.content, extraction)
-        else:
-            combined_content = doc.content
-
-        rag_docs.append(
-            RagDocument(
-                id=str(doc.id),
-                content=combined_content,
-                metadata={
-                    "file_name": doc.file_name,
-                    "memory_id": str(doc.memory_id) if doc.memory_id else memory_id or "",
-                    "keywords": ". ".join(extraction.keywords) if extraction else "",
-                    "facts": ". ".join(fact.text for fact in extraction.facts)
-                    if extraction
-                    else "",
-                },
-            )
-        )
 
     logger.debug(
-        f"Converted queryset to {len(rag_docs)} RagDocuments (skipped {skipped_count} empty docs)"
+        f"Converted queryset to {len(rag_docs)} RagDocuments (skipped {skipped_count} empty/incompatible)"
     )
     return rag_docs

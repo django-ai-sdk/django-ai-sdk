@@ -16,7 +16,7 @@ from django_ai_sdk.rags.haystack import (
     QdrantBM25HybridRAGConfig,
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
-from django_ai_sdk.memories.models import Document, Memory, ThreadMemory
+from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -69,11 +69,11 @@ class PirateBasicAssistant(Assistant):
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
 
-    async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Document]:
+    async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Entry]:
         """Return queryset of documents for RAG."""
         if memory_id:
-            return Document.objects.filter(memory_id=memory_id)
-        return Document.objects.all()
+            return Entry.objects.filter(memory_id=memory_id)
+        return Entry.objects.all()
 
     async def get_rag_pipeline_bm25(
         self, memory_id: str | None = None
