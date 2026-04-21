@@ -6,7 +6,6 @@ without requiring actual retrieval operations or database setup.
 """
 
 import logging
-from unittest.mock import patch
 
 import pytest
 
