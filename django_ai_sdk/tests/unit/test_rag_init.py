@@ -5,8 +5,6 @@ These tests verify RAG provider structure, configuration models, and schemas
 without requiring actual retrieval operations or database setup.
 """
 
-import logging
-
 import pytest
 
 
