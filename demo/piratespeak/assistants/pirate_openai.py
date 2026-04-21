@@ -2,7 +2,6 @@ from django.conf import settings
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.openai import OpenAIAdapter
 from django_ai_sdk.assistants import auto_register
-from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25RAG,
@@ -13,15 +12,9 @@ from django_ai_sdk.rags import (
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from openai import AsyncOpenAI
 
-logger = get_logger(__name__)
-
 
 @auto_register
 class PirateOpenAIAssistant(Assistant):
-    """
-    OpenAI pirate assistant with BM25 RAG.
-    """
-
     name = "OpenAI Pirate with RAG"
     model = settings.AI_SDK_DEFAULT_MODEL
     instructions = [
@@ -32,26 +25,23 @@ class PirateOpenAIAssistant(Assistant):
         "Use the context provided to answer questions accurately.",
     ]
 
-    protocol = VercelProtocolHandler
-    storage_adapter = MemoryStorageAdapter
-
-    # Use RAGProvider for direct BM25 RAG implementation
+    # protocol = VercelProtocolHandler
+    # storage_adapter = MemoryStorageAdapter
     rag_provider = RAGProvider()
 
     def get_example_documents(self) -> list[RagDocument]:
         """
-        Get 5 pirate-themed documents for testing.
+        Get 5 pirate-themed documents
         """
         return [
             RagDocument(
                 id="pirate_code",
                 content=(
                     "The Pirate Code of Conduct includes several important rules that all crew members must follow: "
-                    "1) Every man has a vote in affairs of the moment and equal title to fresh provisions and liquors. "
-                    "2) No man shall gamble with cards or dice for money while on board the ship. "
+                    "1) Every pirate has a vote in affairs of the moment and equal title to fresh provisions and liquors. "
+                    "2) No pirate shall gamble with cards or dice for money while on board the ship. "
                     "3) The lights and candles must be put out by 8 PM to prevent fire. "
-                    "4) Each man shall keep his piece (gun), pistols, and cutlass clean and fit for service. "
-                    "5) No boy or woman shall be allowed amongst the crew. Breaking these rules results in marooning or death."
+                    "4) Each pirate shall keep his piece (gun), pistols, and cutlass clean and fit for service. "
                 ),
                 metadata={
                     "source": "pirate_lore",
@@ -132,30 +122,18 @@ class PirateOpenAIAssistant(Assistant):
 
     async def get_rag_pipeline(self, silo_id: str | None = None) -> "BM25RAG | None":
         """
-        Build BM25 RAG pipeline with documents.
+        Build BM25 RAG pipeline with example documents.
         """
         documents = self.get_example_documents()
-        logger.debug(f"Using {len(documents)} example documents for RAG")
-
-        if not documents:
-            logger.warning("No documents available for RAG")
-            return None
-
         return BM25RAG(documents=documents, config=BM25Config(top_k=2))
 
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIAdapter":
         """
         Create OpenAI adapter with RAG support.
         """
-        # Get storage adapter
-        storage_adapter = await self.get_storage_adapter(thread_id)
 
-        # Get RAG from provider
-        rag = None
-        if self.rag_provider:
-            rag = await self.rag_provider.get_rag_instance(self, None)
-            if rag:
-                logger.debug(f"RAG loaded: {type(rag).__name__}")
+        storage_adapter = await self.get_storage_adapter(thread_id)
+        rag = await self.rag_provider.get_rag_instance(self, None)
 
         return OpenAIAdapter(
             client=AsyncOpenAI(
