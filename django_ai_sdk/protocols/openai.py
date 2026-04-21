@@ -11,9 +11,6 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
 
-if TYPE_CHECKING:
-    ...
-
 
 # OpenAI chunk schemas
 class OpenAIDelta(BaseModel):
