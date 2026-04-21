@@ -16,6 +16,7 @@ class ThreadService:
         title: str,
         metadata: dict | None = None,
         user_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in the appropriate storage.
@@ -27,6 +28,7 @@ class ThreadService:
             title: Thread title (usually first user message)
             metadata: Additional metadata (will include assistant_id)
             user_id: Optional user ID for the thread owner
+            thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
@@ -51,7 +53,7 @@ class ThreadService:
         metadata["assistant_id"] = assistant_id
 
         thread_id = await storage_class.create_thread(
-            title=title, metadata=metadata, user_id=user_id
+            title=title, metadata=metadata, user_id=user_id, thread_id=thread_id
         )
 
         logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")
@@ -150,3 +152,20 @@ class ThreadService:
                 return True
 
         return False
+
+    @staticmethod
+    async def delete_all_threads() -> int:
+        """
+        Delete all threads and their messages.
+
+        Returns:
+            Total number of threads deleted
+        """
+        total_deleted = 0
+        for adapter_class in StorageAdapterRegistry.get_all_adapters():
+            count = await adapter_class.delete_all_threads()
+            if count and count > 0:
+                logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
+                total_deleted += count
+
+        return total_deleted

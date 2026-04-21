@@ -9,7 +9,7 @@ from agents.run import RunConfig, Runner
 from openai.types.chat import ChatCompletionMessageParam
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
-from django_ai_sdk.adapters.utils import merge_messages
+from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -380,11 +380,13 @@ class OpenAIAdapter(BasePipelineAdapter):
                     # Extract usage from final chunk
                     usage = None
                     if hasattr(openai_chunk, "usage") and openai_chunk.usage:
-                        usage = {
-                            "prompt_tokens": openai_chunk.usage.prompt_tokens,
-                            "completion_tokens": openai_chunk.usage.completion_tokens,
-                            "total_tokens": openai_chunk.usage.total_tokens,
-                        }
+                        usage = normalize_usage(
+                            {
+                                "prompt_tokens": openai_chunk.usage.prompt_tokens,
+                                "completion_tokens": openai_chunk.usage.completion_tokens,
+                                "total_tokens": openai_chunk.usage.total_tokens,
+                            }
+                        )
                         logger.debug(f"Usage: {usage}")
 
                     # Finalize message

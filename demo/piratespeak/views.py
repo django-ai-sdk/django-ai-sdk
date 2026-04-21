@@ -10,7 +10,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.storage import ThreadService
-from django_ai_sdk.storage.schemas import ThreadDetail
+from django_ai_sdk.storage.schemas import ThreadInfo
 from ninja import Field, Router, Schema
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ router = Router()
 
 class Error(Schema):
     message: str
+    code: int | None = None
 
 
 class Success(Schema):
@@ -75,6 +76,24 @@ class ThreadListResponse(Schema):
 
 class CreateThreadResponse(Schema):
     thread_id: str | None = None
+
+
+class ThreadSiloInfo(Schema):
+    """Silo information included in thread history."""
+
+    id: str
+    name: str
+    description: str
+    document_count: int
+    active: bool
+
+
+class ThreadDetailWithSilos(Schema):
+    """Thread detail with silos included."""
+
+    thread: ThreadInfo
+    silos: list[ThreadSiloInfo]
+    messages: list
 
 
 # ============================================================================
@@ -128,16 +147,26 @@ async def reindex_assistant(
     request: HttpRequest,
     assistant_id: str,
     silo_id: str | None = None,
+    force_rebuild: bool = False,
 ) -> Success | Error:
     """Reindex the RAG pipeline for an assistant.
 
     Args:
         assistant_id: The ID of the assistant to reindex
         silo_id: Optional silo ID to limit reindexing to specific documents
+        force_rebuild: If True, forces a complete rebuild of the index
+                      (clears persistent storage for backends like Qdrant)
 
     Returns:
         Success status and message
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"[reindex_assistant] assistant_id={assistant_id}, silo_id={silo_id}, force_rebuild={force_rebuild}"
+    )
+
     if assistant_id not in registry:
         return Error(message=f"Assistant '{assistant_id}' not found")
 
@@ -147,14 +176,16 @@ async def reindex_assistant(
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     try:
-        result = await Assistant.reindex(assistant, silo_id)
+        result = await Assistant.reindex(assistant, silo_id, force_rebuild)
 
         if result is None:
             return Success(success=False, message="No RAG provider configured for this assistant")
 
+        rebuild_msg = " (force rebuild)" if force_rebuild else ""
         return Success(
             success=True,
             message="RAG pipeline reindexed successfully"
+            + rebuild_msg
             + (f" for silo {silo_id}" if silo_id else ""),
         )
     except Exception as e:
@@ -236,14 +267,17 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> CreateThr
     return CreateThreadResponse(thread_id=thread_id)
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetail, 404: Error})
-async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetail | Error:
+@router.get("/threads/{thread_id}/", response={200: ThreadDetailWithSilos, 404: Error})
+async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetailWithSilos | Error:
     """
     Get conversation history for a specific thread.
 
-    Returns thread metadata and message history in JSON format.
+    Returns thread metadata, connected silos, and message history in JSON format.
     Uses Assistant.history() to support any storage adapter.
     """
+    from django.db.models import Count
+    from django_ai_sdk.silos.models import ThreadSilo
+
     # Find thread and assistant using ThreadService
     thread = await ThreadService.get_assistant(thread_id)
     if not thread:
@@ -258,7 +292,32 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDeta
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     # Get history via assistant (returns ThreadDetail with thread metadata and messages)
-    return await assistant.history(thread_id)
+    thread_detail = await assistant.history(thread_id)
+
+    # Get connected silos with document count - use async for iteration
+    thread_silos_query = (
+        ThreadSilo.objects.filter(thread_id=thread_id)
+        .select_related("silo")
+        .annotate(document_count=Count("silo__documents"))
+    )
+
+    silos = []
+    async for ts in thread_silos_query:
+        silos.append(
+            ThreadSiloInfo(
+                id=str(ts.silo.id),
+                name=ts.silo.name,
+                description=ts.silo.description,
+                document_count=ts.document_count,
+                active=ts.active,
+            )
+        )
+
+    return ThreadDetailWithSilos(
+        thread=thread_detail.thread,
+        silos=silos,
+        messages=thread_detail.messages,
+    )
 
 
 @router.post("/threads/{thread_id}/", response={404: Error})
@@ -310,6 +369,23 @@ async def delete_thread(request: HttpRequest, thread_id: str) -> Success | Error
     if success:
         return Success(success=True, message="Thread deleted successfully")
     return Error(message="Thread not found")
+
+
+class DeleteAllThreadsResponse(Schema):
+    success: bool
+    deleted_count: int
+
+
+@router.delete("/threads/", response={200: DeleteAllThreadsResponse})
+async def delete_all_threads(request: HttpRequest) -> DeleteAllThreadsResponse:
+    """
+    Delete all conversation threads and their messages.
+
+    Returns:
+        Number of threads deleted
+    """
+    deleted_count = await ThreadService.delete_all_threads()
+    return DeleteAllThreadsResponse(success=True, deleted_count=deleted_count)
 
 
 # ============================================================================

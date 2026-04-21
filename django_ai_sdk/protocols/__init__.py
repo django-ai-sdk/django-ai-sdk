@@ -7,6 +7,11 @@ OpenAI native, etc.
 """
 
 from .base import BaseProtocolHandler
+from .openai import OpenAIProtocolHandler
 from .vercel import VercelProtocolHandler
 
-__all__ = ["BaseProtocolHandler", "VercelProtocolHandler"]
+__all__ = [
+    "BaseProtocolHandler",
+    "OpenAIProtocolHandler",
+    "VercelProtocolHandler",
+]

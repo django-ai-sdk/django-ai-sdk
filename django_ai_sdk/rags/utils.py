@@ -1,12 +1,11 @@
-"""
-Utility functions for RAG adapters.
-"""
-
 from typing import Any
 
 from haystack import Document as HaystackDocument
 
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.schemas import RagDocument
+
+logger = get_logger(__name__)
 
 
 def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
@@ -29,13 +28,14 @@ def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
     )
 
 
+# TODO: this might become extraction to rag documents, it is now our Document queryset
+# But it now depends heavily on the Document model itself.
+# A true queryset_to_rag_documents should be generic and work with any queryset
 async def queryset_to_rag_documents(queryset: Any, silo_id: Any = None) -> list[RagDocument]:
     """
     Convert Django QuerySet to list of RagDocuments.
-
     This is the vendor-neutral way to get documents for RAG.
     The returned RagDocuments can be passed to any RAG adapter
-    (Haystack, BM25, ChromaDB, Qdrant, etc.)
 
     Args:
         queryset: Django QuerySet of Document objects (async iterable)
@@ -51,8 +51,10 @@ async def queryset_to_rag_documents(queryset: Any, silo_id: Any = None) -> list[
     from django_ai_sdk.silos.utils import get_prompt_metadata
 
     rag_docs = []
+    skipped_count = 0
     async for doc in queryset:
         if not doc.content.strip():
+            skipped_count += 1
             continue
 
         extraction = doc.extraction
@@ -76,4 +78,7 @@ async def queryset_to_rag_documents(queryset: Any, silo_id: Any = None) -> list[
             )
         )
 
+    logger.debug(
+        f"Converted queryset to {len(rag_docs)} RagDocuments (skipped {skipped_count} empty docs)"
+    )
     return rag_docs

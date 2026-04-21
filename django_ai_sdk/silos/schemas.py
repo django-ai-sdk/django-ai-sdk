@@ -114,3 +114,26 @@ class DocumentOut(BaseModel):
     file_extension: str
     created_at: str
     updated_at: str
+
+
+class ThreadSiloOut(BaseModel):
+    """Schema for thread-silo relationship output."""
+
+    id: str
+    name: str
+    description: str
+    document_count: int
+    active: bool
+    created_at: str
+
+
+class BulkConnectSilosIn(BaseModel):
+    """Schema for bulk connecting silos to a thread."""
+
+    silo_ids: list[str]
+
+
+class ToggleSiloActiveIn(BaseModel):
+    """Schema for toggling silo active status."""
+
+    active: bool

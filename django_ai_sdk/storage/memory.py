@@ -135,6 +135,14 @@ class MemoryStore:
             return True
         return False
 
+    @classmethod
+    def delete_all_threads(cls) -> int:
+        """Delete all threads and their messages."""
+        count = len(cls.threads)
+        cls.threads.clear()
+        cls.messages.clear()
+        return count
+
     # ============================================================================
     # Message Operations
     # ============================================================================
@@ -225,7 +233,11 @@ class MemoryStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def create_thread(
-        cls, title: str, metadata: dict | None = None, user_id: str | None = None
+        cls,
+        title: str,
+        metadata: dict | None = None,
+        user_id: str | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in memory.
@@ -234,11 +246,12 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             title: Thread title
             metadata: Should include assistant_id, model
             user_id: Optional user ID
+            thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
         """
-        thread_id = str(uuid.uuid4())
+        thread_id = thread_id or str(uuid.uuid4())
         assistant_id = metadata.get("assistant_id", "") if metadata else ""
         model = metadata.get("model", "") if metadata else ""
 
@@ -307,6 +320,11 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     async def delete_thread(cls, thread_id: str) -> bool:
         """Delete thread and all its messages."""
         return MemoryStore.delete_thread(thread_id)
+
+    @classmethod
+    async def delete_all_threads(cls) -> int:
+        """Delete all threads and their messages."""
+        return MemoryStore.delete_all_threads()
 
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations

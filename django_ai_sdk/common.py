@@ -23,13 +23,16 @@ class ChatMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
-    processing_time_ms: int = 0  # TODO: remove _ms suffix
-    started_at: float = Field(default_factory=time.time)
-    completed_at: float = 0
     adapter_type: str = ""
     errors: list[str] = Field(default_factory=list)
     usage: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
+
+    # Timestamps & timing
+    created_at: str = ""
+    processing_time_ms: int = 0
+    started_at: float = Field(default_factory=time.time)
+    completed_at: float = 0
 
     # Helpers
     @property

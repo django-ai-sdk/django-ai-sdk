@@ -6,9 +6,9 @@ from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25RAG,
-    BaseRAGProvider,
     BM25Config,
     RagDocument,
+    RAGProvider,
 )
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from openai import AsyncOpenAI
@@ -35,8 +35,8 @@ class PirateOpenAIAssistant(Assistant):
     protocol = VercelProtocolHandler
     storage_adapter = MemoryStorageAdapter
 
-    # Use BaseRAGProvider
-    rag_provider = BaseRAGProvider()
+    # Use RAGProvider for direct BM25 RAG implementation
+    rag_provider = RAGProvider()
 
     def get_example_documents(self) -> list[RagDocument]:
         """

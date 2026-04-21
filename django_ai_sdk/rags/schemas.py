@@ -1,10 +1,3 @@
-"""
-RAG schemas and data models for the Django AI SDK.
-
-Provides framework-agnostic document models that work with any RAG implementation
-(Haystack, LangChain, custom, etc.).
-"""
-
 import uuid
 from typing import Any
 
@@ -45,23 +38,18 @@ class RagDocument(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    # Optional fields commonly used across frameworks
     title: str | None = None
-    source: str | None = None  # URL, file path, database source, etc.
-    score: float | None = None  # Relevance score (set during retrieval)
+    source: str | None = None
+    score: float | None = None
 
     class Config:
-        """Pydantic configuration."""
-
-        # Allow extra fields for framework-specific data
         extra = "allow"
 
+    # TODO: make vendor specific like `from_haystack`
     @classmethod
     def from_dict(cls, data: dict) -> "RagDocument":
         """
         Create RagDocument from a dictionary.
-
         Handles various dict formats from different sources:
         - Standard: {"id": "...", "content": "...", "metadata": {...}}
         - Haystack-style: {"id": "...", "content": "...", "meta": {...}}
@@ -108,6 +96,7 @@ class RagDocument(BaseModel):
             source=meta.get("source"),
         )
 
+    # TODO: mark as obsolete, we should use pydantic dump methods.
     def to_dict(self) -> dict:
         """
         Convert to dictionary format.
@@ -123,3 +112,12 @@ class RagDocument(BaseModel):
             "source": self.source,
             "score": self.score,
         }
+
+
+class ToolSpec(BaseModel):
+    """Specification for RAG tool presentation to LLM."""
+
+    name: str = Field(description="Tool name for function calling")
+    description: str = Field(description="Tool description for LLM")
+    doc_count: int | None = Field(default=None, description="Number of documents")
+    metadata: dict = Field(default_factory=dict, description="Additional metadata")

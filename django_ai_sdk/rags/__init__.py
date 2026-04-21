@@ -21,13 +21,13 @@ from .utils import (
 __all__ = [
     "BaseRAGAdapter",
     "BaseRAGProvider",
+    "RAGProvider",
     "BM25Config",
     "BM25RAG",
     "RagDocument",
     "rag_document_to_haystack",
     "queryset_to_rag_documents",
     "RAGConfig",
-    "RAGProvider",
     "RAGResult",
     "RAGSource",
 ]

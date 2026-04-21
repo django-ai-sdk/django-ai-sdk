@@ -1,14 +1,11 @@
-"""
-Base RAG (Retrieval Augmented Generation) adapter for the Django AI SDK.
-
-Provides a generic interface for RAG implementations that can retrieve
-documents and format them for injection into LLM prompts.
-"""
-
 from abc import ABC, abstractmethod
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from django_ai_sdk.rags.schemas import ToolSpec
 
 
 class RAGSource(BaseModel):
@@ -48,6 +45,8 @@ class BaseRAGAdapter(ABC):
     - warmup(): Build search index (expensive, called once)
     - retrieve(): Search documents (fast, called per query)
     - format_context(): Format results for LLM
+    - as_tool(): Return tool for function calling
+    - get_tool(spec): Return tool with custom specification
 
     Example:
         class MyRAG(BaseRAGAdapter):
@@ -63,15 +62,6 @@ class BaseRAGAdapter(ABC):
     """
 
     _is_warmed_up: bool = False
-
-    def __init__(self, config: BaseModel | None = None) -> None:
-        """
-        Initialize the RAG adapter.
-
-        Args:
-            config: Configuration model (RAGConfig, BM25Config, or custom)
-        """
-        self.config = config
 
     @abstractmethod
     def warmup(self) -> None:
@@ -125,15 +115,29 @@ class BaseRAGAdapter(ABC):
 
         return "\n".join(context_parts)
 
-    def get_retriever(
-        self,
-    ) -> Any:
+    @abstractmethod
+    def as_tool(self) -> Callable:
         """
-        Return a Haystack retriever component for pipeline integration.
-
-        Override in subclasses that need Haystack compatibility.
+        Return the RAG as a tool callable for function calling.
 
         Returns:
-            Haystack retriever component or None
+            Callable that accepts query and returns documents.
         """
-        return None
+        pass
+
+    def get_tool(self, spec: "ToolSpec") -> Callable:
+        """
+        Get tool with custom specification.
+
+        Args:
+            spec: ToolSpec with name and description.
+
+        Returns:
+            Tool callable with customized name/description.
+        """
+        tool = self.as_tool()
+        if hasattr(tool, "name"):
+            tool.name = spec.name
+        if hasattr(tool, "description"):
+            tool.description = spec.description
+        return tool

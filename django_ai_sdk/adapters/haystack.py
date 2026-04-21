@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import traceback
@@ -11,7 +12,7 @@ from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
-from django_ai_sdk.adapters.utils import merge_messages
+from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def parse_tool_result(arguments: str | None) -> dict[str, Any] | str:
+def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
     """
     Parse tool result as JSON if valid, otherwise return as string.
     """
@@ -45,6 +46,30 @@ def parse_tool_result(arguments: str | None) -> dict[str, Any] | str:
         return json.loads(str(arguments))
     except (json.JSONDecodeError, ValueError):
         return str(arguments)
+
+
+def parse_tool_output(obj: Any) -> Any:
+    """
+    Parse tool output from haystack to ensure it's JSON serializable.
+    """
+    if hasattr(obj, "to_dict"):
+        obj = obj.to_dict()
+
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        if isinstance(obj, str):
+            try:
+                return ast.literal_eval(obj)
+            except (ValueError, SyntaxError):
+                return obj
+        return obj
+
+    if isinstance(obj, dict):
+        return {k: parse_tool_output(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple)):
+        return [parse_tool_output(item) for item in obj]
+
+    return str(obj)
 
 
 class HaystackAdapter(BasePipelineAdapter):
@@ -186,12 +211,14 @@ class HaystackAdapter(BasePipelineAdapter):
 
         # Tool outputs
         for tool_result in message.tool_call_results:
+            # Ensure the output is JSON serializable
+            tool_output = parse_tool_output(tool_result.to_dict())
             chunks.append(
                 MessageChunk(
                     type="tool_output",
                     content={
                         "tool_call_id": tool_result.origin.id,
-                        "tool_output": tool_result.to_dict(),
+                        "tool_output": tool_output,
                     },
                     metadata={"source": "haystack_adapter"},
                 )
@@ -264,6 +291,18 @@ class HaystackAdapter(BasePipelineAdapter):
                     logger.debug("Pipeline finished with reason: stop")
                     loop_ref.call_soon_threadsafe(event_ref.set)
 
+                # Capture usage from chunk metadata (when stream_options={"include_usage": True})
+                # This handles the final chunk with choices=[] and usage data
+                if hasattr(chunk, "meta") and chunk.meta:
+                    usage_data = (
+                        chunk.meta.get("usage")
+                        if isinstance(chunk.meta, dict)
+                        else getattr(chunk.meta, "usage", None)
+                    )
+                    if usage_data:
+                        queue_ref.put_nowait(("usage", usage_data))
+                        logger.debug(f"Usage chunk queued from meta: {usage_data}")
+
             return callback
 
         # Create callback with explicit references for thread safety
@@ -300,12 +339,20 @@ class HaystackAdapter(BasePipelineAdapter):
                 )
 
             # Yield tokens
+            pipeline_result = None
+            usage = None
             while not pipeline_finished.is_set() or not queue.empty():
                 # Check if pipeline task has completed
                 if pipeline_task.done():
                     try:
-                        pipeline_task.result()
+                        pipeline_result = pipeline_task.result()
                         logger.debug("Pipeline task completed successfully, exiting token loop")
+
+                        # Extract usage from result metadata if available
+                        if pipeline_result:
+                            replies = pipeline_result.get("replies", [])
+                            if replies and replies[0].meta:
+                                usage = normalize_usage(replies[0].meta.get("usage"))
                     except Exception as pipeline_error:
                         logger.error(f"Pipeline task failed: {pipeline_error}")
                         # Emit error and exit loop
@@ -334,23 +381,26 @@ class HaystackAdapter(BasePipelineAdapter):
 
                             # Emit ToolInputCompleteEvent
                             if payload.arguments:
-                                tool_input = payload.arguments
-
                                 yield ToolInputCompleteEvent(
                                     tool_call_id=tool_call_id,
                                     tool_name=tool_name,
-                                    tool_input=parse_tool_result(payload.arguments),
+                                    tool_input=parse_tool_input(payload.arguments),
                                 )
 
                         elif event_type == "tool_result":
                             # Tool result received
                             tool_call_id = payload.origin.id
-                            tool_output = payload.to_dict()
+                            # Ensure the output is JSON serializable
+                            tool_output = parse_tool_output(payload.to_dict())
 
                             yield ToolOutputEvent(
                                 tool_call_id=tool_call_id,
                                 tool_output=tool_output,
                             )
+
+                        elif event_type == "usage":
+                            # Usage data from streaming chunk (when stream_options={"include_usage": True})
+                            usage = normalize_usage(payload)
 
                     else:
                         # Plain text token
@@ -431,7 +481,7 @@ class HaystackAdapter(BasePipelineAdapter):
                             for chunk in tool_chunks:
                                 stream_writer.add_chunk(chunk)
 
-                logger.debug(f"Tool storage complete: stored tool chunks from pipeline result")
+                logger.debug("Tool storage complete: stored tool chunks from pipeline result")
 
             except Exception as pipeline_processing_error:
                 logger.error(
@@ -460,17 +510,20 @@ class HaystackAdapter(BasePipelineAdapter):
                 return
 
             # Finalize message after all chunks processed
+            logger.info(
+                f"Finalizing message: stream_writer={stream_writer is not None}, usage={usage}"
+            )
             if stream_writer:
                 logger.debug("Finalizing stored message")
-                self.message_result = await stream_writer.finalize("stop")
+                self.message_result = await stream_writer.finalize("stop", usage=usage)
                 logger.debug(
                     f"Message finalized with {len(self.message_result.content)} characters"
                 )
             _finalize_called = True  # Mark as finalized even if no stream_writer (success path)
 
             # End message
-            logger.debug("Emitting message end event")
-            yield MessageEndEvent()
+            logger.info(f"Emitting message end event with usage: {usage}")
+            yield MessageEndEvent(usage=usage)
 
         except Exception as critical_error:
             logger.error(

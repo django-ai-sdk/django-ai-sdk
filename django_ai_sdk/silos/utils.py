@@ -107,4 +107,8 @@ def get_prompt_metadata(
         keywords = ", ".join(extraction.keywords)
         parts.append(f"Keywords: {keywords}")
 
+    if extraction.entities:
+        entities = ", ".join(f"{ent.text} ({ent.type})" for ent in extraction.entities)
+        parts.append(f"Named entities: {entities}")
+
     return "\n\n".join(parts)

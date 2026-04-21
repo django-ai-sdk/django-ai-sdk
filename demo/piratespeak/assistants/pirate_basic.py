@@ -6,6 +6,7 @@ from django_ai_sdk.adapters.haystack import HaystackAdapter
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+from django_ai_sdk.rags.config import VectorDBStorageConfig
 from django_ai_sdk.rags.haystack import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
@@ -15,11 +16,11 @@ from django_ai_sdk.rags.haystack import (
     QdrantBM25HybridRAGConfig,
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
-from django_ai_sdk.silos.models import Document
+from django_ai_sdk.silos.models import Document, Silo, ThreadSilo
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.tools import ComponentTool, Tool
+from haystack.tools import Tool
 from haystack.utils import Secret
 
 
@@ -63,6 +64,7 @@ class PirateBasicAssistant(Assistant):
 
     protocol = VercelProtocolHandler
     storage_adapter = DbStorageAdapter
+    max_history = 20
 
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
@@ -121,6 +123,7 @@ class PirateBasicAssistant(Assistant):
                 n_expansions=4,
                 expander_model="openai/gpt-oss-120b",
                 meta_fields_to_embed=["file_name", "keywords", "facts"],
+                storage=VectorDBStorageConfig.from_settings(silo_id),
             ),
         )
 
@@ -131,7 +134,7 @@ class PirateBasicAssistant(Assistant):
         return await self.get_rag_pipeline_qdrant(silo_id)
 
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackAdapter:
-        """Create Haystack pipeline adapter."""
+        """Create Haystack pipeline adapter with multi-silo RAG tools."""
 
         # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)
@@ -143,23 +146,29 @@ class PirateBasicAssistant(Assistant):
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
 
-        # Get RAG from provider
-        rag = None
-        if self.rag_provider:
-            rag = await self.rag_provider.get_rag_instance(self, None)
-
         # Create tools list
         tools = [get_today()]
-        if rag:
-            # Check if already a ComponentTool or needs conversion
 
-            # TODO: This is ugly, I need to cast directly into right tool
-            if isinstance(rag, ComponentTool):
-                tools.append(rag)
-            elif hasattr(rag, "as_tool"):
-                tools.append(rag.as_tool())
+        # Add RAG tools for each silo
+        if self.rag_provider and thread_id:
+            silo_links = ThreadSilo.objects.filter(
+                thread_id=thread_id, active=True
+            ).prefetch_related("silo")
 
-        # Build tool agent
+            async for link in silo_links:
+                try:
+                    silo = await Silo.objects.aget(id=link.silo.id)
+                    spec = await silo.get_tool_spec()
+
+                    rag = await self.rag_provider.get_rag_instance(self, str(silo.id))
+                    if rag:
+                        tool = rag.get_tool(spec)
+                        tools.append(tool)
+
+                except Silo.DoesNotExist:
+                    continue
+
+        # Build tool agent with all tools
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
                 model=self.get_model(),

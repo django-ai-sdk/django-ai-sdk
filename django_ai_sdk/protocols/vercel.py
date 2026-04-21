@@ -1,11 +1,3 @@
-"""
-Vercel AI SDK Data Stream Protocol implementation.
-
-This module combines both the protocol schemas and handler for Vercel AI SDK,
-keeping all Vercel-specific logic in one place.
-"""
-
-import json
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any, Literal, cast
@@ -26,7 +18,11 @@ from django_ai_sdk.events import (
     ToolInputCompleteEvent,
     ToolOutputEvent,
 )
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
+from django_ai_sdk.protocols.utils import format_sse
+
+logger = get_logger(__name__)
 
 # === Base Schema Classes ===
 
@@ -255,26 +251,6 @@ StreamChunk = (
 )
 
 
-# === Protocol Handler ===
-
-
-def format_sse(data: dict | str) -> bytes:
-    """
-    Format data as Server-Sent Event.
-
-    Args:
-        data: Dictionary to serialize as SSE data, or string for [DONE]
-
-    Returns:
-        Encoded SSE bytes
-    """
-    if isinstance(data, str):
-        return f"data: {data}\n\n".encode()
-
-    payload = json.dumps(data, ensure_ascii=False)
-    return f"data: {payload}\n\n".encode()
-
-
 class VercelProtocolHandler(BaseProtocolHandler):
     """Converts normalized events to Vercel AI SDK Data Stream Protocol."""
 
@@ -332,8 +308,11 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "tool_calls": chat_message.tool_calls,
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
+                    "usage": chat_message.usage,
+                    "created_at": chat_message.created_at,
                 }
             )
+            logger.debug(f"Converting message {chat_message.id}: usage={chat_message.usage}")
 
         return result
 
@@ -431,10 +410,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_input_complete":
                     tool_input_event = cast("ToolInputCompleteEvent", event)
+                    tool_input = (
+                        tool_input_event.tool_input
+                        if isinstance(tool_input_event.tool_input, dict)
+                        else {"input": tool_input_event.tool_input}
+                    )
                     yield ToolInputAvailablePart(
                         tool_call_id=tool_input_event.tool_call_id,
                         tool_name=tool_input_event.tool_name,
-                        input=tool_input_event.tool_input,
+                        input=tool_input,
                     )
 
                 case "tool_output":
@@ -465,7 +449,16 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         self.text_started = False
                     # Default to "stop" if no finish_reason provided
                     finish_reason = end_event.finish_reason or "stop"
+                    logger.info(f"Message end: usage={end_event.usage}")
                     yield FinishPart(finishReason=finish_reason)
+                    # Emit usage as custom data event if available
+                    if end_event.usage:
+                        logger.info(f"Emitting data-usage event: {end_event.usage}")
+                        yield DataPart(type="data-usage", data=end_event.usage)
+                    else:
+                        logger.info(
+                            "No usage in message end event - data-usage event will NOT be emitted"
+                        )
 
                 case "stream_end":
                     yield DonePart()

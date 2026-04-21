@@ -1,7 +1,3 @@
-"""
-ChromaDB-based RAG implementation with query expansion.
-"""
-
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -13,25 +9,25 @@ from haystack.dataclasses import Document as HaystackDocument
 from haystack.tools import ComponentTool
 from haystack.utils import Secret
 from haystack_integrations.document_stores.chroma import ChromaDocumentStore
-from pydantic import BaseModel
+from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.haystack.base import HaystackRAGBase
+from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
 
 logger = get_logger(__name__)
 
 
-class ChromaDBQueryExpanderRAGConfig(BaseModel):
+class ChromaDBQueryExpanderRAGConfig(BaseHaystackRAGConfig):
     """Configuration for ChromaDB Query Expander RAG."""
 
-    embedder_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    expander_model: str = "gpt-4o-mini"
-    top_k: int = 5
-    n_expansions: int = 4
-    chunk_size: int = 260
-    chunk_overlap: int = 0
+    embedder_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="Sentence transformer model for document/query embeddings",
+    )
+    chunk_size: int = Field(default=260, ge=1, description="Size of document chunks")
+    chunk_overlap: int = Field(default=0, ge=0, description="Overlap between consecutive chunks")
 
 
 class ChromaDBQueryExpanderRAG(HaystackRAGBase):
@@ -52,9 +48,9 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
         """Convert RagDocuments to HaystackDocuments for internal use."""
         return [rag_document_to_haystack(doc) for doc in self.documents]
 
-    def warmup(self) -> None:
+    def warmup(self, force_rebuild: bool = False) -> None:
         """Build and cache the indexed document store (expensive)."""
-        if self._is_warmed_up:
+        if self._is_warmed_up and not force_rebuild:
             logger.debug("ChromaDBQueryExpanderRAG already warmed up, skipping")
             return
 
@@ -121,6 +117,7 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
+            # TODO: we need to fix this
             api_key=Secret.from_env_var("OPENAI_API_KEY"),
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
@@ -129,25 +126,10 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
         from django_ai_sdk.rags.haystack.components import MultiQueryChromaRetriever
 
         # Custom prompt that forces same-language expansion
-        expander_prompt = """You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
-
-        IMPORTANT: 
-        - Generate queries ONLY in the SAME language as the original query
-        - If the original query is in Dutch, generate ONLY Dutch queries
-        - If the original query is in English, generate ONLY English queries
-        - Do NOT mix languages
-        - Do NOT translate the queries
-
-        Return a JSON object with the key "queries" containing the list of queries.
-
-        Original query: {{query}}
-
-        Generate {{n_expansions}} alternative queries in the SAME language as the original:"""
-
         query_expander = QueryExpander(
             chat_generator=expander_generator,
             n_expansions=self.config.n_expansions,
-            prompt_template=expander_prompt,
+            prompt_template=self.config.expander_prompt,
         )
 
         # Create retriever with query expansion support

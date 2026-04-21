@@ -1,9 +1,3 @@
-"""
-Qdrant Hybrid RAG implementation combining sparse (BM42) and dense (multilingual) embeddings.
-Uses Reciprocal Rank Fusion (RRF) for combining results.
-Supports multilingual retrieval (Dutch, English, etc.) with query expansion.
-"""
-
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -20,10 +14,11 @@ from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseDocumentEmbedder,
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from pydantic import BaseModel
+from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.haystack.base import HaystackRAGBase
+from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
@@ -31,65 +26,114 @@ from django_ai_sdk.rags.utils import rag_document_to_haystack
 logger = get_logger(__name__)
 
 
-class QdrantBM25HybridRAGConfig(BaseModel):
+class QdrantBM25HybridRAGConfig(BaseHaystackRAGConfig):
     """Configuration for Qdrant Hybrid RAG (BM42 Sparse + Dense)."""
 
-    # Preselected multilingual models for sparse and dense embeddings that work well together
-    sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions"
-    dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-    # Qdrant's BM42-based settings
-    embedding_dim: int = 384
-    top_k: int = 5
-    chunk_size: int = 500
-    chunk_overlap: int = 150
-    meta_fields_to_embed: list[str] = ["title"]
-
-    # Expander settings
-    expander_model: str = "gpt-4o-mini"
-    n_expansions: int = 4
+    sparse_embedder_model: str = Field(
+        default="Qdrant/bm42-all-minilm-l6-v2-attentions",
+    )
+    dense_embedder_model: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    )
+    embedding_dim: int = Field(default=384, ge=1)
+    chunk_size: int = Field(default=500, ge=1)
+    chunk_overlap: int = Field(default=150, ge=0)
+    meta_fields_to_embed: list[str] = Field(default=["title"])
+    storage: VectorDBStorageConfig = Field(default_factory=VectorDBStorageConfig)
 
 
 class QdrantBM25HybridRAG(HaystackRAGBase):
-    """
-    RAG implementation using Qdrant with Hybrid retrieval + Query Expansion.
-
-    Combines:
-    - QueryExpander: generates multiple query variations
-    - Sparse retrieval (BM42) for keyword-based matching (multilingual)
-    - Dense retrieval (paraphrase-multilingual-MiniLM-L12-v2) for semantic matching
-    - Reciprocal Rank Fusion (RRF) for combining results
-    """
+    """RAG implementation using Qdrant with Hybrid retrieval + Query Expansion."""
 
     def __init__(
         self,
         documents: list[RagDocument],
         config: QdrantBM25HybridRAGConfig | None = None,
     ) -> None:
-        self.config = config or QdrantBM25HybridRAGConfig()
-        self.documents = documents
-        self._cached_document_store = None
+        self.config: QdrantBM25HybridRAGConfig = config or QdrantBM25HybridRAGConfig()
+        self.documents: list[RagDocument] = documents
+        self._cached_document_store: QdrantDocumentStore | None = None
         self._is_warmed_up = False
-        logger.debug(f"QdrantBM25HybridRAG initialized with {len(documents)} documents")
+        logger.info(f"QdrantBM25HybridRAG initialized with {len(documents)} documents")
+        for i, doc in enumerate(documents):
+            title = doc.title or (doc.metadata.get("title") if doc.metadata else None) or "N/A"
+            logger.debug(
+                f"  Document {i + 1}: id={doc.id}, title='{title}', content_len={len(doc.content)}"
+            )
 
     def _convert_documents(self) -> list[HaystackDocument]:
         """Convert RagDocuments to HaystackDocuments for internal use."""
         return [rag_document_to_haystack(doc) for doc in self.documents]
 
-    def warmup(self) -> None:
-        """Build and cache the indexed document store (expensive)."""
-        if self._is_warmed_up:
+    def _create_document_store(self, recreate: bool = False) -> QdrantDocumentStore:
+        """Create document store based on persistence configuration."""
+        import os
+
+        storage = self.config.storage
+
+        if storage.is_persistent and storage.persist_path:
+            os.makedirs(storage.persist_path, exist_ok=True)
+
+            return QdrantDocumentStore(
+                path=storage.persist_path,
+                index="documents",
+                recreate_index=recreate,
+                return_embedding=True,
+                use_sparse_embeddings=True,
+                embedding_dim=self.config.embedding_dim,
+                on_disk=storage.qdrant_on_disk,
+                similarity=storage.qdrant_similarity,
+            )
+        else:
+            return QdrantDocumentStore(
+                ":memory:",
+                recreate_index=True,
+                return_embedding=True,
+                use_sparse_embeddings=True,
+                embedding_dim=self.config.embedding_dim,
+            )
+
+    def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
+        """Check if document store already has indexed documents."""
+        return document_store.count_documents() > 0
+
+    def warmup(self, force_rebuild: bool = False) -> None:
+        """
+        Build or load indexed document store.
+
+        Args:
+            force_rebuild: If True, clears existing index and rebuilds from scratch.
+                          This will delete all documents in the persistent storage.
+        """
+        if self._is_warmed_up and not force_rebuild:
             logger.debug("QdrantBM25HybridRAG already warmed up, skipping")
             return
 
-        logger.debug("Warming up QdrantBM25HybridRAG - building indexed document store")
+        if force_rebuild:
+            logger.info("Force rebuild requested, resetting Qdrant index")
+            self._is_warmed_up = False
 
-        document_store = QdrantDocumentStore(
-            ":memory:",
-            recreate_index=True,
-            return_embedding=True,
-            use_sparse_embeddings=True,
-            embedding_dim=self.config.embedding_dim,
+        logger.debug("Warming up QdrantBM25HybridRAG - building indexed document store")
+        logger.info(
+            f"[warmup] force_rebuild={force_rebuild}, source_documents={len(self.documents)}"
+        )
+
+        storage = self.config.storage
+        document_store = self._create_document_store(recreate=force_rebuild)
+
+        if not force_rebuild and storage.is_persistent and self._has_existing_index(document_store):
+            existing_count = document_store.count_documents()
+            self._cached_document_store = document_store
+            self._is_warmed_up = True
+            logger.info(
+                f"Using existing Qdrant index from {storage.persist_path} with {existing_count} chunks"
+            )
+            return
+
+        logger.info(
+            f"Creating new Qdrant index for persistent storage at {storage.persist_path}"
+            if storage.is_persistent
+            else "Creating in-memory Qdrant index"
         )
 
         indexing_pipeline = Pipeline()
@@ -129,74 +173,66 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
         # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
+        logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
 
         logger.debug(
             f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
         )
         indexing_pipeline.run({"documents": haystack_docs})
 
+        indexed_count = document_store.count_documents()
         self._cached_document_store = document_store
         self._is_warmed_up = True
-        logger.debug("QdrantBM25HybridRAG warmup complete")
+        logger.info(
+            f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
+        )
 
     def build_pipeline(self) -> Pipeline:
-        """Build the RAG pipeline with Qdrant Hybrid retrieval and query expansion."""
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
 
         if self._cached_document_store is not None:
             document_store = self._cached_document_store
-            logger.debug("Using cached document store")
         else:
-            logger.debug("No cached document store, building fresh (warmup needed)")
-            document_store = QdrantDocumentStore(
-                ":memory:",
-                recreate_index=True,
-                return_embedding=True,
-                use_sparse_embeddings=True,
-                embedding_dim=self.config.embedding_dim,
-            )
-            indexing_pipeline = Pipeline()
-            indexing_pipeline.add_component(
-                "splitter",
-                RecursiveDocumentSplitter(
-                    split_length=self.config.chunk_size,
-                    split_overlap=self.config.chunk_overlap,
-                    separators=["\n\n", "\n", ".", " "],
-                ),
-            )
-            indexing_pipeline.add_component(
-                "sparse_doc_embedder",
-                FastembedSparseDocumentEmbedder(
-                    model=self.config.sparse_embedder_model,
-                    meta_fields_to_embed=self.config.meta_fields_to_embed,
-                ),
-            )
-            indexing_pipeline.add_component(
-                "dense_doc_embedder",
-                FastembedDocumentEmbedder(
-                    model=self.config.dense_embedder_model,
-                    meta_fields_to_embed=self.config.meta_fields_to_embed,
-                ),
-            )
-            indexing_pipeline.add_component(
-                "writer",
-                DocumentWriter(
-                    document_store=document_store,
-                    policy=DuplicatePolicy.OVERWRITE,
-                ),
-            )
+            document_store = self._create_document_store(recreate=False)
 
-            indexing_pipeline.connect("splitter", "sparse_doc_embedder")
-            indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
-            indexing_pipeline.connect("dense_doc_embedder", "writer")
+            if not self._has_existing_index(document_store):
+                indexing_pipeline = Pipeline()
+                indexing_pipeline.add_component(
+                    "splitter",
+                    RecursiveDocumentSplitter(
+                        split_length=self.config.chunk_size,
+                        split_overlap=self.config.chunk_overlap,
+                        separators=["\n\n", "\n", ".", " "],
+                    ),
+                )
+                indexing_pipeline.add_component(
+                    "sparse_doc_embedder",
+                    FastembedSparseDocumentEmbedder(
+                        model=self.config.sparse_embedder_model,
+                        meta_fields_to_embed=self.config.meta_fields_to_embed,
+                    ),
+                )
+                indexing_pipeline.add_component(
+                    "dense_doc_embedder",
+                    FastembedDocumentEmbedder(
+                        model=self.config.dense_embedder_model,
+                        meta_fields_to_embed=self.config.meta_fields_to_embed,
+                    ),
+                )
+                indexing_pipeline.add_component(
+                    "writer",
+                    DocumentWriter(
+                        document_store=document_store,
+                        policy=DuplicatePolicy.OVERWRITE,
+                    ),
+                )
 
-            # Convert RagDocuments to HaystackDocuments
-            haystack_docs = self._convert_documents()
+                indexing_pipeline.connect("splitter", "sparse_doc_embedder")
+                indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
+                indexing_pipeline.connect("dense_doc_embedder", "writer")
 
-            logger.debug(
-                f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
-            )
-            indexing_pipeline.run({"documents": haystack_docs})
+                haystack_docs = self._convert_documents()
+                indexing_pipeline.run({"documents": haystack_docs})
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
@@ -204,25 +240,10 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
 
-        expander_prompt = """You are a query expansion assistant. Generate {{n_expansions}} alternative search queries for the given user query.
-
-IMPORTANT:
-- Generate queries ONLY in the SAME language as the original query
-- If the original query is in Dutch, generate ONLY Dutch queries
-- If the original query is in English, generate ONLY English queries
-- Do NOT mix languages
-- Do NOT translate the queries
-
-Return a JSON object with the key "queries" containing the list of queries.
-
-Original query: {{query}}
-
-Generate {{n_expansions}} alternative queries in the SAME language as the original:"""
-
         query_expander = QueryExpander(
             chat_generator=expander_generator,
             n_expansions=self.config.n_expansions,
-            prompt_template=expander_prompt,
+            prompt_template=self.config.expander_prompt,
         )
 
         query_pipeline = Pipeline()
@@ -239,7 +260,7 @@ Generate {{n_expansions}} alternative queries in the SAME language as the origin
 
         query_pipeline.connect("expander.queries", "retriever.queries")
 
-        logger.debug("Qdrant Hybrid RAG pipeline built successfully with query expansion")
+        logger.debug("Qdrant Hybrid RAG pipeline built")
         return query_pipeline
 
     def as_tool(self) -> ComponentTool:

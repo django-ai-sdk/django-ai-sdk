@@ -1,3 +1,8 @@
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["django_ai_sdk*"]
+exclude = ["demo*", "logs*", "ideas*"]
+
 [project]
 dependencies = [
   "daphne>=4.2.1",

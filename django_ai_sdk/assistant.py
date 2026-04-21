@@ -136,7 +136,9 @@ class Assistant(ABC, AssistantInfoMixin):
             logger.debug("RAG cache cleared via provider")
 
     @classmethod
-    async def reindex(cls, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def reindex(
+        cls, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+    ) -> Any:
         """
         Reindex the RAG pipeline for this assistant.
         Delegates to rag_provider.reindex() if configured.
@@ -144,6 +146,9 @@ class Assistant(ABC, AssistantInfoMixin):
         Args:
             assistant: Instance of the assistant
             silo_id: Optional silo ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index.
+                          For persistent storage backends (like Qdrant), this
+                          will delete and recreate the index from scratch.
 
         Returns:
             The reindexed RAG pipeline, or None if no provider
@@ -152,7 +157,7 @@ class Assistant(ABC, AssistantInfoMixin):
             logger.debug("No RAG provider configured, skipping reindex")
             return None
 
-        return await assistant.rag_provider.reindex(assistant, silo_id)
+        return await assistant.rag_provider.reindex(assistant, silo_id, force_rebuild)
 
     def __init__(self) -> None:
         # Protocol handler setup
@@ -277,12 +282,25 @@ class Assistant(ABC, AssistantInfoMixin):
         Returns:
             List of RagDocuments (vendor-neutral)
         """
-
-        # TODO: same as for get_rag_queryset()
         from django_ai_sdk.rags import queryset_to_rag_documents
 
+        logger.info(f"[get_rag_documents] silo_id={silo_id}, assistant={self.__class__.__name__}")
+        logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, silo_id={silo_id}")
+
         queryset = await self.get_rag_queryset(silo_id)
-        return await queryset_to_rag_documents(queryset, silo_id)
+        logger.info(f"[get_rag_documents] Got queryset, type={type(queryset).__name__}")
+
+        rag_docs = await queryset_to_rag_documents(queryset, silo_id)
+        logger.info(f"[get_rag_documents] Converted to {len(rag_docs)} RagDocuments")
+
+        logger.info(f"Fetched {len(rag_docs)} documents for RAG")
+        for i, doc in enumerate(rag_docs):
+            title = doc.title or "N/A"
+            logger.debug(
+                f"  Document {i + 1}: id={doc.id}, title='{title}', content_len={len(doc.content)}"
+            )
+
+        return rag_docs
 
     async def get_rag_pipeline(self, silo_id: str | None = None) -> Any:
         """

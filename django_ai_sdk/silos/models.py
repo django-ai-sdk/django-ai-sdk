@@ -4,6 +4,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
+from django_ai_sdk.rags.schemas import ToolSpec
 from django_ai_sdk.silos.schemas import DocumentExtraction
 
 
@@ -24,6 +25,22 @@ class Silo(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    async def get_tool_spec(self) -> ToolSpec:
+        """Generate ToolSpec for this silo."""
+        doc_count = await Document.objects.filter(silo_id=self.id).acount()
+
+        return ToolSpec(
+            name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
+            description=(
+                f"Search knowledge base: {self.name}. "
+                f"Contains {doc_count} documents. "
+                f"{self.description[:80] if self.description else ''} "
+                f"Use this when you need information from {self.name}."
+            ),
+            doc_count=doc_count,
+            metadata={"silo_id": str(self.id), "silo_name": self.name},
+        )
 
 
 class Document(models.Model):
@@ -94,7 +111,11 @@ class ThreadSilo(models.Model):
         related_name="silo_links",
     )
     silo = models.ForeignKey(Silo, on_delete=models.CASCADE, related_name="thread_links")
+    active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
+
+    # Annotated field from queries
+    document_count: int
 
     class Meta:
         db_table = "django_ai_sdk_thread_silos"
