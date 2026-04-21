@@ -20,17 +20,17 @@ class HaystackRAGProvider(BaseRAGProvider):
         class MyAssistant(Assistant):
             rag_provider = HaystackRAGProvider()
 
-            async def get_rag_pipeline(self, silo_id=None):
+            async def get_rag_pipeline(self, memory_id=None):
                 # Return a HaystackRAGBase instance
                 return QdrantBM25HybridRAG(documents=docs)
     """
 
     def __init__(self) -> None:
-        # Cache: key = "{class_name}_{silo_id}", value = RAG instance
+        # Cache: key = "{class_name}_{memory_id}", value = RAG instance
         self._cache: dict[str, Any] = {}
 
     async def warmup(
-        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> None:
         """
         Warm up the Haystack RAG by building indexes.
@@ -39,17 +39,17 @@ class HaystackRAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Warming up Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Get or create the RAG instance
-        await self._get_or_create_rag(assistant, silo_id, force_rebuild)
+        await self._get_or_create_rag(assistant, memory_id, force_rebuild)
         logger.info(f"Haystack RAG warmed up for {cache_key}")
 
-    async def get_rag_instance(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
         """
         Get the Haystack RAG instance.
 
@@ -60,12 +60,12 @@ class HaystackRAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
 
         Returns:
             HaystackRAGBase instance (e.g., QdrantBM25HybridRAG), or None
         """
-        return await self._get_or_create_rag(assistant, silo_id, False)
+        return await self._get_or_create_rag(assistant, memory_id, False)
 
     async def build_tool(self, rag_instance: Any) -> Any:
         """
@@ -94,21 +94,21 @@ class HaystackRAGProvider(BaseRAGProvider):
         logger.debug("Haystack RAG cache cleared")
 
     async def reindex(
-        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
                           (clears persistent storage for backends like Qdrant)
 
         Returns:
             The reindexed RAG instance.
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Reindexing Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
@@ -116,23 +116,23 @@ class HaystackRAGProvider(BaseRAGProvider):
             del self._cache[cache_key]
 
         # Warm up again (rebuilds indexes and caches)
-        await self.warmup(assistant, silo_id, force_rebuild)
+        await self.warmup(assistant, memory_id, force_rebuild)
 
         # Return the cached RAG
         result = self._cache.get(cache_key)
         logger.info(f"Haystack RAG reindexed for {cache_key}")
         return result
 
-    # TODO: thightly coupled to silo, maybe we want to have some RagKey object
-    # that would support many key types (assistant, silo, etc)
-    def _get_cache_key(self, assistant: "Assistant", silo_id: str | None) -> str:
-        """Generate cache key for this assistant and silo."""
-        return f"{assistant.__class__.__name__}_{silo_id or 'default'}"
+    # TODO: maybe we want to have some RagKey object
+    # that would support many key types (assistant, memory, etc)
+    def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
+        """Generate cache key for this assistant and memory."""
+        return f"{assistant.__class__.__name__}_{memory_id or 'default'}"
 
     async def _get_or_create_rag(
         self,
         assistant: "Assistant",
-        silo_id: str | None,
+        memory_id: str | None,
         force_rebuild: bool = False,
     ) -> Any:
         """
@@ -142,12 +142,12 @@ class HaystackRAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(
-            f"[_get_or_create_rag] cache_key={cache_key}, silo_id={silo_id}, force_rebuild={force_rebuild}, cache_hit={cache_key in self._cache and not force_rebuild}"
+            f"[_get_or_create_rag] cache_key={cache_key}, memory_id={memory_id}, force_rebuild={force_rebuild}, cache_hit={cache_key in self._cache and not force_rebuild}"
         )
 
         if cache_key not in self._cache or force_rebuild:
@@ -155,9 +155,9 @@ class HaystackRAGProvider(BaseRAGProvider):
 
             # Get RAG from assistant
             logger.info(
-                f"[_get_or_create_rag] Calling assistant.get_rag_pipeline(silo_id={silo_id})"
+                f"[_get_or_create_rag] Calling assistant.get_rag_pipeline(memory_id={memory_id})"
             )
-            rag = await assistant.get_rag_pipeline(silo_id)
+            rag = await assistant.get_rag_pipeline(memory_id)
             logger.info(f"[_get_or_create_rag] Got rag={rag is not None}")
 
             if rag is not None:

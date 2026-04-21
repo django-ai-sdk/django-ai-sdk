@@ -120,7 +120,7 @@ class PirateOpenAIAssistant(Assistant):
             ),
         ]
 
-    async def get_rag_pipeline(self, silo_id: str | None = None) -> "BM25RAG | None":
+    async def get_rag_pipeline(self, memory_id: str | None = None) -> "BM25RAG | None":
         """
         Build BM25 RAG pipeline with example documents.
         """

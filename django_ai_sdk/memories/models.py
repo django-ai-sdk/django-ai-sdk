@@ -5,10 +5,10 @@ from django.db import models
 from django.utils import timezone
 
 from django_ai_sdk.rags.schemas import ToolSpec
-from django_ai_sdk.silos.schemas import DocumentExtraction
+from django_ai_sdk.memories.schemas import DocumentExtraction
 
 
-class Silo(models.Model):
+class Memory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
@@ -27,8 +27,8 @@ class Silo(models.Model):
         return self.name
 
     async def get_tool_spec(self) -> ToolSpec:
-        """Generate ToolSpec for this silo."""
-        doc_count = await Document.objects.filter(silo_id=self.id).acount()
+        """Generate ToolSpec for this memory."""
+        doc_count = await Document.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
             name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
@@ -39,14 +39,14 @@ class Silo(models.Model):
                 f"Use this when you need information from {self.name}."
             ),
             doc_count=doc_count,
-            metadata={"silo_id": str(self.id), "silo_name": self.name},
+            metadata={"memory_id": str(self.id), "memory_name": self.name},
         )
 
 
 class Document(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    silo = models.ForeignKey(Silo, on_delete=models.CASCADE, related_name="documents")
-    file = models.FileField(upload_to="silos/documents/")
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to="memories/documents/")
     content = models.TextField(blank=True, default="")
     data = models.JSONField(default=dict, blank=True)  # stores DocumentExtraction as dict
     file_name = models.CharField(max_length=255, blank=True, default="")
@@ -103,14 +103,14 @@ class Document(models.Model):
         super().save(*args, **kwargs)
 
 
-class ThreadSilo(models.Model):
+class ThreadMemory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     thread = models.ForeignKey(
         "django_ai_sdk.Thread",
         on_delete=models.CASCADE,
-        related_name="silo_links",
+        related_name="memory_links",
     )
-    silo = models.ForeignKey(Silo, on_delete=models.CASCADE, related_name="thread_links")
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="thread_links")
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -119,7 +119,7 @@ class ThreadSilo(models.Model):
 
     class Meta:
         db_table = "django_ai_sdk_thread_silos"
-        unique_together = [["thread", "silo"]]
+        unique_together = [["thread", "memory"]]
 
     def __str__(self) -> str:
-        return f"{self.thread} - {self.silo}"
+        return f"{self.thread} - {self.memory}"

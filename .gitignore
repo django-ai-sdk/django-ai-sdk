@@ -221,7 +221,7 @@ logs/
 tmp/
 
 # Local
-demo/silos
+demo/memories
 demo/stores
 
 # Ideas directory for exploration documents

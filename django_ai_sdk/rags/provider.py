@@ -33,7 +33,7 @@ class BaseRAGProvider(ABC):
     """
 
     @abstractmethod
-    async def warmup(self, assistant: "Assistant", silo_id: str | None = None) -> None:
+    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
         """
         Warm up the RAG by building indexes and loading embeddings.
 
@@ -43,11 +43,11 @@ class BaseRAGProvider(ABC):
 
         Args:
             assistant: The assistant instance to warm up RAG for
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
         """
 
     @abstractmethod
-    async def get_rag_instance(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
         """
         Get the RAG instance for retrieval.
 
@@ -58,7 +58,7 @@ class BaseRAGProvider(ABC):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
 
         Returns:
             Framework-specific RAG instance, or None if no documents
@@ -86,14 +86,14 @@ class BaseRAGProvider(ABC):
 
     @abstractmethod
     async def reindex(
-        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
                           (clears persistent storage for backends that support it)
 
@@ -119,8 +119,8 @@ class RAGProvider(BaseRAGProvider):
         class MyAssistant(Assistant):
             rag_provider = RAGProvider()
 
-            async def get_rag_pipeline(self, silo_id=None):
-                documents = await self.get_rag_documents(silo_id)
+            async def get_rag_pipeline(self, memory_id=None):
+                documents = await self.get_rag_documents(memory_id)
                 return BM25RAG(documents=documents)
 
     Flow:
@@ -139,7 +139,7 @@ class RAGProvider(BaseRAGProvider):
         self._cache: dict[str, Any] = {}
         logger.debug("RAGProvider initialized")
 
-    async def warmup(self, assistant: "Assistant", silo_id: str | None = None) -> None:
+    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
         """
         Warm up the RAG by building the search index.
 
@@ -148,13 +148,13 @@ class RAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance to warm up
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Warming up Base RAG for {cache_key}")
 
         # Get RAG from assistant
-        rag = await assistant.get_rag_pipeline(silo_id)
+        rag = await assistant.get_rag_pipeline(memory_id)
 
         if rag is not None:
             # Warm up the RAG (build index)
@@ -170,7 +170,7 @@ class RAGProvider(BaseRAGProvider):
             self._cache[cache_key] = None
             logger.warning(f"No RAG available for {cache_key}")
 
-    async def get_rag_instance(self, assistant: "Assistant", silo_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
         """
         Get the RAG instance (cached or newly created).
 
@@ -179,16 +179,16 @@ class RAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
 
         Returns:
             BaseRAGAdapter instance (e.g., BM25RAG), or None
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
 
         if cache_key not in self._cache:
             logger.debug(f"Creating Base RAG for {cache_key}")
-            await self.warmup(assistant, silo_id)
+            await self.warmup(assistant, memory_id)
         else:
             logger.debug(f"Using cached Base RAG for {cache_key}")
 
@@ -222,7 +222,7 @@ class RAGProvider(BaseRAGProvider):
         return tool
 
     async def reindex(
-        self, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
@@ -231,7 +231,7 @@ class RAGProvider(BaseRAGProvider):
 
         Args:
             assistant: The assistant instance
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index.
                           For non-Haystack RAG types (like BM25RAG), this is
                           treated as a no-op since they don't have persistent storage.
@@ -239,7 +239,7 @@ class RAGProvider(BaseRAGProvider):
         Returns:
             The reindexed RAG instance
         """
-        cache_key = self._get_cache_key(assistant, silo_id)
+        cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Reindexing Base RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
@@ -248,7 +248,7 @@ class RAGProvider(BaseRAGProvider):
             logger.debug(f"Cleared cache for {cache_key}")
 
         # Warm up again (rebuilds index and caches)
-        await self.warmup(assistant, silo_id)
+        await self.warmup(assistant, memory_id)
 
         # Return the cached RAG
         result = self._cache.get(cache_key)
@@ -261,6 +261,6 @@ class RAGProvider(BaseRAGProvider):
         self._cache.clear()
         logger.debug(f"Base RAG cache cleared ({cache_size} entries)")
 
-    def _get_cache_key(self, assistant: "Assistant", silo_id: str | None) -> str:
-        """Generate cache key for this assistant and silo."""
-        return f"{assistant.__class__.__name__}_{silo_id or 'default'}"
+    def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
+        """Generate cache key for this assistant and memory."""
+        return f"{assistant.__class__.__name__}_{memory_id or 'default'}"

@@ -4,19 +4,19 @@ from .conversation.models import (
     Thread,
 )
 
-# Silos models
-from .silos.models import (
+# Memories models
+from .memories.models import (
     Document,
-    Silo,
-    ThreadSilo,
+    Memory,
+    ThreadMemory,
 )
 
 __all__ = [
     # Conversation models
     "Thread",
     "Message",
-    # Silos models
+    # Memories models
     "Document",
-    "Silo",
-    "ThreadSilo",
+    "Memory",
+    "ThreadMemory",
 ]

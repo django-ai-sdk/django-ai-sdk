@@ -106,7 +106,7 @@ class Assistant(ABC, AssistantInfoMixin):
             registry.register(cls)
 
     @classmethod
-    async def warmup(cls, assistant: "Assistant", silo_id: str | None = None) -> None:
+    async def warmup(cls, assistant: "Assistant", memory_id: str | None = None) -> None:
         """
         Warm up the RAG pipeline.
 
@@ -115,13 +115,13 @@ class Assistant(ABC, AssistantInfoMixin):
 
         Args:
             assistant: Instance of the assistant
-            silo_id: Optional silo
+            memory_id: Optional memory
         """
         if assistant.rag_provider is None:
             logger.debug("No RAG provider configured, skipping warmup")
             return
 
-        await assistant.rag_provider.warmup(assistant, silo_id)
+        await assistant.rag_provider.warmup(assistant, memory_id)
 
     @classmethod
     def clear_rag_cache(cls, assistant: "Assistant") -> None:
@@ -137,7 +137,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
     @classmethod
     async def reindex(
-        cls, assistant: "Assistant", silo_id: str | None = None, force_rebuild: bool = False
+        cls, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG pipeline for this assistant.
@@ -145,7 +145,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
         Args:
             assistant: Instance of the assistant
-            silo_id: Optional silo ID for document source
+            memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index.
                           For persistent storage backends (like Qdrant), this
                           will delete and recreate the index from scratch.
@@ -157,7 +157,7 @@ class Assistant(ABC, AssistantInfoMixin):
             logger.debug("No RAG provider configured, skipping reindex")
             return None
 
-        return await assistant.rag_provider.reindex(assistant, silo_id, force_rebuild)
+        return await assistant.rag_provider.reindex(assistant, memory_id, force_rebuild)
 
     def __init__(self) -> None:
         # Protocol handler setup
@@ -243,7 +243,7 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return []
 
-    async def get_rag_queryset(self, silo_id: str | None = None) -> Any:
+    async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
         """
         Override to return a Django QuerySet of documents for RAG.
 
@@ -251,7 +251,7 @@ class Assistant(ABC, AssistantInfoMixin):
         are included in RAG.
 
         Args:
-            silo_id: Optional silo ID to filter documents
+            memory_id: Optional memory ID to filter documents
 
         Returns:
             Django QuerySet of Document objects
@@ -261,13 +261,13 @@ class Assistant(ABC, AssistantInfoMixin):
         # For now this is fine, but we might want to decouple it
         # and provide a hint for overriding, but leave out the
         # implementation details.
-        from django_ai_sdk.silos.models import Document
+        from django_ai_sdk.memories.models import Document
 
-        if silo_id:
-            return Document.objects.filter(silo_id=silo_id)
+        if memory_id:
+            return Document.objects.filter(memory_id=memory_id)
         return Document.objects.all()
 
-    async def get_rag_documents(self, silo_id: str | None = None) -> list["RagDocument"]:
+    async def get_rag_documents(self, memory_id: str | None = None) -> list["RagDocument"]:
         """
         Get documents for RAG as RagDocuments.
 
@@ -277,20 +277,20 @@ class Assistant(ABC, AssistantInfoMixin):
         Override get_rag_queryset() to customize document selection.
 
         Args:
-            silo_id: Optional silo ID to filter documents
+            memory_id: Optional memory ID to filter documents
 
         Returns:
             List of RagDocuments (vendor-neutral)
         """
         from django_ai_sdk.rags import queryset_to_rag_documents
 
-        logger.info(f"[get_rag_documents] silo_id={silo_id}, assistant={self.__class__.__name__}")
-        logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, silo_id={silo_id}")
+        logger.info(f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}")
+        logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
 
-        queryset = await self.get_rag_queryset(silo_id)
+        queryset = await self.get_rag_queryset(memory_id)
         logger.info(f"[get_rag_documents] Got queryset, type={type(queryset).__name__}")
 
-        rag_docs = await queryset_to_rag_documents(queryset, silo_id)
+        rag_docs = await queryset_to_rag_documents(queryset, memory_id)
         logger.info(f"[get_rag_documents] Converted to {len(rag_docs)} RagDocuments")
 
         logger.info(f"Fetched {len(rag_docs)} documents for RAG")
@@ -302,7 +302,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
         return rag_docs
 
-    async def get_rag_pipeline(self, silo_id: str | None = None) -> Any:
+    async def get_rag_pipeline(self, memory_id: str | None = None) -> Any:
         """
         Get RAG pipeline/adapter for retrieval-augmented generation.
 
@@ -312,7 +312,7 @@ class Assistant(ABC, AssistantInfoMixin):
         For OpenAI: Return a RAG adapter: has .retrieve() method
 
         Args:
-            silo_id: Optional silo ID to use for document retrieval
+            memory_id: Optional memory ID to use for document retrieval
 
         Returns:
             BaseRAGAdapter instance, or None if RAG is not enabled
