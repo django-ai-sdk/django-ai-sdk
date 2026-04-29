@@ -259,6 +259,39 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         logger.debug("Qdrant Hybrid RAG pipeline built")
         return query_pipeline
 
+    def refresh_documents(self, documents: list[RagDocument]) -> None:
+        """
+        Update the indexed documents without releasing the Qdrant file lock.
+
+        Replaces self.documents with the new list and re-indexes all of them
+        into the already-open document store using OVERWRITE policy.
+        Safe to call on a warmed-up instance — avoids creating a second
+        QdrantClient on the same storage folder (which would deadlock).
+        """
+        self.documents = documents
+        logger.info(f"[refresh_documents] Refreshing Qdrant index with {len(documents)} documents")
+
+        if self._cached_document_store is None:
+            # Not yet warmed up — do a full warmup with force_rebuild
+            self.warmup(force_rebuild=True)
+            return
+
+        document_store = self._cached_document_store
+
+        # Wipe and rewrite all chunks so deleted/updated docs don't linger
+        existing_docs = document_store.filter_documents()
+        if existing_docs:
+            document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
+
+        # Convert and index using shared helper
+        haystack_docs = self._convert_documents()
+        self._index_documents(haystack_docs, document_store)
+
+        indexed_count = document_store.count_documents()
+        logger.info(
+            f"[refresh_documents] Done: {len(documents)} source docs → {indexed_count} chunks"
+        )
+
     def as_tool(self) -> ComponentTool:
         """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
