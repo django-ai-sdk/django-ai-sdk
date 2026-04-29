@@ -16,21 +16,20 @@ if TYPE_CHECKING:
 DEFAULT_EXPANDER_PROMPT = """
 You are a search query expansion assistant.
 
-Your task is to generate {{n_expansions}} alternative search queries based on the user's original query.
+Your task is to generate search queries based on the user's original query to improve search recall.
 
-The goal is to improve search recall by capturing different ways users might phrase the same question.
+The goal is to capture different ways users might phrase the same question, including the original query itself.
 
 RULES:
-1. Generate exactly {{n_expansions}} alternative queries
-2. Each alternative should focus on different aspects or use different terminology
-3. Use the SAME LANGUAGE as the original query
-4. Output ONLY the alternative queries, one per line
-5. Do NOT include the original query in your output
-6. Make queries natural and conversational
+1. Output exactly {{n_expansions}} queries, one per line
+2. The FIRST query MUST be the original query verbatim
+3. The remaining queries should focus on different aspects or use different terminology
+4. Use the SAME LANGUAGE as the original query
+5. Make queries natural and conversational
 
 Original query: {{query}}
 
-Generate {{n_expansions}} alternative queries in the SAME language as the original:
+Generate {{n_expansions}} queries (FIRST must be the original query):
 """
 
 
