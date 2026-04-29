@@ -1,3 +1,5 @@
+import os
+import shutil
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
@@ -79,6 +81,7 @@ class HaystackRAGProvider(BaseRAGProvider):
         Returns:
             ComponentTool ready for Haystack ToolAgent, or None
         """
+
         if rag_instance is None:
             return None
 
@@ -93,6 +96,28 @@ class HaystackRAGProvider(BaseRAGProvider):
         self._cache.clear()
         logger.debug("Haystack RAG cache cleared")
 
+    async def add_documents(
+        self, assistant: "Assistant", memory_id: str | None, documents: list["RagDocument"]
+    ) -> None:
+        """Add documents to existing RAG instance."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        rag = self._cache.get(cache_key)
+
+        if rag is not None and hasattr(rag, "add_documents"):
+            await rag.add_documents(documents)
+            logger.info(f"Added {len(documents)} documents to {cache_key}")
+
+    async def remove_documents(
+        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+    ) -> None:
+        """Remove documents from existing RAG instance."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        rag = self._cache.get(cache_key)
+
+        if rag is not None and hasattr(rag, "remove_documents"):
+            await rag.remove_documents(document_ids)
+            logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
+
     async def reindex(
         self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
@@ -103,13 +128,28 @@ class HaystackRAGProvider(BaseRAGProvider):
             assistant: The assistant instance
             memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
-                          (clears persistent storage for backends like Qdrant)
 
         Returns:
             The reindexed RAG instance.
         """
         cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Reindexing Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
+
+        # TODO: base class has already the same implementation, need to move this into utils method.
+        if force_rebuild:
+            try:
+                from django_ai_sdk.rags.config import VectorDBStorageConfig
+
+                config = VectorDBStorageConfig.from_settings(memory_id)
+                if (
+                    config.is_persistent
+                    and config.persist_path
+                    and os.path.exists(config.persist_path)
+                ):
+                    shutil.rmtree(config.persist_path)
+                    logger.info(f"Deleted RAG index at {config.persist_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting index: {e}")
 
         # Clear this entry from cache
         if cache_key in self._cache:

@@ -97,6 +97,72 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         """Check if document store already has indexed documents."""
         return document_store.count_documents() > 0
 
+    async def add_documents(self, documents: list["RagDocument"]) -> None:
+        """Add documents to the existing Qdrant index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot add documents")
+            return
+
+        haystack_docs = [rag_document_to_haystack(doc) for doc in documents]
+        self._index_documents(haystack_docs, self._cached_document_store)
+        logger.info(f"Added {len(documents)} documents to Qdrant index")
+
+    def _index_documents(self, documents: list, document_store) -> None:
+        """Index documents with chunking and embedding."""
+        from haystack import Pipeline
+        from haystack.components.preprocessors import RecursiveDocumentSplitter
+        from haystack_integrations.components.embedders.fastembed import (
+            FastembedDocumentEmbedder,
+            FastembedSparseDocumentEmbedder,
+        )
+
+        indexing_pipeline = Pipeline()
+        indexing_pipeline.add_component(
+            "splitter",
+            RecursiveDocumentSplitter(
+                split_length=self.config.chunk_size,
+                split_overlap=self.config.chunk_overlap,
+                separators=["\n\n", "\n", ".", " "],
+            ),
+        )
+        indexing_pipeline.add_component(
+            "sparse_doc_embedder",
+            FastembedSparseDocumentEmbedder(
+                model=self.config.sparse_embedder_model,
+                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            ),
+        )
+        indexing_pipeline.add_component(
+            "dense_doc_embedder",
+            FastembedDocumentEmbedder(
+                model=self.config.dense_embedder_model,
+                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            ),
+        )
+        indexing_pipeline.add_component(
+            "writer",
+            DocumentWriter(
+                document_store=document_store,
+                policy=DuplicatePolicy.OVERWRITE,
+            ),
+        )
+
+        indexing_pipeline.connect("splitter", "sparse_doc_embedder")
+        indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
+        indexing_pipeline.connect("dense_doc_embedder", "writer")
+
+        indexing_pipeline.run({"documents": documents})
+
+    async def remove_documents(self, document_ids: list[str]) -> None:
+        """Remove documents from the Qdrant index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot remove documents")
+            return
+
+        # Delete documents by ID
+        self._cached_document_store.delete_documents(document_ids=document_ids)
+        logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
+
     def warmup(self, force_rebuild: bool = False) -> None:
         """
         Build or load indexed document store.
@@ -136,41 +202,6 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             else "Creating in-memory Qdrant index"
         )
 
-        indexing_pipeline = Pipeline()
-        indexing_pipeline.add_component(
-            "splitter",
-            RecursiveDocumentSplitter(
-                split_length=self.config.chunk_size,
-                split_overlap=self.config.chunk_overlap,
-                separators=["\n\n", "\n", ".", " "],
-            ),
-        )
-        indexing_pipeline.add_component(
-            "sparse_doc_embedder",
-            FastembedSparseDocumentEmbedder(
-                model=self.config.sparse_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
-            ),
-        )
-        indexing_pipeline.add_component(
-            "dense_doc_embedder",
-            FastembedDocumentEmbedder(
-                model=self.config.dense_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
-            ),
-        )
-        indexing_pipeline.add_component(
-            "writer",
-            DocumentWriter(
-                document_store=document_store,
-                policy=DuplicatePolicy.OVERWRITE,
-            ),
-        )
-
-        indexing_pipeline.connect("splitter", "sparse_doc_embedder")
-        indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
-        indexing_pipeline.connect("dense_doc_embedder", "writer")
-
         # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
         logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
@@ -178,7 +209,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         logger.debug(
             f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
         )
-        indexing_pipeline.run({"documents": haystack_docs})
+        self._index_documents(haystack_docs, document_store)
 
         indexed_count = document_store.count_documents()
         self._cached_document_store = document_store
@@ -196,43 +227,8 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             document_store = self._create_document_store(recreate=False)
 
             if not self._has_existing_index(document_store):
-                indexing_pipeline = Pipeline()
-                indexing_pipeline.add_component(
-                    "splitter",
-                    RecursiveDocumentSplitter(
-                        split_length=self.config.chunk_size,
-                        split_overlap=self.config.chunk_overlap,
-                        separators=["\n\n", "\n", ".", " "],
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "sparse_doc_embedder",
-                    FastembedSparseDocumentEmbedder(
-                        model=self.config.sparse_embedder_model,
-                        meta_fields_to_embed=self.config.meta_fields_to_embed,
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "dense_doc_embedder",
-                    FastembedDocumentEmbedder(
-                        model=self.config.dense_embedder_model,
-                        meta_fields_to_embed=self.config.meta_fields_to_embed,
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "writer",
-                    DocumentWriter(
-                        document_store=document_store,
-                        policy=DuplicatePolicy.OVERWRITE,
-                    ),
-                )
-
-                indexing_pipeline.connect("splitter", "sparse_doc_embedder")
-                indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
-                indexing_pipeline.connect("dense_doc_embedder", "writer")
-
                 haystack_docs = self._convert_documents()
-                indexing_pipeline.run({"documents": haystack_docs})
+                self._index_documents(haystack_docs, document_store)
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
