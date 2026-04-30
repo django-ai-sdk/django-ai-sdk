@@ -268,7 +268,9 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> CreateThr
 
 
 @router.get("/threads/{thread_id}/", response={200: ThreadDetailWithMemories, 404: Error})
-async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetailWithMemories | Error:
+async def get_thread_history(
+    request: HttpRequest, thread_id: str
+) -> ThreadDetailWithMemories | Error:
     """
     Get conversation history for a specific thread.
 

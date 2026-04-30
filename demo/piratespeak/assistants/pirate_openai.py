@@ -2,14 +2,12 @@ from django.conf import settings
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.openai import OpenAIAdapter
 from django_ai_sdk.assistants import auto_register
-from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25RAG,
     BM25Config,
     RagDocument,
     RAGProvider,
 )
-from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from openai import AsyncOpenAI
 
 

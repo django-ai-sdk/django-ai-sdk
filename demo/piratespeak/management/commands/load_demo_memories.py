@@ -32,8 +32,6 @@ class Command(BaseCommand):
         ]
 
         for memory_data in memories_data:
-            Memory.objects.create(
-                name=memory_data["name"], description=memory_data["description"]
-            )
+            Memory.objects.create(name=memory_data["name"], description=memory_data["description"])
 
         self.stdout.write(self.style.SUCCESS(f"Created {len(memories_data)} memories."))

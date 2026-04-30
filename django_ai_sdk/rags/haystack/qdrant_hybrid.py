@@ -107,14 +107,9 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         self._index_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to Qdrant index")
 
-    def _index_documents(self, documents: list, document_store) -> None:
+    def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
         """Index documents with chunking and embedding."""
         from haystack import Pipeline
-        from haystack.components.preprocessors import RecursiveDocumentSplitter
-        from haystack_integrations.components.embedders.fastembed import (
-            FastembedDocumentEmbedder,
-            FastembedSparseDocumentEmbedder,
-        )
 
         indexing_pipeline = Pipeline()
         indexing_pipeline.add_component(

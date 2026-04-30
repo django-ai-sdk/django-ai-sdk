@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
+
 
 logger = get_logger(__name__)
 
@@ -106,7 +108,7 @@ class BaseRAGProvider(ABC):
 
     @abstractmethod
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list["RagDocument"]
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """
         Incrementally add documents to the RAG index.
@@ -303,7 +305,7 @@ class RAGProvider(BaseRAGProvider):
         logger.debug(f"Base RAG cache cleared ({cache_size} entries)")
 
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list["RagDocument"]
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """Add documents to RAG - fallback to reindex since BM25RAG doesn't support incremental."""
         cache_key = self._get_cache_key(assistant, memory_id)

@@ -185,9 +185,7 @@ def get_document(request: HttpRequest, memory_id: str, doc_id: str) -> DocumentO
 
 
 @router.delete("/{memory_id}/documents/{doc_id}", response={204: None})
-async def delete_document(
-    request: HttpRequest, memory_id: str, doc_id: str
-) -> tuple[int, None]:
+async def delete_document(request: HttpRequest, memory_id: str, doc_id: str) -> tuple[int, None]:
     """Delete a document (and its entry) from a memory."""
     entry = await Entry.objects.aget(id=doc_id, memory_id=memory_id)
     await entry.adelete()
@@ -195,9 +193,7 @@ async def delete_document(
 
 
 @router.post("/{memory_id}/link/{thread_id}", response={204: None})
-async def link_thread(
-    request: HttpRequest, memory_id: str, thread_id: str
-) -> tuple[int, None]:
+async def link_thread(request: HttpRequest, memory_id: str, thread_id: str) -> tuple[int, None]:
     """Link a memory to a thread."""
     memory = await Memory.objects.aget(id=memory_id)
     from django_ai_sdk.conversation.models import Thread
@@ -211,9 +207,7 @@ async def link_thread(
 
 
 @router.delete("/{memory_id}/link/{thread_id}", response={204: None})
-async def unlink_thread(
-    request: HttpRequest, memory_id: str, thread_id: str
-) -> tuple[int, None]:
+async def unlink_thread(request: HttpRequest, memory_id: str, thread_id: str) -> tuple[int, None]:
     """Unlink a memory from a thread."""
     link = await ThreadMemory.objects.aget(memory_id=memory_id, thread_id=thread_id)
     await link.adelete()
@@ -226,9 +220,7 @@ async def unlink_thread(
 
 
 @router.get("/thread/{thread_id}", response=list[ThreadMemoryOut])
-async def list_thread_memories(
-    request: HttpRequest, thread_id: str
-) -> list[ThreadMemoryOut]:
+async def list_thread_memories(request: HttpRequest, thread_id: str) -> list[ThreadMemoryOut]:
     """List all memories connected to a thread with their active status."""
     thread_memories_query = (
         ThreadMemory.objects.filter(thread_id=thread_id)

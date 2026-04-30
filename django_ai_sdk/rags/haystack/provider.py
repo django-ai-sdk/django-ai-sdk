@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.provider import BaseRAGProvider
+from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
@@ -97,7 +98,7 @@ class HaystackRAGProvider(BaseRAGProvider):
         logger.debug("Haystack RAG cache cleared")
 
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list["RagDocument"]
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """Add documents to existing RAG instance."""
         cache_key = self._get_cache_key(assistant, memory_id)
