@@ -19,7 +19,7 @@ class PirateAgentAssistant(Assistant):
     """
 
     name = "Captain Blackbeard Bot"
-    model = "mistralai/Ministral-3-14B-Instruct-2512"
+    model = settings.AI_SDK_DEFAULT_MODEL
     instructions = [
         "You are Captain Blackbeard Bot, a swashbuckling pirate AI assistant!",
         "",

@@ -16,7 +16,7 @@ from django_ai_sdk.rags.haystack import (
     QdrantBM25HybridRAGConfig,
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
-from django_ai_sdk.silos.models import Document, Silo, ThreadSilo
+from django_ai_sdk.memories.models import Document, Memory, ThreadMemory
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -69,17 +69,17 @@ class PirateBasicAssistant(Assistant):
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
 
-    async def get_rag_queryset(self, silo_id: str | None = None) -> QuerySet[Document]:
+    async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Document]:
         """Return queryset of documents for RAG."""
-        if silo_id:
-            return Document.objects.filter(silo_id=silo_id)
+        if memory_id:
+            return Document.objects.filter(memory_id=memory_id)
         return Document.objects.all()
 
     async def get_rag_pipeline_bm25(
-        self, silo_id: str | None = None
+        self, memory_id: str | None = None
     ) -> BM25QueryExpanderRAG | None:
         """Build BM25 RAG pipeline for document retrieval."""
-        documents = await self.get_rag_documents(silo_id)
+        documents = await self.get_rag_documents(memory_id)
         if not documents:
             return None
 
@@ -92,10 +92,10 @@ class PirateBasicAssistant(Assistant):
         )
 
     async def get_rag_pipeline_chromadb(
-        self, silo_id: str | None = None
+        self, memory_id: str | None = None
     ) -> ChromaDBQueryExpanderRAG | None:
         """Build ChromaDB RAG pipeline for document retrieval."""
-        documents = await self.get_rag_documents(silo_id)
+        documents = await self.get_rag_documents(memory_id)
         if not documents:
             return None
 
@@ -109,10 +109,10 @@ class PirateBasicAssistant(Assistant):
         )
 
     async def get_rag_pipeline_qdrant(
-        self, silo_id: str | None = None
+        self, memory_id: str | None = None
     ) -> QdrantBM25HybridRAG | None:
         """Build Qdrant Hybrid RAG pipeline (SPLADE + BGE embeddings with RRF)."""
-        documents = await self.get_rag_documents(silo_id)
+        documents = await self.get_rag_documents(memory_id)
         if not documents:
             return None
 
@@ -123,18 +123,18 @@ class PirateBasicAssistant(Assistant):
                 n_expansions=4,
                 expander_model="openai/gpt-oss-120b",
                 meta_fields_to_embed=["file_name", "keywords", "facts"],
-                storage=VectorDBStorageConfig.from_settings(silo_id),
+                storage=VectorDBStorageConfig.from_settings(memory_id),
             ),
         )
 
     @track_llm
     @track_embedding
-    async def get_rag_pipeline(self, silo_id: str | None = None) -> QdrantBM25HybridRAG | None:
+    async def get_rag_pipeline(self, memory_id: str | None = None) -> QdrantBM25HybridRAG | None:
         """Build RAG pipeline for document retrieval."""
-        return await self.get_rag_pipeline_qdrant(silo_id)
+        return await self.get_rag_pipeline_qdrant(memory_id)
 
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackAdapter:
-        """Create Haystack pipeline adapter with multi-silo RAG tools."""
+        """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
         # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)
@@ -149,23 +149,23 @@ class PirateBasicAssistant(Assistant):
         # Create tools list
         tools = [get_today()]
 
-        # Add RAG tools for each silo
+        # Add RAG tools for each memory
         if self.rag_provider and thread_id:
-            silo_links = ThreadSilo.objects.filter(
+            memory_links = ThreadMemory.objects.filter(
                 thread_id=thread_id, active=True
-            ).prefetch_related("silo")
+            ).prefetch_related("memory")
 
-            async for link in silo_links:
+            async for link in memory_links:
                 try:
-                    silo = await Silo.objects.aget(id=link.silo.id)
-                    spec = await silo.get_tool_spec()
+                    memory = await Memory.objects.aget(id=link.memory.id)
+                    spec = await memory.get_tool_spec()
 
-                    rag = await self.rag_provider.get_rag_instance(self, str(silo.id))
+                    rag = await self.rag_provider.get_rag_instance(self, str(memory.id))
                     if rag:
                         tool = rag.get_tool(spec)
                         tools.append(tool)
 
-                except Silo.DoesNotExist:
+                except Memory.DoesNotExist:
                     continue
 
         # Build tool agent with all tools

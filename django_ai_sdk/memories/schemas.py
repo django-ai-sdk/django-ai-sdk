@@ -77,15 +77,15 @@ class DocumentExtraction(BaseModel):
 # View Schemas
 
 
-class SiloIn(BaseModel):
-    """Schema for creating a silo."""
+class MemoryIn(BaseModel):
+    """Schema for creating a memory."""
 
     name: str
     description: str = ""
 
 
-class SiloOut(BaseModel):
-    """Schema for silo output."""
+class MemoryOut(BaseModel):
+    """Schema for memory output."""
 
     id: str
     name: str
@@ -116,8 +116,8 @@ class DocumentOut(BaseModel):
     updated_at: str
 
 
-class ThreadSiloOut(BaseModel):
-    """Schema for thread-silo relationship output."""
+class ThreadMemoryOut(BaseModel):
+    """Schema for thread-memory relationship output."""
 
     id: str
     name: str
@@ -127,13 +127,13 @@ class ThreadSiloOut(BaseModel):
     created_at: str
 
 
-class BulkConnectSilosIn(BaseModel):
-    """Schema for bulk connecting silos to a thread."""
+class BulkConnectMemoriesIn(BaseModel):
+    """Schema for bulk connecting memories to a thread."""
 
-    silo_ids: list[str]
+    memory_ids: list[str]
 
 
-class ToggleSiloActiveIn(BaseModel):
-    """Schema for toggling silo active status."""
+class ToggleMemoryActiveIn(BaseModel):
+    """Schema for toggling memory active status."""
 
     active: bool

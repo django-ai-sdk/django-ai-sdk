@@ -78,8 +78,8 @@ class CreateThreadResponse(Schema):
     thread_id: str | None = None
 
 
-class ThreadSiloInfo(Schema):
-    """Silo information included in thread history."""
+class ThreadMemoryInfo(Schema):
+    """Memory information included in thread history."""
 
     id: str
     name: str
@@ -88,11 +88,11 @@ class ThreadSiloInfo(Schema):
     active: bool
 
 
-class ThreadDetailWithSilos(Schema):
-    """Thread detail with silos included."""
+class ThreadDetailWithMemories(Schema):
+    """Thread detail with memories included."""
 
     thread: ThreadInfo
-    silos: list[ThreadSiloInfo]
+    memories: list[ThreadMemoryInfo]
     messages: list
 
 
@@ -146,14 +146,14 @@ def get_assistant_info(request: HttpRequest, assistant_id: str) -> AssistantInfo
 async def reindex_assistant(
     request: HttpRequest,
     assistant_id: str,
-    silo_id: str | None = None,
+    memory_id: str | None = None,
     force_rebuild: bool = False,
 ) -> Success | Error:
     """Reindex the RAG pipeline for an assistant.
 
     Args:
         assistant_id: The ID of the assistant to reindex
-        silo_id: Optional silo ID to limit reindexing to specific documents
+        memory_id: Optional memory ID to limit reindexing to specific documents
         force_rebuild: If True, forces a complete rebuild of the index
                       (clears persistent storage for backends like Qdrant)
 
@@ -164,7 +164,7 @@ async def reindex_assistant(
 
     logger = logging.getLogger(__name__)
     logger.info(
-        f"[reindex_assistant] assistant_id={assistant_id}, silo_id={silo_id}, force_rebuild={force_rebuild}"
+        f"[reindex_assistant] assistant_id={assistant_id}, memory_id={memory_id}, force_rebuild={force_rebuild}"
     )
 
     if assistant_id not in registry:
@@ -176,7 +176,7 @@ async def reindex_assistant(
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     try:
-        result = await Assistant.reindex(assistant, silo_id, force_rebuild)
+        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
 
         if result is None:
             return Success(success=False, message="No RAG provider configured for this assistant")
@@ -186,7 +186,7 @@ async def reindex_assistant(
             success=True,
             message="RAG pipeline reindexed successfully"
             + rebuild_msg
-            + (f" for silo {silo_id}" if silo_id else ""),
+            + (f" for memory {memory_id}" if memory_id else ""),
         )
     except Exception as e:
         return Success(success=False, message=f"Reindex failed: {str(e)}")
@@ -267,16 +267,16 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> CreateThr
     return CreateThreadResponse(thread_id=thread_id)
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetailWithSilos, 404: Error})
-async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetailWithSilos | Error:
+@router.get("/threads/{thread_id}/", response={200: ThreadDetailWithMemories, 404: Error})
+async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDetailWithMemories | Error:
     """
     Get conversation history for a specific thread.
 
-    Returns thread metadata, connected silos, and message history in JSON format.
+    Returns thread metadata, connected memories, and message history in JSON format.
     Uses Assistant.history() to support any storage adapter.
     """
     from django.db.models import Count
-    from django_ai_sdk.silos.models import ThreadSilo
+    from django_ai_sdk.memories.models import ThreadMemory
 
     # Find thread and assistant using ThreadService
     thread = await ThreadService.get_assistant(thread_id)
@@ -294,28 +294,28 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDeta
     # Get history via assistant (returns ThreadDetail with thread metadata and messages)
     thread_detail = await assistant.history(thread_id)
 
-    # Get connected silos with document count - use async for iteration
-    thread_silos_query = (
-        ThreadSilo.objects.filter(thread_id=thread_id)
-        .select_related("silo")
-        .annotate(document_count=Count("silo__documents"))
+    # Get connected memories with document count - use async for iteration
+    thread_memories_query = (
+        ThreadMemory.objects.filter(thread_id=thread_id)
+        .select_related("memory")
+        .annotate(document_count=Count("memory__documents"))
     )
 
-    silos = []
-    async for ts in thread_silos_query:
-        silos.append(
-            ThreadSiloInfo(
-                id=str(ts.silo.id),
-                name=ts.silo.name,
-                description=ts.silo.description,
-                document_count=ts.document_count,
-                active=ts.active,
+    memories = []
+    async for tm in thread_memories_query:
+        memories.append(
+            ThreadMemoryInfo(
+                id=str(tm.memory.id),
+                name=tm.memory.name,
+                description=tm.memory.description,
+                document_count=tm.document_count,
+                active=tm.active,
             )
         )
 
-    return ThreadDetailWithSilos(
+    return ThreadDetailWithMemories(
         thread=thread_detail.thread,
-        silos=silos,
+        memories=memories,
         messages=thread_detail.messages,
     )
 

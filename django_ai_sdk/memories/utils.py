@@ -7,7 +7,7 @@ we must unify Caren version against the public one.
 from openai import AsyncOpenAI
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.silos.schemas import DocumentExtraction, Predicate
+from django_ai_sdk.memories.schemas import DocumentExtraction, Predicate
 from django_ai_sdk.tracking.utils import track_llm
 
 logger = get_logger(__name__)
