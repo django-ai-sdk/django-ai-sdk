@@ -4,6 +4,7 @@ from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackAdapter
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags.config import VectorDBStorageConfig
@@ -16,7 +17,6 @@ from django_ai_sdk.rags.haystack import (
     QdrantBM25HybridRAGConfig,
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
-from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator

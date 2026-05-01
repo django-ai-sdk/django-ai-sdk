@@ -1,11 +1,10 @@
 import uuid
-from typing import Any
 
 from django.db import models
 from django.utils import timezone
 
-from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 from django_ai_sdk.memories.schemas import DocumentExtraction
+from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
 
 class Memory(models.Model):

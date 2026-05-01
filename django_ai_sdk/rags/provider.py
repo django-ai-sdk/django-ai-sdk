@@ -1,11 +1,16 @@
+import os
+import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
+
 
 logger = get_logger(__name__)
 
@@ -99,6 +104,32 @@ class BaseRAGProvider(ABC):
 
         Returns:
             The reindexed RAG instance
+        """
+
+    @abstractmethod
+    async def add_documents(
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+    ) -> None:
+        """
+        Incrementally add documents to the RAG index.
+
+        Args:
+            assistant: The assistant instance
+            memory_id: Memory ID for the RAG instance
+            documents: List of RagDocuments to add
+        """
+
+    @abstractmethod
+    async def remove_documents(
+        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+    ) -> None:
+        """
+        Incrementally remove documents from the RAG index.
+
+        Args:
+            assistant: The assistant instance
+            memory_id: Memory ID for the RAG instance
+            document_ids: List of document IDs to remove
         """
 
 
@@ -233,14 +264,26 @@ class RAGProvider(BaseRAGProvider):
             assistant: The assistant instance
             memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index.
-                          For non-Haystack RAG types (like BM25RAG), this is
-                          treated as a no-op since they don't have persistent storage.
 
         Returns:
             The reindexed RAG instance
         """
         cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Reindexing Base RAG for {cache_key} (force_rebuild={force_rebuild})")
+
+        if force_rebuild:
+            # When we force, delete the complete index from disk
+            try:
+                config = VectorDBStorageConfig.from_settings(memory_id)
+                if (
+                    config.is_persistent
+                    and config.persist_path
+                    and os.path.exists(config.persist_path)
+                ):
+                    shutil.rmtree(config.persist_path)
+                    logger.info(f"Deleted RAG index at {config.persist_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting index: {e}")
 
         # Clear this entry from cache
         if cache_key in self._cache:
@@ -260,6 +303,26 @@ class RAGProvider(BaseRAGProvider):
         cache_size = len(self._cache)
         self._cache.clear()
         logger.debug(f"Base RAG cache cleared ({cache_size} entries)")
+
+    async def add_documents(
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+    ) -> None:
+        """Add documents to RAG - fallback to reindex since BM25RAG doesn't support incremental."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        if cache_key in self._cache:
+            del self._cache[cache_key]
+        await self.warmup(assistant, memory_id)
+        logger.info(f"Reindexed (add) for {cache_key}")
+
+    async def remove_documents(
+        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+    ) -> None:
+        """Remove documents from RAG - fallback to reindex since BM25RAG doesn't support incremental."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        if cache_key in self._cache:
+            del self._cache[cache_key]
+        await self.warmup(assistant, memory_id)
+        logger.info(f"Reindexed (remove) for {cache_key}")
 
     def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
         """Generate cache key for this assistant and memory."""

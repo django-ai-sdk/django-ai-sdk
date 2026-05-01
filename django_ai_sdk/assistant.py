@@ -284,7 +284,9 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         from django_ai_sdk.rags import queryset_to_rag_documents
 
-        logger.info(f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}")
+        logger.info(
+            f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}"
+        )
         logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
 
         queryset = await self.get_rag_queryset(memory_id)

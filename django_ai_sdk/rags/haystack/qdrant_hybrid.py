@@ -97,6 +97,67 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         """Check if document store already has indexed documents."""
         return document_store.count_documents() > 0
 
+    async def add_documents(self, documents: list["RagDocument"]) -> None:
+        """Add documents to the existing Qdrant index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot add documents")
+            return
+
+        haystack_docs = [rag_document_to_haystack(doc) for doc in documents]
+        self._index_documents(haystack_docs, self._cached_document_store)
+        logger.info(f"Added {len(documents)} documents to Qdrant index")
+
+    def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
+        """Index documents with chunking and embedding."""
+        from haystack import Pipeline
+
+        indexing_pipeline = Pipeline()
+        indexing_pipeline.add_component(
+            "splitter",
+            RecursiveDocumentSplitter(
+                split_length=self.config.chunk_size,
+                split_overlap=self.config.chunk_overlap,
+                separators=["\n\n", "\n", ".", " "],
+            ),
+        )
+        indexing_pipeline.add_component(
+            "sparse_doc_embedder",
+            FastembedSparseDocumentEmbedder(
+                model=self.config.sparse_embedder_model,
+                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            ),
+        )
+        indexing_pipeline.add_component(
+            "dense_doc_embedder",
+            FastembedDocumentEmbedder(
+                model=self.config.dense_embedder_model,
+                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            ),
+        )
+        indexing_pipeline.add_component(
+            "writer",
+            DocumentWriter(
+                document_store=document_store,
+                policy=DuplicatePolicy.OVERWRITE,
+            ),
+        )
+
+        indexing_pipeline.connect("splitter", "sparse_doc_embedder")
+        indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
+        indexing_pipeline.connect("dense_doc_embedder", "writer")
+
+        indexing_pipeline.run({"documents": documents})
+
+    async def remove_documents(self, document_ids: list[str]) -> None:
+        """Remove documents from the Qdrant index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot remove documents")
+            return
+
+        # Delete documents by ID
+        self._cached_document_store.delete_documents(document_ids=document_ids)
+        logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
+
     def warmup(self, force_rebuild: bool = False) -> None:
         """
         Build or load indexed document store.
@@ -136,41 +197,6 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             else "Creating in-memory Qdrant index"
         )
 
-        indexing_pipeline = Pipeline()
-        indexing_pipeline.add_component(
-            "splitter",
-            RecursiveDocumentSplitter(
-                split_length=self.config.chunk_size,
-                split_overlap=self.config.chunk_overlap,
-                separators=["\n\n", "\n", ".", " "],
-            ),
-        )
-        indexing_pipeline.add_component(
-            "sparse_doc_embedder",
-            FastembedSparseDocumentEmbedder(
-                model=self.config.sparse_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
-            ),
-        )
-        indexing_pipeline.add_component(
-            "dense_doc_embedder",
-            FastembedDocumentEmbedder(
-                model=self.config.dense_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
-            ),
-        )
-        indexing_pipeline.add_component(
-            "writer",
-            DocumentWriter(
-                document_store=document_store,
-                policy=DuplicatePolicy.OVERWRITE,
-            ),
-        )
-
-        indexing_pipeline.connect("splitter", "sparse_doc_embedder")
-        indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
-        indexing_pipeline.connect("dense_doc_embedder", "writer")
-
         # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
         logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
@@ -178,7 +204,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         logger.debug(
             f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
         )
-        indexing_pipeline.run({"documents": haystack_docs})
+        self._index_documents(haystack_docs, document_store)
 
         indexed_count = document_store.count_documents()
         self._cached_document_store = document_store
@@ -196,43 +222,8 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             document_store = self._create_document_store(recreate=False)
 
             if not self._has_existing_index(document_store):
-                indexing_pipeline = Pipeline()
-                indexing_pipeline.add_component(
-                    "splitter",
-                    RecursiveDocumentSplitter(
-                        split_length=self.config.chunk_size,
-                        split_overlap=self.config.chunk_overlap,
-                        separators=["\n\n", "\n", ".", " "],
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "sparse_doc_embedder",
-                    FastembedSparseDocumentEmbedder(
-                        model=self.config.sparse_embedder_model,
-                        meta_fields_to_embed=self.config.meta_fields_to_embed,
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "dense_doc_embedder",
-                    FastembedDocumentEmbedder(
-                        model=self.config.dense_embedder_model,
-                        meta_fields_to_embed=self.config.meta_fields_to_embed,
-                    ),
-                )
-                indexing_pipeline.add_component(
-                    "writer",
-                    DocumentWriter(
-                        document_store=document_store,
-                        policy=DuplicatePolicy.OVERWRITE,
-                    ),
-                )
-
-                indexing_pipeline.connect("splitter", "sparse_doc_embedder")
-                indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
-                indexing_pipeline.connect("dense_doc_embedder", "writer")
-
                 haystack_docs = self._convert_documents()
-                indexing_pipeline.run({"documents": haystack_docs})
+                self._index_documents(haystack_docs, document_store)
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
@@ -262,6 +253,39 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
         logger.debug("Qdrant Hybrid RAG pipeline built")
         return query_pipeline
+
+    def refresh_documents(self, documents: list[RagDocument]) -> None:
+        """
+        Update the indexed documents without releasing the Qdrant file lock.
+
+        Replaces self.documents with the new list and re-indexes all of them
+        into the already-open document store using OVERWRITE policy.
+        Safe to call on a warmed-up instance — avoids creating a second
+        QdrantClient on the same storage folder (which would deadlock).
+        """
+        self.documents = documents
+        logger.info(f"[refresh_documents] Refreshing Qdrant index with {len(documents)} documents")
+
+        if self._cached_document_store is None:
+            # Not yet warmed up — do a full warmup with force_rebuild
+            self.warmup(force_rebuild=True)
+            return
+
+        document_store = self._cached_document_store
+
+        # Wipe and rewrite all chunks so deleted/updated docs don't linger
+        existing_docs = document_store.filter_documents()
+        if existing_docs:
+            document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
+
+        # Convert and index using shared helper
+        haystack_docs = self._convert_documents()
+        self._index_documents(haystack_docs, document_store)
+
+        indexed_count = document_store.count_documents()
+        logger.info(
+            f"[refresh_documents] Done: {len(documents)} source docs → {indexed_count} chunks"
+        )
 
     def as_tool(self) -> ComponentTool:
         """Return the RAG pipeline as a ComponentTool."""
