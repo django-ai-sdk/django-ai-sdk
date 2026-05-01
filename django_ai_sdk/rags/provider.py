@@ -274,7 +274,7 @@ class RAGProvider(BaseRAGProvider):
         if force_rebuild:
             # When we force, delete the complete index from disk
             try:
-                config = VectorDBStorageConfig.from_settings(memory_id)
+                config = VectorDBStorageConfig.from_settings(memory_id, backend="bm25")
                 if (
                     config.is_persistent
                     and config.persist_path

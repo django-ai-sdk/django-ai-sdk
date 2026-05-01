@@ -23,12 +23,15 @@ class VectorDBStorageConfig(BaseModel):
         return self.mode == "persistent" and self.persist_path is not None
 
     @classmethod
-    def from_settings(cls, memory_id: str | None = None) -> "VectorDBStorageConfig":
+    def from_settings(
+        cls, memory_id: str | None = None, backend: str = "qdrant"
+    ) -> "VectorDBStorageConfig":
         """Create config from Django settings.
 
         Args:
             memory_id: Required. The memory ID determines the storage path.
                        Returns in-memory config if memory_id is None or empty.
+            backend: Storage backend name for path (qdrant, chroma, etc.)
         """
         if not memory_id:
             return cls(mode=":memory:")
@@ -37,6 +40,6 @@ class VectorDBStorageConfig(BaseModel):
 
         if persist_path:
             base_path = persist_path.rstrip("/")
-            return cls(mode="persistent", persist_path=f"{base_path}/qdrant/{memory_id}")
+            return cls(mode="persistent", persist_path=f"{base_path}/{backend}/{memory_id}")
 
         return cls(mode=":memory:")

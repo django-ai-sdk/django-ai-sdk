@@ -141,7 +141,7 @@ class HaystackRAGProvider(BaseRAGProvider):
             try:
                 from django_ai_sdk.rags.config import VectorDBStorageConfig
 
-                config = VectorDBStorageConfig.from_settings(memory_id)
+                config = VectorDBStorageConfig.from_settings(memory_id, backend="qdrant")
                 if (
                     config.is_persistent
                     and config.persist_path
