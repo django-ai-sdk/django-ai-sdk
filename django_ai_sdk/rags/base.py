@@ -4,8 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from django_ai_sdk.logger import get_logger
+
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
+
+logger = get_logger(__name__)
 
 
 class RAGSource(BaseModel):
