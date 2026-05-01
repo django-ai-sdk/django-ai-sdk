@@ -261,11 +261,11 @@ class Assistant(ABC, AssistantInfoMixin):
         # For now this is fine, but we might want to decouple it
         # and provide a hint for overriding, but leave out the
         # implementation details.
-        from django_ai_sdk.memories.models import Document
+        from django_ai_sdk.memories.models import Entry
 
         if memory_id:
-            return Document.objects.filter(memory_id=memory_id)
-        return Document.objects.all()
+            return Entry.objects.filter(memory_id=memory_id)
+        return Entry.objects.all()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list["RagDocument"]:
         """
@@ -290,7 +290,7 @@ class Assistant(ABC, AssistantInfoMixin):
         queryset = await self.get_rag_queryset(memory_id)
         logger.info(f"[get_rag_documents] Got queryset, type={type(queryset).__name__}")
 
-        rag_docs = await queryset_to_rag_documents(queryset, memory_id)
+        rag_docs = await queryset_to_rag_documents(queryset, memory_id=memory_id)
         logger.info(f"[get_rag_documents] Converted to {len(rag_docs)} RagDocuments")
 
         logger.info(f"Fetched {len(rag_docs)} documents for RAG")

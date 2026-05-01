@@ -298,7 +298,7 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> ThreadDeta
     thread_memories_query = (
         ThreadMemory.objects.filter(thread_id=thread_id)
         .select_related("memory")
-        .annotate(document_count=Count("memory__documents"))
+        .annotate(document_count=Count("memory__entries"))
     )
 
     memories = []

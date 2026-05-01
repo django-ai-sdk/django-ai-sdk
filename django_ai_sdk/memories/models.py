@@ -4,7 +4,7 @@ from typing import Any
 from django.db import models
 from django.utils import timezone
 
-from django_ai_sdk.rags.schemas import ToolSpec
+from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 from django_ai_sdk.memories.schemas import DocumentExtraction
 
 
@@ -15,8 +15,8 @@ class Memory(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    # Reverse relation type hint
-    documents: models.Manager["Document"]
+    # Reverse relation type hints
+    entries: models.Manager["Entry"]
     # Annotated field from queries
     document_count: int
 
@@ -28,13 +28,13 @@ class Memory(models.Model):
 
     async def get_tool_spec(self) -> ToolSpec:
         """Generate ToolSpec for this memory."""
-        doc_count = await Document.objects.filter(memory_id=self.id).acount()
+        doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
             name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
             description=(
                 f"Search knowledge base: {self.name}. "
-                f"Contains {doc_count} documents. "
+                f"Contains {doc_count} entries. "
                 f"{self.description[:80] if self.description else ''} "
                 f"Use this when you need information from {self.name}."
             ),
@@ -43,16 +43,18 @@ class Memory(models.Model):
         )
 
 
-class Document(models.Model):
+class Entry(models.Model):
+    """
+    A piece of knowledge stored in a Memory.
+    Text content + JSON metadata. No file columns — clean and lightweight.
+    File-backed entries are represented by an associated EntryDocument (OneToOne).
+    """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="documents")
-    file = models.FileField(upload_to="memories/documents/")
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="entries")
     content = models.TextField(blank=True, default="")
-    data = models.JSONField(default=dict, blank=True)  # stores DocumentExtraction as dict
-    file_name = models.CharField(max_length=255, blank=True, default="")
-    file_size = models.PositiveIntegerField(default=0)
-    content_type = models.CharField(max_length=100, blank=True, default="")
-    file_extension = models.CharField(max_length=20, blank=True, default="")
+    data = models.JSONField(default=dict, blank=True)
+    name = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -60,11 +62,11 @@ class Document(models.Model):
         db_table = "django_ai_sdk_documents"
 
     def __str__(self) -> str:
-        return self.file_name or (self.file.name if self.file else f"Document {self.id}")
+        return self.name or f"Entry {self.id}"
 
     @property
     def extraction(self) -> DocumentExtraction | None:
-        """Parse data JSON to DocumentExtraction Pydantic model."""
+        """Parse data JSON as DocumentExtraction. Returns None for non-file entries."""
         if not self.data:
             return None
         try:
@@ -74,33 +76,57 @@ class Document(models.Model):
 
     @extraction.setter
     def extraction(self, value: DocumentExtraction | None) -> None:
-        """Set data from DocumentExtraction Pydantic model."""
         if value is None:
             self.data = {}
         else:
             self.data = value.model_dump()
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        if self.file:
-            # TODO: this sucks donkey balls, but we need to move
-            # to a proper mime type detection and file metadata extraction
-            if not self.file_name:
-                self.file_name = self.file.name
-            if not self.file_size:
-                self.file_size = self.file.size or 0
-            if not self.content_type:
-                if hasattr(self.file, "content_type"):
-                    self.content_type = self.file.content_type or ""
-                elif hasattr(self.file, "content_type") and self.file.content_type:
-                    self.content_type = self.file.content_type
-                else:
-                    self.content_type = ""
-            if not self.file_extension:
-                import os
+    def to_rag_document(self) -> RagDocument:
+        """Convert to RagDocument for retrieval. Enriches with extraction data when present."""
+        from django_ai_sdk.memories.utils import get_prompt_metadata
 
-                _, ext = os.path.splitext(self.file.name)
-                self.file_extension = ext.lower().lstrip(".")
-        super().save(*args, **kwargs)
+        extraction = self.extraction
+        content = get_prompt_metadata(self.content, extraction) if extraction else self.content
+        return RagDocument(
+            id=str(self.id),
+            content=content,
+            metadata={
+                "memory_id": str(self.memory_id),
+                "name": self.name,
+                "keywords": ". ".join(extraction.keywords) if extraction else "",
+                "facts": ". ".join(f.text for f in extraction.facts) if extraction else "",
+            },
+        )
+
+
+class EntryDocument(models.Model):
+    """
+    An uploaded file attached to an Entry.
+    Stored in a separate table — only joined when file metadata is actually needed.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.OneToOneField(
+        Entry,
+        on_delete=models.CASCADE,
+        related_name="document",
+        null=True,
+        blank=True,
+    )
+    file = models.FileField(upload_to="memories/documents/")
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    file_size = models.PositiveIntegerField(default=0)
+    content_type = models.CharField(max_length=100, blank=True, default="")
+    file_extension = models.CharField(max_length=20, blank=True, default="")
+    extracted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "django_ai_sdk_entry_documents"
+
+    def __str__(self) -> str:
+        return self.file_name or f"EntryDocument {self.id}"
 
 
 class ThreadMemory(models.Model):

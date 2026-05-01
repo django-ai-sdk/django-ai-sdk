@@ -6,7 +6,8 @@ from .conversation.models import (
 
 # Memories models
 from .memories.models import (
-    Document,
+    Entry,
+    EntryDocument,
     Memory,
     ThreadMemory,
 )
@@ -16,7 +17,8 @@ __all__ = [
     "Thread",
     "Message",
     # Memories models
-    "Document",
+    "Entry",
+    "EntryDocument",
     "Memory",
     "ThreadMemory",
 ]

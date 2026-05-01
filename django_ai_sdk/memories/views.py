@@ -7,7 +7,7 @@ from django.http import HttpRequest
 from ninja import File, Router
 from ninja.files import UploadedFile
 
-from django_ai_sdk.memories.models import Document, Memory, ThreadMemory
+from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     BulkConnectMemoriesIn,
     DocumentOut,
@@ -40,7 +40,7 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut:
 @router.get("", response=list[MemoryOut])
 def list_memories(request: HttpRequest) -> list[MemoryOut]:
     """List all memories."""
-    memories = Memory.objects.annotate(document_count=Count("documents")).order_by("-created_at")
+    memories = Memory.objects.annotate(document_count=Count("entries")).order_by("-created_at")
     return [
         MemoryOut(
             id=str(memory.id),
@@ -57,7 +57,7 @@ def list_memories(request: HttpRequest) -> list[MemoryOut]:
 @router.get("/{memory_id}", response=MemoryOut)
 async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOut:
     """Get a single memory by ID."""
-    memory = await Memory.objects.annotate(document_count=Count("documents")).aget(id=memory_id)
+    memory = await Memory.objects.annotate(document_count=Count("entries")).aget(id=memory_id)
     return MemoryOut(
         id=str(memory.id),
         name=memory.name,
@@ -75,7 +75,7 @@ def update_memory(request: HttpRequest, memory_id: str, payload: MemoryIn) -> Me
     memory.name = payload.name
     memory.description = payload.description or ""
     memory.save()
-    doc_count = memory.documents.count()
+    doc_count = memory.entries.count()
     return MemoryOut(
         id=str(memory.id),
         name=memory.name,
@@ -88,7 +88,7 @@ def update_memory(request: HttpRequest, memory_id: str, payload: MemoryIn) -> Me
 
 @router.delete("/{memory_id}", response={204: None})
 async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None]:
-    """Delete a memory and all its documents."""
+    """Delete a memory and all its entries."""
     memory = await Memory.objects.aget(id=memory_id)
     await memory.adelete()
     return 204, None
@@ -115,80 +115,82 @@ async def upload_document(
         content = file.read().decode("utf-8", errors="replace")
         extraction = await extract_document(content)
 
-    doc = await Document.objects.acreate(
+    entry = await Entry.objects.acreate(
         memory=memory,
-        file=file,
+        name=file_name,
         content=content,
-        file_name=file.name,
+    )
+    if extraction:
+        entry.extraction = extraction
+        await entry.asave()
+
+    entry_doc = await EntryDocument.objects.acreate(
+        entry=entry,
+        file=file,
+        file_name=file_name,
         file_size=file.size or 0,
         content_type=file.content_type or "",
         file_extension=ext.lower().lstrip("."),
+        extracted=bool(extraction),
     )
-    if extraction:
-        doc.extraction = extraction
-        await doc.asave()
 
     return DocumentOut(
-        id=str(doc.id),
-        file=doc.file.url if doc.file else "",
-        content=doc.content,
-        extraction=doc.extraction,
-        file_name=doc.file_name or "",
-        file_size=doc.file_size or 0,
-        content_type=doc.content_type or "",
-        file_extension=doc.file_extension or "",
-        created_at=doc.created_at.isoformat(),
-        updated_at=doc.updated_at.isoformat(),
+        id=str(entry.id),
+        file=entry_doc.file.url if entry_doc.file else "",
+        content=entry.content,
+        extraction=entry.extraction,
+        file_name=entry_doc.file_name,
+        file_size=entry_doc.file_size,
+        content_type=entry_doc.content_type,
+        file_extension=entry_doc.file_extension,
+        created_at=entry_doc.created_at.isoformat(),
+        updated_at=entry_doc.updated_at.isoformat(),
+    )
+
+
+def _entry_doc_to_out(entry_doc: EntryDocument) -> DocumentOut:
+    entry = entry_doc.entry
+    return DocumentOut(
+        id=str(entry.id),
+        file=entry_doc.file.url if entry_doc.file else "",
+        content=entry.content,
+        extraction=entry.extraction,
+        file_name=entry_doc.file_name,
+        file_size=entry_doc.file_size,
+        content_type=entry_doc.content_type,
+        file_extension=entry_doc.file_extension,
+        created_at=entry_doc.created_at.isoformat(),
+        updated_at=entry_doc.updated_at.isoformat(),
     )
 
 
 @router.get("/{memory_id}/documents", response=list[DocumentOut])
 def list_documents(request: HttpRequest, memory_id: str) -> list[DocumentOut]:
-    """List all documents in a memory."""
-    memory = Memory.objects.get(id=memory_id)
-    docs = memory.documents.all().order_by("-created_at")
-    return [
-        DocumentOut(
-            id=str(doc.id),
-            file=doc.file.url if doc.file else "",
-            content=doc.content,
-            extraction=doc.extraction,
-            file_name=doc.file_name or "",
-            file_size=doc.file_size or 0,
-            content_type=doc.content_type or "",
-            file_extension=doc.file_extension or "",
-            created_at=doc.created_at.isoformat(),
-            updated_at=doc.updated_at.isoformat(),
-        )
-        for doc in docs
-    ]
+    """List all file-backed documents in a memory."""
+    entry_docs = (
+        EntryDocument.objects.filter(entry__memory_id=memory_id)
+        .select_related("entry")
+        .order_by("-created_at")
+    )
+    return [_entry_doc_to_out(ed) for ed in entry_docs]
 
 
 @router.get("/{memory_id}/documents/{doc_id}", response=DocumentOut)
 def get_document(request: HttpRequest, memory_id: str, doc_id: str) -> DocumentOut:
     """Get a single document from a memory."""
-    doc = Document.objects.get(id=doc_id, memory_id=memory_id)
-    return DocumentOut(
-        id=str(doc.id),
-        file=doc.file.url if doc.file else "",
-        content=doc.content,
-        extraction=doc.extraction,
-        file_name=doc.file_name or "",
-        file_size=doc.file_size or 0,
-        content_type=doc.content_type or "",
-        file_extension=doc.file_extension or "",
-        created_at=doc.created_at.isoformat(),
-        updated_at=doc.updated_at.isoformat(),
+    entry_doc = EntryDocument.objects.select_related("entry").get(
+        entry_id=doc_id, entry__memory_id=memory_id
     )
+    return _entry_doc_to_out(entry_doc)
 
 
 @router.delete("/{memory_id}/documents/{doc_id}", response={204: None})
 async def delete_document(
     request: HttpRequest, memory_id: str, doc_id: str
 ) -> tuple[int, None]:
-    """Delete a document from a memory."""
-    doc = await Document.objects.aget(id=doc_id, memory_id=memory_id)
-    await doc.adelete()
+    """Delete a document (and its entry) from a memory."""
+    entry = await Entry.objects.aget(id=doc_id, memory_id=memory_id)
+    await entry.adelete()
     return 204, None
 
 
@@ -231,7 +233,7 @@ async def list_thread_memories(
     thread_memories_query = (
         ThreadMemory.objects.filter(thread_id=thread_id)
         .select_related("memory")
-        .annotate(document_count=Count("memory__documents"))
+        .annotate(document_count=Count("memory__entries"))
     )
 
     memories = []
@@ -259,7 +261,6 @@ async def bulk_connect_memories(
 
     thread = await Thread.objects.aget(id=thread_id)
 
-    # Get or create links for all memories
     for memory_id in payload.memory_ids:
         memory = await Memory.objects.aget(id=memory_id)
         await ThreadMemory.objects.aget_or_create(
@@ -268,7 +269,6 @@ async def bulk_connect_memories(
             defaults={"active": True},
         )
 
-    # Return updated list
     return await list_thread_memories(request, thread_id)
 
 
@@ -281,9 +281,8 @@ async def toggle_memory_active(
     thread_memory.active = payload.active
     await thread_memory.asave()
 
-    # Fetch memory separately using async ORM
     memory = await Memory.objects.aget(id=memory_id)
-    doc_count = await Document.objects.filter(memory_id=memory_id).acount()
+    doc_count = await Entry.objects.filter(memory_id=memory_id).acount()
 
     return ThreadMemoryOut(
         id=str(memory.id),
