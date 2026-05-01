@@ -207,11 +207,25 @@ class TestAdapterUtils:
 class TestAssistantAdapterIntegration:
     """Test Assistant integration with adapters."""
 
-    def test_assistant_storage_adapter_attribute(self):
-        """Verify Assistant has storage_adapter class attribute."""
+    def test_assistant_storage_attribute(self):
+        """Verify Assistant has storage class attribute (named 'storage')."""
         from django_ai_sdk import Assistant
 
-        assert hasattr(Assistant, "storage_adapter")
+        # The class attribute is named 'storage' (not 'storage_adapter')
+        assert hasattr(Assistant, "storage")
+
+    def test_assistant_subclass_can_set_storage_adapter(self):
+        """Verify Assistant subclass can configure storage_adapter."""
+        from django_ai_sdk import Assistant
+        from django_ai_sdk.storage.memory import MemoryStorageAdapter
+
+        class TestAssistant(Assistant):
+            name = "Test"
+            storage_adapter = MemoryStorageAdapter
+
+        # Subclass can set storage_adapter (used by __init__)
+        assert hasattr(TestAssistant, "storage_adapter")
+        assert TestAssistant.storage_adapter is MemoryStorageAdapter
 
     def test_assistant_protocol_attribute(self):
         """Verify Assistant has protocol class attribute."""
