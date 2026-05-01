@@ -14,7 +14,7 @@ from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.config import ChromaStorageConfig
 from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryChromaRetriever
 from django_ai_sdk.rags.schemas import RagDocument
@@ -33,7 +33,7 @@ class ChromaDBQueryExpanderRAGConfig(BaseHaystackRAGConfig):
     chunk_size: int = Field(default=260, ge=1, description="Size of document chunks")
     chunk_overlap: int = Field(default=0, ge=0, description="Overlap between consecutive chunks")
     meta_fields_to_embed: list[str] = Field(default=["title"])
-    storage: VectorDBStorageConfig = Field(default_factory=VectorDBStorageConfig)
+    storage: ChromaStorageConfig = Field(default_factory=ChromaStorageConfig)
 
 
 class ChromaDBQueryExpanderRAG(HaystackRAGBase):

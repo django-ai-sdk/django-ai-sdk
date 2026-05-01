@@ -17,7 +17,7 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.schemas import RagDocument
@@ -39,7 +39,7 @@ class QdrantBM25HybridRAGConfig(BaseHaystackRAGConfig):
     chunk_size: int = Field(default=500, ge=1)
     chunk_overlap: int = Field(default=150, ge=0)
     meta_fields_to_embed: list[str] = Field(default=["title"])
-    storage: VectorDBStorageConfig = Field(default_factory=VectorDBStorageConfig)
+    storage: QdrantStorageConfig = Field(default_factory=QdrantStorageConfig)
 
 
 class QdrantBM25HybridRAG(HaystackRAGBase):
