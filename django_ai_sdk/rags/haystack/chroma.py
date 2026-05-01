@@ -88,6 +88,11 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
     def _index_documents(self, documents: list, document_store: ChromaDocumentStore) -> None:
         """Index documents with chunking and embedding."""
 
+        # Add original doc_id to metadata so we can delete by it later
+        for doc in documents:
+            if "doc_id" not in doc.meta:
+                doc.meta["doc_id"] = doc.id
+
         indexing_pipeline = Pipeline()
         indexing_pipeline.add_component(
             "splitter",
@@ -122,9 +127,25 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
-
-        self._cached_document_store.delete_documents(document_ids=document_ids)
-        logger.info(f"Removed {len(document_ids)} documents from Chroma index")
+        
+        try:
+            # Use filter_documents to find documents, then delete by IDs
+            # Haystack filter format for Chroma
+            if len(document_ids) == 1:
+                filters = {"field": "meta.doc_id", "operator": "==", "value": document_ids[0]}
+            else:
+                filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
+            
+            # Get matching documents
+            matching_docs = self._cached_document_store.filter_documents(filters=filters)
+            doc_ids_to_delete = [doc.id for doc in matching_docs]
+            
+            if doc_ids_to_delete:
+                self._cached_document_store.delete_documents(document_ids=doc_ids_to_delete)
+            
+            logger.info(f"Removed {len(document_ids)} documents from Chroma index")
+        except Exception as e:
+            logger.error(f"Failed to remove documents: {e}")
 
     def warmup(self, force_rebuild: bool = False) -> None:
         """

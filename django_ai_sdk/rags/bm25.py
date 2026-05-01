@@ -92,6 +92,14 @@ class BM25RAG(BaseRAGAdapter):
 
     def _rebuild_index(self) -> None:
         """Rebuild the BM25 index from self.documents."""
+        if not self.documents:
+            # No documents to index
+            self._bm25 = None
+            self._corpus_tokens = None
+            self._doc_id_to_index = {}
+            logger.debug("No documents to index, skipping BM25 index build")
+            return
+
         corpus = [doc.content for doc in self.documents]
         self._doc_id_to_index = {doc.id: i for i, doc in enumerate(self.documents)}
 
@@ -191,8 +199,12 @@ class BM25RAG(BaseRAGAdapter):
         # Tokenize query
         query_tokens = bm25s.tokenize([query])
 
-        # Retrieve top-k documents
-        results, scores = self._bm25.retrieve(query_tokens, k=self.config.top_k)
+        # Retrieve top-k documents (cap at number of documents available)
+        k = min(self.config.top_k, len(self.documents))
+        if k == 0:
+            return RAGResult(documents=[], context="", sources=[], query=query)
+
+        results, scores = self._bm25.retrieve(query_tokens, k=k)
 
         # Build RAGResult
         documents = []
