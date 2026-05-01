@@ -5,10 +5,13 @@ This module defines the Ninja API router and all endpoints for the piratespeak d
 including thread management and message operations.
 """
 
+from django.db.models import Count
 from django.http import HttpRequest, StreamingHttpResponse
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.memories.models import Entry, ThreadMemory
 from django_ai_sdk.storage import ThreadService
 from django_ai_sdk.storage.schemas import ThreadInfo
 from ninja import Field, Router, Schema
@@ -94,6 +97,8 @@ class ThreadDetailWithMemories(Schema):
     thread: ThreadInfo
     memories: list[ThreadMemoryInfo]
     messages: list
+    file_count: int = 0
+    file_memory_id: str | None = None
 
 
 # ============================================================================
@@ -238,6 +243,7 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> CreateThr
         return Error(message=f"Assistant '{assistant_id}' not found")
 
     # Generate thread title from first user message if provided
+    # TODO: need utils helper for this.
     title = "New Conversation"
     if payload.messages:
         for message in payload.messages:
@@ -277,8 +283,6 @@ async def get_thread_history(
     Returns thread metadata, connected memories, and message history in JSON format.
     Uses Assistant.history() to support any storage adapter.
     """
-    from django.db.models import Count
-    from django_ai_sdk.memories.models import ThreadMemory
 
     # Find thread and assistant using ThreadService
     thread = await ThreadService.get_assistant(thread_id)
@@ -293,12 +297,14 @@ async def get_thread_history(
     if not assistant:
         return Error(message=f"Assistant '{assistant_id}' not found")
 
-    # Get history via assistant (returns ThreadDetail with thread metadata and messages)
+    # Get history via assistant
     thread_detail = await assistant.history(thread_id)
 
-    # Get connected memories with document count - use async for iteration
+    # Get visible and connected memories with document count
+    thread_db = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+
     thread_memories_query = (
-        ThreadMemory.objects.filter(thread_id=thread_id)
+        ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
         .select_related("memory")
         .annotate(document_count=Count("memory__entries"))
     )
@@ -315,10 +321,21 @@ async def get_thread_history(
             )
         )
 
+    # File upload info
+    # TODO: lets fix this later on, this is to messy.
+    # We probaly want to annotate this somehow or otherwise fetch it from Thread Manager.
+    file_count = 0
+    file_memory_id = None
+    if thread_db.file_memory_id:
+        file_memory_id = str(thread_db.file_memory_id)
+        file_count = await Entry.objects.filter(memory_id=thread_db.file_memory_id).acount()
+
     return ThreadDetailWithMemories(
         thread=thread_detail.thread,
         memories=memories,
         messages=thread_detail.messages,
+        file_count=file_count,
+        file_memory_id=file_memory_id,
     )
 
 

@@ -20,6 +20,13 @@ class Thread(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="ai_threads", null=True, blank=True
     )
+    file_memory = models.ForeignKey(
+        "django_ai_sdk.Memory",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="file_threads",
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     metadata = models.JSONField(default=dict, blank=True)

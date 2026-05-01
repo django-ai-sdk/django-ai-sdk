@@ -33,7 +33,7 @@ async def on_entry_saved(
 
 @receiver(post_delete, sender=Entry)
 async def on_entry_deleted(
-    sender: type[Model], instance: Entry, created: bool, **kwargs: object
+    sender: type[Model], instance: Entry, **kwargs: object
 ) -> None:
     """Remove document from RAG index when Entry is deleted."""
     memory_id = str(instance.memory_id)

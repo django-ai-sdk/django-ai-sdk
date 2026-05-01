@@ -109,7 +109,6 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
     def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
         """Index documents with chunking and embedding."""
-        from haystack import Pipeline
 
         indexing_pipeline = Pipeline()
         indexing_pipeline.add_component(

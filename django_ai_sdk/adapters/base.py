@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from types import CoroutineType
 
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.events import StreamEvent
@@ -47,7 +48,7 @@ class BasePipelineAdapter(ABC):
     async def stream(
         self,
         messages: list[ChatMessage],
-    ) -> AsyncGenerator[StreamEvent, None]:
+    ) -> CoroutineType[Any, Any, AsyncGenerator[StreamEvent, None]]:
         """
         Convert internal messages to pipeline format,
         del the pipeline,

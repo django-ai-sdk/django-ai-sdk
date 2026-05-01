@@ -2,11 +2,14 @@
 TODO: we should use this as a reference only, for now there is no authentication.
 """
 
+import os
+
 from django.db.models import Count
 from django.http import HttpRequest
 from ninja import File, Router
 from ninja.files import UploadedFile
 
+from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     BulkConnectMemoriesIn,
@@ -16,6 +19,7 @@ from django_ai_sdk.memories.schemas import (
     ThreadMemoryOut,
     ToggleMemoryActiveIn,
 )
+from django_ai_sdk.memories.utils import extract_document
 
 router = Router()
 
@@ -39,8 +43,12 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut:
 
 @router.get("", response=list[MemoryOut])
 def list_memories(request: HttpRequest) -> list[MemoryOut]:
-    """List all memories."""
-    memories = Memory.objects.annotate(document_count=Count("entries")).order_by("-created_at")
+    """List all visible memories."""
+    memories = (
+        Memory.objects.filter(is_hidden=False)
+        .annotate(document_count=Count("entries"))
+        .order_by("-created_at")
+    )
     return [
         MemoryOut(
             id=str(memory.id),
@@ -101,9 +109,6 @@ async def upload_document(
     file: UploadedFile = File(...),  # type: ignore
 ) -> DocumentOut:
     """Upload a file to a memory."""
-    import os
-
-    from django_ai_sdk.memories.utils import extract_document
 
     memory = await Memory.objects.aget(id=memory_id)
     file_name = file.name or ""
@@ -196,7 +201,6 @@ async def delete_document(request: HttpRequest, memory_id: str, doc_id: str) -> 
 async def link_thread(request: HttpRequest, memory_id: str, thread_id: str) -> tuple[int, None]:
     """Link a memory to a thread."""
     memory = await Memory.objects.aget(id=memory_id)
-    from django_ai_sdk.conversation.models import Thread
 
     thread = await Thread.objects.aget(id=thread_id)
     await ThreadMemory.objects.aget_or_create(
@@ -223,7 +227,7 @@ async def unlink_thread(request: HttpRequest, memory_id: str, thread_id: str) ->
 async def list_thread_memories(request: HttpRequest, thread_id: str) -> list[ThreadMemoryOut]:
     """List all memories connected to a thread with their active status."""
     thread_memories_query = (
-        ThreadMemory.objects.filter(thread_id=thread_id)
+        ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
         .select_related("memory")
         .annotate(document_count=Count("memory__entries"))
     )
@@ -249,7 +253,6 @@ async def bulk_connect_memories(
     request: HttpRequest, thread_id: str, payload: BulkConnectMemoriesIn
 ) -> list[ThreadMemoryOut]:
     """Connect multiple memories to a thread at once."""
-    from django_ai_sdk.conversation.models import Thread
 
     thread = await Thread.objects.aget(id=thread_id)
 
@@ -262,6 +265,119 @@ async def bulk_connect_memories(
         )
 
     return await list_thread_memories(request, thread_id)
+
+
+# ============================================================================
+# Thread File Upload Endpoints
+# ============================================================================
+
+
+async def _get_or_create_thread_file_memory(thread_id: str) -> Memory:
+    """Get or auto-create the hidden file-upload Memory for a thread."""
+
+    thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+    if not thread.file_memory:
+        memory = await Memory.objects.acreate(
+            name=f"thread_files_{thread_id}",
+            description="Thread file uploads",
+            is_hidden=True,
+        )
+        thread.file_memory = memory
+        await thread.asave(update_fields=["file_memory", "updated_at"])
+        await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
+    return thread.file_memory
+
+
+@router.post("/thread/{thread_id}/files", response=DocumentOut)
+async def upload_thread_file(
+    request: HttpRequest,
+    thread_id: str,
+    file: UploadedFile = File(...),  # type: ignore
+) -> DocumentOut:
+    """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
+    import os
+
+    memory = await _get_or_create_thread_file_memory(thread_id)
+    file_name = file.name or ""
+    _, ext = os.path.splitext(file_name)
+
+    # TODO: this needs to be fixed before any merge takes place!
+    # Again we need this to move into some kind of helper and then re-use it on each upload!
+    content = ""
+    extraction = None
+    if ext.lower() in (".txt", ".md"):
+        raw = file.read()
+        content = raw.decode("utf-8", errors="replace")
+        if content:
+            extraction = await extract_document(content)
+
+    entry = await Entry.objects.acreate(
+        memory=memory,
+        name=file_name,
+        content=content,
+    )
+    if extraction:
+        entry.extraction = extraction
+        await entry.asave()
+
+    entry_doc = await EntryDocument.objects.acreate(
+        entry=entry,
+        file=file,
+        file_name=file_name,
+        file_size=file.size or 0,
+        content_type=file.content_type or "",
+        file_extension=ext.lower().lstrip("."),
+        extracted=bool(extraction),
+    )
+
+    return DocumentOut(
+        id=str(entry.id),
+        file=entry_doc.file.url if entry_doc.file else "",
+        content=entry.content,
+        extraction=entry.extraction,
+        file_name=entry_doc.file_name,
+        file_size=entry_doc.file_size,
+        content_type=entry_doc.content_type,
+        file_extension=entry_doc.file_extension,
+        created_at=entry_doc.created_at.isoformat(),
+        updated_at=entry_doc.updated_at.isoformat(),
+    )
+
+
+@router.get("/thread/{thread_id}/files", response=list[DocumentOut])
+def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
+    """List all files uploaded to a thread."""
+    try:
+        thread = Thread.objects.select_related("file_memory").get(id=thread_id)
+    except Thread.DoesNotExist:
+        return []
+
+    if not thread.file_memory_id:
+        return []
+
+    entry_docs = (
+        EntryDocument.objects.filter(entry__memory_id=thread.file_memory_id)
+        .select_related("entry")
+        .order_by("-created_at")
+    )
+    return [_entry_doc_to_out(ed) for ed in entry_docs]
+
+
+@router.delete("/thread/{thread_id}/files/{doc_id}", response={204: None})
+async def delete_thread_file(request: HttpRequest, thread_id: str, doc_id: str) -> tuple[int, None]:
+    """Delete a file from a thread."""
+
+    thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+    if not thread.file_memory_id:
+        return 204, None
+    entry = await Entry.objects.aget(id=doc_id, memory_id=thread.file_memory_id)
+    await entry.adelete()
+    return 204, None
+
+
+# ============================================================================
+# Thread-Memory Management Endpoints
+# ============================================================================
 
 
 @router.patch("/thread/{thread_id}/{memory_id}", response=ThreadMemoryOut)
