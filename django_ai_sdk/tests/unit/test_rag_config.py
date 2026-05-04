@@ -4,7 +4,6 @@ Tests for RAG storage configuration classes.
 These tests verify the config classes without any LLM calls.
 """
 
-import pytest
 from django_ai_sdk.rags.config import (
     BaseStorageConfig,
     QdrantStorageConfig,
