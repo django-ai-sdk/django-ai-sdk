@@ -13,7 +13,6 @@ from django_ai_sdk.protocols.utils import format_sse
 
 if TYPE_CHECKING:
     from django_ai_sdk.events import (
-        ErrorEvent,
         MessageEndEvent,
         TextChunkEvent,
         ToolCallStartEvent,
