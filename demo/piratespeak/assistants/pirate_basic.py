@@ -66,6 +66,9 @@ class PirateBasicAssistant(Assistant):
     storage_adapter = DbStorageAdapter
     max_history = 20
 
+    # Enable file upload UI for this assistant
+    file_upload = True
+
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
 

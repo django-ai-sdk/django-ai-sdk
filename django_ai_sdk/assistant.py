@@ -93,6 +93,9 @@ class Assistant(ABC, AssistantInfoMixin):
     # Maximum conversation history to send to LLM (None = unlimited)
     max_history: int | None = None
 
+    # Enable file upload UI for this assistant's threads
+    file_upload: bool = False
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
 

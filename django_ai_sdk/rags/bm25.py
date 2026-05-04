@@ -66,6 +66,7 @@ class BM25RAG(BaseRAGAdapter):
     documents: list[RagDocument]
     _bm25: Any | None
     _corpus_tokens: Any | None
+    _doc_id_to_index: dict[str, int]
 
     def __init__(
         self,
@@ -86,7 +87,27 @@ class BM25RAG(BaseRAGAdapter):
         ]
         self._bm25 = None
         self._corpus_tokens = None
+        self._doc_id_to_index = {}
         logger.debug(f"BM25RAG initialized with {len(documents)} documents")
+
+    def _rebuild_index(self) -> None:
+        """Rebuild the BM25 index from self.documents."""
+        if not self.documents:
+            # No documents to index
+            self._bm25 = None
+            self._corpus_tokens = None
+            self._doc_id_to_index = {}
+            logger.debug("No documents to index, skipping BM25 index build")
+            return
+
+        corpus = [doc.content for doc in self.documents]
+        self._doc_id_to_index = {doc.id: i for i, doc in enumerate(self.documents)}
+
+        self._corpus_tokens = bm25s.tokenize(corpus)
+        self._bm25 = bm25s.BM25(k1=self.config.k1, b=self.config.b)
+        self._bm25.index(self._corpus_tokens)
+
+        logger.debug(f"BM25 index rebuilt with {len(self.documents)} documents")
 
     def warmup(self) -> None:
         """
@@ -99,17 +120,59 @@ class BM25RAG(BaseRAGAdapter):
             return
 
         logger.debug(f"Warming up BM25RAG with {len(self.documents)} documents")
-
-        # Extract content from RagDocument objects
-        corpus = [doc.content for doc in self.documents]
-
-        # Tokenize and build index
-        self._corpus_tokens = bm25s.tokenize(corpus)
-        self._bm25 = bm25s.BM25(k1=self.config.k1, b=self.config.b)
-        self._bm25.index(self._corpus_tokens)
-
+        self._rebuild_index()
         self._is_warmed_up = True
         logger.debug("BM25RAG warmup complete")
+
+    async def add_documents(self, documents: list[RagDocument]) -> None:
+        """
+        Add documents to the BM25 index incrementally.
+
+        Since bm25s doesn't support incremental adds, we rebuild the index
+        with all documents (existing + new).
+
+        Args:
+            documents: List of RagDocument objects to add.
+        """
+        logger.info(f"Adding {len(documents)} documents to BM25RAG")
+        self.documents.extend(documents)
+        self._rebuild_index()
+        logger.info(f"BM25RAG now has {len(self.documents)} documents")
+
+    async def remove_documents(self, document_ids: list[str]) -> None:
+        """
+        Remove documents from the BM25 index incrementally.
+
+        Since bm25s doesn't support incremental removes, we rebuild the index
+        without the removed documents.
+
+        Args:
+            document_ids: List of document IDs to remove.
+        """
+        removed = set(document_ids)
+        before_count = len(self.documents)
+        self.documents = [d for d in self.documents if d.id not in removed]
+        after_count = len(self.documents)
+
+        logger.info(f"Removing {before_count - after_count} documents from BM25RAG")
+        self._rebuild_index()
+        logger.info(f"BM25RAG now has {len(self.documents)} documents")
+
+    def refresh_documents(self, documents: list[RagDocument]) -> None:
+        """
+        Fully refresh the index with a new set of documents.
+
+        Replaces all documents and rebuilds the index.
+
+        Args:
+            documents: The new complete set of documents.
+        """
+        logger.info(f"Refreshing BM25RAG with {len(documents)} documents")
+        self.documents = [
+            doc if isinstance(doc, RagDocument) else RagDocument.from_dict(doc) for doc in documents
+        ]
+        self._rebuild_index()
+        logger.info(f"BM25RAG refresh complete: {len(documents)} documents")
 
     async def retrieve(self, query: str) -> RAGResult:
         """
@@ -136,8 +199,12 @@ class BM25RAG(BaseRAGAdapter):
         # Tokenize query
         query_tokens = bm25s.tokenize([query])
 
-        # Retrieve top-k documents
-        results, scores = self._bm25.retrieve(query_tokens, k=self.config.top_k)
+        # Retrieve top-k documents (cap at number of documents available)
+        k = min(self.config.top_k, len(self.documents))
+        if k == 0:
+            return RAGResult(documents=[], context="", sources=[], query=query)
+
+        results, scores = self._bm25.retrieve(query_tokens, k=k)
 
         # Build RAGResult
         documents = []

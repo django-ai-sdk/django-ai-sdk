@@ -4,8 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from django_ai_sdk.logger import get_logger
+
 if TYPE_CHECKING:
-    from django_ai_sdk.rags.schemas import ToolSpec
+    from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
+
+logger = get_logger(__name__)
 
 
 class RAGSource(BaseModel):
@@ -136,8 +140,48 @@ class BaseRAGAdapter(ABC):
             Tool callable with customized name/description.
         """
         tool = self.as_tool()
-        if hasattr(tool, "name"):
-            tool.name = spec.name
-        if hasattr(tool, "description"):
-            tool.description = spec.description
+        tool.name = spec.name
+        tool.description = spec.description
         return tool
+
+    async def add_documents(self, documents: list["RagDocument"]) -> None:
+        """
+        Add documents incrementally (optional, override in subclass).
+
+        Default falls back to full warmup.
+
+        Args:
+            documents: List of RagDocument objects to add.
+        """
+        logger.warning(f"{self.__class__.__name__} does not support incremental add, rebuilding")
+        self.documents.extend(documents)
+        if hasattr(self, "warmup"):
+            self.warmup()
+
+    async def remove_documents(self, document_ids: list[str]) -> None:
+        """
+        Remove documents incrementally (optional, override in subclass).
+
+        Default falls back to filtering documents and full warmup.
+
+        Args:
+            document_ids: List of document IDs to remove.
+        """
+        logger.warning(f"{self.__class__.__name__} does not support incremental remove, rebuilding")
+        removed = set(document_ids)
+        self.documents = [d for d in self.documents if d.id not in removed]
+        if hasattr(self, "warmup"):
+            self.warmup()
+
+    def refresh_documents(self, documents: list["RagDocument"]) -> None:
+        """
+        Fully refresh the index with a new set of documents.
+
+        Default calls warmup() which rebuilds the index from self.documents.
+
+        Args:
+            documents: The new complete set of documents.
+        """
+        self.documents = documents
+        if hasattr(self, "warmup"):
+            self.warmup()

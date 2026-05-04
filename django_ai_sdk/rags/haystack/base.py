@@ -10,7 +10,7 @@ from django_ai_sdk.logger import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from django_ai_sdk.rags.schemas import ToolSpec
+    from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
 # TODO: move into prompts.py file, this should make maintenance easier.
 DEFAULT_EXPANDER_PROMPT = """
@@ -119,6 +119,51 @@ class HaystackRAGBase(ABC):
             A ComponentTool wrapping the RAG pipeline.
         """
         pass
+
+    async def add_documents(self, documents: list["RagDocument"]) -> None:
+        """
+        Add documents to an existing index (incremental update).
+
+        Subclasses should override this if they support incremental adds.
+        Default is a no-op (forces full reindex via warmup).
+
+        Args:
+            documents: List of RagDocument objects to add.
+        """
+        logger.warning(
+            f"{self.__class__.__name__} does not support incremental add, use refresh_documents()"
+        )
+
+    async def remove_documents(self, document_ids: list[str]) -> None:
+        """
+        Remove documents from an existing index (incremental update).
+
+        Subclasses should override this if they support incremental removal.
+        Default is a no-op (forces full reindex via warmup).
+
+        Args:
+            document_ids: List of document IDs to remove.
+        """
+        logger.warning(
+            f"{self.__class__.__name__} does not support incremental remove, use refresh_documents()"
+        )
+
+    def refresh_documents(self, documents: list["RagDocument"]) -> None:
+        """
+        Fully refresh the index with a new set of documents.
+
+        Replaces all documents in the index. Subclasses should override
+        this to perform an efficient in-place refresh without releasing
+        file locks (for persistent backends).
+
+        Default implementation calls warmup(force_rebuild=True).
+
+        Args:
+            documents: The new complete set of documents.
+        """
+        logger.debug(f"Refreshing documents for {self.__class__.__name__}")
+        self.documents = documents
+        self.warmup(force_rebuild=True)
 
     def get_tool(self, spec: "ToolSpec") -> ComponentTool:
         """Get tool with custom specification."""

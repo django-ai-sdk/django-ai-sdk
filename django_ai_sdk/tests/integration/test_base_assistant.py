@@ -52,7 +52,14 @@ class TestBaseAssistant:
     @pytest.mark.asyncio
     async def test_assistant_creates_thread(self, assistant, thread_id):
         """Test that assistant properly creates threads."""
-        # Create thread via assistant
+        # Create thread FIRST
+        await MemoryStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test_assistant"},
+            thread_id=thread_id
+        )
+
+        # Now get storage adapter for existing thread
         storage = await assistant.get_storage_adapter(thread_id)
 
         # Thread should be accessible
@@ -62,12 +69,16 @@ class TestBaseAssistant:
     @pytest.mark.asyncio
     async def test_message_storage_flow(self, assistant, thread_id):
         """Test complete message storage flow."""
-        storage = await assistant.get_storage_adapter(thread_id)
-
-        # Create thread first (required by our fix)
-        MemoryStore.create_thread(
-            thread_id, title="Test Thread", assistant_id="test_assistant"
+        # Create thread FIRST
+        await MemoryStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test_assistant"},
+            thread_id=thread_id
         )
+
+        # Now get storage adapter
+        storage = await assistant.get_storage_adapter(thread_id)
+        assert storage is not None
 
         # Store user message
         user_msg = ChatMessageFactory.build(user=True)
@@ -82,10 +93,15 @@ class TestBaseAssistant:
     @pytest.mark.asyncio
     async def test_message_rating_flow(self, assistant, thread_id):
         """Test complete message rating workflow."""
-        storage = await assistant.get_storage_adapter(thread_id)
+        # Create thread FIRST
+        await MemoryStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test_assistant"},
+            thread_id=thread_id
+        )
 
-        # Create thread first
-        MemoryStore.create_thread(thread_id)
+        storage = await assistant.get_storage_adapter(thread_id)
+        assert storage is not None
 
         # Store message
         msg = ChatMessageFactory.build(assistant=True)
@@ -102,10 +118,15 @@ class TestBaseAssistant:
     @pytest.mark.asyncio
     async def test_conversation_history_retrieval(self, assistant, thread_id):
         """Test conversation history retrieval."""
-        storage = await assistant.get_storage_adapter(thread_id)
+        # Create thread FIRST
+        await MemoryStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test_assistant"},
+            thread_id=thread_id
+        )
 
-        # Create thread
-        MemoryStore.create_thread(thread_id)
+        storage = await assistant.get_storage_adapter(thread_id)
+        assert storage is not None
 
         # Create conversation history
         messages = [

@@ -17,7 +17,7 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
 from django_ai_sdk.rags.haystack.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.schemas import RagDocument
@@ -39,7 +39,7 @@ class QdrantBM25HybridRAGConfig(BaseHaystackRAGConfig):
     chunk_size: int = Field(default=500, ge=1)
     chunk_overlap: int = Field(default=150, ge=0)
     meta_fields_to_embed: list[str] = Field(default=["title"])
-    storage: VectorDBStorageConfig = Field(default_factory=VectorDBStorageConfig)
+    storage: QdrantStorageConfig = Field(default_factory=QdrantStorageConfig)
 
 
 class QdrantBM25HybridRAG(HaystackRAGBase):
@@ -109,7 +109,11 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
     def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
         """Index documents with chunking and embedding."""
-        from haystack import Pipeline
+
+        # Add original doc_id to metadata so we can delete by it later
+        for doc in documents:
+            if "doc_id" not in doc.meta:
+                doc.meta["doc_id"] = doc.id
 
         indexing_pipeline = Pipeline()
         indexing_pipeline.add_component(
@@ -154,9 +158,19 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             logger.warning("No document store available, cannot remove documents")
             return
 
-        # Delete documents by ID
-        self._cached_document_store.delete_documents(document_ids=document_ids)
-        logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
+        try:
+            # Use delete_by_filter with metadata filtering
+            # Build filter for doc_id field in metadata
+            from qdrant_client.http.models import FieldCondition, Filter, MatchAny
+
+            filter_obj = Filter(
+                should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
+            )
+
+            self._cached_document_store.delete_by_filter(filters=filter_obj)
+            logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
+        except Exception as e:
+            logger.error(f"Failed to remove documents: {e}")
 
     def warmup(self, force_rebuild: bool = False) -> None:
         """

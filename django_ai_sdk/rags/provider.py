@@ -1,11 +1,8 @@
-import os
-import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.config import VectorDBStorageConfig
 from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
@@ -270,20 +267,6 @@ class RAGProvider(BaseRAGProvider):
         """
         cache_key = self._get_cache_key(assistant, memory_id)
         logger.info(f"Reindexing Base RAG for {cache_key} (force_rebuild={force_rebuild})")
-
-        if force_rebuild:
-            # When we force, delete the complete index from disk
-            try:
-                config = VectorDBStorageConfig.from_settings(memory_id)
-                if (
-                    config.is_persistent
-                    and config.persist_path
-                    and os.path.exists(config.persist_path)
-                ):
-                    shutil.rmtree(config.persist_path)
-                    logger.info(f"Deleted RAG index at {config.persist_path}")
-            except Exception as e:
-                logger.warning(f"Error deleting index: {e}")
 
         # Clear this entry from cache
         if cache_key in self._cache:

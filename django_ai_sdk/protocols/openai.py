@@ -11,6 +11,12 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
 
+if TYPE_CHECKING:
+    from django_ai_sdk.events import (
+        ToolCallStartEvent,
+        ToolInputCompleteEvent,
+    )
+
 
 # OpenAI chunk schemas
 class OpenAIDelta(BaseModel):
@@ -100,7 +106,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         yield format_sse(start_chunk.model_dump())
 
         # Get events from adapter
-        events = await adapter.stream(messages)
+        events = adapter.stream(messages)
 
         try:
             async for event in events:

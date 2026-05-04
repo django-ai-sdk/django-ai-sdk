@@ -10,6 +10,8 @@ from collections.abc import AsyncGenerator
 # Django configuration for tests
 pytest_plugins = ["pytest_django"]
 
+from django_ai_sdk.rags.schemas import RagDocument
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -20,7 +22,7 @@ def event_loop():
 
 
 @pytest.fixture
-async def mock_openai_client():
+def mock_openai_client():
     """Mock AsyncOpenAI client."""
     from unittest.mock import AsyncMock, MagicMock
 
@@ -59,3 +61,31 @@ def sample_user_message():
 def sample_assistant_response():
     """Sample assistant response."""
     return {"role": "assistant", "content": "Here's a joke for you!"}
+
+
+@pytest.fixture
+def rag_document_factory():
+    """Factory for creating RagDocument objects."""
+    def create(**kwargs):
+        defaults = {
+            "id": "test-doc-1",
+            "content": "Test content for RAG",
+            "title": "Test Document",
+            "metadata": {"source": "test"},
+        }
+        defaults.update(kwargs)
+        return RagDocument(**defaults)
+    return create
+
+
+@pytest.fixture
+def sample_rag_documents():
+    """Create a list of sample RagDocuments."""
+    return [
+        RagDocument(
+            id=f"doc-{i}",
+            content=f"Content for document {i}",
+            title=f"Document {i}",
+        )
+        for i in range(5)
+    ]
