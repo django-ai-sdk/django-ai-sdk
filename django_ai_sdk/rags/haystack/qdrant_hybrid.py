@@ -157,21 +157,16 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
-        
+
         try:
             # Use delete_by_filter with metadata filtering
             # Build filter for doc_id field in metadata
-            from qdrant_client.http.models import Filter, FieldCondition, MatchAny
-            
+            from qdrant_client.http.models import FieldCondition, Filter, MatchAny
+
             filter_obj = Filter(
-                should=[
-                    FieldCondition(
-                        key="meta.doc_id",
-                        match=MatchAny(any=document_ids)
-                    )
-                ]
+                should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
             )
-            
+
             self._cached_document_store.delete_by_filter(filters=filter_obj)
             logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
         except Exception as e:

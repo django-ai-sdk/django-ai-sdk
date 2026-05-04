@@ -127,7 +127,7 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
-        
+
         try:
             # Use filter_documents to find documents, then delete by IDs
             # Haystack filter format for Chroma
@@ -135,14 +135,14 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
                 filters = {"field": "meta.doc_id", "operator": "==", "value": document_ids[0]}
             else:
                 filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
-            
+
             # Get matching documents
             matching_docs = self._cached_document_store.filter_documents(filters=filters)
             doc_ids_to_delete = [doc.id for doc in matching_docs]
-            
+
             if doc_ids_to_delete:
                 self._cached_document_store.delete_documents(document_ids=doc_ids_to_delete)
-            
+
             logger.info(f"Removed {len(document_ids)} documents from Chroma index")
         except Exception as e:
             logger.error(f"Failed to remove documents: {e}")
