@@ -574,6 +574,7 @@ dependencies = [
 all = [
     { name = "bm25s" },
     { name = "chroma-haystack" },
+    { name = "djangorestframework" },
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
     { name = "huggingface-hub" },
@@ -603,6 +604,9 @@ rag = [
     { name = "bm25s" },
     { name = "nltk" },
 ]
+restframework = [
+    { name = "djangorestframework" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -628,9 +632,10 @@ requires-dist = [
     { name = "chroma-haystack", marker = "extra == 'haystack'", specifier = ">=4.1.1" },
     { name = "daphne", specifier = ">=4.2.1" },
     { name = "django", specifier = ">=5.2.6" },
-    { name = "django-ai-sdk", extras = ["rag", "haystack", "openai", "mistral"], marker = "extra == 'all'" },
+    { name = "django-ai-sdk", extras = ["rag", "haystack", "openai", "mistral", "restframework"], marker = "extra == 'all'" },
     { name = "django-environ", specifier = ">=0.12.1" },
     { name = "django-ninja", specifier = ">=1.5.3" },
+    { name = "djangorestframework", marker = "extra == 'restframework'", specifier = ">=3.14.0" },
     { name = "fastembed-haystack", marker = "extra == 'haystack'", specifier = ">=2.1.0" },
     { name = "haystack-ai", marker = "extra == 'haystack'", specifier = ">=2.24.1" },
     { name = "huggingface-hub", marker = "extra == 'haystack'", specifier = ">=1.5.0" },
@@ -644,7 +649,7 @@ requires-dist = [
     { name = "qdrant-haystack", marker = "extra == 'haystack'", specifier = ">=10.2.1" },
     { name = "sentence-transformers", marker = "extra == 'haystack'", specifier = ">=5.2.3" },
 ]
-provides-extras = ["all", "haystack", "mistral", "openai", "rag"]
+provides-extras = ["all", "haystack", "mistral", "openai", "rag", "restframework"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -725,6 +730,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1a/89/51b82766a1c937dea9fb92f0fb7666919d120379fc26dc84ab504e35f37e/django_watchfiles-1.4.0.tar.gz", hash = "sha256:88e253e8e8427834eac467923d334c35010279b3e9ceb5bb91014be83975b11b", size = 8647, upload-time = "2025-09-22T16:34:04.634Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/85/3d31f347e1a3eef9be381792df1994ff25e4db4659ab40a5cc3f814e3a1a/django_watchfiles-1.4.0-py3-none-any.whl", hash = "sha256:40cb3180987c63629b0681ab228b65afd68e0f783388cc72a45620378213bb48", size = 6766, upload-time = "2025-09-22T16:34:03.193Z" },
+]
+
+[[package]]
+name = "djangorestframework"
+version = "3.17.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/d7/c016e69fac19ff8afdc89db9d31d9ae43ae031e4d1993b20aca179b8301a/djangorestframework-3.17.1.tar.gz", hash = "sha256:a6def5f447fe78ff853bff1d47a3c59bf38f5434b031780b351b0c73a62db1a5", size = 905742, upload-time = "2026-03-24T16:58:33.705Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/e1/2c516bdc83652b1a60c6119366ac2c0607b479ed05cd6093f916ca8928f8/djangorestframework-3.17.1-py3-none-any.whl", hash = "sha256:c3c74dd3e83a5a3efc37b3c18d92bd6f86a6791c7b7d4dff62bb068500e76457", size = 898844, upload-time = "2026-03-24T16:58:31.845Z" },
 ]
 
 [[package]]
