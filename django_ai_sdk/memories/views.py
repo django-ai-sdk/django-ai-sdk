@@ -21,7 +21,25 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.utils import extract_document
 
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
+
 router = Router()
+
+
+def _read_text_content(file: UploadedFile) -> tuple[str, str] | None:
+    """Read text content from a file. Returns (content, ext) or None if unsupported/empty."""
+    file_name = file.name or ""
+    _, ext = os.path.splitext(file_name)
+    ext = ext.lower()
+
+    if ext not in SUPPORTED_TEXT_EXTENSIONS:
+        return None
+
+    content = file.read().decode("utf-8", errors="replace")
+    if not content.strip():
+        return None
+
+    return content, ext
 
 
 @router.post("", response=MemoryOut)
@@ -102,32 +120,30 @@ async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None
     return 204, None
 
 
-@router.post("/{memory_id}/documents", response=DocumentOut)
+@router.post("/{memory_id}/documents", response={200: DocumentOut, 400: dict})
 async def upload_document(
     request: HttpRequest,
     memory_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> DocumentOut:
+) -> DocumentOut | tuple[int, dict]:
     """Upload a file to a memory."""
 
     memory = await Memory.objects.aget(id=memory_id)
     file_name = file.name or ""
-    _, ext = os.path.splitext(file_name)
 
-    content = ""
-    extraction = None
-    if ext.lower() in (".txt", ".md"):
-        content = file.read().decode("utf-8", errors="replace")
-        extraction = await extract_document(content)
+    result = _read_text_content(file)
+    if result is None:
+        return 400, {"detail": f"Unsupported or empty file: {file_name}"}
+    content, ext = result
+
+    extraction = await extract_document(content)
 
     entry = await Entry.objects.acreate(
         memory=memory,
         name=file_name,
         content=content,
+        data=extraction.model_dump() if extraction else {},
     )
-    if extraction:
-        entry.extraction = extraction
-        await entry.asave()
 
     entry_doc = await EntryDocument.objects.acreate(
         entry=entry,
@@ -135,7 +151,7 @@ async def upload_document(
         file_name=file_name,
         file_size=file.size or 0,
         content_type=file.content_type or "",
-        file_extension=ext.lower().lstrip("."),
+        file_extension=ext.lstrip("."),
         extracted=bool(extraction),
     )
 
@@ -288,37 +304,30 @@ async def _get_or_create_thread_file_memory(thread_id: str) -> Memory:
     return thread.file_memory
 
 
-@router.post("/thread/{thread_id}/files", response=DocumentOut)
+@router.post("/thread/{thread_id}/files", response={200: DocumentOut, 400: dict})
 async def upload_thread_file(
     request: HttpRequest,
     thread_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> DocumentOut:
+) -> DocumentOut | tuple[int, dict]:
     """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
-    import os
 
     memory = await _get_or_create_thread_file_memory(thread_id)
     file_name = file.name or ""
-    _, ext = os.path.splitext(file_name)
 
-    # TODO: this needs to be fixed before any merge takes place!
-    # Again we need this to move into some kind of helper and then re-use it on each upload!
-    content = ""
-    extraction = None
-    if ext.lower() in (".txt", ".md"):
-        raw = file.read()
-        content = raw.decode("utf-8", errors="replace")
-        if content:
-            extraction = await extract_document(content)
+    result = _read_text_content(file)
+    if result is None:
+        return 400, {"detail": f"Unsupported or empty file: {file_name}"}
+    content, ext = result
+
+    extraction = await extract_document(content)
 
     entry = await Entry.objects.acreate(
         memory=memory,
         name=file_name,
         content=content,
+        data=extraction.model_dump() if extraction else {},
     )
-    if extraction:
-        entry.extraction = extraction
-        await entry.asave()
 
     entry_doc = await EntryDocument.objects.acreate(
         entry=entry,
@@ -326,7 +335,7 @@ async def upload_thread_file(
         file_name=file_name,
         file_size=file.size or 0,
         content_type=file.content_type or "",
-        file_extension=ext.lower().lstrip("."),
+        file_extension=ext.lstrip("."),
         extracted=bool(extraction),
     )
 
