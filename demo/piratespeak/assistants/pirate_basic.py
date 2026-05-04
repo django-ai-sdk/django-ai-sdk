@@ -18,7 +18,6 @@ from django_ai_sdk.rags.haystack import (
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
-from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
@@ -130,8 +129,6 @@ class PirateBasicAssistant(Assistant):
             ),
         )
 
-    @track_llm
-    @track_embedding
     async def get_rag_pipeline(self, memory_id: str | None = None) -> QdrantBM25HybridRAG | None:
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)

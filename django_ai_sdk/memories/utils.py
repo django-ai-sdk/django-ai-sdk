@@ -8,7 +8,6 @@ from openai import AsyncOpenAI
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.schemas import DocumentExtraction, Predicate
-from django_ai_sdk.tracking.utils import track_llm
 
 logger = get_logger(__name__)
 
@@ -52,7 +51,6 @@ Return the output strictly in the DocumentExtraction format.
 """
 
 
-@track_llm
 async def extract_document(content: str) -> DocumentExtraction | None:
     """Extract summary, keywords, and facts from content"""
 

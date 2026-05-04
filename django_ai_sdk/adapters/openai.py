@@ -29,7 +29,6 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.tracking.utils import track_llm
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -208,7 +207,6 @@ class OpenAIAdapter(BasePipelineAdapter):
 
         return None
 
-    @track_llm
     async def stream(  # type: ignore
         self,
         messages: list[ChatMessage],
@@ -480,7 +478,6 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
             )
         return user_messages[-1].content
 
-    @track_llm
     async def stream(  # type: ignore
         self,
         messages: list["ChatMessage"],

@@ -18,7 +18,6 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from django_ai_sdk.memories.views import router as memories_router
-from django_ai_sdk.tracking.views import router as tracking_router
 from ninja import NinjaAPI
 
 from piratespeak.views import router as piratespeak_router
@@ -29,7 +28,6 @@ api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
 
 api.add_router("/piratespeak", piratespeak_router)
 api.add_router("/memories", memories_router)
-api.add_router("/tracking", tracking_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

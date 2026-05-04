@@ -30,7 +30,6 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.tracking.utils import track_llm
 
 if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -226,7 +225,6 @@ class HaystackAdapter(BasePipelineAdapter):
 
         return chunks
 
-    @track_llm
     async def stream(
         self,
         input: list[ChatMessage],
