@@ -7,7 +7,7 @@ from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.haystack import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
@@ -126,7 +126,7 @@ class PirateBasicAssistant(Assistant):
                 n_expansions=4,
                 expander_model="openai/gpt-oss-120b",
                 meta_fields_to_embed=["file_name", "keywords", "facts"],
-                storage=VectorDBStorageConfig.from_settings(memory_id),
+                storage=QdrantStorageConfig.from_settings(memory_id),
             ),
         )
 
