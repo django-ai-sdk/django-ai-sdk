@@ -7,7 +7,7 @@ The bm25s library works entirely locally.
 
 import pytest
 from django_ai_sdk.rags.bm25 import BM25RAG, BM25Config
-from django_ai_sdk.rags.base import RAGResult, RAGSource
+from django_ai_sdk.rags.base import RAGSource
 from django_ai_sdk.rags.schemas import RagDocument
 
 
