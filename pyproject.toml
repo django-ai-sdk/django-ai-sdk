@@ -6,7 +6,7 @@ exclude = ["demo*", "logs*", "ideas*"]
 [project]
 dependencies = [
   "daphne>=4.2.1",
-  "django>=6.0.2",
+  "django>=5.2.6",
   "django-environ>=0.12.1",
   "django-ninja>=1.5.3",
   "loguru>=0.7.3",
