@@ -2,6 +2,7 @@ from typing import Any, TypedDict
 
 from asgiref.sync import async_to_sync
 from django.db.models import Count
+from django.http import HttpRequest, StreamingHttpResponse
 
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
@@ -162,9 +163,13 @@ aget_thread_history = _get_thread_history
 get_thread_history = async_to_sync(_get_thread_history)
 
 
-async def _add_message_to_thread(thread_id: str, protocol_messages: list, request: Any) -> Any:
+async def _add_message_to_thread(
+    thread_id: str,
+    messages: list[dict[str, Any]],
+    request: HttpRequest,
+) -> StreamingHttpResponse:
     assistant = await get_assistant(thread_id)
-    return await assistant.as_view(protocol_messages, thread_id=thread_id)
+    return await assistant.as_view(messages, thread_id=thread_id)
 
 
 aadd_message_to_thread = _add_message_to_thread
