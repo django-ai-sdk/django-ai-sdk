@@ -21,7 +21,7 @@ class Memory(models.Model):
     document_count: int
 
     class Meta:
-        db_table = "django_ai_sdk_silos"
+        db_table = "django_ai_sdk_memories"
 
     def __str__(self) -> str:
         return self.name
@@ -144,7 +144,7 @@ class ThreadMemory(models.Model):
     document_count: int
 
     class Meta:
-        db_table = "django_ai_sdk_thread_silos"
+        db_table = "django_ai_sdk_thread_memories"
         unique_together = [["thread", "memory"]]
 
     def __str__(self) -> str:
