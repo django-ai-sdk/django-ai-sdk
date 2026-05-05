@@ -58,7 +58,7 @@ class MemoryService:
                 created_at=memory.created_at.isoformat(),
                 updated_at=memory.updated_at.isoformat(),
             )
-            for memory in memories
+            async for memory in memories
         ]
 
     @staticmethod
