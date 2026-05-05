@@ -4,7 +4,11 @@ from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
-from django_ai_sdk.storage.services import ThreadService, aget_thread_history
+from django_ai_sdk.storage.services import (
+    ThreadService,
+    aget_thread_file_meta,
+    aget_thread_history,
+)
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from ninja import Router, Schema
 
@@ -43,18 +47,12 @@ class CreateThreadResponse(Schema):
     thread_id: str | None = None
 
 
-class ThreadMemoryInfo(Schema):
-    id: str
-    name: str
-    description: str
-    document_count: int
-    active: bool
-
-
-class ThreadDetailWithMemories(Schema):
+class ThreadDetailResponse(Schema):
     thread: dict
-    memories: list[ThreadMemoryInfo]
     messages: list
+
+
+class ThreadFileMeta(Schema):
     file_count: int = 0
     file_memory_id: str | None = None
 
@@ -105,11 +103,20 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetailWithMemories, 404: Error})
+@router.get("/threads/{thread_id}/", response={200: ThreadDetailResponse, 404: Error})
 async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     try:
         data = await aget_thread_history(thread_id)
-        return ThreadDetailWithMemories(**data)
+        return ThreadDetailResponse(**data)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.get("/threads/{thread_id}/file-meta/", response={200: ThreadFileMeta, 404: Error})
+async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
+    try:
+        data = await aget_thread_file_meta(thread_id)
+        return ThreadFileMeta(**data)
     except ValueError as e:
         return 404, Error(message=str(e))
 

@@ -14,6 +14,7 @@ from django_ai_sdk.storage.services import (
     delete_all_threads,
     delete_message,
     delete_thread,
+    get_thread_file_meta,
     get_thread_history,
     rate_message,
     restore_message,
@@ -39,18 +40,12 @@ class ThreadListResponseSerializer(serializers.Serializer):
     threads = ThreadListItemSerializer(many=True)
 
 
-class ThreadMemoryInfoSerializer(serializers.Serializer):
-    id = serializers.CharField()
-    name = serializers.CharField()
-    description = serializers.CharField()
-    document_count = serializers.IntegerField()
-    active = serializers.BooleanField()
-
-
 class ThreadDetailSerializer(serializers.Serializer):
     thread = serializers.DictField()
-    memories = ThreadMemoryInfoSerializer(many=True)
     messages = serializers.ListField()
+
+
+class ThreadFileMetaSerializer(serializers.Serializer):
     file_count = serializers.IntegerField()
     file_memory_id = serializers.CharField(allow_null=True)
 
@@ -136,6 +131,15 @@ class ThreadDetailAPIView(APIView):
         try:
             data = get_thread_history(thread_id)
             return Response(ThreadDetailSerializer(data).data)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+
+
+class ThreadFileMetaAPIView(APIView):
+    def get(self, request: Request, thread_id: str) -> Response:
+        try:
+            data = get_thread_file_meta(thread_id)
+            return Response(ThreadFileMetaSerializer(data).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -309,6 +313,11 @@ urlpatterns = [
     ),
     path("threads/", ThreadListAPIView.as_view(), name="thread-list"),
     path("threads/<str:thread_id>/", ThreadDetailAPIView.as_view(), name="thread-detail"),
+    path(
+        "threads/<str:thread_id>/file-meta/",
+        ThreadFileMetaAPIView.as_view(),
+        name="thread-file-meta",
+    ),
     path("threads/", ThreadCreateAPIView.as_view(), name="thread-create"),
     path("threads/<str:thread_id>/delete/", ThreadDeleteAPIView.as_view(), name="thread-delete"),
     path(

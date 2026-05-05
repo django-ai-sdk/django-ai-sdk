@@ -1,7 +1,6 @@
 from typing import Any
 
 from asgiref.sync import async_to_sync
-from django.db.models import Count
 
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
@@ -296,49 +295,67 @@ class ThreadService:
 
 
 # ============================================================================
-# Thread history (DB + storage + memories)
+# Thread history
 # ============================================================================
 
 
 async def aget_thread_history(thread_id: str) -> dict[str, Any]:
     """
-    Get full thread history including messages, memories, and file metadata.
+    Get thread history: thread metadata and messages only.
+
+    For memories, use GET /memories/thread/{thread_id}/
+    For file metadata, use aget_thread_file_meta().
 
     Args:
         thread_id: Thread ID to retrieve history for
 
     Returns:
-        Dict with thread, memories, messages, file_count, file_memory_id
+        Dict with thread and messages
 
     Raises:
         ValueError: If thread or assistant not found
     """
     from django_ai_sdk.assistants.services import AssistantService
-    from django_ai_sdk.conversation.models import Thread
-    from django_ai_sdk.memories.models import Entry, ThreadMemory
 
     assistant = await AssistantService.get_assistant(thread_id)
     thread_detail: ThreadDetail = await assistant.history(thread_id)
+
+    return {
+        "thread": thread_detail.thread,
+        "messages": thread_detail.messages,
+    }
+
+
+get_thread_history = async_to_sync(aget_thread_history)
+
+
+# ============================================================================
+# Thread file metadata
+# ============================================================================
+
+
+async def aget_thread_file_meta(thread_id: str) -> dict[str, Any]:
+    """
+    Get file metadata for a thread: file_count and file_memory_id.
+
+    Does not raise if thread has no file memory — returns {file_count: 0, file_memory_id: None}.
+
+    Args:
+        thread_id: Thread ID to retrieve file metadata for
+
+    Returns:
+        Dict with file_count and file_memory_id
+
+    Raises:
+        ValueError: If thread not found in DB
+    """
+    from django_ai_sdk.conversation.models import Thread
+    from django_ai_sdk.memories.models import Entry
+
+    if not await Thread.objects.filter(id=thread_id).aexists():
+        raise ValueError("Thread not found")
+
     thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
-
-    thread_memories = (
-        ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
-        .select_related("memory")
-        .annotate(document_count=Count("memory__entries"))
-    )
-
-    memories = []
-    async for tm in thread_memories:
-        memories.append(
-            {
-                "id": str(tm.memory.id),
-                "name": tm.memory.name,
-                "description": tm.memory.description,
-                "document_count": tm.document_count,
-                "active": tm.active,
-            }
-        )
-
     file_memory_id = str(thread.file_memory_id) if thread.file_memory_id else None
     file_count = (
         await Entry.objects.filter(memory_id=thread.file_memory_id).acount()
@@ -347,15 +364,12 @@ async def aget_thread_history(thread_id: str) -> dict[str, Any]:
     )
 
     return {
-        "thread": thread_detail.thread,
-        "memories": memories,
-        "messages": thread_detail.messages,
         "file_count": file_count,
         "file_memory_id": file_memory_id,
     }
 
 
-get_thread_history = async_to_sync(aget_thread_history)
+get_thread_file_meta = async_to_sync(aget_thread_file_meta)
 
 
 # ============================================================================

@@ -5,12 +5,12 @@ Unit tests for ThreadService and thread history service.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from django_ai_sdk.views.schemas import Message, MessagePart
 from django_ai_sdk.storage.services import (
     ThreadService,
+    aget_thread_file_meta,
     aget_thread_history,
 )
+from django_ai_sdk.views.schemas import Message, MessagePart
 
 
 def make_message(role: str, text: str, message_id: str = None) -> Message:
@@ -49,20 +49,6 @@ def mock_storage_adapter_registry():
     with patch("django_ai_sdk.storage.services.StorageAdapterRegistry") as sr:
         sr.get_all_adapters = MagicMock(return_value=[])
         yield sr
-
-
-class AsyncEmptyIterator:
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        raise StopAsyncIteration
-
-
-def make_empty_query():
-    q = MagicMock()
-    q.__aiter__ = lambda s: AsyncEmptyIterator()
-    return q
 
 
 def make_mock_adapter_class(get_thread=None):
@@ -220,29 +206,18 @@ class TestThreadServiceRestoreMessage:
 
 @pytest.mark.asyncio
 class TestGetThreadHistory:
-    async def test_returns_thread_data(self, mock_assistants_registry, mock_storage_adapter_registry):
-        thread_db = MagicMock()
-        thread_db.file_memory_id = None
-
-        mock_adapter_cls = make_mock_adapter_class(
-            get_thread=MagicMock(assistant_id="test-assistant")
-        )
+    async def test_returns_thread_and_messages(self, mock_assistants_registry, mock_storage_adapter_registry):
+        thread_info = MagicMock(assistant_id="test-assistant")
+        mock_adapter_cls = make_mock_adapter_class(get_thread=thread_info)
         mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]
 
-        with patch("django_ai_sdk.conversation.models.Thread") as mock_thread, \
-             patch("django_ai_sdk.memories.models.ThreadMemory") as mock_thread_memory, \
-             patch("django_ai_sdk.memories.models.Entry") as mock_entry:
-            mock_thread.objects.select_related.return_value.aget = AsyncMock(return_value=thread_db)
-            mock_thread_memory.objects.filter.return_value.select_related.return_value.annotate.return_value = make_empty_query()
-            mock_entry.objects.filter.return_value.acount = AsyncMock(return_value=0)
+        result = await aget_thread_history("thread-1")
 
-            result = await aget_thread_history("thread-1")
-
-            assert "thread" in result
-            assert "memories" in result
-            assert "messages" in result
-            assert "file_count" in result
-            assert "file_memory_id" in result
+        assert "thread" in result
+        assert "messages" in result
+        assert "memories" not in result
+        assert "file_count" not in result
+        assert "file_memory_id" not in result
 
     async def test_raises_when_thread_not_found(self, mock_storage_adapter_registry):
         mock_storage_adapter_registry.get_all_adapters.return_value = []
@@ -250,8 +225,45 @@ class TestGetThreadHistory:
         with pytest.raises(ValueError, match="Thread not found"):
             await aget_thread_history("nonexistent")
 
-    async def test_raises_when_assistant_not_found(self, mock_storage_adapter_registry):
-        mock_storage_adapter_registry.get_all_adapters.return_value = []
 
-        with pytest.raises(ValueError, match="Thread not found"):
-            await aget_thread_history("thread-1")
+# ============================================================================
+# Thread File Meta Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestGetThreadFileMeta:
+    async def test_returns_file_meta(self, mock_storage_adapter_registry):
+        thread_db = MagicMock()
+        thread_db.file_memory_id = None
+
+        with patch("django_ai_sdk.conversation.models.Thread") as mock_thread:
+            mock_thread.objects.filter.return_value.aexists = AsyncMock(return_value=True)
+            mock_thread.objects.select_related.return_value.aget = AsyncMock(return_value=thread_db)
+
+            result = await aget_thread_file_meta("thread-1")
+
+            assert result["file_count"] == 0
+            assert result["file_memory_id"] is None
+
+    async def test_raises_when_thread_not_found(self):
+        with patch("django_ai_sdk.conversation.models.Thread") as mock_thread:
+            mock_thread.objects.filter.return_value.aexists = AsyncMock(return_value=False)
+
+            with pytest.raises(ValueError, match="Thread not found"):
+                await aget_thread_file_meta("nonexistent")
+
+    async def test_counts_files_when_memory_exists(self, mock_storage_adapter_registry):
+        thread_db = MagicMock()
+        thread_db.file_memory_id = "mem-uuid-123"
+
+        with patch("django_ai_sdk.conversation.models.Thread") as mock_thread, \
+             patch("django_ai_sdk.memories.models.Entry") as mock_entry:
+            mock_thread.objects.filter.return_value.aexists = AsyncMock(return_value=True)
+            mock_thread.objects.select_related.return_value.aget = AsyncMock(return_value=thread_db)
+            mock_entry.objects.filter.return_value.acount = AsyncMock(return_value=3)
+
+            result = await aget_thread_file_meta("thread-1")
+
+            assert result["file_count"] == 3
+            assert result["file_memory_id"] == "mem-uuid-123"
