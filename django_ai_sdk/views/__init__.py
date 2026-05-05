@@ -1,3 +1,3 @@
-from django_ai_sdk.views import schemas, services
+from django_ai_sdk.views import schemas
 
-__all__ = ["schemas", "services"]
+__all__ = ["schemas"]

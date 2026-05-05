@@ -1,6 +1,12 @@
+from typing import Any
+
+from asgiref.sync import async_to_sync
+from django.db.models import Count
+
+from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import StorageAdapterRegistry
-from django_ai_sdk.storage.schemas import ThreadInfo
+from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
 
 logger = get_logger(__name__)
 
@@ -8,12 +14,16 @@ logger = get_logger(__name__)
 class ThreadService:
     """
     Service for thread operations across all storage adapters.
+
+    All methods are async. Use the sync-prefixed aliases for sync contexts
+    (e.g., DRF class-based views).
     """
 
     @staticmethod
     async def create_thread(
         assistant_id: str,
-        title: str,
+        messages: list[Any] | None = None,
+        title: str = "",
         metadata: dict | None = None,
         user_id: str | None = None,
         thread_id: str | None = None,
@@ -25,44 +35,140 @@ class ThreadService:
 
         Args:
             assistant_id: ID of the assistant creating the thread
-            title: Thread title (usually first user message)
-            metadata: Additional metadata (will include assistant_id)
+            messages: Optional list of messages for auto-title generation
+            title: Thread title. If empty and messages provided, auto-generated
+            metadata: Additional metadata. Auto-populates model, assistant_name,
+                     assistant_class, and created_via. Caller-provided values
+                     take precedence over auto-generated ones.
             user_id: Optional user ID for the thread owner
             thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
         """
-        # Import registry
-        # TODO: check if we can move to top-level import, but it breaks due to circular imports
         from django_ai_sdk.assistants.registry import registry
 
         assistant = registry.get(assistant_id)
         if not assistant:
             raise ValueError(f"Assistant not found: {assistant_id}")
 
-        # Get storage adapter class from assistant
         storage_class = assistant.storage_adapter
         if storage_class is None:
             from django_ai_sdk.storage.memory import MemoryStorageAdapter
 
             storage_class = MemoryStorageAdapter
 
-        # Create thread using storage class method
+        title = title or generate_thread_title(messages or [])
+
         metadata = metadata or {}
-        metadata["assistant_id"] = assistant_id
+        auto_metadata = {
+            "assistant_id": assistant_id,
+            "model": assistant.model,
+            "assistant_name": assistant.name or assistant.__class__.__name__,
+            "assistant_class": assistant.__class__.__name__,
+            "created_via": "create_thread",
+        }
+        auto_metadata.update(metadata)
 
         thread_id = await storage_class.create_thread(
-            title=title, metadata=metadata, user_id=user_id, thread_id=thread_id
+            title=title, metadata=auto_metadata, user_id=user_id, thread_id=thread_id
         )
 
         logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")
         return thread_id
 
     @staticmethod
-    async def get_assistant(thread_id: str) -> ThreadInfo | None:
+    async def rate_message(thread_id: str, message_id: str, rating: int) -> bool:
         """
-        Find thread by querying storage adapters (fastest first).
+        Rate a message in a thread.
+
+        Args:
+            thread_id: Thread ID containing the message
+            message_id: Message ID to rate
+            rating: 1 for good, -1 for bad
+
+        Returns:
+            True if rated successfully
+
+        Raises:
+            ValueError: If thread or message not found
+        """
+        from django_ai_sdk.assistants.services import AssistantService
+
+        thread_info = await ThreadService.get_thread(thread_id)
+        if thread_info is None:
+            raise ValueError("Thread not found")
+
+        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        storage = ThreadService.get_storage(assistant)(thread_id)
+
+        success = await storage.rate_message(message_id, rating)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @staticmethod
+    async def delete_message(thread_id: str, message_id: str) -> bool:
+        """
+        Soft delete a message in a thread.
+
+        Args:
+            thread_id: Thread ID containing the message
+            message_id: Message ID to delete
+
+        Returns:
+            True if deleted successfully
+
+        Raises:
+            ValueError: If thread or message not found
+        """
+        from django_ai_sdk.assistants.services import AssistantService
+
+        thread_info = await ThreadService.get_thread(thread_id)
+        if thread_info is None:
+            raise ValueError("Thread not found")
+
+        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        storage = ThreadService.get_storage(assistant)(thread_id)
+
+        success = await storage.delete_message(message_id)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @staticmethod
+    async def restore_message(thread_id: str, message_id: str) -> bool:
+        """
+        Restore a soft-deleted message in a thread.
+
+        Args:
+            thread_id: Thread ID containing the message
+            message_id: Message ID to restore
+
+        Returns:
+            True if restored successfully
+
+        Raises:
+            ValueError: If thread or message not found
+        """
+        from django_ai_sdk.assistants.services import AssistantService
+
+        thread_info = await ThreadService.get_thread(thread_id)
+        if thread_info is None:
+            raise ValueError("Thread not found")
+
+        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        storage = ThreadService.get_storage(assistant)(thread_id)
+
+        success = await storage.restore_message(message_id)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @staticmethod
+    async def get_thread(thread_id: str) -> ThreadInfo | None:
+        """
+        Find thread by querying storage adapters.
 
         Returns thread metadata including assistant_id.
 
@@ -72,7 +178,6 @@ class ThreadService:
         Returns:
             ThreadInfo with assistant_id, or None if not found
         """
-        # Query storage adapters in order of speed
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             thread = await adapter_class.get_thread(thread_id)
             if thread:
@@ -102,7 +207,6 @@ class ThreadService:
             all_threads.extend(threads)
             logger.debug(f"Found {len(threads)} threads in {adapter_class.__name__}")
 
-        # Sort by updated_at (newest first)
         all_threads.sort(key=lambda t: t.updated_at, reverse=True)
 
         logger.debug(f"Total threads: {len(all_threads)}")
@@ -126,7 +230,6 @@ class ThreadService:
             True if updated, False if not found
         """
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            # Try to update in this storage
             success = await adapter_class.update_thread(thread_id, title, metadata)
             if success:
                 logger.debug(f"Updated thread {thread_id} in {adapter_class.__name__}")
@@ -169,3 +272,102 @@ class ThreadService:
                 total_deleted += count
 
         return total_deleted
+
+    @staticmethod
+    def get_storage(assistant: Any) -> type:
+        """
+        Get the storage adapter class for an assistant.
+
+        Args:
+            assistant: Assistant instance
+
+        Returns:
+            Storage adapter class (not instantiated)
+
+        Raises:
+            ValueError: If assistant has no storage_adapter configured
+        """
+        storage_class = assistant.storage_adapter
+        if storage_class is None:
+            raise ValueError(
+                f"Assistant '{assistant.assistant_id}' has no storage_adapter configured"
+            )
+        return storage_class
+
+
+# ============================================================================
+# Thread history (DB + storage + memories)
+# ============================================================================
+
+
+async def aget_thread_history(thread_id: str) -> dict[str, Any]:
+    """
+    Get full thread history including messages, memories, and file metadata.
+
+    Args:
+        thread_id: Thread ID to retrieve history for
+
+    Returns:
+        Dict with thread, memories, messages, file_count, file_memory_id
+
+    Raises:
+        ValueError: If thread or assistant not found
+    """
+    from django_ai_sdk.assistants.services import AssistantService
+    from django_ai_sdk.conversation.models import Thread
+    from django_ai_sdk.memories.models import Entry, ThreadMemory
+
+    assistant = await AssistantService.get_assistant(thread_id)
+    thread_detail: ThreadDetail = await assistant.history(thread_id)
+    thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+
+    thread_memories = (
+        ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
+        .select_related("memory")
+        .annotate(document_count=Count("memory__entries"))
+    )
+
+    memories = []
+    async for tm in thread_memories:
+        memories.append(
+            {
+                "id": str(tm.memory.id),
+                "name": tm.memory.name,
+                "description": tm.memory.description,
+                "document_count": tm.document_count,
+                "active": tm.active,
+            }
+        )
+
+    file_memory_id = str(thread.file_memory_id) if thread.file_memory_id else None
+    file_count = (
+        await Entry.objects.filter(memory_id=thread.file_memory_id).acount()
+        if file_memory_id
+        else 0
+    )
+
+    return {
+        "thread": thread_detail.thread,
+        "memories": memories,
+        "messages": thread_detail.messages,
+        "file_count": file_count,
+        "file_memory_id": file_memory_id,
+    }
+
+
+get_thread_history = async_to_sync(aget_thread_history)
+
+
+# ============================================================================
+# Sync wrappers for use in sync contexts
+# ============================================================================
+
+create_thread = async_to_sync(ThreadService.create_thread)
+rate_message = async_to_sync(ThreadService.rate_message)
+delete_message = async_to_sync(ThreadService.delete_message)
+restore_message = async_to_sync(ThreadService.restore_message)
+get_thread = async_to_sync(ThreadService.get_thread)
+threads = async_to_sync(ThreadService.threads)
+update_thread = async_to_sync(ThreadService.update_thread)
+delete_thread = async_to_sync(ThreadService.delete_thread)
+delete_all_threads = async_to_sync(ThreadService.delete_all_threads)
