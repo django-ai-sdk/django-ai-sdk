@@ -3,18 +3,19 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from .assistants.mixins import AssistantInfoMixin
-from .logger import get_logger
-from .responses import stream_response
+from django_ai_sdk.assistants.mixins import AssistantInfoMixin
+from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.logger import get_logger
+from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+from django_ai_sdk.rags import queryset_to_rag_documents
+from django_ai_sdk.responses import stream_response
+from django_ai_sdk.storage.memory import MemoryStorageAdapter
+from django_ai_sdk.storage.schemas import ThreadDetail
 
 if TYPE_CHECKING:
-    from .rags.schemas import RagDocument
-    from .storage.base import BaseStorageAdapter
+    from django_ai_sdk.rags.schemas import RagDocument
+    from django_ai_sdk.storage.base import BaseStorageAdapter
 
-from .assistants.registry import registry
-from .protocols.vercel import VercelProtocolHandler
-from .storage.memory import MemoryStorageAdapter
-from .storage.schemas import ThreadDetail
 
 logger = get_logger(__name__)
 
@@ -260,7 +261,7 @@ class Assistant(ABC, AssistantInfoMixin):
             Django QuerySet of Document objects
         """
 
-        # TODO: this ia to entangled with our own Document model
+        # TODO: this ia to entangled with our own Entry model
         # For now this is fine, but we might want to decouple it
         # and provide a hint for overriding, but leave out the
         # implementation details.
@@ -285,7 +286,6 @@ class Assistant(ABC, AssistantInfoMixin):
         Returns:
             List of RagDocuments (vendor-neutral)
         """
-        from django_ai_sdk.rags import queryset_to_rag_documents
 
         logger.info(
             f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}"

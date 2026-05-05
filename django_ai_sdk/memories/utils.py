@@ -4,13 +4,33 @@ Same as for schemas: we need make sure we have the correct imports and
 we must unify Caren version against the public one.
 """
 
+import os
+from typing import Any
+
 from openai import AsyncOpenAI
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.schemas import DocumentExtraction, Predicate
-from django_ai_sdk.tracking.utils import track_llm
+
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
 
 logger = get_logger(__name__)
+
+
+def read_text_content(file: Any) -> tuple[str, str] | None:
+    """Read text content from a file. Returns (content, ext) or None if unsupported/empty."""
+    file_name = file.name or ""
+    _, ext = os.path.splitext(file_name)
+    ext = ext.lower()
+
+    if ext not in SUPPORTED_TEXT_EXTENSIONS:
+        return None
+
+    content = file.read().decode("utf-8", errors="replace")
+    if not content.strip():
+        return None
+
+    return content, ext
 
 
 def get_llm() -> AsyncOpenAI:
@@ -52,7 +72,6 @@ Return the output strictly in the DocumentExtraction format.
 """
 
 
-@track_llm
 async def extract_document(content: str) -> DocumentExtraction | None:
     """Extract summary, keywords, and facts from content"""
 

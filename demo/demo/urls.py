@@ -16,22 +16,21 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
-from django_ai_sdk.memories.views import router as memories_router
-from django_ai_sdk.tracking.views import router as tracking_router
+from django.urls import include, path
 from ninja import NinjaAPI
 
-from piratespeak.views import router as piratespeak_router
+from piratespeak.views_memories_ninja import router as memories_router
+from piratespeak.views_ninja import router as piratespeak_router
 
 # Create the main API instance
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
 
-
 api.add_router("/piratespeak", piratespeak_router)
 api.add_router("/memories", memories_router)
-api.add_router("/tracking", tracking_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", api.urls),
+    path("api/v2/", include("piratespeak.views_drf")),
+    path("api/v2/", include("piratespeak.views_memories_drf")),
 ]

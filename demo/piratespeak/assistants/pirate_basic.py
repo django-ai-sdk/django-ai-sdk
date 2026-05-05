@@ -7,7 +7,7 @@ from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-from django_ai_sdk.rags.config import VectorDBStorageConfig
+from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.haystack import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
@@ -18,7 +18,6 @@ from django_ai_sdk.rags.haystack import (
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
-from django_ai_sdk.tracking.utils import track_embedding, track_llm
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
@@ -126,12 +125,10 @@ class PirateBasicAssistant(Assistant):
                 n_expansions=4,
                 expander_model="openai/gpt-oss-120b",
                 meta_fields_to_embed=["file_name", "keywords", "facts"],
-                storage=VectorDBStorageConfig.from_settings(memory_id),
+                storage=QdrantStorageConfig.from_settings(memory_id),
             ),
         )
 
-    @track_llm
-    @track_embedding
     async def get_rag_pipeline(self, memory_id: str | None = None) -> QdrantBM25HybridRAG | None:
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
