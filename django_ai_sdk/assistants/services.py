@@ -20,7 +20,7 @@ class AssistantService:
     """
 
     @staticmethod
-    async def from_registry(assistant_id: str) -> "Assistant":
+    def from_registry(assistant_id: str) -> "Assistant":
         """Resolve assistant from registry or raise ValueError."""
         assistant = registry.get(assistant_id)
         if assistant is None:
@@ -35,11 +35,13 @@ class AssistantService:
         thread = await ThreadService.get_thread(thread_id)
         if thread is None:
             raise ValueError("Thread not found")
-        return await AssistantService.from_registry(thread.assistant_id)
+        return AssistantService.from_registry(thread.assistant_id)
 
     @staticmethod
     def list_assistants() -> list[AssistantSummary]:
         """Return all registered assistants as a list of typed dicts."""
+        from django_ai_sdk.assistants.registry import registry
+
         return [
             AssistantSummary(
                 id=aid,

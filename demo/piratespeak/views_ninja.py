@@ -205,11 +205,7 @@ async def list_assistants_view(request: HttpRequest) -> Any:
 @router.get("/assistants/{assistant_id}/", response={200: AssistantInfo, 404: Error})
 async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        from django_ai_sdk.assistants.registry import registry
-
-        assistant = registry.get(assistant_id)
-        if assistant is None:
-            raise ValueError(f"Assistant '{assistant_id}' not found")
+        assistant = AssistantService.from_registry(assistant_id)
         return assistant.info()
     except ValueError as e:
         return 404, Error(message=str(e))
@@ -226,12 +222,7 @@ async def reindex_assistant(
     force_rebuild: bool = False,
 ) -> Any:
     try:
-        from django_ai_sdk.assistants.registry import registry
-
-        assistant = registry.get(assistant_id)
-        if assistant is None:
-            raise ValueError(f"Assistant '{assistant_id}' not found")
-
+        assistant = AssistantService.from_registry(assistant_id)
         result = await Assistant.reindex(assistant, memory_id, force_rebuild)
 
         if not result:

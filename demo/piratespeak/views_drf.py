@@ -5,7 +5,6 @@ from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
@@ -229,9 +228,7 @@ class ListAssistantsAPIView(APIView):
 class AssistantInfoAPIView(APIView):
     def get(self, request: Request, assistant_id: str) -> Response:
         try:
-            assistant = registry.get(assistant_id)
-            if assistant is None:
-                raise ValueError(f"Assistant '{assistant_id}' not found")
+            assistant = AssistantService.from_registry(assistant_id)
             return Response(AssistantInfoSerializer(assistant.info()).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
@@ -242,10 +239,7 @@ class ReindexAssistantAPIView(APIView):
         memory_id = request.data.get("memory_id")
         force_rebuild = request.data.get("force_rebuild", False)
         try:
-            assistant = registry.get(assistant_id)
-            if assistant is None:
-                raise ValueError(f"Assistant '{assistant_id}' not found")
-
+            assistant = AssistantService.from_registry(assistant_id)
             result = Assistant.reindex(assistant, memory_id, force_rebuild)
 
             if not result:

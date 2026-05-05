@@ -98,7 +98,7 @@ class ThreadService:
         if thread_info is None:
             raise ValueError("Thread not found")
 
-        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        assistant = AssistantService.from_registry(thread_info.assistant_id)
         storage = ThreadService.get_storage(assistant)(thread_id)
 
         success = await storage.rate_message(message_id, rating)
@@ -127,7 +127,7 @@ class ThreadService:
         if thread_info is None:
             raise ValueError("Thread not found")
 
-        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        assistant = AssistantService.from_registry(thread_info.assistant_id)
         storage = ThreadService.get_storage(assistant)(thread_id)
 
         success = await storage.delete_message(message_id)
@@ -156,7 +156,7 @@ class ThreadService:
         if thread_info is None:
             raise ValueError("Thread not found")
 
-        assistant = await AssistantService.from_registry(thread_info.assistant_id)
+        assistant = AssistantService.from_registry(thread_info.assistant_id)
         storage = ThreadService.get_storage(assistant)(thread_id)
 
         success = await storage.restore_message(message_id)
