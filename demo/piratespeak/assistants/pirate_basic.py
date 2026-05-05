@@ -145,7 +145,7 @@ class PirateBasicAssistant(Assistant):
         # Build generator
         generator = OpenAIChatGenerator(
             model=self.get_model(),
-            api_key=Secret.from_env_var("OPENAI_API_KEY"),
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
 

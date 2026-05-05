@@ -6,7 +6,7 @@ exclude = ["demo*", "logs*", "ideas*"]
 [project]
 dependencies = [
   "daphne>=4.2.1",
-  "django>=6.0.2",
+  "django>=5.2.6",
   "django-environ>=0.12.1",
   "django-ninja>=1.5.3",
   "loguru>=0.7.3",
@@ -20,7 +20,7 @@ requires-python = ">=3.12"
 version = "0.1.0"
 
 [project.optional-dependencies]
-all = ["django-ai-sdk[rag,haystack,openai,mistral]"]
+all = ["django-ai-sdk[rag,haystack,openai,mistral,restframework]"]
 haystack = [
   "chroma-haystack>=4.1.1",
   "fastembed-haystack>=2.1.0",
@@ -32,6 +32,7 @@ haystack = [
 mistral = ["mistralai>=1.12.3"]
 openai = ["openai>=1.0.0", "openai-agents>=0.10.2"]
 rag = ["bm25s>=0.3.0", "nltk>=3.9.3"]
+restframework = ["djangorestframework>=3.14.0"]
 [dependency-groups]
 dev = [
   "django-stubs>=5.2.9",

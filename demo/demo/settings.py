@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # third-party
     "django_watchfiles",
+    "rest_framework",
     "django_ai_sdk",
     # local
     "piratespeak",

@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from django.contrib.auth.models import User
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -18,7 +18,11 @@ class Thread(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=255, blank=True, default="")
     user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="ai_threads", null=True, blank=True
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ai_threads",
+        null=True,
+        blank=True,
     )
     file_memory = models.ForeignKey(
         "django_ai_sdk.Memory",
