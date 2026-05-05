@@ -141,7 +141,7 @@ class MemoryService:
             .select_related("entry")
             .order_by("-created_at")
         )
-        return [MemoryService._entry_doc_to_out(ed) for ed in entry_docs]
+        return [MemoryService._entry_doc_to_out(ed) async for ed in entry_docs]
 
     @staticmethod
     async def get_document(memory_id: str, doc_id: str) -> DocumentOut:
