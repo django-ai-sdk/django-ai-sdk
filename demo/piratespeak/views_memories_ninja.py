@@ -1,8 +1,8 @@
-from typing import Any
 
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
     BulkConnectMemoriesIn,
+    DocumentOut,
     MemoryIn,
     MemoryOut,
     ThreadMemoryOut,
@@ -43,25 +43,22 @@ async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None
     return 204, None
 
 
-@router.post("/{memory_id}/documents", response={200: Any, 400: Any})
+@router.post("/{memory_id}/documents", response={200: DocumentOut, 400: dict})
 async def upload_document(
     request: HttpRequest,
     memory_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> Any:
-    result = await MemoryService.upload_document(memory_id, file)
-    if isinstance(result, tuple):
-        return result
-    return result
+) -> DocumentOut | tuple[int, dict]:
+    return await MemoryService.upload_document(memory_id, file)
 
 
-@router.get("/{memory_id}/documents", response=list[Any])
-async def list_documents(request: HttpRequest, memory_id: str) -> list[Any]:
+@router.get("/{memory_id}/documents", response=list[DocumentOut])
+async def list_documents(request: HttpRequest, memory_id: str) -> list[DocumentOut]:
     return await MemoryService.list_documents(memory_id)
 
 
-@router.get("/{memory_id}/documents/{doc_id}", response=Any)
-async def get_document(request: HttpRequest, memory_id: str, doc_id: str) -> Any:
+@router.get("/{memory_id}/documents/{doc_id}", response=DocumentOut)
+async def get_document(request: HttpRequest, memory_id: str, doc_id: str) -> DocumentOut:
     return await MemoryService.get_document(memory_id, doc_id)
 
 
@@ -95,20 +92,17 @@ async def bulk_connect_memories(
     return await MemoryService.bulk_connect_memories(thread_id, payload.memory_ids)
 
 
-@router.post("/thread/{thread_id}/files", response={200: Any, 400: Any})
+@router.post("/thread/{thread_id}/files", response={200: DocumentOut, 400: dict})
 async def upload_thread_file(
     request: HttpRequest,
     thread_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> Any:
-    result = await MemoryService.upload_thread_file(thread_id, file)
-    if isinstance(result, tuple):
-        return result
-    return result
+) -> DocumentOut | tuple[int, dict]:
+    return await MemoryService.upload_thread_file(thread_id, file)
 
 
-@router.get("/thread/{thread_id}/files", response=list[Any])
-async def list_thread_files(request: HttpRequest, thread_id: str) -> list[Any]:
+@router.get("/thread/{thread_id}/files", response=list[DocumentOut])
+async def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
     return await MemoryService.list_thread_files(thread_id)
 
 
