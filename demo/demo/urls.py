@@ -17,9 +17,9 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path
-from django_ai_sdk.memories.views import router as memories_router
 from ninja import NinjaAPI
 
+from piratespeak.views_memories_ninja import router as memories_router
 from piratespeak.views_ninja import router as piratespeak_router
 
 # Create the main API instance
@@ -32,4 +32,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", api.urls),
     path("api/v2/", include("piratespeak.views_drf")),
+    path("api/v2/", include("piratespeak.views_memories_drf")),
 ]
