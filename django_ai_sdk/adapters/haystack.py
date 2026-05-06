@@ -557,3 +557,20 @@ class HaystackAdapter(BasePipelineAdapter):
         logger.info("Haystack pipeline completed successfully")
 
         yield StreamEndEvent()
+
+
+if TYPE_CHECKING:
+    from haystack.tools import Tool
+
+    from django_ai_sdk.mcp.client import MCPToolDescriptor
+
+
+def to_haystack_tool(descriptor: "MCPToolDescriptor") -> "Tool":
+    from haystack.tools import Tool
+
+    return Tool(
+        name=descriptor.name,
+        description=descriptor.description,
+        parameters=descriptor.parameters,
+        function=descriptor.function,
+    )

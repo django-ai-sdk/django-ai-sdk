@@ -97,6 +97,13 @@ class Assistant(ABC, AssistantInfoMixin):
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
 
+    # Names of MCP servers (from MCPServerConfig.name) this assistant opts in to.
+    # Empty list = no MCP tools. Must match names declared in AI_SDK_MCP_SERVERS setting.
+    mcp_servers: list[str] = []
+
+    # Per-assistant cache TTL override (seconds). None = use AI_SDK_MCP_CACHE_TTL setting.
+    mcp_cache_ttl: int | None = None
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
 
@@ -246,6 +253,49 @@ class Assistant(ABC, AssistantInfoMixin):
         for better organization and co-location.
         """
         return []
+
+    async def get_mcp_tools(self) -> list[Any]:
+        """
+        Discover and return tools from opted-in MCP servers.
+
+        Filters AI_SDK_MCP_SERVERS by the names listed in self.mcp_servers.
+        Unreachable servers are skipped with a warning.
+        Results are cached per URL with a configurable TTL.
+
+        Returns MCPToolDescriptor objects. Convert to
+        tool type before passing to the pipeline (e.g. mcp.haystack.to_haystack_tool).
+        """
+        if not self.mcp_servers:
+            return []
+
+        from django.conf import settings
+
+        from django_ai_sdk.mcp.client import MCPServerConfig, discover
+
+        global_configs: list[MCPServerConfig] = getattr(settings, "AI_SDK_MCP_SERVERS", [])
+        global_ttl: int = getattr(settings, "AI_SDK_MCP_CACHE_TTL", 300)
+        cache_ttl = self.mcp_cache_ttl if self.mcp_cache_ttl is not None else global_ttl
+
+        configs = [c for c in global_configs if c.name in self.mcp_servers]
+
+        tools: list[Any] = []
+        for config in configs:
+            server_label = f"{config.name} ({config.url})" if config.name else config.url
+            ttl = config.cache_ttl if config.cache_ttl is not None else cache_ttl
+            try:
+                discovered = await discover(config, cache_ttl=ttl)
+                tools.extend(discovered)
+                logger.debug(
+                    f"[MCP] {server_label} — added {len(discovered)} tool(s) "
+                    f"to {self.__class__.__name__}"
+                )
+            except Exception as exc:
+                cause = exc.exceptions[0] if isinstance(exc, BaseExceptionGroup) else exc
+                logger.warning(
+                    f"[MCP] Could not connect to {server_label} "
+                    f"for {self.__class__.__name__}: {cause}"
+                )
+        return tools
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
         """
