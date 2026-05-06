@@ -296,7 +296,7 @@ class MemoryService:
     async def list_thread_files(thread_id: str) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
         try:
-            thread = Thread.objects.select_related("file_memory").get(id=thread_id)
+            thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
         except Thread.DoesNotExist:
             return []
 
@@ -308,7 +308,7 @@ class MemoryService:
             .select_related("entry")
             .order_by("-created_at")
         )
-        return [MemoryService._entry_doc_to_out(ed) for ed in entry_docs]
+        return [MemoryService._entry_doc_to_out(ed) async for ed in entry_docs]
 
     @staticmethod
     async def delete_thread_file(thread_id: str, doc_id: str) -> None:
