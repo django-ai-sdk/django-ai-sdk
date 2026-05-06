@@ -24,7 +24,7 @@ class BaseStorageConfig(BaseModel):
         persist_path = getattr(settings, "AI_SDK_VECTOR_STORE_PATH", None)
         if not persist_path:
             return None
-        base_path = persist_path.rstrip("/")
+        base_path = str(persist_path).rstrip("/")
         return f"{base_path}/{backend}/{memory_id}"
 
     @classmethod
