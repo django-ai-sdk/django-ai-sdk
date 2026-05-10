@@ -1,9 +1,8 @@
 from django_ai_sdk.views.schemas import Message
 
 
-# TODO: will do for now, but not the cleanest.
-# but we could ask LLM as helper, to generate a proper title.
 def generate_thread_title(messages: list[Message]) -> str:
+    """Extract a thread title from the first user message. Returns empty string if none found."""
     for message in messages:
         if message.role != "user":
             continue
@@ -12,4 +11,4 @@ def generate_thread_title(messages: list[Message]) -> str:
                 text = part.text
                 title = text[:50].strip()
                 return title + "..." if len(text) > 50 else title
-    return "New Conversation"
+    return ""

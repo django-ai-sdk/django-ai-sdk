@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -107,6 +108,29 @@ class BaseStorageAdapter(ABC):
             thread_id: Unique identifier for the conversation thread
         """
         self.thread_id = thread_id
+        # Optional hook called after every successful storage_callback.
+        # Set this to an async callable (ChatMessage) -> None to run custom
+        # logic (e.g. title generation) without subclassing.
+        # Adapters are created per-request, so this is effectively per-request state.
+        self.post_store_hook: Callable[[ChatMessage], Awaitable[None]] | None = None
+
+    async def _run_post_store_hook(self, chat_message: "ChatMessage") -> None:
+        """
+        Run ``post_store_hook`` if set. Called by ``storage_callback`` implementations
+        after persistence succeeds. Errors are logged but not raised — a broken hook
+        must never break streaming.
+
+        Subclasses should call this from their ``storage_callback`` rather than
+        invoking ``post_store_hook`` directly, so all adapters behave consistently.
+        """
+        if self.post_store_hook is None:
+            return
+        try:
+            await self.post_store_hook(chat_message)
+        except Exception as hook_error:
+            import logging
+
+            logging.getLogger(__name__).error(f"post_store_hook failed: {hook_error}")
 
     # ============================================================================
     # CLASS METHODS - Thread Management

@@ -372,6 +372,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             message = MemoryMessage.from_chat_message(self.thread_id, chat_message)
             MemoryStore.add_message(self.thread_id, message)
             logger.debug(f"Message saved to memory store with ID: {message.id}")
+            await self._run_post_store_hook(chat_message)
             return message.id
         except Exception as error:
             logger.error(f"Memory storage failed: {error}")
