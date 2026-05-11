@@ -13,6 +13,7 @@ from haystack.dataclasses import StreamingChunk
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
+from django_ai_sdk.citations import CitationRegistry
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -22,6 +23,7 @@ from django_ai_sdk.events import (
     ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
+    SourceEvent,
     StreamEndEvent,
     StreamEvent,
     TextChunkEvent,
@@ -83,6 +85,7 @@ class HaystackAdapter(BasePipelineAdapter):
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         rag_pipeline: Any = None,
+        citation_registry: CitationRegistry | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.generator = generator
@@ -91,6 +94,8 @@ class HaystackAdapter(BasePipelineAdapter):
         self.rag_pipeline = (
             rag_pipeline  # TODO: we probably don't need this, we can check pipeline directly
         )
+        self.citation_registry = citation_registry
+        self._sources_emitted = 0
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
@@ -409,6 +414,17 @@ class HaystackAdapter(BasePipelineAdapter):
                                 tool_call_id=tool_call_id,
                                 tool_output=tool_output,
                             )
+
+                            if self.citation_registry is not None:
+                                all_sources = self.citation_registry.all_sources
+                                for source in all_sources[self._sources_emitted :]:
+                                    yield SourceEvent(
+                                        index=source.index,
+                                        title=source.title,
+                                        content=source.content,
+                                        tool_call_id=tool_call_id,
+                                    )
+                                self._sources_emitted = len(all_sources)
 
                         elif event_type == "usage":
                             # Usage data from streaming chunk (when stream_options={"include_usage": True})

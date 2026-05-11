@@ -5,6 +5,11 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.citations import (
+    CitationFormatter,
+    CitationRegistry,
+    DefaultCitationFormatter,
+)
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
@@ -106,6 +111,9 @@ class Assistant(ABC, AssistantInfoMixin):
     # Enable automatic thread title generation based on chat messages
     title_generation: bool = True
 
+    # Citation formatter used to render retrieved documents for the LLM.
+    citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
 
@@ -150,7 +158,10 @@ class Assistant(ABC, AssistantInfoMixin):
 
     @classmethod
     async def reindex(
-        cls, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        cls,
+        assistant: "Assistant",
+        memory_id: str | None = None,
+        force_rebuild: bool = False,
     ) -> Any:
         """
         Reindex the RAG pipeline for this assistant.
@@ -193,7 +204,9 @@ class Assistant(ABC, AssistantInfoMixin):
             # Warmup RAG provider on init
             # TODO: delegate this to background task and check status.
             # for now this won't block the main thread, but it can become very slow.
-            asyncio.get_event_loop().run_until_complete(self.rag_provider.warmup(self, None))
+            asyncio.get_event_loop().run_until_complete(
+                self.rag_provider.warmup(self, None)
+            )
 
     async def get_storage_adapter(
         self, thread_id: str | None = None
@@ -241,6 +254,18 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return the model identifier."""
         return self.model or ""
 
+    def get_citation_formatter(self) -> CitationFormatter:
+        """Return the formatter used to render retrieved docs for the LLM.
+
+        Override to inject formatter dependencies; otherwise swap formatters by
+        setting the citation_formatter_class class attribute.
+        """
+        return self.citation_formatter_class()
+
+    def get_citation_registry(self) -> CitationRegistry:
+        """Return a fresh per-turn registry so citation indices reset between turns."""
+        return CitationRegistry()
+
     def get_tools(self) -> list[Any]:
         """
         Return list of available tools.
@@ -275,7 +300,9 @@ class Assistant(ABC, AssistantInfoMixin):
             return Entry.objects.filter(memory_id=memory_id)
         return Entry.objects.all()
 
-    async def get_rag_documents(self, memory_id: str | None = None) -> list["RagDocument"]:
+    async def get_rag_documents(
+        self, memory_id: str | None = None
+    ) -> list["RagDocument"]:
         """
         Get documents for RAG as RagDocuments.
 
@@ -294,7 +321,9 @@ class Assistant(ABC, AssistantInfoMixin):
         logger.info(
             f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}"
         )
-        logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
+        logger.debug(
+            f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}"
+        )
 
         queryset = await self.get_rag_queryset(memory_id)
         logger.info(f"[get_rag_documents] Got queryset, type={type(queryset).__name__}")
@@ -377,7 +406,9 @@ class Assistant(ABC, AssistantInfoMixin):
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
-        logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
+        logger.debug(
+            f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format"
+        )
 
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
