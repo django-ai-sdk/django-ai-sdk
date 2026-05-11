@@ -6,6 +6,7 @@ from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.citations import CitationFormatter, CitationRegistry
 
 logger = get_logger(__name__)
 
@@ -68,27 +69,40 @@ class HaystackRAGProvider(BaseRAGProvider):
         """
         return await self._get_or_create_rag(assistant, memory_id, False)
 
-    async def build_tool(self, rag_instance: Any) -> Any:
-        """
-        Build a ComponentTool from the Haystack RAG instance.
+    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
+        """Build a ComponentTool from a Haystack RAG instance.
 
-        Delegates to the RAG's as_tool() method.
+        Uses the RAG's spec-aware get_tool when a spec is given, otherwise
+        falls back to as_tool.
 
         Args:
             rag_instance: The RAG instance from get_rag_instance()
+            spec: Optional Haystack tool spec for custom names/descriptions
 
         Returns:
             ComponentTool ready for Haystack ToolAgent, or None
         """
-
         if rag_instance is None:
             return None
-
+        if spec is not None and hasattr(rag_instance, "get_tool"):
+            return rag_instance.get_tool(spec)
         if hasattr(rag_instance, "as_tool"):
             return rag_instance.as_tool()
-
-        logger.warning("Cannot build ComponentTool: rag_instance does not have as_tool() method")
+        logger.warning(
+            "Cannot build ComponentTool: rag_instance has neither get_tool() nor as_tool()"
+        )
         return None
+
+    def _attach_citations(
+        self,
+        tool: Any,
+        formatter: "CitationFormatter",
+        registry: "CitationRegistry",
+    ) -> None:
+        """Wire a Haystack ComponentTool via the haystack citation bridge."""
+        from django_ai_sdk.citations.haystack import attach_citations  # noqa: PLC0415
+
+        attach_citations(tool, formatter, registry)
 
     def clear_cache(self) -> None:
         """Clear the RAG cache."""

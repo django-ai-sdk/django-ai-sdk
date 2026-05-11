@@ -92,15 +92,7 @@ class ThreadService:
         Raises:
             ValueError: If thread or message not found
         """
-        from django_ai_sdk.assistants.services import AssistantService
-
-        thread_info = await ThreadService.get_thread(thread_id)
-        if thread_info is None:
-            raise ValueError("Thread not found")
-
-        assistant = AssistantService.from_registry(thread_info.assistant_id)
-        storage = ThreadService.get_storage(assistant)(thread_id)
-
+        storage = await ThreadService.storage_for_thread(thread_id)
         success = await storage.rate_message(message_id, rating)
         if not success:
             raise ValueError("Message not found")
@@ -121,15 +113,7 @@ class ThreadService:
         Raises:
             ValueError: If thread or message not found
         """
-        from django_ai_sdk.assistants.services import AssistantService
-
-        thread_info = await ThreadService.get_thread(thread_id)
-        if thread_info is None:
-            raise ValueError("Thread not found")
-
-        assistant = AssistantService.from_registry(thread_info.assistant_id)
-        storage = ThreadService.get_storage(assistant)(thread_id)
-
+        storage = await ThreadService.storage_for_thread(thread_id)
         success = await storage.delete_message(message_id)
         if not success:
             raise ValueError("Message not found")
@@ -150,15 +134,7 @@ class ThreadService:
         Raises:
             ValueError: If thread or message not found
         """
-        from django_ai_sdk.assistants.services import AssistantService
-
-        thread_info = await ThreadService.get_thread(thread_id)
-        if thread_info is None:
-            raise ValueError("Thread not found")
-
-        assistant = AssistantService.from_registry(thread_info.assistant_id)
-        storage = ThreadService.get_storage(assistant)(thread_id)
-
+        storage = await ThreadService.storage_for_thread(thread_id)
         success = await storage.restore_message(message_id)
         if not success:
             raise ValueError("Message not found")
@@ -271,6 +247,25 @@ class ThreadService:
                 total_deleted += count
 
         return total_deleted
+
+    @staticmethod
+    async def storage_for_thread(thread_id: str) -> Any:
+        """Resolve a thread's storage adapter, instantiated and bound to the thread.
+
+        Convenience for the common pattern: look up the thread, find its
+        assistant, get the assistant's storage class, instantiate with
+        thread_id. Returns a ready-to-use storage adapter instance.
+
+        Raises ValueError if the thread does not exist or the assistant
+        has no storage_adapter configured.
+        """
+        from django_ai_sdk.assistants.services import AssistantService  # noqa: PLC0415
+
+        thread_info = await ThreadService.get_thread(thread_id)
+        if thread_info is None:
+            raise ValueError(f"Thread not found: {thread_id}")
+        assistant = AssistantService.from_registry(thread_info.assistant_id)
+        return ThreadService.get_storage(assistant)(thread_id)
 
     @staticmethod
     def get_storage(assistant: Any) -> type:

@@ -5,6 +5,11 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.citations import (
+    CitationFormatter,
+    CitationRegistry,
+    DefaultCitationFormatter,
+)
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
@@ -96,6 +101,10 @@ class Assistant(ABC, AssistantInfoMixin):
 
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
+
+    # Citation formatter used to render retrieved documents for the LLM.
+    # Subclasses can swap in a custom formatter by overriding this class attr.
+    citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
@@ -236,6 +245,18 @@ class Assistant(ABC, AssistantInfoMixin):
     def get_model(self) -> str:
         """Return the model identifier."""
         return self.model or ""
+
+    def get_citation_formatter(self) -> CitationFormatter:
+        """Return the formatter used to render retrieved docs for the LLM.
+
+        Override to inject formatter dependencies; otherwise swap formatters by
+        setting the citation_formatter_class class attribute.
+        """
+        return self.citation_formatter_class()
+
+    def get_citation_registry(self) -> CitationRegistry:
+        """Return a fresh per-turn registry so citation indices reset between turns."""
+        return CitationRegistry()
 
     def get_tools(self) -> list[Any]:
         """

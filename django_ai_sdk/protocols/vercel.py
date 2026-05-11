@@ -12,6 +12,7 @@ from django_ai_sdk.events import (
     MessageEndEvent,
     MessageStartEvent,
     ReasoningChunkEvent,
+    SourceEvent,
     StreamEvent,
     TextChunkEvent,
     ToolCallStartEvent,
@@ -432,6 +433,17 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     # Convert intermediate DataEvent to Vercel DataPart
                     data_event = cast("DataEvent", event)
                     yield DataPart(type=f"data-{data_event.data_type}", data=data_event.data)
+
+                case "source":
+                    src = cast("SourceEvent", event)
+                    yield DataPart(
+                        type="data-source",
+                        data={
+                            "index": src.index,
+                            "title": src.title,
+                            "content": src.content,
+                        },
+                    )
 
                 case "error":
                     error_event = cast("ErrorEvent", event)
