@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -209,6 +210,7 @@ class RAGProvider(BaseRAGProvider):
     def __init__(self) -> None:
         """Initialize provider with empty cache."""
         self._cache: dict[str, Any] = {}
+        self._warmup_locks: dict[str, asyncio.Lock] = {}
         logger.debug("RAGProvider initialized")
 
     async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
@@ -247,7 +249,8 @@ class RAGProvider(BaseRAGProvider):
         Get the RAG instance (cached or newly created).
 
         Returns the BaseRAGAdapter instance directly (not wrapped as a tool).
-        The instance is cached and warmed up if needed.
+        Uses double-checked locking so concurrent calls for the same key
+        serialize on warmup rather than racing to build the index twice.
 
         Args:
             assistant: The assistant instance
@@ -258,11 +261,20 @@ class RAGProvider(BaseRAGProvider):
         """
         cache_key = self._get_cache_key(assistant, memory_id)
 
-        if cache_key not in self._cache:
+        # Fast path.
+        if cache_key in self._cache:
+            logger.debug(f"Using cached Base RAG for {cache_key}")
+            return self._cache.get(cache_key)
+
+        # Slow path: serialize warmup per key.
+        lock = self._warmup_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            if cache_key in self._cache:
+                logger.debug(f"Using cached Base RAG for {cache_key} (post-lock cache hit)")
+                return self._cache.get(cache_key)
+
             logger.debug(f"Creating Base RAG for {cache_key}")
             await self.warmup(assistant, memory_id)
-        else:
-            logger.debug(f"Using cached Base RAG for {cache_key}")
 
         return self._cache.get(cache_key)
 

@@ -258,6 +258,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             MultiQueryQdrantHybridRetriever(
                 document_store=document_store,
                 top_k=self.config.top_k,
+                min_score=self.config.min_score,
                 sparse_embedder_model=self.config.sparse_embedder_model,
                 dense_embedder_model=self.config.dense_embedder_model,
             ),

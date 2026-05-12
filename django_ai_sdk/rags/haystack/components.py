@@ -42,13 +42,16 @@ class MultiQueryDeduplicationMixin:
     def deduplicate_and_rank(
         results: list[dict[str, list[HaystackDocument]]],
         top_k: int,
+        min_score: float | None = None,
     ) -> list[HaystackDocument]:
         """
-        Deduplicate documents across multiple query results and rank by score.
+        Deduplicate documents across multiple query results, filter by score, and rank.
 
         Args:
             results: List of retrieval result dicts, each containing "documents"
             top_k: Maximum number of documents to return
+            min_score: Minimum score threshold; documents below this are dropped.
+                       None disables filtering.
 
         Returns:
             List of unique documents sorted by score (descending), limited to top_k
@@ -66,6 +69,10 @@ class MultiQueryDeduplicationMixin:
             key=lambda x: x.score if hasattr(x, "score") and x.score is not None else 0.0,
             reverse=True,
         )
+
+        # Keep filter for non native support for min_score (BM25 e.g.)
+        if min_score is not None:
+            docs = [d for d in docs if (d.score or 0.0) >= min_score]
 
         return docs[:top_k]
 
@@ -99,9 +106,11 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
         self,
         document_store: Any,
         top_k: int = 3,
+        min_score: float | None = None,
     ) -> None:
         self.document_store = document_store
         self.top_k = top_k
+        self.min_score = min_score
         self._retriever: Any
 
     def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
@@ -142,8 +151,7 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
             result = self.retrieve(query, k)
             results.append(result)
 
-        # Deduplicate and rank using mixin method
-        docs = self.deduplicate_and_rank(results, k)
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
         return {"documents": docs}
 
 
@@ -237,11 +245,13 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         self,
         document_store: Any,
         top_k: int = 3,
+        min_score: float | None = None,
         sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
         dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     ) -> None:
         self.document_store = document_store
         self.top_k = top_k
+        self.min_score = min_score
         self.sparse_embedder_model = sparse_embedder_model
         self.dense_embedder_model = dense_embedder_model
         self._sparse_embedder: Any | None = None
@@ -291,7 +301,10 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         for query in queries:
             sparse_result = self._sparse_embedder.run(text=query)
             dense_result = self._dense_embedder.run(text=query)
-            retriever = QdrantHybridRetriever(document_store=self.document_store)
+            retriever = QdrantHybridRetriever(
+                document_store=self.document_store,
+                score_threshold=self.min_score,
+            )
             result = retriever.run(
                 query_sparse_embedding=sparse_result["sparse_embedding"],
                 query_embedding=dense_result["embedding"],
@@ -300,5 +313,5 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
             results.append(result)
 
         # Deduplicate and rank using mixin
-        docs = self.deduplicate_and_rank(results, k)
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
         return {"documents": docs}

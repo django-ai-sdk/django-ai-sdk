@@ -50,6 +50,10 @@ class BaseHaystackRAGConfig(BaseModel):
     """
 
     top_k: int = Field(default=5, ge=1, description="Maximum documents to retrieve per query")
+    min_score: float | None = Field(
+        default=None,
+        description="Drop documents below this relevance score. None disables filtering.",
+    )
     n_expansions: int = Field(
         default=4,
         ge=1,

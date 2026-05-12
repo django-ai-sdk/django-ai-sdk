@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
@@ -30,6 +31,11 @@ class HaystackRAGProvider(BaseRAGProvider):
     def __init__(self) -> None:
         # Cache: key = "{class_name}_{memory_id}", value = RAG instance
         self._cache: dict[str, Any] = {}
+        # Per-key locks prevent concurrent warmups for the same memory_id.
+        # Backends like Qdrant local hold an exclusive file lock during warmup;
+        # a second concurrent call for the same key would crash rather than wait.
+        # Using one asyncio.Lock per key keeps the fast path (warm cache) lock-free.
+        self._warmup_locks: dict[str, asyncio.Lock] = {}
 
     async def warmup(
         self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
@@ -175,7 +181,13 @@ class HaystackRAGProvider(BaseRAGProvider):
         """
         Get cached RAG or create and cache it.
 
-        Always caches the RAG instance.
+        Uses double-checked locking to handle concurrent calls for the same
+        cache key safely:
+        - Fast path: warm cache is returned immediately without acquiring any lock.
+        - Slow path: a per-key asyncio.Lock serializes concurrent warmups so that
+          only one coroutine builds the index while others wait, then get the cached
+          result instead of repeating the expensive (and potentially exclusive-lock-
+          holding) warmup.
 
         Args:
             assistant: The assistant instance
@@ -183,14 +195,28 @@ class HaystackRAGProvider(BaseRAGProvider):
             force_rebuild: If True, forces a complete rebuild of the index
         """
         cache_key = self._get_cache_key(assistant, memory_id)
-        logger.info(
-            f"[_get_or_create_rag] cache_key={cache_key}, memory_id={memory_id}, force_rebuild={force_rebuild}, cache_hit={cache_key in self._cache and not force_rebuild}"
-        )
 
-        if cache_key not in self._cache or force_rebuild:
+        # Fast path: return immediately if already cached and no rebuild requested.
+        if cache_key in self._cache and not force_rebuild:
+            logger.debug(f"Using cached Haystack RAG for {cache_key}")
+            return self._cache[cache_key]
+
+        # Slow path: serialize warmup per key.
+        # setdefault is a single dict operation — no await between check and insert,
+        # so concurrent coroutines always resolve to the same Lock object for a key.
+        lock = self._warmup_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            # Re-check after acquiring the lock: a previous waiter may have already
+            # populated the cache while we were waiting.
+            if cache_key in self._cache and not force_rebuild:
+                logger.debug(f"Using cached Haystack RAG for {cache_key} (post-lock cache hit)")
+                return self._cache[cache_key]
+
+            logger.info(
+                f"[_get_or_create_rag] cache_key={cache_key}, memory_id={memory_id}, force_rebuild={force_rebuild}"
+            )
             logger.debug(f"Creating Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
-            # Get RAG from assistant
             logger.info(
                 f"[_get_or_create_rag] Calling assistant.get_rag_pipeline(memory_id={memory_id})"
             )
@@ -198,21 +224,15 @@ class HaystackRAGProvider(BaseRAGProvider):
             logger.info(f"[_get_or_create_rag] Got rag={rag is not None}")
 
             if rag is not None:
-                # Warm up the RAG
                 if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
                     if rag.needs_warmup or force_rebuild:
                         logger.debug(
                             f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})"
                         )
                         rag.warmup(force_rebuild)
-
-                # Cache the RAG
                 self._cache[cache_key] = rag
             else:
                 self._cache[cache_key] = None
 
             logger.debug(f"Haystack RAG created and cached for {cache_key}")
-        else:
-            logger.debug(f"Using cached Haystack RAG for {cache_key}")
-
-        return self._cache[cache_key]
+            return self._cache[cache_key]
