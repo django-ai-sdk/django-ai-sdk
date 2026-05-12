@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from django.http import StreamingHttpResponse
 
@@ -15,6 +15,7 @@ async def stream_response(
     messages: list[ChatMessage],
     protocol_handler: BaseProtocolHandler,
     extra_headers: dict[str, str] | None = None,
+    on_complete: Callable[[], Awaitable[None]] | None = None,
 ) -> StreamingHttpResponse:
     """
     Generic streaming chat view that works with any pipeline adapter and protocol handler.
@@ -39,8 +40,22 @@ async def stream_response(
     # Note: sse() is an async generator method, calling it returns a coroutine
     # that resolves to an async generator. StreamingHttpResponse handles this.
     sse_stream = protocol_handler.sse(adapter, messages)
+
+    if on_complete is not None:
+        async def _with_on_complete():
+            async for chunk in sse_stream:
+                yield chunk
+            try:
+                await on_complete()
+            except Exception as completion_error:
+                logger.error(f"stream on_complete failed: {completion_error}")
+
+        body = _with_on_complete()
+    else:
+        body = sse_stream
+
     response = StreamingHttpResponse(  # type: ignore[arg-type]
-        sse_stream,
+        body,
         content_type="text/event-stream",
     )
 

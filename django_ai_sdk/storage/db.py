@@ -231,7 +231,6 @@ class DbStorageAdapter(BaseStorageAdapter):
 
             await message.asave()
             logger.debug(f"Message saved: id={message.id}, thread={message.thread_id}")
-            await self._run_post_store_hook(chat_message)
             return str(message.id)
         except Exception as database_error:
             logger.error(

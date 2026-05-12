@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -13,7 +14,6 @@ from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
 
 if TYPE_CHECKING:
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
@@ -331,26 +331,26 @@ class Assistant(ABC, AssistantInfoMixin):
     # ------------------------------------------------------------------
     # Thread title generation
     #
-    # Hardcoded to ``openai.AsyncOpenAI`` against the Django OPENAI_* settings.
+    # Hardcoded to openai.AsyncOpenAI against the Django OPENAI_* settings.
     # That covers any OpenAI-compatible endpoint (OpenAI, vLLM, Together,
-    # OpenRouter, Nebul, …).
+    # OpenRouter, Nebul, etc).
     #
-    # TODO: should be extensible once the SDK has a unified provider
+    # TODO: should be extensible once the SDK has a unified provider (LLM)
     # abstraction. 
     # ------------------------------------------------------------------
 
     #: Whether thread titles are generated automatically after the first
-    #: assistant response. Set ``False`` to disable entirely (no LLM call,
-    #: no fallback — the application is responsible for setting titles).
+    #: assistant response. Set False to disable entirely (no LLM call,
+    #: no fallback - the application is responsible for setting titles).
     title_generation: bool = True
 
     #: Hard fallback used when both the LLM and the user-message fallback
     #: yield nothing. Override per assistant for branding/locale ("New chat",
-    #: "Nieuw gesprek", a timestamp, …).
+    #: "Nieuw gesprek", a timestamp, etc).
     title_fallback_default: str = "New conversation"
 
-    #: Prompt template used for thread title generation. ``{chat_history}``
-    #: is interpolated with ``role: content`` lines from the message context.
+    #: Prompt template used for thread title generation. {chat_history}
+    #: is interpolated with role: content lines from the message context.
     #: Override on the subclass to drop the emoji, change examples, or
     #: localize the instructions.
     title_prompt_template: str = (
@@ -378,8 +378,8 @@ class Assistant(ABC, AssistantInfoMixin):
         self, message_context: list[tuple[str, str]]
     ) -> str | None:
         """
-        Call the LLM to generate a thread title. Returns ``None`` if the LLM
-        is unavailable or the response is unusable — caller falls back.
+        Call the LLM to generate a thread title. Returns None` if the LLM
+        is unavailable or the response is unusable - caller falls back.
 
         Override to use a non-OpenAI provider, change parsing, or restructure
         the call entirely. See the TODO comment above the section for context
@@ -429,9 +429,9 @@ class Assistant(ABC, AssistantInfoMixin):
         self, message_context: list[tuple[str, str]]
     ) -> str:
         """
-        Always-non-empty fallback used when ``generate_thread_title`` returns
-        ``None``. Default: first ~50 chars of the first user message, or
-        ``title_fallback_default`` if no user message has content.
+        Always-non-empty fallback used when generate_thread_title returns
+        None. Default: first ~50 chars of the first user message, or
+        title_fallback_default if no user message has content.
         """
         for role, content in message_context:
             if role != "user":
@@ -446,12 +446,12 @@ class Assistant(ABC, AssistantInfoMixin):
         self, thread_id: str, message_context: list[tuple[str, str]]
     ) -> None:
         """
-        Generate and persist a title for ``thread_id``.
+        Generate and persist a title for thread_id.
 
         Called from the post-store hook, which is installed only when the
-        thread had no title at request start (see ``as_view``). Always writes
-        *some* title — LLM result if available, otherwise the fallback. The
-        hook is therefore one-shot: after this runs, ``thread.title`` is
+        thread had no title at request start (see as_view). Always writes
+        *some* title - LLM result if available, otherwise the fallback. The
+        hook is therefore one-shot: after this runs, thread.title is
         non-empty and the hook is never reinstalled.
         """
         from django_ai_sdk.storage.services import ThreadService
@@ -464,17 +464,12 @@ class Assistant(ABC, AssistantInfoMixin):
         logger.debug(f"Persisted title for thread {thread_id}: {title!r}")
 
     @abstractmethod
-    async def get_pipeline_adapter(
-        self, thread_id: str | None = None, storage_adapter: Any = None
-    ) -> Any:
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
         """
         Create and return pipeline adapter.
 
         Args:
             thread_id: Optional thread ID for conversation persistence.
-            storage_adapter: Optional pre-fetched storage adapter instance.
-                             When provided, implementations should use it directly
-                             instead of re-fetching via get_storage_adapter().
 
         Returns:
             BasePipelineAdapter instance
@@ -583,39 +578,36 @@ class Assistant(ABC, AssistantInfoMixin):
             else:
                 logger.debug("No user messages found to store")
 
-            # Install the title-generation hook only when the thread has no
-            # title yet. _maybe_generate_title always writes *some* title
-            # (LLM or fallback), so this branch only runs once per thread.
-            # Skipped entirely when the assistant has disabled title generation.
+        # Decide whether this request should trigger title generation. We
+        # do it as a stream-completion callback rather than via a hook on
+        # the storage adapter, so the assistant fully owns its lifecycle
+        # and the pipeline doesn't need the storage instance threaded in.
+        on_complete: Callable[[], Awaitable[None]] | None = None
+        if thread_id and self.title_generation:
             from django_ai_sdk.storage.services import ThreadService
 
-            existing_thread = (
-                await ThreadService.get_thread(thread_id)
-                if self.title_generation
-                else None
-            )
+            existing_thread = await ThreadService.get_thread(thread_id)
             if existing_thread is not None and not existing_thread.title:
-                # Snapshot (role, content) tuples — the pipeline mutates the
-                # live ChatMessage objects (e.g. assigns IDs), and we want a
-                # stable, immutable context for title generation.
                 _message_context: list[tuple[str, str]] = [
                     (m.role, m.content) for m in messages if m.role and m.content
                 ]
                 _thread_id_for_title = thread_id
 
-                async def _title_hook(_message: "ChatMessage") -> None:
+                async def _generate_title_on_complete() -> None:
                     await self._maybe_generate_title(
                         _thread_id_for_title, _message_context
                     )
 
-                storage_adapter.post_store_hook = _title_hook
+                on_complete = _generate_title_on_complete
 
         # Create fresh adapter each time
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
-        adapter = await self.get_pipeline_adapter(thread_id=thread_id, storage_adapter=storage_adapter)
+        adapter = await self.get_pipeline_adapter(thread_id=thread_id)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
         logger.debug("Initiating stream response")
-        return await stream_response(adapter, messages, self.protocol_handler)
+        return await stream_response(
+            adapter, messages, self.protocol_handler, on_complete=on_complete
+        )
