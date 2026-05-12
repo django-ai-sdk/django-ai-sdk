@@ -82,6 +82,9 @@ class Assistant(ABC, AssistantInfoMixin):
     model: str | None = None
     instructions: list[str] | str | None = None
 
+    # Default list of connected memories
+    memories: list[str] = []
+
     protocol = None
     storage: type["BaseStorageAdapter"] | None = None
 

@@ -3,6 +3,7 @@ from typing import Any
 from asgiref.sync import async_to_sync
 from django.db.models import Count
 
+from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
@@ -60,6 +61,23 @@ class MemoryService:
             )
             async for memory in memories
         ]
+
+    @staticmethod
+    async def get_assistant_memories(assistant_id: str) -> list[str]:
+        assistant = AssistantService.from_registry(assistant_id)
+        return [
+            str(m.id) async for m in Memory.objects.filter(name__in=assistant.memories).distinct()
+        ]
+
+    @staticmethod
+    async def link_memories(assistant_id: str, thread_id: str) -> None:
+        for memory_id in await MemoryService.get_assistant_memories(assistant_id):
+            await MemoryService.link_memory_to_thread(memory_id, thread_id)
+
+    @staticmethod
+    async def unlink_memories(assistant_id: str, thread_id: str) -> None:
+        for memory_id in await MemoryService.get_assistant_memories(assistant_id):
+            await MemoryService.unlink_memory_from_thread(memory_id, thread_id)
 
     @staticmethod
     async def get_memory(memory_id: str) -> MemoryOut:
