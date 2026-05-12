@@ -1,7 +1,8 @@
+from haystack.utils import Secret
 from haystack_integrations.tools.mcp import MCPToolset, StreamableHttpServerInfo
 
 
-def get_mcp_server(url: str, tools: list[str]) -> MCPToolset:
+def get_mcp_server(url: str, tools: list[str], token: str | None = None) -> MCPToolset:
     """
     Creates an MCPToolset for the given server URL.
 
@@ -12,5 +13,10 @@ def get_mcp_server(url: str, tools: list[str]) -> MCPToolset:
         MCPToolset: An instance of MCPToolset configured with the given server URL.
     """
 
-    server_info = StreamableHttpServerInfo(url=url)
-    return MCPToolset(server_info=server_info, tool_names=tools)
+    server_info = StreamableHttpServerInfo(
+        url=url,
+        token=Secret.from_token(token) if token else None,
+    )
+
+    # TODO: check if we need to warmup? This would be better then eager_connect
+    return MCPToolset(server_info=server_info, tool_names=tools, eager_connect=True)
