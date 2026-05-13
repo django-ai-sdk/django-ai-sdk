@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from django_ai_sdk.logger import get_logger
 
@@ -13,6 +13,7 @@ class NumberedSource(BaseModel):
     index: int
     title: str
     content: str
+    metadata: dict = Field(default_factory=dict)
 
 
 class CitationFormatter(Protocol):
@@ -26,7 +27,7 @@ class CitationFormatter(Protocol):
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
         """Return (llm_visible_string, ordered_sources).
 
-        start_index is the first citation number to assign — callers pass the
+        start_index is the first citation number to assign - callers pass the
         registry's next_index so numbering stays cumulative across multiple
         retrievals within the same turn.
         """
@@ -36,7 +37,7 @@ class CitationFormatter(Protocol):
 class DefaultCitationFormatter:
     """XML-tagged numbered citation format. Works with any chat LLM.
 
-    The default PREAMBLE defines only the *format contract* — what the
+    The default PREAMBLE defines only the *format contract* - what the
     <source id="N"> tags mean and how to cite them. Strong models (GPT-4,
     Claude, etc.) follow this on its own.
 
@@ -87,6 +88,11 @@ class DefaultCitationFormatter:
             else:
                 title = base
             content = doc.get("content") or ""
-            sources.append(NumberedSource(index=idx, title=title, content=content))
+            metadata_dict = {
+                k: v for k, v in meta.items() if k in ("file_name", "page_number", "split_id")
+            }
+            sources.append(
+                NumberedSource(index=idx, title=title, content=content, metadata=metadata_dict)
+            )
             lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
         return "\n".join(lines), sources
