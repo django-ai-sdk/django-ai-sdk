@@ -1,17 +1,19 @@
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
+from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
@@ -100,6 +102,9 @@ class Assistant(ABC, AssistantInfoMixin):
 
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
+
+    # Enable automatic thread title generation based on chat messages
+    title_generation: bool = True
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
@@ -456,6 +461,10 @@ class Assistant(ABC, AssistantInfoMixin):
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
         adapter = await self.get_pipeline_adapter(thread_id=thread_id)
+
+        if self.title_generation and thread_id:
+            title = await generate_thread_title(assistant=self, messages=messages)
+            await ThreadService.update_thread(thread_id, title)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
