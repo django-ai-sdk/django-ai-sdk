@@ -25,7 +25,7 @@ class BasePipelineAdapter(ABC):
     query: str | None = None
 
     # Message processing configuration
-    merge_messages: bool = False  # Default: preserve message boundaries
+    merge_messages: bool = False
 
     def __init__(self) -> None:
         self.message_result: ChatMessage | None = None

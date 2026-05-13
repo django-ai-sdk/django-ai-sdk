@@ -214,10 +214,9 @@ class OpenAIAdapter(BasePipelineAdapter):
         logger.debug(f"Starting OpenAI stream with {len(messages)} input messages")
 
         # Build message list fresh to ensure proper structure
-        # Order: 1. Instructions (if present), 2. RAG Context (if present), 3. Conversation
         openai_messages: list[ChatCompletionMessageParam] = []
 
-        # 1. Add instructions as separate system message (immutable, developer-controlled)
+        # 1. Add instructions as separate system message
         if self.instructions:
             openai_messages.append(
                 cast("ChatCompletionMessageParam", {"role": "system", "content": self.instructions})

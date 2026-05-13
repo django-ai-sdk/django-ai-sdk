@@ -2,7 +2,6 @@ from typing import Any
 
 from asgiref.sync import async_to_sync
 
-from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
@@ -52,25 +51,18 @@ class ThreadService:
             raise ValueError(f"Assistant not found: {assistant_id}")
 
         storage_class = assistant.storage_adapter
-        if storage_class is None:
-            from django_ai_sdk.storage.memory import MemoryStorageAdapter
-
-            storage_class = MemoryStorageAdapter
-
-        title = title or generate_thread_title(messages or [])
-
-        metadata = metadata or {}
-        auto_metadata = {
+        title = title or ""
+        default_metadata = {
             "assistant_id": assistant_id,
             "model": assistant.model,
             "assistant_name": assistant.name or assistant.__class__.__name__,
             "assistant_class": assistant.__class__.__name__,
             "created_via": "create_thread",
         }
-        auto_metadata.update(metadata)
+        default_metadata.update(metadata or {})
 
         thread_id = await storage_class.create_thread(
-            title=title, metadata=auto_metadata, user_id=user_id, thread_id=thread_id
+            title=title, metadata=default_metadata, user_id=user_id, thread_id=thread_id
         )
 
         logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")
