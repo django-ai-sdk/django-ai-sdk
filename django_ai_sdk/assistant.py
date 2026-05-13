@@ -328,7 +328,14 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
     ) -> str | None:
+        """Run LLM calls directly from adapter"""
+        adapter = await self.get_pipeline_adapter()
+        return await adapter.run(messages=messages, system_prompt=system_prompt)
 
     @abstractmethod
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:

@@ -225,6 +225,20 @@ class HaystackAdapter(BasePipelineAdapter):
 
         return chunks
 
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> str | None:
+
+        user_messages = self.get_messages(messages)
+
+        if system_prompt:
+            user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
+
+        response = self.generator.run(messages=user_messages)
+        return response["replies"][0].text
+
     async def stream(
         self,
         input: list[ChatMessage],

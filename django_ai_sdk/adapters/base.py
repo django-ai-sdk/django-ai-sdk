@@ -45,6 +45,17 @@ class BasePipelineAdapter(ABC):
         ...
 
     @abstractmethod
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> CoroutineType[Any, Any, str]:
+        """
+        Run LLM call directly
+        """
+        ...
+
+    @abstractmethod
     async def stream(
         self,
         messages: list[ChatMessage],
