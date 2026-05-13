@@ -461,24 +461,6 @@ class HaystackAdapter(BasePipelineAdapter):
                 pipeline_result = await pipeline_task
                 logger.debug("Pipeline execution completed, processing results")
 
-                # Extract RAG sources if retriever component exists
-                if self.rag_pipeline:
-                    # Check if retriever is in pipeline result
-                    if "retriever" in pipeline_result:
-                        retrieved_docs = pipeline_result["retriever"].get("documents", [])
-                        if retrieved_docs and stream_writer:
-                            sources = []
-                            for doc in retrieved_docs:
-                                sources.append(
-                                    {
-                                        "id": str(doc.id),
-                                        "content": doc.content,
-                                        "metadata": doc.meta or {},
-                                    }
-                                )
-                            stream_writer.message.sources = sources
-                            logger.debug(f"Extracted {len(sources)} RAG sources from pipeline")
-
                 # Extract response messages from pipeline result
                 if self.first_component and self.first_component in pipeline_result:
                     response_messages = pipeline_result[self.first_component].get("messages", [])
@@ -536,6 +518,19 @@ class HaystackAdapter(BasePipelineAdapter):
                 )
                 yield StreamEndEvent()
                 return
+
+            # Persist numbered sources from citation registry
+            if stream_writer and self.citation_registry and self.citation_registry.all_sources:
+                stream_writer.message.sources = [
+                    {
+                        "index": src.index,
+                        "title": src.title,
+                        "content": src.content,
+                        "metadata": src.metadata,
+                    }
+                    for src in self.citation_registry.all_sources
+                ]
+                logger.debug(f"Persisted {len(stream_writer.message.sources)} numbered sources")
 
             # Finalize message after all chunks processed
             logger.info(

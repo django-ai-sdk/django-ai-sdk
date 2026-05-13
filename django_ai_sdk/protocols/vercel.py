@@ -287,6 +287,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
             if chat_message.content:
                 parts.append({"type": "text", "text": chat_message.content})
 
+            if chat_message.sources:
+                for source in chat_message.sources:
+                    parts.append(
+                        {
+                            "type": "data-source",
+                            "data": source,
+                        }
+                    )
+
             if chat_message.tool_calls:
                 for tool_call in chat_message.tool_calls:
                     parts.append(
