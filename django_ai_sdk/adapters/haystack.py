@@ -79,13 +79,13 @@ class HaystackAdapter(BasePipelineAdapter):
     def __init__(
         self,
         pipeline: Any,
-        generator_component: Any,
+        generator: Any,
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         rag_pipeline: Any = None,
     ) -> None:
         self.pipeline = pipeline
-        self.generator = generator_component
+        self.generator = generator
         self.store = store
         self.storage_adapter = storage_adapter
         self.rag_pipeline = (

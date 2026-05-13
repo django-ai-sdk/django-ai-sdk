@@ -182,6 +182,6 @@ class PirateBasicAssistant(Assistant):
 
         return HaystackAdapter(
             pipeline=pipeline,
-            generator_component=generator,
+            generator=generator,
             storage_adapter=storage_adapter,
         )

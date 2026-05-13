@@ -138,6 +138,6 @@ class AgentSwarmAssistant(Assistant):
 
         return HaystackAdapter(
             pipeline=pipeline,
-            generator_component=triage_agent.chat_generator,
+            generator=triage_agent.chat_generator,
             storage_adapter=storage_adapter,
         )
