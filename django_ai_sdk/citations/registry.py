@@ -2,12 +2,15 @@ from .formatter import NumberedSource
 
 
 class CitationRegistry:
-    """Per-stream citation state.
+    """Tracks numbered citations within a single message (turn).
 
-    One instance is created at the start of each adapter.stream() call and
-    threaded into RAG tool wrappers. Tracks a monotonic counter so multiple
-    retrievals within the same turn produce non-overlapping [N] indices,
-    and keeps the ordered list of sources for downstream SourceEvent emission.
+    When a user sends a message, a fresh registry is created. If the LLM
+    calls 3 RAG tools in sequence, the registry ensures indices don't overlap:
+    - Tool 1 retrieves docs → gets [1], [2], [3]
+    - Tool 2 retrieves docs → gets [4], [5]
+
+    This monotonic counter ensures the LLM cites consistently across all
+    retrievals in one turn, then resets to [1] for the next message.
     """
 
     def __init__(self) -> None:

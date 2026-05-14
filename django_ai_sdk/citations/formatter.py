@@ -37,21 +37,15 @@ class CitationFormatter(Protocol):
 class DefaultCitationFormatter:
     """XML-tagged numbered citation format. Works with any chat LLM.
 
-    The default PREAMBLE defines only the *format contract* - what the
-    <source id="N"> tags mean and how to cite them. Strong models (GPT-4,
-    Claude, etc.) follow this on its own.
-
-    For weaker models that drift, subclass and extend PREAMBLE with
-    STRICT_RULES (or your own).
+    Override RAG_TEMPLATE in a subclass to customize citation instructions.
+    Default includes strict rules to prevent common citation errors (fullwidth
+    brackets, bundled citations, trailing 'Sources:' sections).
     """
 
-    FORMAT_CONTRACT = (
+    RAG_TEMPLATE = (
         'Retrieved documents below are wrapped in <source id="N"> tags. '
         "When you reference one, cite inline as [N] using the exact id from "
-        "the tag. Do not renumber."
-    )
-
-    STRICT_RULES = (
+        "the tag. Do not renumber.\n\n"
         "Citation rules:\n"
         "- Use ASCII square brackets only ([]), never CJK or fullwidth variants.\n"
         "- Place [N] immediately after the clause it supports, not bundled at "
@@ -61,11 +55,9 @@ class DefaultCitationFormatter:
         "- Do not add a 'Sources:' or 'References:' section - citations are inline only."
     )
 
-    PREAMBLE = FORMAT_CONTRACT
-
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
         sources: list[NumberedSource] = []
-        lines: list[str] = [self.PREAMBLE]
+        lines: list[str] = [self.RAG_TEMPLATE]
 
         for offset, doc in enumerate(documents):
             idx = start_index + offset
@@ -79,8 +71,9 @@ class DefaultCitationFormatter:
                 or meta.get("topic")
                 or f"Document {idx}"
             )
-            # Disambiguate chunks from the same source file.
-            # split_id is set by Haystack's document splitter (0-indexed).
+            # If document was split into chunks, add page/section marker to title.
+            # Helps user distinguish between [1] policy.pdf·p2 vs [2] policy.pdf·p5.
+            # split_id is the chunk index (0-indexed, so §1 means first chunk).
             split_id = meta.get("split_id")
             if split_id is not None:
                 page = meta.get("page_number")
