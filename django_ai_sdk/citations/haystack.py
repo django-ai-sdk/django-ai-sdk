@@ -18,20 +18,28 @@ def attach_citations(
     registry: CitationRegistry,
     documents_key: str = "documents",
 ) -> ComponentTool:
-    """Wire a RAG ComponentTool so its LLM-visible string carries [N] markers.
+    """Wire citations into a RAG tool so the LLM sees [1] [2] [3] markers.
 
-    The tool's structured output (the documents list) is preserved for
-    downstream consumers (adapter source-event emission, storage, etc.). Only
-    the string the LLM consumes is rewritten.
+    How it works:
+    1. Tool retrieves raw documents (e.g., chunks from a PDF)
+    2. Handler converts them to dicts and runs through the formatter
+    3. Formatter returns: XML with <source id="1"> tags for the LLM,
+       plus a list of NumberedSource objects
+    4. Registry stores the NumberedSource objects for persistence/emission
+    5. LLM-visible string with [N] markers is returned to the tool
+    6. Raw documents are preserved unchanged (for downstream processors)
 
-    Each invocation increments the registry's counter so multiple retrievals
-    within the same turn produce non-overlapping indices.
+    The registry counter increments so multiple RAG calls in one turn get
+    non-overlapping indices: tool1 gets [1,2,3], tool2 gets [4,5].
     """
 
     def _handler(documents: Any) -> str:
+        # Convert Haystack Document objects to plain dicts for the formatter.
+        # Handles both Haystack Document objects and dicts transparently.
         as_dicts = []
         for d in documents or []:
             if hasattr(d, "meta"):
+                # Haystack Document: extract id, content, meta fields
                 as_dicts.append(
                     {
                         "id": getattr(d, "id", None),
@@ -40,10 +48,13 @@ def attach_citations(
                     }
                 )
             else:
+                # Already a dict, pass through
                 as_dicts.append(dict(d))
+
+        # Format documents: returns (xml_for_llm, numbered_sources)
         text, sources = formatter.format(as_dicts, start_index=registry.next_index)
-        registry.add(sources)
-        return text
+        registry.add(sources)  # Store so we can emit SourceEvent and persist to DB
+        return text  # Return XML string for LLM to cite from
 
     tool.outputs_to_string = {"source": documents_key, "handler": _handler}
     return tool
