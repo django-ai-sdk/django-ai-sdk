@@ -26,12 +26,14 @@ from django_ai_sdk.events import (
     SourceEvent,
     StreamEndEvent,
     StreamEvent,
+    SuggestionEvent,
     TextChunkEvent,
     ToolCallStartEvent,
     ToolInputCompleteEvent,
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -86,6 +88,7 @@ class HaystackAdapter(BasePipelineAdapter):
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         rag_pipeline: Any = None,
         citation_registry: CitationRegistry | None = None,
+        suggestion_generator: "SuggestionGenerator | None" = None,
     ) -> None:
         self.pipeline = pipeline
         self.generator = generator_component
@@ -95,6 +98,7 @@ class HaystackAdapter(BasePipelineAdapter):
             rag_pipeline  # TODO: we probably don't need this, we can check pipeline directly
         )
         self.citation_registry = citation_registry
+        self.suggestion_generator = suggestion_generator
         self._sources_emitted = 0
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
@@ -535,6 +539,20 @@ class HaystackAdapter(BasePipelineAdapter):
             # End message
             logger.info(f"Emitting message end event with usage: {usage}")
             yield MessageEndEvent(usage=usage)
+
+            # Generate suggestions if generator is configured
+            if self.suggestion_generator and self.message_result:
+                try:
+                    # Use only recent context for faster, cheaper suggestions
+                    recent_messages = messages[-6:] if len(messages) > 6 else messages
+                    suggestions = self.suggestion_generator.generate(
+                        messages=recent_messages,
+                        response=self.message_result.content,
+                    )
+                    if suggestions:
+                        yield SuggestionEvent(suggestions=suggestions)
+                except Exception as e:
+                    logger.error(f"Error generating suggestions: {e}", exc_info=True)
 
         except Exception as critical_error:
             logger.error(

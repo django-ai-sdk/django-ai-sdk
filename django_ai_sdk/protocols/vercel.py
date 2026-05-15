@@ -14,6 +14,7 @@ from django_ai_sdk.events import (
     ReasoningChunkEvent,
     SourceEvent,
     StreamEvent,
+    SuggestionEvent,
     TextChunkEvent,
     ToolCallStartEvent,
     ToolInputCompleteEvent,
@@ -446,6 +447,10 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     # Convert intermediate DataEvent to Vercel DataPart
                     data_event = cast("DataEvent", event)
                     yield DataPart(type=f"data-{data_event.data_type}", data=data_event.data)
+
+                case "suggestion":
+                    suggestion_event = cast("SuggestionEvent", event)
+                    yield DataPart(type="data-suggestions", data={"suggestions": suggestion_event.suggestions})
 
                 case "source":
                     src = cast("SourceEvent", event)

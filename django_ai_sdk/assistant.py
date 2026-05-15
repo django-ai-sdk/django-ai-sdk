@@ -16,6 +16,7 @@ from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
+from django_ai_sdk.suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
@@ -260,6 +261,13 @@ class Assistant(ABC, AssistantInfoMixin):
     def get_citation_registry(self) -> CitationRegistry:
         """Return a fresh per-turn registry so citation indices reset between turns."""
         return CitationRegistry()
+
+    def get_suggestion_generator(self) -> "SuggestionGenerator | None":
+        """Return a configured SuggestionGenerator, or None to disable.
+
+        Override in subclasses to enable suggestions. Default is None (opt-in).
+        """
+        return None
 
     def get_tools(self) -> list[Any]:
         """
