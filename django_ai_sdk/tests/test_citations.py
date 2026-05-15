@@ -1,7 +1,5 @@
 """Simple tests for citation formatter and registry."""
 
-import pytest
-
 from django_ai_sdk.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
