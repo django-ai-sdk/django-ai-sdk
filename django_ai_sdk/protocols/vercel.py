@@ -450,8 +450,8 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 case "source":
                     src = cast("SourceEvent", event)
                     yield SourceDocumentPart(
-                        source_id=src.source_id,
-                        media_type=src.media_type,
+                        source_id=str(src.index),
+                        media_type="document",
                         title=src.title,
                     )
 
