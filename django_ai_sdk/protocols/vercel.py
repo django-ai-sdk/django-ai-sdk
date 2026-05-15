@@ -289,10 +289,14 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.sources:
                 for source in chat_message.sources:
+                    # Emit spec-compliant source-document with optional content for UI display
                     parts.append(
                         {
-                            "type": "data-source",
-                            "data": source,
+                            "type": "source-document",
+                            "sourceId": str(source.get("index", "")),
+                            "mediaType": "file",
+                            "title": source.get("title", ""),
+                            "content": source.get("content", ""),  # From stored history
                         }
                     )
 
@@ -445,13 +449,10 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "source":
                     src = cast("SourceEvent", event)
-                    yield DataPart(
-                        type="data-source",
-                        data={
-                            "index": src.index,
-                            "title": src.title,
-                            "content": src.content,
-                        },
+                    yield SourceDocumentPart(
+                        source_id=src.source_id,
+                        media_type=src.media_type,
+                        title=src.title,
                     )
 
                 case "error":

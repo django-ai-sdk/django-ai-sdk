@@ -409,6 +409,8 @@ class HaystackAdapter(BasePipelineAdapter):
                                         title=source.title,
                                         content=source.content,
                                         tool_call_id=tool_call_id,
+                                        source_id=str(source.index),  # Ties to [N] citation in text
+                                        media_type="file",  # Local document source
                                     )
                                 self._sources_emitted = len(all_sources)
 
