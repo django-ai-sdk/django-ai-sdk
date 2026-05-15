@@ -17,6 +17,7 @@ from django_ai_sdk.protocols.vercel import (
     ReasoningEndPart,
     FinishPart,
     DonePart,
+    SourceDocumentPart,
 )
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.events import (
@@ -29,6 +30,7 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
     DataEvent,
     ErrorEvent,
+    SourceEvent,
 )
 from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
 
@@ -322,3 +324,34 @@ class TestVercelProtocolHandler:
 
         # IDs should be different
         assert first_text_id != second_text_id
+
+    @pytest.mark.asyncio
+    async def test_handle_stream_source_event_yields_source_document_part(self, handler):
+        """Test that SourceEvent is converted to SourceDocumentPart (Vercel spec-compliant)."""
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_123")
+            yield SourceEvent(
+                index=1,
+                title="Sales Q3 Report",
+                content="Document content here...",
+                source_id="1",
+                media_type="file",
+            )
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = []
+        async for chunk in handler.handle_stream(event_generator()):
+            chunks.append(chunk)
+
+        # Find SourceDocumentPart chunks
+        source_parts = [c for c in chunks if isinstance(c, SourceDocumentPart)]
+        assert len(source_parts) == 1
+
+        # Verify the spec-compliant format
+        source_part = source_parts[0]
+        assert source_part.type == "source-document"
+        assert source_part.source_id == "1"
+        assert source_part.media_type == "file"
+        assert source_part.title == "Sales Q3 Report"
+

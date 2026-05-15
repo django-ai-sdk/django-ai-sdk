@@ -85,6 +85,8 @@ class SourceEvent(StreamEvent):
     title: str
     content: str
     tool_call_id: str | None = None
+    source_id: str = ""  # Stable identifier for the source
+    media_type: str = "file"  # MIME type or document type (e.g., "file" for local documents)
 
 
 class MessageEndEvent(StreamEvent):
