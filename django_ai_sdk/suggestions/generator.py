@@ -65,7 +65,7 @@ class DefaultSuggestionGenerator:
 
     def __init__(
         self,
-        assistant: "Assistant",
+        assistant: Assistant,
         prompt: str | None = None,
     ) -> None:
         self.assistant = assistant

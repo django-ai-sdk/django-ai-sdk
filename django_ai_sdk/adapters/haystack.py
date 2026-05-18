@@ -5,7 +5,7 @@ import traceback
 import uuid
 from asyncio import Queue
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any, TypeVar, Union, cast, overload
+from typing import TYPE_CHECKING, Any, TypeVar, Union, overload
 
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
