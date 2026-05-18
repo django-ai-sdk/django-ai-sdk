@@ -69,7 +69,7 @@ class MemoryService:
     async def get_assistant_memories(assistant_id: str) -> list[str]:
         assistant = AssistantService.from_registry(assistant_id)
         return [
-            str(m.id) async for m in Memory.objects.filter(name__in=assistant.memories).distinct()
+            str(m.id) async for m in Memory.objects.filter(slug__in=assistant.memories).distinct()
         ]
 
     @staticmethod
