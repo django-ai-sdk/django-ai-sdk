@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
@@ -118,6 +120,9 @@ class Assistant(ABC, AssistantInfoMixin):
 
     # Citation formatter used to render retrieved documents for the LLM.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
+
+    # Suggestion generator class for follow-up questions.
+    suggestion_generator: type[SuggestionGenerator] | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
@@ -269,12 +274,15 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return a fresh per-turn registry so citation indices reset between turns."""
         return CitationRegistry()
 
-    def get_suggestion_generator(self) -> "SuggestionGenerator | None":
+    def get_suggestion_generator(self) -> SuggestionGenerator | None:
         """Return a configured SuggestionGenerator, or None to disable.
 
-        Override in subclasses to enable suggestions. Default is None (opt-in).
+        Uses self.suggestion_generator class attribute if set.
+        Override this method in subclasses for full control.
         """
-        return None
+        if not self.suggestion_generator:
+            return None
+        return self.suggestion_generator(assistant=self)
 
     def get_tools(self) -> list[Any]:
         """
@@ -374,7 +382,7 @@ class Assistant(ABC, AssistantInfoMixin):
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-        response_format: Any = None,
+        response_format: type[T] | None = None,
     ) -> T | str | None:
         """Run LLM calls directly from adapter.
 
