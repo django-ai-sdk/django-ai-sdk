@@ -1,7 +1,9 @@
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, Union, cast, overload
+
+from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
@@ -25,6 +27,8 @@ if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
 
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
@@ -359,14 +363,35 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
-        """Run LLM calls directly from adapter"""
+        response_format: Any = None,
+    ) -> T | str | None:
+        """Run LLM calls directly from adapter.
+
+        Args:
+            messages: Conversation messages
+            system_prompt: Optional system prompt override
+            response_format: Optional Pydantic model for structured output
+
+        Returns:
+            Response string, or parsed Pydantic model if response_format is set
+        """
         adapter = await self.get_pipeline_adapter()
-        return await adapter.run(messages=messages, system_prompt=system_prompt)
+        return await adapter.run(
+            messages=messages,
+            system_prompt=system_prompt,
+            response_format=response_format,
+        )
 
     @abstractmethod
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:

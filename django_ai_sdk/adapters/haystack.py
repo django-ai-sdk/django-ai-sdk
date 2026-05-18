@@ -5,11 +5,12 @@ import traceback
 import uuid
 from asyncio import Queue
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, TypeVar, Union, cast, overload
 
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
+from pydantic import BaseModel
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
@@ -37,6 +38,8 @@ from django_ai_sdk.logger import get_logger
 if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
@@ -234,16 +237,35 @@ class HaystackAdapter(BasePipelineAdapter):
 
         return chunks
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
-
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         user_messages = self.get_messages(messages)
-
         if system_prompt:
             user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
+
+        if response_format:
+            schema = response_format.model_json_schema()
+            response = self.generator.run(
+                messages=user_messages,
+                generation_kwargs={
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": response_format.__name__, "schema": schema},
+                    }
+                },
+            )
+            return response_format.model_validate_json(response["replies"][0].text)
 
         response = self.generator.run(messages=user_messages)
         return response["replies"][0].text

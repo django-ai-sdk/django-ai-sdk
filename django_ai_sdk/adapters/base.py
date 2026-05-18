@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, overload
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -9,6 +11,7 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.events import StreamEvent
+T = TypeVar("T", bound=BaseModel)
 
 
 class BasePipelineAdapter(ABC):
@@ -44,12 +47,20 @@ class BasePipelineAdapter(ABC):
         """
         ...
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
     @abstractmethod
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> CoroutineType[Any, Any, str]:
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         """
         Run LLM call directly
         """

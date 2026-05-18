@@ -2,12 +2,13 @@ import hashlib
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from agents.agent import Agent
 from agents.items import ItemHelpers
 from agents.run import RunConfig, Runner
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
@@ -34,6 +35,7 @@ from django_ai_sdk.logger import get_logger
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
+T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
@@ -206,25 +208,37 @@ class OpenAIAdapter(BasePipelineAdapter):
             case "error":
                 return ErrorEvent(error_message=message_chunk.content["error_message"])
 
-        return None
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
 
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
-
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         openai_messages: list[ChatCompletionMessageParam] = []
         conversation_messages = self.get_messages(messages)
         openai_messages.extend(cast("list[ChatCompletionMessageParam]", conversation_messages))
         if system_prompt:
             openai_messages = [{"role": "system", "content": system_prompt}, *openai_messages]
 
-        response = await self.client.chat.completions.create(  # type: ignore[attr-defined]
+        if response_format:
+            response = await self.client.beta.chat.completions.parse(
+                model=self.model or "",
+                messages=openai_messages,
+                response_format=response_format,
+            )
+            return response.choices[0].message.parsed
+
+        response = await self.client.chat.completions.create(
             model=self.model or "",
             messages=openai_messages,
         )
-
         return response.choices[0].message.content
 
     async def stream(  # type: ignore
@@ -497,18 +511,29 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
             )
         return user_messages[-1].content
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         agent_input = self.get_input(messages)
         result = await self.runner.run(
-            Agent(name="run", instructions=system_prompt),
+            Agent(
+                name="run",
+                instructions=system_prompt,
+                output_type=response_format,
+            ),
             input=agent_input,
             run_config=self.runner_config,  # type: ignore[arg-type] # OpenAI RunConfig type not available
         )
-
         return result.final_output
 
     async def stream(  # type: ignore
