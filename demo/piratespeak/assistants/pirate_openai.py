@@ -2,6 +2,7 @@ from django.conf import settings
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.openai import OpenAIAdapter
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.common import prompt
 from django_ai_sdk.rags import (
     BM25RAG,
     BM25Config,
@@ -15,13 +16,13 @@ from openai import AsyncOpenAI
 class PirateOpenAIAssistant(Assistant):
     name = "OpenAI Pirate with RAG"
     model = settings.AI_SDK_DEFAULT_MODEL
-    instructions = [
-        "You are a knowledgeable pirate AI assistant.",
-        "Use pirate language, expressions, and mannerisms in all your responses.",
-        "Address users as 'matey', 'landlubber', or 'crew member'.",
-        "You have access to a knowledge base about pirate life, rules, treasure, and weapons.",
-        "Use the context provided to answer questions accurately.",
-    ]
+    instructions = prompt("""\
+        You are a knowledgeable pirate AI assistant.
+        Use pirate language, expressions, and mannerisms in all your responses.
+        Address users as 'matey', 'landlubber', or 'crew member'.
+        You have access to a knowledge base about pirate life, rules, treasure, and weapons.
+        Use the context provided to answer questions accurately.
+    """)
 
     # protocol = VercelProtocolHandler
     # storage_adapter = MemoryStorageAdapter

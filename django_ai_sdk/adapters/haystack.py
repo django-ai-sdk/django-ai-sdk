@@ -79,13 +79,13 @@ class HaystackAdapter(BasePipelineAdapter):
     def __init__(
         self,
         pipeline: Any,
-        generator_component: Any,
+        generator: Any,
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         rag_pipeline: Any = None,
     ) -> None:
         self.pipeline = pipeline
-        self.generator = generator_component
+        self.generator = generator
         self.store = store
         self.storage_adapter = storage_adapter
         self.rag_pipeline = (
@@ -224,6 +224,20 @@ class HaystackAdapter(BasePipelineAdapter):
             )
 
         return chunks
+
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> str | None:
+
+        user_messages = self.get_messages(messages)
+
+        if system_prompt:
+            user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
+
+        response = self.generator.run(messages=user_messages)
+        return response["replies"][0].text
 
     async def stream(
         self,

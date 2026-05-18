@@ -39,6 +39,8 @@ async def stream_response(
     # Note: sse() is an async generator method, calling it returns a coroutine
     # that resolves to an async generator. StreamingHttpResponse handles this.
     sse_stream = protocol_handler.sse(adapter, messages)
+
+    # Build streaming HTTP response
     response = StreamingHttpResponse(  # type: ignore[arg-type]
         sse_stream,
         content_type="text/event-stream",

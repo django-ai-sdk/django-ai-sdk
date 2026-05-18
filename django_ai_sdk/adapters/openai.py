@@ -4,6 +4,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, cast
 
+from agents.agent import Agent
 from agents.items import ItemHelpers
 from agents.run import RunConfig, Runner
 from openai.types.chat import ChatCompletionMessageParam
@@ -207,6 +208,25 @@ class OpenAIAdapter(BasePipelineAdapter):
 
         return None
 
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> str | None:
+
+        openai_messages: list[ChatCompletionMessageParam] = []
+        conversation_messages = self.get_messages(messages)
+        openai_messages.extend(cast("list[ChatCompletionMessageParam]", conversation_messages))
+        if system_prompt:
+            openai_messages = [{"role": "system", "content": system_prompt}, *openai_messages]
+
+        response = await self.client.chat.completions.create(  # type: ignore[attr-defined]
+            model=self.model or "",
+            messages=openai_messages,
+        )
+
+        return response.choices[0].message.content
+
     async def stream(  # type: ignore
         self,
         messages: list[ChatMessage],
@@ -214,10 +234,9 @@ class OpenAIAdapter(BasePipelineAdapter):
         logger.debug(f"Starting OpenAI stream with {len(messages)} input messages")
 
         # Build message list fresh to ensure proper structure
-        # Order: 1. Instructions (if present), 2. RAG Context (if present), 3. Conversation
         openai_messages: list[ChatCompletionMessageParam] = []
 
-        # 1. Add instructions as separate system message (immutable, developer-controlled)
+        # 1. Add instructions as separate system message
         if self.instructions:
             openai_messages.append(
                 cast("ChatCompletionMessageParam", {"role": "system", "content": self.instructions})
@@ -478,9 +497,23 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
             )
         return user_messages[-1].content
 
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> str | None:
+        agent_input = self.get_input(messages)
+        result = await self.runner.run(
+            Agent(name="run", instructions=system_prompt),
+            input=agent_input,
+            run_config=self.runner_config,  # type: ignore[arg-type] # OpenAI RunConfig type not available
+        )
+
+        return result.final_output
+
     async def stream(  # type: ignore
         self,
-        messages: list["ChatMessage"],
+        messages: list[ChatMessage],
     ) -> AsyncGenerator["StreamEvent", None]:
         agent_input = self.get_input(messages)
         self._tool_call_registry.clear()  # Clear registry for new stream

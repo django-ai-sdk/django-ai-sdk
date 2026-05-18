@@ -1,12 +1,21 @@
 import time
 import traceback
-from typing import Any, Literal
+from textwrap import dedent
+from typing import Any, Literal, NewType
 
 from pydantic import BaseModel, Field
 
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+
+Prompt = NewType("Prompt", str)
+
+
+def prompt(text: str) -> Prompt:
+    """Helper to create Prompt type with dedented text."""
+    return Prompt(dedent(text))
 
 
 class ChatMessage(BaseModel):
