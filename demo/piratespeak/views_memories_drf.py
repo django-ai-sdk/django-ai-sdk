@@ -28,12 +28,14 @@ from rest_framework.views import APIView
 
 class MemoryInSerializer(serializers.Serializer):
     name = serializers.CharField()
+    slug = serializers.CharField(required=False, default="")
     description = serializers.CharField(required=False, default="")
 
 
 class MemoryOutSerializer(serializers.Serializer):
     id = serializers.CharField()
     name = serializers.CharField()
+    slug = serializers.CharField()
     description = serializers.CharField()
     document_count = serializers.IntegerField()
     created_at = serializers.CharField()
@@ -80,6 +82,7 @@ class MemoryListCreateAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         memory = create_memory(
             name=serializer.validated_data["name"],
+            slug=serializer.validated_data.get("slug", ""),
             description=serializer.validated_data.get("description", ""),
         )
         return Response(MemoryOutSerializer(memory).data)

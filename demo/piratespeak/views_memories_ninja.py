@@ -17,7 +17,7 @@ router = Router()
 
 @router.post("", response=MemoryOut)
 async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut:
-    return await MemoryService.create_memory(name=payload.name, description=payload.description)
+    return await MemoryService.create_memory(name=payload.name, slug=payload.slug, description=payload.description)
 
 
 @router.get("", response=list[MemoryOut])
