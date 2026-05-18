@@ -23,6 +23,7 @@ from django_ai_sdk.storage.services import ThreadService
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
+    from django_ai_sdk.suggestions import SuggestionGenerator
 
 
 logger = get_logger(__name__)
@@ -204,9 +205,7 @@ class Assistant(ABC, AssistantInfoMixin):
             # Warmup RAG provider on init
             # TODO: delegate this to background task and check status.
             # for now this won't block the main thread, but it can become very slow.
-            asyncio.get_event_loop().run_until_complete(
-                self.rag_provider.warmup(self, None)
-            )
+            asyncio.get_event_loop().run_until_complete(self.rag_provider.warmup(self, None))
 
     async def get_storage_adapter(
         self, thread_id: str | None = None
@@ -266,6 +265,13 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return a fresh per-turn registry so citation indices reset between turns."""
         return CitationRegistry()
 
+    def get_suggestion_generator(self) -> "SuggestionGenerator | None":
+        """Return a configured SuggestionGenerator, or None to disable.
+
+        Override in subclasses to enable suggestions. Default is None (opt-in).
+        """
+        return None
+
     def get_tools(self) -> list[Any]:
         """
         Return list of available tools.
@@ -300,9 +306,7 @@ class Assistant(ABC, AssistantInfoMixin):
             return Entry.objects.filter(memory_id=memory_id)
         return Entry.objects.all()
 
-    async def get_rag_documents(
-        self, memory_id: str | None = None
-    ) -> list["RagDocument"]:
+    async def get_rag_documents(self, memory_id: str | None = None) -> list["RagDocument"]:
         """
         Get documents for RAG as RagDocuments.
 
@@ -321,9 +325,7 @@ class Assistant(ABC, AssistantInfoMixin):
         logger.info(
             f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}"
         )
-        logger.debug(
-            f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}"
-        )
+        logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
 
         queryset = await self.get_rag_queryset(memory_id)
         logger.info(f"[get_rag_documents] Got queryset, type={type(queryset).__name__}")
@@ -406,9 +408,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
-        logger.debug(
-            f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format"
-        )
+        logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
 
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)

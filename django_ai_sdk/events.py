@@ -89,6 +89,13 @@ class SourceEvent(StreamEvent):
     media_type: str = "file"  # MIME type or document type (e.g., "file" for local documents)
 
 
+class SuggestionEvent(StreamEvent):
+    """Follow-up suggestions generated after a response."""
+
+    event_type: Literal["suggestion"] = "suggestion"
+    suggestions: list[str]
+
+
 class MessageEndEvent(StreamEvent):
     """End of message."""
 

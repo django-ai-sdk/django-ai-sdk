@@ -4,7 +4,7 @@ from django_ai_sdk.common import Prompt, prompt
 TITLE_GENERATION_PROMPT: Prompt = prompt("""\
     ### Task:
     Generate a concise, 3-5 word title summarizing the chat history.
-    
+
     ### Guidelines:
     - The title should clearly represent the main theme or subject of the conversation.
     - Start the title with a single emoji that enhances understanding of the topic.
