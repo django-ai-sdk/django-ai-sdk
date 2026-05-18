@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -69,7 +69,7 @@ class Assistant(ABC, AssistantInfoMixin):
         class MyAssistant(Assistant):
             name = "My Bot"
             model = "gpt-4"
-            instructions = ["You are a helpful assistant..."]
+            instructions = prompt("You are a helpful assistant...")
             protocol = VercelProtocolHandler
 
             async def get_pipeline_adapter(self): return SomeAdapter(...)
@@ -83,7 +83,7 @@ class Assistant(ABC, AssistantInfoMixin):
     name: str | None = None
     description: str | None = None
     model: str | None = None
-    instructions: list[str] | str | None = None
+    instructions: Prompt = prompt("You are a helpful assistant.")
 
     # Default list of connected memories
     memories: list[str] = []
@@ -227,14 +227,9 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return the assistant's display name."""
         return self.name or "Unnamed Assistant"
 
-    def get_instructions(self) -> str:
+    def get_instructions(self) -> Prompt:
         """Return formatted system instructions as a single string."""
-
-        # TODO: we might want to pass on str after all.
-        # Editing the list is kinda annoying
-        if isinstance(self.instructions, list):
-            return "\n".join(self.instructions)
-        return self.instructions or ""
+        return self.instructions
 
     def get_system_prompt(self) -> str:
         """
