@@ -19,11 +19,11 @@ from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
-from django_ai_sdk.suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
+    from django_ai_sdk.suggestions import SuggestionGenerator
 
 
 logger = get_logger(__name__)

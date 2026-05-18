@@ -33,10 +33,10 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
+    from django_ai_sdk.suggestions import SuggestionGenerator
 
 logger = get_logger(__name__)
 
