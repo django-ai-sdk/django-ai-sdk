@@ -580,8 +580,8 @@ class HaystackAdapter(BasePipelineAdapter):
             if self.suggestion_generator and self.message_result:
                 try:
                     # Use only recent context for faster, cheaper suggestions
-                    recent_messages = messages[-6:] if len(messages) > 6 else messages
-                    suggestions = self.suggestion_generator.generate(
+                    recent_messages = input[-6:] if len(input) > 6 else input
+                    suggestions = await self.suggestion_generator.generate(
                         messages=recent_messages,
                         response=self.message_result.content,
                     )
