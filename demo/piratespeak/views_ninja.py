@@ -4,6 +4,7 @@ from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.storage.services import (
     ThreadService,
     aget_thread_file_meta,
@@ -15,11 +16,6 @@ from ninja import Router, Schema
 router = Router()
 
 
-@router.get("/health/")
-def health_check(request: HttpRequest) -> dict:
-    return {"status": "ok", "service": "piratespeak"}
-
-
 class Error(Schema):
     message: str
     code: int | None = None
@@ -28,6 +24,21 @@ class Error(Schema):
 class Success(Schema):
     success: bool
     message: str | None = None
+
+
+class HealthResponse(Schema):
+    status: str
+    service: str
+
+
+class AssistantItem(Schema):
+    id: str
+    name: str
+    model: str
+
+
+class AssistantsListResponse(Schema):
+    assistants: list[AssistantItem]
 
 
 class ThreadListItem(Schema):
@@ -48,7 +59,7 @@ class CreateThreadResponse(Schema):
 
 
 class ThreadDetailResponse(Schema):
-    thread: dict
+    thread: ThreadInfo
     messages: list
 
 
@@ -66,6 +77,11 @@ class MessageResponse(Schema):
     id: str
     rating: int | None = None
     is_deleted: bool = False
+
+
+@router.get("/health/", response={200: HealthResponse})
+def health_check(request: HttpRequest) -> HealthResponse:
+    return HealthResponse(status="ok", service="piratespeak")
 
 
 @router.get("/threads/", response={200: ThreadListResponse, 500: Error})
@@ -88,7 +104,7 @@ async def list_threads(request: HttpRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.post("/threads/", response={200: CreateThreadResponse, 400: Error})
+@router.post("/threads/", response={200: CreateThreadResponse, 400: Error, 500: Error})
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     try:
         thread_id = await ThreadService.create_thread(
@@ -130,7 +146,7 @@ async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: C
         return 404, Error(message=str(e))
 
 
-@router.delete("/threads/{thread_id}/", response={200: Success, 404: Error})
+@router.delete("/threads/{thread_id}/", response={200: Success, 404: Error, 500: Error})
 async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
     try:
         success = await ThreadService.delete_thread(thread_id)
@@ -143,7 +159,7 @@ async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.delete("/threads/", response={200: DeleteAllThreadsResponse})
+@router.delete("/threads/", response={200: DeleteAllThreadsResponse, 500: Error})
 async def delete_all_threads(request: HttpRequest) -> Any:
     try:
         deleted_count = await ThreadService.delete_all_threads()
@@ -193,11 +209,13 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
         return 404, Error(message=str(e))
 
 
-@router.get("/assistants/")
-async def list_assistants_view(request: HttpRequest) -> Any:
+@router.get("/assistants/", response={200: AssistantsListResponse, 500: Error})
+async def list_assistants(request: HttpRequest) -> Any:
     try:
         items = AssistantService.list_assistants()
-        return {"assistants": items}
+        return AssistantsListResponse(
+            assistants=[AssistantItem(**item) for item in items]
+        )
     except Exception as e:
         return 500, Error(message=str(e))
 
@@ -213,7 +231,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
 
 @router.post(
     "/assistants/{assistant_id}/reindex/",
-    response={200: Success, 404: Error},
+    response={200: Success, 404: Error, 500: Error},
 )
 async def reindex_assistant(
     request: HttpRequest,
