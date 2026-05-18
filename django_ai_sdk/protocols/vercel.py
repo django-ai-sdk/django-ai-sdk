@@ -450,13 +450,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "suggestion":
                     suggestion_event = cast("SuggestionEvent", event)
-                    yield DataPart(type="data-suggestions", data={"suggestions": suggestion_event.suggestions})
+                    yield DataPart(
+                        type="data-suggestions", data={"suggestions": suggestion_event.suggestions}
+                    )
 
                 case "source":
                     src = cast("SourceEvent", event)
                     yield SourceDocumentPart(
-                        source_id=str(src.index),
-                        media_type="document",
+                        source_id=src.source_id,
+                        media_type=src.media_type,
                         title=src.title,
                     )
 

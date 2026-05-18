@@ -10,12 +10,15 @@ from django_ai_sdk.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
+from django_ai_sdk.common import ChatMessage, Prompt, prompt
+from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
+from django_ai_sdk.storage.services import ThreadService
 from django_ai_sdk.suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
@@ -72,7 +75,7 @@ class Assistant(ABC, AssistantInfoMixin):
         class MyAssistant(Assistant):
             name = "My Bot"
             model = "gpt-4"
-            instructions = ["You are a helpful assistant..."]
+            instructions = prompt("You are a helpful assistant...")
             protocol = VercelProtocolHandler
 
             async def get_pipeline_adapter(self): return SomeAdapter(...)
@@ -86,7 +89,7 @@ class Assistant(ABC, AssistantInfoMixin):
     name: str | None = None
     description: str | None = None
     model: str | None = None
-    instructions: list[str] | str | None = None
+    instructions: Prompt = prompt("You are a helpful assistant.")
 
     # Default list of connected memories
     memories: list[str] = []
@@ -97,7 +100,7 @@ class Assistant(ABC, AssistantInfoMixin):
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
 
-    # RAG provider - set to a RAGProvider instance to enable RAG, None disables RAG
+    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG
     rag_provider: Any = None
 
     # Maximum conversation history to send to LLM (None = unlimited)
@@ -106,8 +109,10 @@ class Assistant(ABC, AssistantInfoMixin):
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
 
+    # Enable automatic thread title generation based on chat messages
+    title_generation: bool = True
+
     # Citation formatter used to render retrieved documents for the LLM.
-    # Subclasses can swap in a custom formatter by overriding this class attr.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -154,7 +159,10 @@ class Assistant(ABC, AssistantInfoMixin):
 
     @classmethod
     async def reindex(
-        cls, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        cls,
+        assistant: "Assistant",
+        memory_id: str | None = None,
+        force_rebuild: bool = False,
     ) -> Any:
         """
         Reindex the RAG pipeline for this assistant.
@@ -231,14 +239,9 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return the assistant's display name."""
         return self.name or "Unnamed Assistant"
 
-    def get_instructions(self) -> str:
+    def get_instructions(self) -> Prompt:
         """Return formatted system instructions as a single string."""
-
-        # TODO: we might want to pass on str after all.
-        # Editing the list is kinda annoying
-        if isinstance(self.instructions, list):
-            return "\n".join(self.instructions)
-        return self.instructions or ""
+        return self.instructions
 
     def get_system_prompt(self) -> str:
         """
@@ -356,13 +359,22 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+    ) -> str | None:
+        """Run LLM calls directly from adapter"""
+        adapter = await self.get_pipeline_adapter()
+        return await adapter.run(messages=messages, system_prompt=system_prompt)
+
     @abstractmethod
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
         """
         Create and return pipeline adapter.
 
         Args:
-            thread_id: Optional thread ID for conversation persistence
+            thread_id: Optional thread ID for conversation persistence.
 
         Returns:
             BasePipelineAdapter instance
@@ -475,6 +487,13 @@ class Assistant(ABC, AssistantInfoMixin):
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
         adapter = await self.get_pipeline_adapter(thread_id=thread_id)
+
+        # TODO: fix type error for argument, can never be None, now nested
+        if thread_id:
+            thread = await ThreadService.get_thread(thread_id)
+            if self.title_generation and thread and not thread.title:
+                title = await generate_thread_title(assistant=self, messages=messages)
+                await ThreadService.update_thread(thread_id, title)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
