@@ -457,9 +457,12 @@ class Assistant(ABC, AssistantInfoMixin):
         logger.debug("Creating pipeline adapter")
         adapter = await self.get_pipeline_adapter(thread_id=thread_id)
 
-        if self.title_generation and thread_id:
-            title = await generate_thread_title(assistant=self, messages=messages)
-            await ThreadService.update_thread(thread_id, title)
+        # TODO: fix type error for argument, can never be None, now nested
+        if thread_id:
+            thread = await ThreadService.get_thread(thread_id)
+            if self.title_generation and thread and not thread.title:
+                title = await generate_thread_title(assistant=self, messages=messages)
+                await ThreadService.update_thread(thread_id, title)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
