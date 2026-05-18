@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.events import StreamEvent
+    from django_ai_sdk.suggestions import SuggestionGenerator
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -29,6 +31,9 @@ class BasePipelineAdapter(ABC):
 
     # Message processing configuration
     merge_messages: bool = False
+
+    # Optional suggestion generator
+    suggestion_generator: SuggestionGenerator | None = None
 
     def __init__(self) -> None:
         self.message_result: ChatMessage | None = None

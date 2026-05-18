@@ -513,6 +513,11 @@ class Assistant(ABC, AssistantInfoMixin):
         logger.debug("Creating pipeline adapter")
         adapter = await self.get_pipeline_adapter(thread_id=thread_id)
 
+        # Wire suggestion generator onto the adapter
+        suggestion_generator = self.get_suggestion_generator()
+        if suggestion_generator:
+            adapter.suggestion_generator = suggestion_generator
+
         # TODO: fix type error for argument, can never be None, now nested
         if thread_id:
             thread = await ThreadService.get_thread(thread_id)
