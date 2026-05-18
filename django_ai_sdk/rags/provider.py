@@ -8,6 +8,7 @@ from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.citations import CitationFormatter, CitationRegistry
 
 
 logger = get_logger(__name__)
@@ -67,8 +68,51 @@ class BaseRAGProvider(ABC):
             Framework-specific RAG instance, or None if no documents
         """
 
+    async def get_tool(
+        self,
+        assistant: "Assistant",
+        memory_id: str | None = None,
+        *,
+        spec: Any = None,
+        citation_registry: "CitationRegistry | None" = None,
+        citation_formatter: "CitationFormatter | None" = None,
+    ) -> Any:
+        """Build a tool for this memory, optionally citation-wired.
+
+        Returns None when no RAG is available for this memory.
+
+        Providers that cannot attach citations (no bridge yet) fall back to a
+        no-op _attach_citations and simply emit no source events — callers
+        get a plain tool and a debug log line.
+        """
+        rag = await self.get_rag_instance(assistant, memory_id)
+        if rag is None:
+            return None
+        tool = await self.build_tool(rag, spec=spec)
+        if tool is not None and citation_registry is not None and citation_formatter is not None:
+            self._attach_citations(tool, citation_formatter, citation_registry)
+        return tool
+
+    def _attach_citations(
+        self,
+        tool: Any,
+        formatter: "CitationFormatter",
+        registry: "CitationRegistry",
+    ) -> None:
+        """Hook called by get_tool to attach citation wiring to a tool.
+
+        Default is a no-op + debug log. Override only when shipping a citation
+        bridge for your framework (see citations/README.md for the bridge
+        contract). Not intended to be called directly by consumers - go through
+        get_tool.
+        """
+        logger.debug(
+            "%s does not implement citation attachment; sources will not be emitted",
+            type(self).__name__,
+        )
+
     @abstractmethod
-    async def build_tool(self, rag_instance: Any) -> Any:
+    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
         """
         Build a tool from the RAG instance (framework-specific).
 
@@ -234,7 +278,7 @@ class RAGProvider(BaseRAGProvider):
 
         return self._cache.get(cache_key)
 
-    async def build_tool(self, rag_instance: Any) -> Callable | None:
+    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Callable | None:
         """
         Build a tool from the RAG instance using RAG's as_tool() method.
 

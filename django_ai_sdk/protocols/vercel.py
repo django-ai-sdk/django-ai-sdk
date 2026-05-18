@@ -12,6 +12,7 @@ from django_ai_sdk.events import (
     MessageEndEvent,
     MessageStartEvent,
     ReasoningChunkEvent,
+    SourceEvent,
     StreamEvent,
     TextChunkEvent,
     ToolCallStartEvent,
@@ -286,6 +287,19 @@ class VercelProtocolHandler(BaseProtocolHandler):
             if chat_message.content:
                 parts.append({"type": "text", "text": chat_message.content})
 
+            if chat_message.sources:
+                for source in chat_message.sources:
+                    # Emit spec-compliant source-document with optional content for UI display
+                    parts.append(
+                        {
+                            "type": "source-document",
+                            "sourceId": str(source.get("index", "")),
+                            "mediaType": "file",
+                            "title": source.get("title", ""),
+                            "content": source.get("content", ""),  # From stored history
+                        }
+                    )
+
             if chat_message.tool_calls:
                 for tool_call in chat_message.tool_calls:
                     parts.append(
@@ -432,6 +446,14 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     # Convert intermediate DataEvent to Vercel DataPart
                     data_event = cast("DataEvent", event)
                     yield DataPart(type=f"data-{data_event.data_type}", data=data_event.data)
+
+                case "source":
+                    src = cast("SourceEvent", event)
+                    yield SourceDocumentPart(
+                        source_id=src.source_id,
+                        media_type=src.media_type,
+                        title=src.title,
+                    )
 
                 case "error":
                     error_event = cast("ErrorEvent", event)

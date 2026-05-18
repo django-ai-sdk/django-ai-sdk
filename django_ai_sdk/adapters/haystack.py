@@ -13,6 +13,7 @@ from haystack.dataclasses import StreamingChunk
 
 from django_ai_sdk.adapters.base import BasePipelineAdapter
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
+from django_ai_sdk.citations import CitationRegistry
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -22,6 +23,7 @@ from django_ai_sdk.events import (
     ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
+    SourceEvent,
     StreamEndEvent,
     StreamEvent,
     TextChunkEvent,
@@ -83,6 +85,7 @@ class HaystackAdapter(BasePipelineAdapter):
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         rag_pipeline: Any = None,
+        citation_registry: CitationRegistry | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.generator = generator
@@ -91,6 +94,8 @@ class HaystackAdapter(BasePipelineAdapter):
         self.rag_pipeline = (
             rag_pipeline  # TODO: we probably don't need this, we can check pipeline directly
         )
+        self.citation_registry = citation_registry
+        self._sources_emitted = 0
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
@@ -410,6 +415,19 @@ class HaystackAdapter(BasePipelineAdapter):
                                 tool_output=tool_output,
                             )
 
+                            if self.citation_registry is not None:
+                                all_sources = self.citation_registry.all_sources
+                                for source in all_sources[self._sources_emitted :]:
+                                    yield SourceEvent(
+                                        index=source.index,
+                                        title=source.title,
+                                        content=source.content,
+                                        tool_call_id=tool_call_id,
+                                        source_id=str(source.index),  # Ties to [N] citation in text
+                                        media_type="file",  # Local document source
+                                    )
+                                self._sources_emitted = len(all_sources)
+
                         elif event_type == "usage":
                             # Usage data from streaming chunk (when stream_options={"include_usage": True})
                             usage = normalize_usage(payload)
@@ -444,24 +462,6 @@ class HaystackAdapter(BasePipelineAdapter):
                 logger.debug("Retrieving pipeline results for tool processing")
                 pipeline_result = await pipeline_task
                 logger.debug("Pipeline execution completed, processing results")
-
-                # Extract RAG sources if retriever component exists
-                if self.rag_pipeline:
-                    # Check if retriever is in pipeline result
-                    if "retriever" in pipeline_result:
-                        retrieved_docs = pipeline_result["retriever"].get("documents", [])
-                        if retrieved_docs and stream_writer:
-                            sources = []
-                            for doc in retrieved_docs:
-                                sources.append(
-                                    {
-                                        "id": str(doc.id),
-                                        "content": doc.content,
-                                        "metadata": doc.meta or {},
-                                    }
-                                )
-                            stream_writer.message.sources = sources
-                            logger.debug(f"Extracted {len(sources)} RAG sources from pipeline")
 
                 # Extract response messages from pipeline result
                 if self.first_component and self.first_component in pipeline_result:
@@ -520,6 +520,19 @@ class HaystackAdapter(BasePipelineAdapter):
                 )
                 yield StreamEndEvent()
                 return
+
+            # Persist numbered sources from citation registry
+            if stream_writer and self.citation_registry and self.citation_registry.all_sources:
+                stream_writer.message.sources = [
+                    {
+                        "index": src.index,
+                        "title": src.title,
+                        "content": src.content,
+                        "metadata": src.metadata,
+                    }
+                    for src in self.citation_registry.all_sources
+                ]
+                logger.debug(f"Persisted {len(stream_writer.message.sources)} numbered sources")
 
             # Finalize message after all chunks processed
             logger.info(
