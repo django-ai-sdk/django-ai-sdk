@@ -27,15 +27,17 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def create_memory(name: str, description: str = "") -> MemoryOut:
+    async def create_memory(name: str, description: str = "", slug: str = "") -> MemoryOut:
         """Create a new memory."""
         memory = await Memory.objects.acreate(
             name=name,
+            slug=slug or None,
             description=description,
         )
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
+            slug=memory.slug,
             description=memory.description,
             document_count=0,
             created_at=memory.created_at.isoformat(),
@@ -54,6 +56,7 @@ class MemoryService:
             MemoryOut(
                 id=str(memory.id),
                 name=memory.name,
+                slug=memory.slug,
                 description=memory.description,
                 document_count=memory.document_count,
                 created_at=memory.created_at.isoformat(),
@@ -86,6 +89,7 @@ class MemoryService:
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
+            slug=memory.slug,
             description=memory.description,
             document_count=memory.document_count,
             created_at=memory.created_at.isoformat(),
@@ -103,6 +107,7 @@ class MemoryService:
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
+            slug=memory.slug,
             description=memory.description,
             document_count=doc_count,
             created_at=memory.created_at.isoformat(),
