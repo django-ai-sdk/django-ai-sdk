@@ -81,6 +81,7 @@ class MemoryIn(BaseModel):
     """Schema for creating a memory."""
 
     name: str
+    slug: str = ""
     description: str = ""
 
 
@@ -89,6 +90,7 @@ class MemoryOut(BaseModel):
 
     id: str
     name: str
+    slug: str
     description: str
     document_count: int
     created_at: str

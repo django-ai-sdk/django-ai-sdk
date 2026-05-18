@@ -2,6 +2,7 @@ import uuid
 
 from django.db import models
 from django.utils import timezone
+from django.utils.text import slugify
 
 from django_ai_sdk.memories.schemas import DocumentExtraction
 from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
@@ -10,6 +11,7 @@ from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 class Memory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True, blank=True, editable=False)
     description = models.TextField(blank=True, default="")
     is_hidden = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
@@ -25,6 +27,18 @@ class Memory(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            if not self.slug and self.name:
+                base_slug = slugify(self.name)
+                slug = base_slug
+                counter = 1
+                while Memory.objects.filter(slug=slug).exists():
+                    slug = f"{base_slug}-{counter}"
+                    counter += 1
+                self.slug = slug
+        super().save(*args, **kwargs)
 
     async def get_tool_spec(self) -> ToolSpec:
         """Generate ToolSpec for this memory."""

@@ -200,6 +200,65 @@ class TestThreadServiceRestoreMessage:
 
 
 # ============================================================================
+# MemoryService Tests
+# ============================================================================
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestMemoryServiceGetAssistantMemories:
+    async def test_filters_by_slug(self):
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.tests.factories.memory_factory import MemoryFactory
+
+        mem1 = await Memory.objects.acreate(name="Legal Documents")
+        mem2 = await Memory.objects.acreate(name="Product Specs")
+        slug1 = mem1.slug
+        slug2 = mem2.slug
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [slug1, slug2]
+
+        with patch("django_ai_sdk.assistants.services.registry") as mock_reg:
+            mock_reg.get.return_value = mock_assistant
+
+            result = await MemoryService.get_assistant_memories("test-asst")
+
+        assert sorted(result) == sorted([str(mem1.id), str(mem2.id)])
+
+    async def test_returns_empty_when_no_memories_configured(self):
+        from django_ai_sdk.memories.services import MemoryService
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = []
+
+        with patch("django_ai_sdk.assistants.services.registry") as mock_reg:
+            mock_reg.get.return_value = mock_assistant
+
+            result = await MemoryService.get_assistant_memories("test-asst")
+
+        assert result == []
+
+    async def test_filters_by_slug_only_not_name(self):
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+
+        mem1 = await Memory.objects.acreate(name="Legal Documents")
+        mem2 = await Memory.objects.acreate(name="Product Specs")
+        # Filter by the other's name — should NOT match
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [mem2.name]
+
+        with patch("django_ai_sdk.assistants.services.registry") as mock_reg:
+            mock_reg.get.return_value = mock_assistant
+
+            result = await MemoryService.get_assistant_memories("test-asst")
+
+        assert result == []
+
+
+# ============================================================================
 # Thread History Tests
 # ============================================================================
 
