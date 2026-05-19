@@ -149,5 +149,11 @@ AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
+# Default memory file service handler
+AI_SDK_MEMORY_FILE_HANDLER = "django_ai_skd.files.services.DefaultMemoryFileHandler"
+
+# Default memory file service handler
+AI_SDK_MEMORY_CONTENT_HANDLER = "django_ai_skd.files.services.DefaultMemoryFileHandler"
+
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"

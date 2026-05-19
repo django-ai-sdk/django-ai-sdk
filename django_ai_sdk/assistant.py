@@ -16,6 +16,7 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
@@ -36,7 +37,7 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
-class Assistant(ABC, AssistantInfoMixin):
+class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     """
     Base class for AI assistants in the Django AI SDK.
 

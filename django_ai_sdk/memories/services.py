@@ -5,6 +5,7 @@ from django.db.models import Count
 
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.files.services import FileService
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
@@ -130,7 +131,9 @@ class MemoryService:
         memory = await Memory.objects.aget(id=memory_id)
         file_name = file.name or ""
 
-        result = read_text_content(file)
+        # file service handles file processing
+        result = await FileService.process(file=file)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
         content, ext = result
