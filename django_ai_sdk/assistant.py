@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar, overload
+
+from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
 from django_ai_sdk.assistants.registry import registry
@@ -21,10 +25,13 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
 
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
@@ -95,7 +102,7 @@ class Assistant(ABC, AssistantInfoMixin):
     memories: list[str] = []
 
     protocol = None
-    storage: type["BaseStorageAdapter"] | None = None
+    storage: type[BaseStorageAdapter] | None = None
 
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
@@ -115,6 +122,9 @@ class Assistant(ABC, AssistantInfoMixin):
     # Citation formatter used to render retrieved documents for the LLM.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
 
+    # Suggestion generator class for follow-up questions.
+    suggestion_generator: type[SuggestionGenerator] | None = None
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Assistant subclasses in the registry.
 
@@ -128,7 +138,7 @@ class Assistant(ABC, AssistantInfoMixin):
             registry.register(cls)
 
     @classmethod
-    async def warmup(cls, assistant: "Assistant", memory_id: str | None = None) -> None:
+    async def warmup(cls, assistant: Assistant, memory_id: str | None = None) -> None:
         """
         Warm up the RAG pipeline.
 
@@ -146,7 +156,7 @@ class Assistant(ABC, AssistantInfoMixin):
         await assistant.rag_provider.warmup(assistant, memory_id)
 
     @classmethod
-    def clear_rag_cache(cls, assistant: "Assistant") -> None:
+    def clear_rag_cache(cls, assistant: Assistant) -> None:
         """
         Clear the RAG cache.
 
@@ -160,7 +170,7 @@ class Assistant(ABC, AssistantInfoMixin):
     @classmethod
     async def reindex(
         cls,
-        assistant: "Assistant",
+        assistant: Assistant,
         memory_id: str | None = None,
         force_rebuild: bool = False,
     ) -> Any:
@@ -207,9 +217,7 @@ class Assistant(ABC, AssistantInfoMixin):
             # for now this won't block the main thread, but it can become very slow.
             asyncio.get_event_loop().run_until_complete(self.rag_provider.warmup(self, None))
 
-    async def get_storage_adapter(
-        self, thread_id: str | None = None
-    ) -> "BaseStorageAdapter | None":
+    async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
         """
         Get storage adapter for the given thread.
 
@@ -265,12 +273,15 @@ class Assistant(ABC, AssistantInfoMixin):
         """Return a fresh per-turn registry so citation indices reset between turns."""
         return CitationRegistry()
 
-    def get_suggestion_generator(self) -> "SuggestionGenerator | None":
+    def get_suggestion_generator(self) -> SuggestionGenerator | None:
         """Return a configured SuggestionGenerator, or None to disable.
 
-        Override in subclasses to enable suggestions. Default is None (opt-in).
+        Uses self.suggestion_generator class attribute if set.
+        Override this method in subclasses for full control.
         """
-        return None
+        if not self.suggestion_generator:
+            return None
+        return self.suggestion_generator(assistant=self)
 
     def get_tools(self) -> list[Any]:
         """
@@ -306,7 +317,7 @@ class Assistant(ABC, AssistantInfoMixin):
             return Entry.objects.filter(memory_id=memory_id)
         return Entry.objects.all()
 
-    async def get_rag_documents(self, memory_id: str | None = None) -> list["RagDocument"]:
+    async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:
         """
         Get documents for RAG as RagDocuments.
 
@@ -359,14 +370,37 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: type[T]
+    ) -> T | None: ...
+
     async def run(
         self,
         messages: list[ChatMessage],
-        system_prompt: str | None = None,
-    ) -> str | None:
-        """Run LLM calls directly from adapter"""
+        system_prompt: str | Prompt | None = None,
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
+        """Run LLM calls directly from adapter.
+
+        Args:
+            messages: Conversation messages
+            system_prompt: Optional system prompt override
+            response_format: Optional Pydantic model for structured output
+
+        Returns:
+            Response string, or parsed Pydantic model if response_format is set
+        """
         adapter = await self.get_pipeline_adapter()
-        return await adapter.run(messages=messages, system_prompt=system_prompt)
+        return await adapter.run(
+            messages=messages,
+            system_prompt=system_prompt,
+            response_format=response_format,
+        )
 
     @abstractmethod
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
@@ -487,6 +521,11 @@ class Assistant(ABC, AssistantInfoMixin):
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
         adapter = await self.get_pipeline_adapter(thread_id=thread_id)
+
+        # Wire suggestion generator onto the adapter
+        suggestion_generator = self.get_suggestion_generator()
+        if suggestion_generator:
+            adapter.suggestion_generator = suggestion_generator
 
         # TODO: fix type error for argument, can never be None, now nested
         if thread_id:
