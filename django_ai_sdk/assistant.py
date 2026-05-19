@@ -411,7 +411,7 @@ class Assistant(ABC, AssistantInfoMixin):
             thread_id: Optional thread ID for conversation persistence.
 
         Returns:
-            BasePipelineAdapter instance
+            A pipeline adapter instance
         """
         pass
 
