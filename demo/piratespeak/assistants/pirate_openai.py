@@ -1,6 +1,6 @@
 from django.conf import settings
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.openai import OpenAIAdapter
+from django_ai_sdk.adapters.openai import OpenAIStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.rags import (
@@ -126,7 +126,7 @@ class PirateOpenAIAssistant(Assistant):
         documents = self.get_example_documents()
         return BM25RAG(documents=documents, config=BM25Config(top_k=2))
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIAdapter":
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIStream":
         """
         Create OpenAI adapter with RAG support.
         """
@@ -134,7 +134,7 @@ class PirateOpenAIAssistant(Assistant):
         storage_adapter = await self.get_storage_adapter(thread_id)
         rag = await self.rag_provider.get_rag_instance(self, None)
 
-        return OpenAIAdapter(
+        return OpenAIStream(
             client=AsyncOpenAI(
                 api_key=settings.OPENAI_API_KEY,
                 base_url=settings.OPENAI_API_URL,

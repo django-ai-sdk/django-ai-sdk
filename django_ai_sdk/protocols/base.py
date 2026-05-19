@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
 
 
@@ -32,7 +32,7 @@ class BaseProtocolHandler(ABC):
     @abstractmethod
     def sse(
         self,
-        adapter: BasePipelineAdapter,
+        adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""

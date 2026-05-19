@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.haystack import HaystackAdapter
+from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
@@ -134,54 +134,23 @@ class PirateBasicAssistant(Assistant):
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackAdapter:
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackStream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
         # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        # Build generator
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        # Build tool agent from RAG provider
+        provider = self.rag_provider  # type: ignore[attr-defined]
+        tool_agent = provider.build_tool_agent(thread_id, memory_id=None)
 
-        # Create tools list
-        tools = [get_today()]
-
-        # Add RAG tools for each memory
-        if self.rag_provider and thread_id:
-            memory_links = ThreadMemory.objects.filter(
-                thread_id=thread_id, active=True
-            ).prefetch_related("memory")
-
-            async for link in memory_links:
-                try:
-                    memory = await Memory.objects.aget(id=link.memory.id)
-                    spec = await memory.get_tool_spec()
-
-                    rag = await self.rag_provider.get_rag_instance(self, str(memory.id))
-                    if rag:
-                        tool = rag.get_tool(spec)
-                        tools.append(tool)
-
-                except Memory.DoesNotExist:
-                    continue
-
-        # Build tool agent with all tools
-        tool_agent = ToolAgent(
-            config=ToolAgentConfig(
-                model=self.get_model(),
-                system_prompt=self.get_system_prompt(),
-                tools=tools,
-            ),
-            generator=generator,
-        )
+        # use Haystack's tool_agent pipeline
+        generator = tool_agent.chat_generator
+        tool_agent.add_tools()  # type: ignore[attr-defined]
 
         pipeline = tool_agent.pipeline()
 
-        return HaystackAdapter(
+        return HaystackStream(
             pipeline=pipeline,
             generator=generator,
             storage_adapter=storage_adapter,

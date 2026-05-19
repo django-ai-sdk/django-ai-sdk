@@ -5,7 +5,7 @@ from agents.run import RunConfig
 from agents.tool import function_tool
 from django.conf import settings
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.openai import OpenAIAgentAdapter
+from django_ai_sdk.adapters.openai import OpenAIAgentStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -125,7 +125,7 @@ class PirateAgentAssistant(Assistant):
         ]
         return random.choice(status_reports)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIAgentAdapter":
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIAgentStream":
         """OpenAI agent adapter with pirate tools."""
         client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
@@ -133,12 +133,13 @@ class PirateAgentAssistant(Assistant):
         )
 
         agent = Agent(
-            name=self.name or "",
+            name=self.name or "PirateAgent",
             instructions=self.get_instructions(),
+            model=self.model or "",
             tools=self.get_tools(),
         )
 
-        return OpenAIAgentAdapter(
+        return OpenAIAgentStream(
             agent=agent,
             runner_config=RunConfig(
                 model_provider=NebulModelProvider(
