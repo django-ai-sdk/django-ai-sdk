@@ -105,6 +105,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
 
+    # If True, hide from registry.list() (used for internal assistants)
+    hidden: bool = False
+
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
 
@@ -479,13 +482,16 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             StreamingHttpResponse ready for Django views
         """
         logger.debug(
-            f"Assistant as_view called: assistant={self.__class__.__name__}, messages={len(protocol_messages) if protocol_messages else 0}, thread_id={thread_id}, user={user}"
+            f"Assistant as_view called: assistant={self.__class__.__name__}, "
+            f"messages={len(protocol_messages) if protocol_messages else 0}, "
+            f"thread_id={thread_id}, user={user}"
         )
 
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
         logger.debug(
-            f"Protocol handler converted {len(protocol_messages) if protocol_messages else 0} protocol messages to {len(messages)} chat messages"
+            f"Protocol handler converted {len(protocol_messages) if protocol_messages else 0} "
+            f"protocol messages to {len(messages)} chat messages"
         )
 
         # Apply max_history limiting if configured
