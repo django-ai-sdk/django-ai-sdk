@@ -25,6 +25,7 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
@@ -374,12 +375,14 @@ class Assistant(ABC, AssistantInfoMixin):
         self, messages: list[ChatMessage], *, response_format: None = None
     ) -> str | None: ...
     @overload
-    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+    async def run(
+        self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: type[T]
+    ) -> T | None: ...
 
     async def run(
         self,
         messages: list[ChatMessage],
-        system_prompt: str | None = None,
+        system_prompt: str | Prompt | None = None,
         response_format: type[T] | None = None,
     ) -> T | str | None:
         """Run LLM calls directly from adapter.
