@@ -1,155 +1,139 @@
 """
 Unit tests for adapter configuration.
-
-These tests verify BasePipelineAdapter and adapter configuration
-without requiring actual streaming or LLM calls.
 """
 
-import pytest
+class TestOpenAIRunnableConfig:
+    """Test OpenAIRunnable configuration."""
+
+    def test_openai_runnable_has_model(self):
+        """Verify OpenAIRunnable has model attribute."""
+        from django_ai_sdk.adapters.openai import OpenAIRunnable
+
+        assert hasattr(OpenAIRunnable, "model")
+
+    def test_openai_runnable_has_instructions(self):
+        """Verify OpenAIRunnable has instructions attribute."""
+        from django_ai_sdk.adapters.openai import OpenAIRunnable
+
+        assert hasattr(OpenAIRunnable, "instructions")
 
 
-class TestBasePipelineAdapterConfig:
-    """Test BasePipelineAdapter configuration attributes."""
+class TestOpenAIStreamConfig:
+    """Test OpenAIStream configuration."""
 
-    def test_adapter_has_common_class_attributes(self):
-        """Verify BasePipelineAdapter common class attributes exist."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
+    def test_openai_stream_has_model(self):
+        """Verify OpenAIStream has model attribute."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
 
-        assert hasattr(BasePipelineAdapter, "model")
-        assert hasattr(BasePipelineAdapter, "instructions")
-        assert hasattr(BasePipelineAdapter, "query")
-        assert hasattr(BasePipelineAdapter, "merge_messages")
+        assert hasattr(OpenAIStream, "model")
 
-    def test_adapter_defaults(self):
-        """Verify default attribute values."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
+    def test_openai_stream_has_instructions(self):
+        """Verify OpenAIStream has instructions attribute."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
 
-        assert BasePipelineAdapter.model is None
-        assert BasePipelineAdapter.instructions is None
-        assert BasePipelineAdapter.query is None
-        assert BasePipelineAdapter.merge_messages is False
+        assert hasattr(OpenAIStream, "instructions")
 
-    def test_adapter_instance_has_message_result(self):
-        """Verify adapter class has message_result attribute."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
+    def test_openai_stream_has_merge_messages(self):
+        """Verify OpenAIStream has merge_messages attribute."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
 
-        # These are instance attributes, not class attributes
-        # Check that they're defined in __init__
-        import inspect
+        assert hasattr(OpenAIStream, "merge_messages")
 
-        init_source = inspect.getsource(BasePipelineAdapter.__init__)
-        assert "message_result" in init_source
-        assert "_rag_sources" in init_source
+    def test_openai_stream_has_stream_method(self):
+        """Verify OpenAIStream defines stream method."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
 
-    def test_adapter_is_abstract(self):
-        """Verify BasePipelineAdapter cannot be instantiated."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
-
-        with pytest.raises(TypeError) as exc_info:
-            BasePipelineAdapter()
-
-        assert "abstract" in str(exc_info.value).lower()
-
-    def test_adapter_has_abstract_methods(self):
-        """Verify abstract methods are defined."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
-
-        abstract_methods = getattr(BasePipelineAdapter, "__abstractmethods__", set())
-        required = {"get_messages", "stream"}
-        assert required <= abstract_methods, f"Missing: {required - abstract_methods}"
+        assert hasattr(OpenAIStream, "stream")
 
 
-class TestAdapterMergeMessagesFlag:
-    """Test the merge_messages configuration flag."""
+class TestHaystackRunnableConfig:
+    """Test HaystackRunnable configuration."""
 
-    def test_default_merge_messages_is_false(self):
-        """Verify default merge_messages is False."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
+    def test_haystack_runnable_has_model(self):
+        """Verify HaystackRunnable has model attribute."""
+        from django_ai_sdk.adapters.haystack import HaystackRunnable
 
-        assert BasePipelineAdapter.merge_messages is False
+        assert hasattr(HaystackRunnable, "model")
 
-    def test_merge_messages_can_be_overridden(self):
-        """Test that merge_messages can be set to True."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
+    def test_haystack_runnable_has_instructions(self):
+        """Verify HaystackRunnable has instructions attribute."""
+        from django_ai_sdk.adapters.haystack import HaystackRunnable
 
-        # Create a concrete implementation for testing
-        class TestAdapter(BasePipelineAdapter):
-            async def get_messages(self, messages):
-                return []
-
-            async def stream(self, messages):
-                return
-
-        # Override the class attribute
-        TestAdapter.merge_messages = True
-        assert TestAdapter.merge_messages is True
-
-    def test_merge_messages_type_is_bool(self):
-        """Verify merge_messages is a boolean."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
-
-        assert isinstance(BasePipelineAdapter.merge_messages, bool)
+        assert hasattr(HaystackRunnable, "instructions")
 
 
-class TestOpenAIAdapterConfig:
-    """Test OpenAIAdapter specific configuration."""
+class TestHaystackStreamConfig:
+    """Test HaystackStream configuration."""
 
-    def test_openai_adapter_inherits_base(self):
-        """Verify OpenAIAdapter extends BasePipelineAdapter."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
-        from django_ai_sdk.adapters.openai import OpenAIAdapter
+    def test_haystack_stream_has_model(self):
+        """Verify HaystackStream has model attribute."""
+        from django_ai_sdk.adapters.haystack import HaystackStream
 
-        assert issubclass(OpenAIAdapter, BasePipelineAdapter)
+        assert hasattr(HaystackStream, "model")
 
-    def test_openai_adapter_inherits_merge_messages(self):
-        """Verify OpenAIAdapter inherits merge_messages from base."""
-        from django_ai_sdk.adapters.openai import OpenAIAdapter
+    def test_haystack_stream_has_merge_messages(self):
+        """Verify HaystackStream has merge_messages attribute."""
+        from django_ai_sdk.adapters.haystack import HaystackStream
 
-        # Should inherit from base (False by default)
-        assert hasattr(OpenAIAdapter, "merge_messages")
+        assert hasattr(HaystackStream, "merge_messages")
 
-    def test_openai_adapter_has_model_attribute(self):
-        """Verify OpenAIAdapter has model attribute."""
-        from django_ai_sdk.adapters.openai import OpenAIAdapter
+    def test_haystack_stream_has_stream_method(self):
+        """Verify HaystackStream defines stream method."""
+        from django_ai_sdk.adapters.haystack import HaystackStream
 
-        assert hasattr(OpenAIAdapter, "model")
-
-    def test_openai_adapter_has_instructions_attribute(self):
-        """Verify OpenAIAdapter has instructions attribute."""
-        from django_ai_sdk.adapters.openai import OpenAIAdapter
-
-        assert hasattr(OpenAIAdapter, "instructions")
-
-    def test_openai_adapter_has_query_attribute(self):
-        """Verify OpenAIAdapter has query attribute."""
-        from django_ai_sdk.adapters.openai import OpenAIAdapter
-
-        assert hasattr(OpenAIAdapter, "query")
+        assert hasattr(HaystackStream, "stream")
 
 
-class TestHaystackAdapterConfig:
-    """Test HaystackAdapter specific configuration."""
+class TestRunnableProtocol:
+    """Test Runnable protocol conformance."""
 
-    def test_haystack_adapter_inherits_base(self):
-        """Verify HaystackAdapter extends BasePipelineAdapter."""
-        from django_ai_sdk.adapters.base import BasePipelineAdapter
-        from django_ai_sdk.adapters.haystack import HaystackAdapter
+    def test_runnable_protocol_exists(self):
+        """Verify Runnable protocol is defined."""
+        from django_ai_sdk.adapters.protocols import Runnable
 
-        assert issubclass(HaystackAdapter, BasePipelineAdapter)
+        assert hasattr(Runnable, "run")
 
-    def test_haystack_adapter_inherits_merge_messages(self):
-        """Verify HaystackAdapter inherits merge_messages from base."""
-        from django_ai_sdk.adapters.haystack import HaystackAdapter
+    def test_haystack_runnable_conforms(self):
+        """Verify HaystackRunnable conforms to Runnable protocol."""
+        from django_ai_sdk.adapters.haystack import HaystackRunnable
 
-        assert hasattr(HaystackAdapter, "merge_messages")
+        assert hasattr(HaystackRunnable, "run")
 
-    def test_haystack_adapter_has_required_methods(self):
-        """Verify HaystackAdapter implements required methods."""
-        from django_ai_sdk.adapters.haystack import HaystackAdapter
+    def test_openai_runnable_conforms(self):
+        """Verify OpenAIRunnable conforms to Runnable protocol."""
+        from django_ai_sdk.adapters.openai import OpenAIRunnable
 
-        required = ["get_messages", "stream"]
-        for method in required:
-            assert hasattr(HaystackAdapter, method), f"Missing: {method}"
+        assert hasattr(OpenAIRunnable, "run")
+
+    def test_openai_stream_has_run(self):
+        """Verify OpenAIStream has run() (implements Runnable too)."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
+
+        assert hasattr(OpenAIStream, "run")
+
+    def test_haystack_stream_has_run(self):
+        """Verify HaystackStream has run() (implements Runnable too)."""
+        from django_ai_sdk.adapters.haystack import HaystackStream
+
+        assert hasattr(HaystackStream, "run")
+
+    def test_streamable_protocol_exists(self):
+        """Verify Streamable protocol is defined."""
+        from django_ai_sdk.adapters.protocols import Streamable
+
+        assert hasattr(Streamable, "stream")
+
+    def test_openai_stream_conforms_to_streamable(self):
+        """Verify OpenAIStream conforms to Streamable protocol."""
+        from django_ai_sdk.adapters.openai import OpenAIStream
+
+        assert hasattr(OpenAIStream, "stream")
+
+    def test_haystack_stream_conforms_to_streamable(self):
+        """Verify HaystackStream conforms to Streamable protocol."""
+        from django_ai_sdk.adapters.haystack import HaystackStream
+
+        assert hasattr(HaystackStream, "stream")
 
 
 class TestAdapterUtils:
