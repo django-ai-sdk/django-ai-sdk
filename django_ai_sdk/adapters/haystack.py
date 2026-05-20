@@ -97,7 +97,7 @@ class HaystackRunnable(Runnable):
         self.instructions = instructions
 
     def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
-        """Quick conversion — no merging."""
+        """Quick conversion."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted: list[HaystackChatMessage] = []
         for role, content in conversation:
@@ -105,8 +105,6 @@ class HaystackRunnable(Runnable):
                 converted.append(HaystackChatMessage.from_user(content))
             elif role == "assistant":
                 converted.append(HaystackChatMessage.from_assistant(content))
-        if not converted:
-            converted.append(HaystackChatMessage.from_system("No messages available."))
         return converted
 
     @overload

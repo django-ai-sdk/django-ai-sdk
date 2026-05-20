@@ -133,9 +133,9 @@ class PirateAgentAssistant(Assistant):
         )
 
         agent = Agent(
-            name=self.name or "PirateAgent",
+            name=self.name,
             instructions=self.get_instructions(),
-            model=self.model or "",
+            model=self.model,
             tools=self.get_tools(),
         )
 
@@ -143,7 +143,7 @@ class PirateAgentAssistant(Assistant):
             agent=agent,
             runner_config=RunConfig(
                 model_provider=NebulModelProvider(
-                    model=self.model or "",
+                    model=self.model,
                     client=client,
                 )
             ),
