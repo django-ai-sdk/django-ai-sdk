@@ -169,6 +169,14 @@ class HaystackRAGBase(ABC):
         self.documents = documents
         self.warmup(force_rebuild=True)
 
+    def get_chunk(self, chunk_id: str) -> str | None:
+        """Return the content of a specific chunk by its Haystack document ID.
+
+        Subclasses should override this if their store supports direct chunk lookup.
+        Returns None to signal the caller should fall back to full Entry content.
+        """
+        return None
+
     def get_tool(self, spec: "ToolSpec") -> ComponentTool:
         """Get tool with custom specification."""
         tool = self.as_tool()
