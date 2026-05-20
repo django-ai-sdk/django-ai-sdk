@@ -213,9 +213,7 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
 async def list_assistants(request: HttpRequest) -> Any:
     try:
         items = AssistantService.list_assistants()
-        return AssistantsListResponse(
-            assistants=[AssistantItem(**item) for item in items]
-        )
+        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
     except Exception as e:
         return 500, Error(message=str(e))
 
