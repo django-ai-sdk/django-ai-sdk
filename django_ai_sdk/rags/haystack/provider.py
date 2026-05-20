@@ -75,6 +75,15 @@ class HaystackRAGProvider(BaseRAGProvider):
         """
         return await self._get_or_create_rag(assistant, memory_id, False)
 
+    def get_cached_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+        """Return the cached RAG instance without warming up or creating a new one.
+
+        Use instead of get_rag_instance() when a second connection would conflict
+        (e.g. Qdrant's exclusive local file lock). Returns None if not yet warmed.
+        """
+        cache_key = self._get_cache_key(assistant, memory_id)
+        return self._cache.get(cache_key)
+
     async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
         """Build a ComponentTool from a Haystack RAG instance.
 
@@ -212,16 +221,8 @@ class HaystackRAGProvider(BaseRAGProvider):
                 logger.debug(f"Using cached Haystack RAG for {cache_key} (post-lock cache hit)")
                 return self._cache[cache_key]
 
-            logger.info(
-                f"[_get_or_create_rag] cache_key={cache_key}, memory_id={memory_id}, force_rebuild={force_rebuild}"
-            )
             logger.debug(f"Creating Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
-
-            logger.info(
-                f"[_get_or_create_rag] Calling assistant.get_rag_pipeline(memory_id={memory_id})"
-            )
             rag = await assistant.get_rag_pipeline(memory_id)
-            logger.info(f"[_get_or_create_rag] Got rag={rag is not None}")
 
             if rag is not None:
                 if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
