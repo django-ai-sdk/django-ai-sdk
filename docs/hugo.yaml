@@ -1,0 +1,48 @@
+# Hugo configuration file
+title: Django AI SDK
+
+# import hextra as module
+module:
+  imports:
+    - path: github.com/imfing/hextra
+
+markup:
+  # allow raw html
+  goldmark:
+    renderer:
+      unsafe: true
+
+  # enable hextra syntax highlight
+  highlight:
+    noClasses: false
+
+menu:
+  main:
+    - name: Quick Start
+      pageRef: /docs/quickstart
+      weight: 1
+    - name: Docs
+      pageRef: /docs
+      weight: 2
+    - name: Manual
+      pageRef: /docs/manual
+      weight: 3
+    - name: About
+      pageRef: /about
+      weight: 4
+    - name: Search
+      weight: 5
+      params:
+        type: search
+
+params:
+  navbar:
+    displayTitle: true
+    displayLogo: false
+
+  footer:
+    displayCopyright: false
+    displayPoweredBy: true
+
+  editURL:
+    enable: false
