@@ -12,7 +12,7 @@ from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
 from pydantic import BaseModel
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Runnable, Streamable
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.citations import CitationRegistry
 from django_ai_sdk.common import (
@@ -78,10 +78,80 @@ def parse_tool_output(obj: Any) -> Any:
     return str(obj)
 
 
-class HaystackAdapter(BasePipelineAdapter):
+class HaystackRunnable(Runnable):
+    """
+    Runnable Haystack adapter.
+    """
+
+    model: str | None = None
+    instructions: str | None = None
+
+    def __init__(
+        self,
+        generator: Any,
+        model: str | None = None,
+        instructions: str | None = None,
+    ) -> None:
+        self.generator = generator
+        self.model = model
+        self.instructions = instructions
+
+    def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
+        """Quick conversion."""
+        conversation = [m for m in messages if m.role in ("user", "assistant")]
+        converted: list[HaystackChatMessage] = []
+        for role, content in conversation:
+            if role == "user":
+                converted.append(HaystackChatMessage.from_user(content))
+            elif role == "assistant":
+                converted.append(HaystackChatMessage.from_assistant(content))
+        return converted
+
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
+        user_messages = self.get_messages(messages)
+        if system_prompt:
+            user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
+
+        if response_format:
+            schema = response_format.model_json_schema()
+            response = self.generator.run(
+                messages=user_messages,
+                generation_kwargs={
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {"name": response_format.__name__, "schema": schema},
+                    }
+                },
+            )
+            return response_format.model_validate_json(response["replies"][0].text)
+
+        response = self.generator.run(messages=user_messages)
+        return response["replies"][0].text
+
+
+class HaystackStream(Runnable, Streamable):
     """
     Adapter for Haystack pipelines that emits events.
     """
+
+    model: str | None = None
+    instructions: str | None = None
+    suggestion_generator: "SuggestionGenerator | None" = None
+
+    # Message processing configuration
+    merge_messages: bool = False
 
     def __init__(
         self,

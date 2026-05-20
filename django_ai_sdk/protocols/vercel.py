@@ -4,7 +4,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.events import (
     DataEvent,
@@ -331,9 +331,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
         return result
 
-    async def sse(  # type: ignore
+    async def sse(
         self,
-        adapter: BasePipelineAdapter,
+        adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""

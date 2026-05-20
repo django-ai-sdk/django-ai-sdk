@@ -93,9 +93,9 @@ class Assistant(ABC, AssistantInfoMixin):
         return await assistant.as_view(protocol_messages)
     """
 
-    name: str | None = None
-    description: str | None = None
-    model: str | None = None
+    name: str
+    description: str
+    model: str
     instructions: Prompt = prompt("You are a helpful assistant.")
 
     # Default list of connected memories
@@ -411,7 +411,7 @@ class Assistant(ABC, AssistantInfoMixin):
             thread_id: Optional thread ID for conversation persistence.
 
         Returns:
-            BasePipelineAdapter instance
+            A pipeline adapter instance
         """
         pass
 

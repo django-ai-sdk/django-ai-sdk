@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
-from django_ai_sdk.adapters.openai import OpenAIAdapter, OpenAIAgentAdapter
+from django_ai_sdk.adapters.openai import OpenAIStream, OpenAIAgentStream
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.events import (
     MessageStartEvent,
@@ -26,8 +26,8 @@ from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
 
 
-class TestOpenAIAdapter:
-    """Test suite for OpenAIAdapter."""
+class TestOpenAIStream:
+    """Test suite for OpenAIStream."""
 
     @pytest_asyncio.fixture
     async def mock_openai_client(self):
@@ -40,7 +40,7 @@ class TestOpenAIAdapter:
     @pytest_asyncio.fixture
     async def adapter(self, mock_openai_client):
         """Create OpenAIAdapter with mock client."""
-        return OpenAIAdapter(
+        return OpenAIStream(
             client=mock_openai_client,
             model="gpt-4o-mini",
             instructions="You are a test assistant",
@@ -223,8 +223,8 @@ class TestOpenAIAdapter:
         assert "API Error" in error_events[0].error_message
 
 
-class TestOpenAIAgentAdapter:
-    """Test suite for OpenAIAgentAdapter."""
+class TestOpenAIAgentStream:
+    """Test suite for OpenAIAgentStream."""
 
     @pytest.mark.asyncio
     async def test_agent_adapter_generates_consistent_id(self):
@@ -232,7 +232,7 @@ class TestOpenAIAgentAdapter:
         from agents.agent import Agent
 
         agent = Agent(name="test", instructions="Test")
-        adapter = OpenAIAgentAdapter(
+        adapter = OpenAIAgentStream(
             agent=agent,
             store=True,
             storage_adapter=MemoryStorageAdapter(thread_id="test-thread"),

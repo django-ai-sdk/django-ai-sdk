@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
@@ -95,7 +95,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
     async def sse(
         self,
-        adapter: BasePipelineAdapter,
+        adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """

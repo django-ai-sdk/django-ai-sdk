@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.haystack import HaystackAdapter
+from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
@@ -134,11 +134,8 @@ class PirateBasicAssistant(Assistant):
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackAdapter:
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackStream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
-
-        # Get storage adapter
-        storage_adapter = await self.get_storage_adapter(thread_id)
 
         # Build generator
         generator = OpenAIChatGenerator(
@@ -146,6 +143,9 @@ class PirateBasicAssistant(Assistant):
             api_key=Secret.from_token(settings.OPENAI_API_KEY),
             api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
+
+        # Get storage adapter
+        storage_adapter = await self.get_storage_adapter(thread_id)
 
         # Create tools list
         tools = [get_today()]
@@ -181,7 +181,7 @@ class PirateBasicAssistant(Assistant):
 
         pipeline = tool_agent.pipeline()
 
-        return HaystackAdapter(
+        return HaystackStream(
             pipeline=pipeline,
             generator=generator,
             storage_adapter=storage_adapter,
