@@ -21,6 +21,8 @@ class FileService:
         for processor in current_handler.get_file_processors():
             return processor.run(file)
 
+        return None
+
     @staticmethod
     async def extract(
         content: str,
@@ -34,3 +36,5 @@ class FileService:
         # processing from each content processor
         for processor in current_handler.get_content_processors():
             return processor.run(content)
+
+        return None
