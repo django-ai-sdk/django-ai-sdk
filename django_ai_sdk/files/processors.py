@@ -32,7 +32,8 @@ class FileProcessor(Protocol):
         file: str | Path | File,
         *,
         response_format: type[T] | None = None,
-    ) -> T | str | None: ...
+    ) -> T | str | None:
+        pass
 
 
 class ContentProcessor(Protocol):
