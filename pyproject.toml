@@ -12,6 +12,7 @@ dependencies = [
   "loguru>=0.7.3",
   "mimetypes-magic>=0.4.30",
   "pydantic>=2.12.5",
+  "python-magic>=0.4.27",
 ]
 description = "Django AI SDK is a library that provides tools and utilities for building AI-powered applications with Django. It includes features such as natural language processing, machine learning, and integration with popular AI frameworks."
 name = "django-ai-sdk"

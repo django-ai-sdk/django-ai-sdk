@@ -568,6 +568,7 @@ dependencies = [
     { name = "loguru" },
     { name = "mimetypes-magic" },
     { name = "pydantic" },
+    { name = "python-magic" },
 ]
 
 [package.optional-dependencies]
@@ -654,6 +655,7 @@ requires-dist = [
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0" },
     { name = "openai-agents", marker = "extra == 'openai'", specifier = ">=0.10.2" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "python-magic", specifier = ">=0.4.27" },
     { name = "qdrant-haystack", marker = "extra == 'haystack'", specifier = ">=10.2.1" },
     { name = "sentence-transformers", marker = "extra == 'haystack'", specifier = ">=5.2.3" },
 ]
@@ -3035,6 +3037,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
+]
+
+[[package]]
+name = "python-magic"
+version = "0.4.27"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/db/0b3e28ac047452d079d375ec6798bf76a036a08182dbb39ed38116a49130/python-magic-0.4.27.tar.gz", hash = "sha256:c1ba14b08e4a5f5c31a302b7721239695b2f0f058d125bd5ce1ee36b9d9d3c3b", size = 14677, upload-time = "2022-06-07T20:16:59.508Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/73/9f872cb81fc5c3bb48f7227872c28975f998f3e7c2b1c16e95e6432bbb90/python_magic-0.4.27-py2.py3-none-any.whl", hash = "sha256:c212960ad306f700aa0d01e5d7a325d20548ff97eb9920dcd29513174f0294d3", size = 13840, upload-time = "2022-06-07T20:16:57.763Z" },
 ]
 
 [[package]]
