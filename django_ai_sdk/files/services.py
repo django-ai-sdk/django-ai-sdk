@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from django.core.files.base import File
+
 from django_ai_sdk.files.common import get_default_content_handler, get_default_file_handler
 from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 
@@ -7,7 +9,7 @@ from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 class FileService:
     @staticmethod
     async def process(
-        file: str | Path,
+        file: str | Path | File,
         *,
         handler: FileHandler | None = None,
     ) -> str | None:
