@@ -42,4 +42,5 @@ class ContentProcessor(Protocol):
         content: str,
         *,
         response_format: type[T] | None = None,
-    ) -> T | str | None: ...
+    ) -> T | str | None:
+        pass
