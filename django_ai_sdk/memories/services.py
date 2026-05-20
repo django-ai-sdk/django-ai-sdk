@@ -1,10 +1,12 @@
-from typing import Any
+import os
 
 from asgiref.sync import async_to_sync
+from django.core.files.base import File
 from django.db.models import Count
 
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.files.services import FileService
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
@@ -125,12 +127,17 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def upload_document(memory_id: str, file: Any) -> DocumentOut | tuple[int, dict]:
+    async def upload_document(memory_id: str, file: File) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        file_name = file.name or ""
 
-        result = read_text_content(file)
+        # file service handles file processing
+        result = await FileService.process(file=file)
+
+        # get extension
+        file_name = file.name or ""
+        _, ext = os.path.splitext(file_name)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
         content, ext = result
@@ -284,12 +291,20 @@ class MemoryService:
         return thread.file_memory
 
     @staticmethod
-    async def upload_thread_file(thread_id: str, file: Any) -> DocumentOut | tuple[int, dict]:
+    async def upload_thread_file(thread_id: str, file: File) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
         memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
-        file_name = file.name or ""
 
-        result = read_text_content(file)
+        # get assistant from thread
+        assistant = await AssistantService.get_assistant(thread_id)
+
+        # file service handles file processing
+        result = await FileService.process(file=file, handler=assistant)
+
+        # get extension
+        file_name = file.name or ""
+        _, ext = os.path.splitext(file_name)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
         content, ext = result
