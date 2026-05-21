@@ -395,6 +395,14 @@ class HaystackAdapter(BasePipelineAdapter):
                             tool_call_id = payload.id or str(uuid.uuid4())
                             tool_name = payload.tool_name
 
+                            # Add to stream_writer NOW so tool is at correct position in stream_sequence
+                            if stream_writer:
+                                stream_writer.add_chunk(MessageChunk(
+                                    type="tool_call_start",
+                                    content={"tool_call_id": tool_call_id, "tool_name": tool_name},
+                                    metadata={"source": "haystack_adapter"},
+                                ))
+
                             yield ToolCallStartEvent(
                                 tool_call_id=tool_call_id,
                                 tool_name=tool_name,
@@ -402,10 +410,17 @@ class HaystackAdapter(BasePipelineAdapter):
 
                             # Emit ToolInputCompleteEvent
                             if payload.arguments:
+                                parsed_input = parse_tool_input(payload.arguments)
+                                if stream_writer:
+                                    stream_writer.add_chunk(MessageChunk(
+                                        type="tool_input",
+                                        content={"tool_call_id": tool_call_id, "tool_name": tool_name, "tool_input": parsed_input},
+                                        metadata={"source": "haystack_adapter"},
+                                    ))
                                 yield ToolInputCompleteEvent(
                                     tool_call_id=tool_call_id,
                                     tool_name=tool_name,
-                                    tool_input=parse_tool_input(payload.arguments),
+                                    tool_input=parsed_input,
                                 )
 
                         elif event_type == "tool_result":
@@ -413,6 +428,14 @@ class HaystackAdapter(BasePipelineAdapter):
                             tool_call_id = payload.origin.id
                             # Ensure the output is JSON serializable
                             tool_output = parse_tool_output(payload.to_dict())
+
+                            # Add to stream_writer NOW so tool result is at correct position in stream_sequence
+                            if stream_writer:
+                                stream_writer.add_chunk(MessageChunk(
+                                    type="tool_output",
+                                    content={"tool_call_id": tool_call_id, "tool_output": tool_output},
+                                    metadata={"source": "haystack_adapter"},
+                                ))
 
                             yield ToolOutputEvent(
                                 tool_call_id=tool_call_id,
@@ -479,25 +502,6 @@ class HaystackAdapter(BasePipelineAdapter):
                         f"Found {len(response_messages)} response messages from pipeline root"
                     )
 
-                # Process tool events from response messages for storage
-                for message_index, message in enumerate(response_messages):
-                    if hasattr(message, "tool_calls") or hasattr(message, "tool_call_results"):
-                        tool_call_count = len(getattr(message, "tool_calls", []))
-                        tool_result_count = len(getattr(message, "tool_call_results", []))
-                        logger.debug(
-                            f"Message {message_index}: {tool_call_count} tool calls, {tool_result_count} tool results"
-                        )
-
-                        # Create tool chunks and add to stream writer for storage
-                        if stream_writer:
-                            tool_chunks = self._create_tool_chunks_from_message(message)
-                            logger.debug(
-                                f"Created {len(tool_chunks)} tool chunks for message {message_index}"
-                            )
-                            for chunk in tool_chunks:
-                                stream_writer.add_chunk(chunk)
-
-                logger.debug("Tool storage complete: stored tool chunks from pipeline result")
 
             except Exception as pipeline_processing_error:
                 logger.error(

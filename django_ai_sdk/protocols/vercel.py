@@ -158,6 +158,11 @@ class ToolInputStartPart(Schema):
     type: Literal["tool-input-start"] = "tool-input-start"
     tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
     tool_name: str = Field(validation_alias="tool_name", serialization_alias="toolName")
+    provider_executed: bool = Field(
+        default=True,
+        validation_alias="provider_executed",
+        serialization_alias="providerExecuted",
+    )
 
 
 class ToolInputDeltaPart(Schema):
@@ -178,6 +183,11 @@ class ToolInputAvailablePart(Schema):
     tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
     tool_name: str = Field(validation_alias="tool_name", serialization_alias="toolName")
     input: dict[str, Any]
+    provider_executed: bool = Field(
+        default=True,
+        validation_alias="provider_executed",
+        serialization_alias="providerExecuted",
+    )
 
 
 class ToolOutputAvailablePart(Schema):
@@ -186,6 +196,11 @@ class ToolOutputAvailablePart(Schema):
     type: Literal["tool-output-available"] = "tool-output-available"
     tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
     output: dict[str, Any]
+    provider_executed: bool = Field(
+        default=True,
+        validation_alias="provider_executed",
+        serialization_alias="providerExecuted",
+    )
 
 
 # === Step Parts ===
@@ -283,35 +298,38 @@ class VercelProtocolHandler(BaseProtocolHandler):
         """Convert ChatMessage objects to Vercel AI SDK message format."""
         result = []
         for chat_message in chat_messages:
-            parts = []
+            if chat_message.parts:
+                parts = [dict(part) if isinstance(part, dict) else part for part in chat_message.parts]
+            else:
+                parts = []
 
-            if chat_message.content:
-                parts.append({"type": "text", "text": chat_message.content})
+                if chat_message.content:
+                    parts.append({"type": "text", "text": chat_message.content})
 
-            if chat_message.sources:
-                for source in chat_message.sources:
-                    # Emit spec-compliant source-document with optional content for UI display
-                    parts.append(
-                        {
-                            "type": "source-document",
-                            "sourceId": str(source.get("index", "")),
-                            "mediaType": "file",
-                            "title": source.get("title", ""),
-                            "content": source.get("content", ""),  # From stored history
-                        }
-                    )
+                if chat_message.sources:
+                    for source in chat_message.sources:
+                        # Emit spec-compliant source-document with optional content for UI display
+                        parts.append(
+                            {
+                                "type": "source-document",
+                                "sourceId": str(source.get("index", "")),
+                                "mediaType": "file",
+                                "title": source.get("title", ""),
+                                "content": source.get("content", ""),  # From stored history
+                            }
+                        )
 
-            if chat_message.tool_calls:
-                for tool_call in chat_message.tool_calls:
-                    parts.append(
-                        {
-                            "type": f"tool-{tool_call.get('name', 'unknown')}",
-                            "toolCallId": tool_call.get("id"),
-                            "state": "output-available",
-                            "input": tool_call.get("arguments", {}),
-                            "output": tool_call.get("result", {}),
-                        }
-                    )
+                if chat_message.tool_calls:
+                    for tool_call in chat_message.tool_calls:
+                        parts.append(
+                            {
+                                "type": f"tool-{tool_call.get('name', 'unknown')}",
+                                "toolCallId": tool_call.get("id"),
+                                "state": "output-available",
+                                "input": tool_call.get("arguments", {}),
+                                "output": tool_call.get("result", {}),
+                            }
+                        )
 
             result.append(
                 {
@@ -418,6 +436,11 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_call_start":
                     tool_start_event = cast("ToolCallStartEvent", event)
+                    # End open text block so tool chunks interleave chronologically with text
+                    if self.text_started and self.text_id:
+                        yield TextEndPart(id=self.text_id)
+                        self.text_started = False
+                        self.text_id = None
                     yield ToolInputStartPart(
                         tool_call_id=tool_start_event.tool_call_id,
                         tool_name=tool_start_event.tool_name,
@@ -429,6 +452,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         tool_input_event.tool_input
                         if isinstance(tool_input_event.tool_input, dict)
                         else {"input": tool_input_event.tool_input}
+                    )
+                    logger.debug(
+                        f"tool_input_complete: {tool_input_event.tool_name}, input={tool_input}"
                     )
                     yield ToolInputAvailablePart(
                         tool_call_id=tool_input_event.tool_call_id,

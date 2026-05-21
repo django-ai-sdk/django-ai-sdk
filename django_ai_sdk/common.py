@@ -29,6 +29,8 @@ class ChatMessage(BaseModel):
 
     # Rich metadata
     tool_calls: list[dict] = Field(default_factory=list)
+    # Generic stream sequence: captures order of text, tools, sources without vendor lock-in
+    stream_sequence: list[dict[str, Any]] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
@@ -115,7 +117,10 @@ class StreamWriter:
 
         if chunk.type == "text":
             self.message.content += chunk.content
-            logger.debug(f"Added text chunk, total content length now: {len(self.message.content)}")
+            if self.message.stream_sequence and self.message.stream_sequence[-1].get("type") == "text":
+                self.message.stream_sequence[-1]["content"] += chunk.content
+            else:
+                self.message.stream_sequence.append({"type": "text", "content": chunk.content})
 
         elif chunk.type == "reasoning":
             # Initialize reasoning field if first chunk
@@ -135,7 +140,11 @@ class StreamWriter:
                 "arguments": {},
                 "result": None,
             }
-            logger.debug(f"Started tool call: {tool_name} (ID: {tool_call_id})")
+            self.message.stream_sequence.append({
+                "type": "tool_call_start",
+                "tool_name": tool_name,
+                "tool_id": tool_call_id,
+            })
 
         elif chunk.type == "tool_input":
             tool_call_id = chunk.content["tool_call_id"]
@@ -149,13 +158,27 @@ class StreamWriter:
             tool_call_id = chunk.content["tool_call_id"]
             if tool_call_id in self._pending_tool_calls:
                 self._pending_tool_calls[tool_call_id]["result"] = chunk.content["tool_output"]
-                # Move completed tool call to message
                 completed_tool = self._pending_tool_calls[tool_call_id]
                 self.message.tool_calls.append(completed_tool)
+                for i, item in enumerate(self.message.stream_sequence):
+                    if item.get("type") == "tool_call_start" and item.get("tool_id") == tool_call_id:
+                        self.message.stream_sequence[i] = {
+                            "type": "tool_call_complete",
+                            "tool_name": completed_tool["name"],
+                            "tool_id": completed_tool["id"],
+                            "result": chunk.content["tool_output"],
+                        }
+                        break
+                else:
+                    self.message.stream_sequence.append({
+                        "type": "tool_call_complete",
+                        "tool_name": completed_tool["name"],
+                        "tool_id": completed_tool["id"],
+                        "result": chunk.content["tool_output"],
+                    })
                 del self._pending_tool_calls[tool_call_id]
-                logger.debug(f"Completed tool call: {completed_tool['name']} (ID: {tool_call_id})")
             else:
-                logger.debug(f"Received tool output for unknown tool call ID: {tool_call_id}")
+                logger.warning(f"Received tool output for unknown tool call: {tool_call_id}")
 
         elif chunk.type == "error":
             error_message = chunk.content["error_message"]
@@ -166,19 +189,17 @@ class StreamWriter:
 
         return self.message
 
-    async def finalize(self, finish_reason: str = "", usage: dict | None = None) -> ChatMessage:
-        """Complete the message"""
-        logger.debug(f"Finalizing message with reason: {finish_reason}")
 
-        # Add any remaining pending tool calls (in casse tool_output never came)
-        pending_tools_count = len(self._pending_tool_calls)
-        if pending_tools_count > 0:
-            logger.debug(f"Adding {pending_tools_count} pending tool calls to final message")
-            for tool_call in self._pending_tool_calls.values():
-                self.message.tool_calls.append(tool_call)
-                logger.debug(
-                    f"Added pending tool call: {tool_call['name']} (ID: {tool_call['id']})"
-                )
+    async def finalize(self, finish_reason: str = "", usage: dict | None = None) -> ChatMessage:
+        """Complete the message."""
+        for tool_call in self._pending_tool_calls.values():
+            self.message.tool_calls.append(tool_call)
+            self.message.stream_sequence.append({
+                "type": "tool_call_complete",
+                "tool_name": tool_call["name"],
+                "tool_id": tool_call["id"],
+                "result": tool_call["result"],
+            })
         self._pending_tool_calls.clear()
 
         # Set usage if provided
@@ -189,7 +210,8 @@ class StreamWriter:
         # Finalize message
         self.message.finalize(finish_reason)
         logger.debug(
-            f"Message finalized: content_length={len(self.message.content)}, tool_calls={len(self.message.tool_calls)}, errors={len(self.message.errors)}, duration={self.message.duration}ms"
+            f"Message finalized: id={self.message.id}, content_length={len(self.message.content)}, "
+            f"tool_calls={len(self.message.tool_calls)}, duration={self.message.duration}ms"
         )
 
         # Auto-store if callback provided
