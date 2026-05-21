@@ -159,7 +159,6 @@ class HaystackStream(Runnable, Streamable):
         generator: Any,
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
-        rag_pipeline: Any = None,
         citation_registry: CitationRegistry | None = None,
         suggestion_generator: "SuggestionGenerator | None" = None,
     ) -> None:
@@ -167,9 +166,6 @@ class HaystackStream(Runnable, Streamable):
         self.generator = generator
         self.store = store
         self.storage_adapter = storage_adapter
-        self.rag_pipeline = (
-            rag_pipeline  # TODO: we probably don't need this, we can check pipeline directly
-        )
         self.citation_registry = citation_registry
         self.suggestion_generator = suggestion_generator
         self._sources_emitted = 0
@@ -409,7 +405,7 @@ class HaystackStream(Runnable, Streamable):
                     logger.debug("Tool result queued")
 
                 if chunk.finish_reason == "stop":
-                    logger.debug("Pipeline finished with reason: stop")
+                    logger.debug("AsyncPipeline finished with reason: stop")
                     loop_ref.call_soon_threadsafe(event_ref.set)
 
                 # Capture usage from chunk metadata (when stream_options={"include_usage": True})
@@ -467,7 +463,9 @@ class HaystackStream(Runnable, Streamable):
                 if pipeline_task.done():
                     try:
                         pipeline_result = pipeline_task.result()
-                        logger.debug("Pipeline task completed successfully, exiting token loop")
+                        logger.debug(
+                            "AsyncPipeline task completed successfully, exiting token loop"
+                        )
 
                         # Extract usage from result metadata if available
                         if pipeline_result:
@@ -475,10 +473,10 @@ class HaystackStream(Runnable, Streamable):
                             if replies and replies[0].meta:
                                 usage = normalize_usage(replies[0].meta.get("usage"))
                     except Exception as pipeline_error:
-                        logger.error(f"Pipeline task failed: {pipeline_error}")
+                        logger.error(f"AsyncPipeline task failed: {pipeline_error}")
                         # Emit error and exit loop
                         yield ErrorEvent(
-                            error_message=f"Pipeline failed: {type(pipeline_error).__name__}: {str(pipeline_error)}"
+                            error_message=f"AsyncPipeline failed: {type(pipeline_error).__name__}: {str(pipeline_error)}"
                         )
                         yield StreamEndEvent()
                         return
@@ -560,14 +558,16 @@ class HaystackStream(Runnable, Streamable):
                     logger.error(f"Stack trace: {traceback.format_exc()}")
                     # Check if pipeline completed
                     if pipeline_task.done() and not pipeline_finished.is_set():
-                        logger.warning("Pipeline completed during exception, setting finished flag")
+                        logger.warning(
+                            "AsyncPipeline completed during exception, setting finished flag"
+                        )
                         pipeline_finished.set()
 
             try:
                 # Get pipeline results to handle tool events
                 logger.debug("Retrieving pipeline results for tool processing")
                 pipeline_result = await pipeline_task
-                logger.debug("Pipeline execution completed, processing results")
+                logger.debug("AsyncPipeline execution completed, processing results")
 
                 # Extract response messages from pipeline result
                 if self.first_component and self.first_component in pipeline_result:

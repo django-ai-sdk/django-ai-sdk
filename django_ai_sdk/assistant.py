@@ -541,7 +541,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
                 title = await generate_thread_title(assistant=self, messages=messages)
                 await ThreadService.update_thread(thread_id, title)
 
-        logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
+        logger.debug(f"AsyncPipeline adapter created: {type(adapter).__name__}")
 
         logger.debug("Initiating stream response")
         return await stream_response(adapter, messages, self.protocol_handler)

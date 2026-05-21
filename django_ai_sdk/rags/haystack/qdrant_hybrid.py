@@ -1,5 +1,5 @@
 from django.conf import settings
-from haystack import Pipeline
+from haystack import AsyncPipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
@@ -115,7 +115,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             if "doc_id" not in doc.meta:
                 doc.meta["doc_id"] = doc.id
 
-        indexing_pipeline = Pipeline()
+        indexing_pipeline = AsyncPipeline()
         indexing_pipeline.add_component(
             "splitter",
             RecursiveDocumentSplitter(
@@ -227,7 +227,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
         )
 
-    def build_pipeline(self) -> Pipeline:
+    def build_pipeline(self) -> AsyncPipeline:
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -251,7 +251,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
             prompt_template=self.config.expander_prompt,
         )
 
-        query_pipeline = Pipeline()
+        query_pipeline = AsyncPipeline()
         query_pipeline.add_component("expander", query_expander)
         query_pipeline.add_component(
             "retriever",

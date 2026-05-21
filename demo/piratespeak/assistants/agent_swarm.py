@@ -7,7 +7,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
-from haystack import Pipeline
+from haystack import AsyncPipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
@@ -121,7 +121,7 @@ class AgentSwarmAssistant(Assistant):
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        pipeline = Pipeline()
+        pipeline = AsyncPipeline()
 
         # Create triage agent
         triage_agent = HaystackAgent(
