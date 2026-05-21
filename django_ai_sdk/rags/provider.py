@@ -68,6 +68,15 @@ class BaseRAGProvider(ABC):
             Framework-specific RAG instance, or None if no documents
         """
 
+    def get_cached_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+        """Return a previously-warmed RAG instance without creating a new one.
+
+        Safe to call when a second connection would conflict (e.g. Qdrant's
+        exclusive local file lock). Returns None if no warmed instance exists.
+        Subclasses with a cache should override this.
+        """
+        return None
+
     async def get_tool(
         self,
         assistant: "Assistant",

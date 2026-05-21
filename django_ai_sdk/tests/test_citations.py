@@ -189,7 +189,7 @@ class TestDefaultCitationFormatter:
 
         text, sources = formatter.format([], start_index=1)
 
-        assert isinstance(text, str)
+        assert text == ""
         assert sources == []
 
     def test_subclass_custom_template(self):

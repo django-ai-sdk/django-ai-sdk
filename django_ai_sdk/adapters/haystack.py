@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from django_ai_sdk.adapters.protocols import Runnable, Streamable
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
-from django_ai_sdk.citations import CitationRegistry
+from django_ai_sdk.citations import CitationRegistry, NumberedSource
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -252,6 +252,14 @@ class HaystackStream(Runnable, Streamable):
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))
 
         return converted_messages
+
+    @staticmethod
+    def _build_source_id(source: NumberedSource) -> str | None:
+        if not source.doc_id:
+            return None
+        if source.chunk_id:
+            return f"{source.doc_id}:{source.chunk_id}"
+        return source.doc_id
 
     def _create_text_chunk(self, content: str) -> MessageChunk:
         """Create a text MessageChunk."""
@@ -514,14 +522,16 @@ class HaystackStream(Runnable, Streamable):
                             if self.citation_registry is not None:
                                 all_sources = self.citation_registry.all_sources
                                 for source in all_sources[self._sources_emitted :]:
-                                    yield SourceEvent(
-                                        index=source.index,
-                                        title=source.title,
-                                        content=source.content,
-                                        tool_call_id=tool_call_id,
-                                        source_id=str(source.index),  # Ties to [N] citation in text
-                                        media_type="file",  # Local document source
-                                    )
+                                    source_id = self._build_source_id(source)
+                                    if source_id is not None:
+                                        yield SourceEvent(
+                                            index=source.index,
+                                            title=source.title,
+                                            content=source.content,
+                                            tool_call_id=tool_call_id,
+                                            source_id=source_id,
+                                            media_type="file",
+                                        )
                                 self._sources_emitted = len(all_sources)
 
                         elif event_type == "usage":
@@ -619,15 +629,23 @@ class HaystackStream(Runnable, Streamable):
 
             # Persist numbered sources from citation registry
             if stream_writer and self.citation_registry and self.citation_registry.all_sources:
-                stream_writer.message.sources = [
-                    {
-                        "index": src.index,
-                        "title": src.title,
-                        "content": src.content,
-                        "metadata": src.metadata,
-                    }
-                    for src in self.citation_registry.all_sources
-                ]
+                sources_list = []
+                for src in self.citation_registry.all_sources:
+                    source_id = self._build_source_id(src)
+                    if source_id is None:
+                        continue
+                    sources_list.append(
+                        {
+                            "index": src.index,
+                            "title": src.title,
+                            "content": src.content,
+                            "metadata": src.metadata,
+                            "source_id": source_id,
+                            "memory_id": src.memory_id,
+                            "page_number": src.page_number,
+                        }
+                    )
+                stream_writer.message.sources = sources_list
                 logger.debug(f"Persisted {len(stream_writer.message.sources)} numbered sources")
 
             # Finalize message after all chunks processed

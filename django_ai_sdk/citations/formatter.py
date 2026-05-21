@@ -1,10 +1,6 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
-
-from django_ai_sdk.logger import get_logger
-
-logger = get_logger(__name__)
 
 
 class NumberedSource(BaseModel):
@@ -13,7 +9,13 @@ class NumberedSource(BaseModel):
     index: int
     title: str
     content: str
-    metadata: dict = Field(default_factory=dict)
+    chunk_id: str | None = None
+    doc_id: str | None = None
+    memory_id: str | None = None
+    page_number: int | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict
+    )  # Display fields for UI (file_name, split_id)
 
 
 class CitationFormatter(Protocol):
@@ -56,13 +58,14 @@ class DefaultCitationFormatter:
     )
 
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
+        if not documents:
+            return "", []
         sources: list[NumberedSource] = []
         lines: list[str] = [self.RAG_TEMPLATE]
 
         for offset, doc in enumerate(documents):
             idx = start_index + offset
-            meta = doc.get("meta") or {}
-            logger.debug("doc[%d] meta=%r", idx, meta)
+            meta: dict[str, Any] = doc.get("meta") or {}
             base = (
                 meta.get("file_name")
                 or meta.get("filename")
@@ -71,21 +74,24 @@ class DefaultCitationFormatter:
                 or meta.get("topic")
                 or f"Document {idx}"
             )
-            # If document was split into chunks, add page/section marker to title.
-            # Helps user distinguish between [1] policy.pdf·p2 vs [2] policy.pdf·p5.
-            # split_id is the chunk index (0-indexed, so §1 means first chunk).
             split_id = meta.get("split_id")
-            if split_id is not None:
-                page = meta.get("page_number")
-                title = f"{base} · p{page}" if page else f"{base} · §{split_id + 1}"
-            else:
-                title = base
-            content = doc.get("content") or ""
+            page_number = meta.get("page_number")
+            title = f"{base} · §{split_id + 1}" if split_id is not None else base
+            content = doc.get("content", "")
             metadata_dict = {
                 k: v for k, v in meta.items() if k in ("file_name", "page_number", "split_id")
             }
             sources.append(
-                NumberedSource(index=idx, title=title, content=content, metadata=metadata_dict)
+                NumberedSource(
+                    index=idx,
+                    title=title,
+                    content=content,
+                    chunk_id=doc.get("chunk_id"),
+                    doc_id=meta.get("doc_id"),
+                    memory_id=meta.get("memory_id"),
+                    page_number=page_number,
+                    metadata=metadata_dict,
+                )
             )
             lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
         return "\n".join(lines), sources
