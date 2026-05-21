@@ -73,9 +73,16 @@ async def _invoke_assistant_for_query_async(
     adapter = await assistant.get_pipeline_adapter(thread_id=None)
     messages = [ChatMessage(role="user", content=query)]
     answer = ""
+    errors: list[str] = []
 
     async for event in adapter.stream(messages):
         if event.event_type == "text_chunk":
             answer += event.content
+        elif event.event_type == "error":
+            errors.append(event.error_message)
+            logger.error(f"Sub-agent {assistant_id} error: {event.error_message}")
+
+    if errors and not answer:
+        raise RuntimeError("; ".join(errors))
 
     return {"answer": answer}
