@@ -3,10 +3,10 @@ import asyncio
 import json
 import traceback
 import uuid
-from asyncio import Queue
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, TypeVar, Union, overload
 
+from haystack import AsyncPipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
@@ -126,7 +126,7 @@ class HaystackRunnable(Runnable):
 
         if response_format:
             schema = response_format.model_json_schema()
-            response = self.generator.run(
+            response = await self.generator.run_async(
                 messages=user_messages,
                 generation_kwargs={
                     "response_format": {
@@ -137,13 +137,13 @@ class HaystackRunnable(Runnable):
             )
             return response_format.model_validate_json(response["replies"][0].text)
 
-        response = self.generator.run(messages=user_messages)
+        response = await self.generator.run_async(messages=user_messages)
         return response["replies"][0].text
 
 
 class HaystackStream(Runnable, Streamable):
     """
-    Adapter for Haystack pipelines that emits events.
+    Async adapter for Haystack AsyncPipeline that emits streaming events.
     """
 
     model: str | None = None
@@ -155,13 +155,18 @@ class HaystackStream(Runnable, Streamable):
 
     def __init__(
         self,
-        pipeline: Any,
+        pipeline: AsyncPipeline,
         generator: Any,
         store: bool = True,
         storage_adapter: Union["BaseStorageAdapter", None] = None,
         citation_registry: CitationRegistry | None = None,
         suggestion_generator: "SuggestionGenerator | None" = None,
     ) -> None:
+        if not isinstance(pipeline, AsyncPipeline):
+            raise TypeError(
+                f"HaystackStream requires an AsyncPipeline, got {type(pipeline).__name__}. "
+                "Use AsyncPipeline from haystack instead of Pipeline."
+            )
         self.pipeline = pipeline
         self.generator = generator
         self.store = store
@@ -200,15 +205,6 @@ class HaystackStream(Runnable, Streamable):
                 storage_adapter={type(storage_adapter).__name__ if storage_adapter else None}
             """
         )
-
-    @staticmethod
-    def _run_agent(
-        agent: Any,
-        messages: list[Any],
-        callback: Any,
-    ) -> Any:
-        """Helper method to run agent."""
-        return agent.run(messages=messages, streaming_callback=callback)
 
     def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
         """Convert internal messages to Haystack ChatMessage format.
@@ -330,7 +326,7 @@ class HaystackStream(Runnable, Streamable):
 
         if response_format:
             schema = response_format.model_json_schema()
-            response = self.generator.run(
+            response = await self.generator.run_async(
                 messages=user_messages,
                 generation_kwargs={
                     "response_format": {
@@ -341,7 +337,7 @@ class HaystackStream(Runnable, Streamable):
             )
             return response_format.model_validate_json(response["replies"][0].text)
 
-        response = self.generator.run(messages=user_messages)
+        response = await self.generator.run_async(messages=user_messages)
         return response["replies"][0].text
 
     async def stream(
@@ -361,225 +357,137 @@ class HaystackStream(Runnable, Streamable):
         message_id = str(uuid.uuid4())
         logger.debug(f"Generated message ID: {message_id}")
 
-        # Create StreamWriter with pre-generated ID
-        stream_writer = None
-        if self.store and self.storage_adapter:
-            stream_writer = StreamWriter(
-                adapter_type="haystack",
-                message_id=message_id,
-                model="haystack-pipeline",
-                role="assistant",
-                storage_callback=self.storage_adapter.storage_callback,
-            )
-            logger.debug(f"StreamWriter configured with ID: {message_id}")
-        else:
-            logger.debug("Message storage disabled or no storage adapter")
-
         _finalize_called = False
-
-        # Queue for token chunks and tool events
-        queue: Queue = Queue()
-        pipeline_finished = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        logger.debug("Token queue and pipeline event initialized")
-
-        # Create callback as bound method to avoid closure capturing issues
-        def make_callback(
-            queue_ref: Queue, event_ref: asyncio.Event, loop_ref: asyncio.AbstractEventLoop
-        ) -> Callable[[StreamingChunk], None]:
-            """Factory function to create callback with explicit references."""
-
-            def callback(chunk: StreamingChunk) -> None:
-                if chunk.content:
-                    queue_ref.put_nowait(chunk.content)
-                    logger.debug(f"Token queued: {chunk.content[:20]}...")
-
-                if chunk.tool_calls:
-                    for tool_call in chunk.tool_calls:
-                        if tool_call.tool_name:
-                            queue_ref.put_nowait(("tool_call", tool_call))
-                            logger.debug(f"Tool call queued: {tool_call.tool_name}")
-
-                if chunk.tool_call_result:
-                    queue_ref.put_nowait(("tool_result", chunk.tool_call_result))
-                    logger.debug("Tool result queued")
-
-                if chunk.finish_reason == "stop":
-                    logger.debug("AsyncPipeline finished with reason: stop")
-                    loop_ref.call_soon_threadsafe(event_ref.set)
-
-                # Capture usage from chunk metadata (when stream_options={"include_usage": True})
-                # This handles the final chunk with choices=[] and usage data
-                if hasattr(chunk, "meta") and chunk.meta:
-                    usage_data = (
-                        chunk.meta.get("usage")
-                        if isinstance(chunk.meta, dict)
-                        else getattr(chunk.meta, "usage", None)
-                    )
-                    if usage_data:
-                        queue_ref.put_nowait(("usage", usage_data))
-                        logger.debug(f"Usage chunk queued from meta: {usage_data}")
-
-            return callback
-
-        # Create callback with explicit references for thread safety
-        streaming_callback = make_callback(queue, pipeline_finished, loop)
-        self.generator.streaming_callback = streaming_callback
-        logger.debug("Streaming callback attached to generator component")
-
-        # Warm up the generator for async compatibility
-        if hasattr(self.generator, "warm_up"):
-            logger.debug("Warming up generator component")
-            self.generator.warm_up()
+        pipeline_task: asyncio.Task | None = None
+        stream_writer = None
 
         try:
+            if self.store and self.storage_adapter:
+                stream_writer = StreamWriter(
+                    adapter_type="haystack",
+                    message_id=message_id,
+                    model="haystack-pipeline",
+                    role="assistant",
+                    storage_callback=self.storage_adapter.storage_callback,
+                )
+                logger.debug(f"StreamWriter configured with ID: {message_id}")
+            else:
+                logger.debug("Message storage disabled or no storage adapter")
+
+            # Async queue for streaming chunks
+            queue: asyncio.Queue[StreamingChunk] = asyncio.Queue()
+            logger.debug("Token queue initialized")
+
+            async def streaming_callback(chunk: StreamingChunk) -> None:
+                await queue.put(chunk)
+
+            self.generator.streaming_callback = streaming_callback
+            logger.debug("Streaming callback attached to generator component")
+
+            # Warm up the generator for async compatibility
+            if hasattr(self.generator, "warm_up"):
+                logger.debug("Warming up generator component")
+                await asyncio.to_thread(self.generator.warm_up)
+
             # Start message, use same ID generated at adapter level
             logger.debug(f"Starting message stream with ID: {message_id}")
             yield MessageStartEvent(message_id=message_id)
 
-            # Run the pipeline or Agent directly
-            # When we have an Agent component, run it directly with streaming_callback
-            # TODO: we might need async support here, its kinda new, but we need to investigate
-            # how to properly use async pipeline execution.
+            # Run the pipeline or Agent directly with native async
             if self.agent_component:
-                logger.debug("Running Agent component directly with streaming_callback")
-                pipeline_task = loop.run_in_executor(
-                    None,
-                    lambda: self._run_agent(self.agent_component, messages, streaming_callback),
+                if not hasattr(self.agent_component, "run_async"):
+                    raise TypeError(
+                        f"Agent component '{self.first_component}' does not support run_async. "
+                        "Only async-capable agents are supported."
+                    )
+                logger.debug("Running Agent component with run_async")
+                coro = self.agent_component.run_async(
+                    messages=messages, streaming_callback=streaming_callback
                 )
             else:
-                pipeline_input = {"messages": messages}
-                logger.debug("Using default pipeline input format")
-                logger.debug("Starting pipeline execution in thread executor")
-                pipeline_task = loop.run_in_executor(
-                    None, lambda: self.pipeline.run(pipeline_input)
-                )
+                logger.debug("Running AsyncPipeline with run_async")
+                coro = self.pipeline.run_async({"messages": messages})
 
-            # Yield tokens
-            pipeline_result = None
+            pipeline_task = asyncio.create_task(coro)
+
+            # Drain tokens
             usage = None
-            while not pipeline_finished.is_set() or not queue.empty():
-                # Check if pipeline task has completed
-                if pipeline_task.done():
-                    try:
-                        pipeline_result = pipeline_task.result()
-                        logger.debug(
-                            "AsyncPipeline task completed successfully, exiting token loop"
-                        )
-
-                        # Extract usage from result metadata if available
-                        if pipeline_result:
-                            replies = pipeline_result.get("replies", [])
-                            if replies and replies[0].meta:
-                                usage = normalize_usage(replies[0].meta.get("usage"))
-                    except Exception as pipeline_error:
-                        logger.error(f"AsyncPipeline task failed: {pipeline_error}")
-                        # Emit error and exit loop
-                        yield ErrorEvent(
-                            error_message=f"AsyncPipeline failed: {type(pipeline_error).__name__}: {str(pipeline_error)}"
-                        )
-                        yield StreamEndEvent()
-                        return
-                    break
+            while not pipeline_task.done() or not queue.empty():
                 try:
-                    item = await asyncio.wait_for(queue.get(), timeout=0.08)
-
-                    # Handle tool events in real-time
-                    if isinstance(item, tuple) and len(item) == 2:
-                        event_type, payload = item
-
-                        if event_type == "tool_call":
-                            # Tool call started - use ToolCallDelta attributes directly
-                            tool_call_id = payload.id or str(uuid.uuid4())
-                            tool_name = payload.tool_name
-
-                            yield ToolCallStartEvent(
-                                tool_call_id=tool_call_id,
-                                tool_name=tool_name,
-                            )
-
-                            # Emit ToolInputCompleteEvent
-                            if payload.arguments:
-                                yield ToolInputCompleteEvent(
-                                    tool_call_id=tool_call_id,
-                                    tool_name=tool_name,
-                                    tool_input=parse_tool_input(payload.arguments),
-                                )
-
-                        elif event_type == "tool_result":
-                            # Tool result received
-                            tool_call_id = payload.origin.id
-                            # Ensure the output is JSON serializable
-                            tool_output = parse_tool_output(payload.to_dict())
-
-                            yield ToolOutputEvent(
-                                tool_call_id=tool_call_id,
-                                tool_output=tool_output,
-                            )
-
-                            if self.citation_registry is not None:
-                                all_sources = self.citation_registry.all_sources
-                                for source in all_sources[self._sources_emitted :]:
-                                    source_id = self._build_source_id(source)
-                                    if source_id is not None:
-                                        yield SourceEvent(
-                                            index=source.index,
-                                            title=source.title,
-                                            content=source.content,
-                                            tool_call_id=tool_call_id,
-                                            source_id=source_id,
-                                            media_type="file",
-                                        )
-                                self._sources_emitted = len(all_sources)
-
-                        elif event_type == "usage":
-                            # Usage data from streaming chunk (when stream_options={"include_usage": True})
-                            usage = normalize_usage(payload)
-
-                    else:
-                        # Plain text token
-                        if not isinstance(item, str):
-                            logger.warning(f"Skipping non-string item in text branch: {type(item)}")
-                            continue
-
-                        if stream_writer:
-                            text_chunk = self._create_text_chunk(item)
-                            stream_writer.add_chunk(text_chunk)
-
-                        yield TextChunkEvent(content=item)
-
+                    chunk = await asyncio.wait_for(queue.get(), timeout=0.01)
                 except TimeoutError:
-                    # No token available yet, continue loop
+                    if pipeline_task.done() and not pipeline_task.cancelled():
+                        exc = pipeline_task.exception()
+                        if exc is not None:
+                            raise exc
                     continue
-                except Exception as streaming_error:
-                    logger.error(
-                        f"Exception occurred in streaming loop: {type(streaming_error).__name__}: {streaming_error}"
+
+                if chunk.content:
+                    if stream_writer:
+                        stream_writer.add_chunk(self._create_text_chunk(chunk.content))
+                    yield TextChunkEvent(content=chunk.content)
+
+                if chunk.tool_calls:
+                    for tc in chunk.tool_calls:
+                        if not tc.tool_name:
+                            continue
+                        tc_id = tc.id or str(uuid.uuid4())
+                        yield ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc.tool_name)
+                        if tc.arguments:
+                            yield ToolInputCompleteEvent(
+                                tool_call_id=tc_id,
+                                tool_name=tc.tool_name,
+                                tool_input=parse_tool_input(tc.arguments),
+                            )
+
+                if chunk.tool_call_result:
+                    result = chunk.tool_call_result
+                    yield ToolOutputEvent(
+                        tool_call_id=result.origin.id,
+                        tool_output=parse_tool_output(result.to_dict()),
                     )
-                    logger.error(f"Stack trace: {traceback.format_exc()}")
-                    # Check if pipeline completed
-                    if pipeline_task.done() and not pipeline_finished.is_set():
-                        logger.warning(
-                            "AsyncPipeline completed during exception, setting finished flag"
-                        )
-                        pipeline_finished.set()
+
+                    if self.citation_registry is not None:
+                        all_sources = self.citation_registry.all_sources
+                        while self._sources_emitted < len(all_sources):
+                            source = all_sources[self._sources_emitted]
+                            source_id = self._build_source_id(source)
+                            if source_id is not None:
+                                yield SourceEvent(
+                                    index=source.index,
+                                    title=source.title,
+                                    content=source.content,
+                                    tool_call_id=result.origin.id,
+                                    source_id=source_id,
+                                    media_type="file",
+                                )
+                            self._sources_emitted += 1
 
             try:
                 # Get pipeline results to handle tool events
                 logger.debug("Retrieving pipeline results for tool processing")
-                pipeline_result = await pipeline_task
+                # Task is already complete — retrieve cached result without suspending.
+                # If the pipeline raised, .result() re-raises it here and it is caught
+                # by the pipeline_processing_error handler below.
+                pipeline_result = pipeline_task.result()
                 logger.debug("AsyncPipeline execution completed, processing results")
 
-                # Extract response messages from pipeline result
-                if self.first_component and self.first_component in pipeline_result:
-                    response_messages = pipeline_result[self.first_component].get("messages", [])
-                    logger.debug(
-                        f"Found {len(response_messages)} response messages from component {self.first_component}"
-                    )
-                else:
-                    response_messages = pipeline_result.get("messages", [])
-                    logger.debug(
-                        f"Found {len(response_messages)} response messages from pipeline root"
-                    )
+                # Single extraction pass — resolve component output once
+                comp_output: dict[str, Any] = {}
+                if pipeline_result is not None:
+                    if self.first_component and self.first_component in pipeline_result:
+                        comp_output = pipeline_result[self.first_component]
+                    else:
+                        comp_output = pipeline_result
+
+                # Usage
+                comp_replies = comp_output.get("replies", [])
+                if comp_replies and comp_replies[0].meta:
+                    usage = normalize_usage(comp_replies[0].meta.get("usage"))
+
+                # Response messages for tool storage
+                response_messages = comp_output.get("messages", [])
+                logger.debug(f"Found {len(response_messages)} response messages")
 
                 # Process tool events from response messages for storage
                 for message_index, message in enumerate(response_messages):
@@ -705,6 +613,14 @@ class HaystackStream(Runnable, Streamable):
             return
 
         finally:
+            if pipeline_task is not None and not pipeline_task.done():
+                pipeline_task.cancel()
+                try:
+                    await asyncio.wait_for(pipeline_task, timeout=1.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    pass
+                except Exception:
+                    pass
             if stream_writer and not _finalize_called:
                 logger.debug("Finalizing with cancelled reason - connection may have dropped")
                 self.message_result = await stream_writer.finalize("cancelled")

@@ -20,7 +20,7 @@ async def stream_response(
     Generic streaming chat view that works with any pipeline adapter and protocol handler.
 
     Args:
-        adapter: AsyncPipeline adapter instance or factory function that returns an adapter
+        adapter: Pipeline adapter instance or factory function that returns an adapter
         messages: List of chat messages to process
         protocol_handler: Protocol handler instance for formatting output
         extra_headers: Optional additional headers to include in response
