@@ -298,38 +298,41 @@ class VercelProtocolHandler(BaseProtocolHandler):
         """Convert ChatMessage objects to Vercel AI SDK message format."""
         result = []
         for chat_message in chat_messages:
-            if chat_message.parts:
-                parts = [dict(part) if isinstance(part, dict) else part for part in chat_message.parts]
-            else:
-                parts = []
+            parts: list[dict] = []
 
-                if chat_message.content:
-                    parts.append({"type": "text", "text": chat_message.content})
-
-                if chat_message.sources:
-                    for source in chat_message.sources:
-                        # Emit spec-compliant source-document with optional content for UI display
+            if chat_message.stream_sequence:
+                for seq_item in chat_message.stream_sequence:
+                    item_type = seq_item.get("type")
+                    if item_type == "text":
+                        parts.append({"type": "text", "text": seq_item.get("content", "")})
+                    elif item_type == "tool_call_start":
+                        continue  # positional marker only, skip
+                    elif item_type == "tool_call_complete":
+                        parts.append(
+                            {
+                                "type": "dynamic-tool",
+                                "toolName": seq_item.get("tool_name", ""),
+                                "toolCallId": seq_item.get("tool_id", ""),
+                                "state": "output-available",
+                                "input": {},
+                                "output": seq_item.get("result", {}),
+                                "providerExecuted": True,
+                            }
+                        )
+                    elif item_type == "source":
                         parts.append(
                             {
                                 "type": "source-document",
-                                "sourceId": str(source.get("index", "")),
+                                "sourceId": str(seq_item.get("index", "")),
                                 "mediaType": "file",
-                                "title": source.get("title", ""),
-                                "content": source.get("content", ""),  # From stored history
+                                "title": seq_item.get("title", ""),
+                                "content": seq_item.get("content", ""),
                             }
                         )
-
-                if chat_message.tool_calls:
-                    for tool_call in chat_message.tool_calls:
-                        parts.append(
-                            {
-                                "type": f"tool-{tool_call.get('name', 'unknown')}",
-                                "toolCallId": tool_call.get("id"),
-                                "state": "output-available",
-                                "input": tool_call.get("arguments", {}),
-                                "output": tool_call.get("result", {}),
-                            }
-                        )
+            else:
+                # Fallback for messages persisted before stream_sequence was introduced
+                if chat_message.content:
+                    parts.append({"type": "text", "text": chat_message.content})
 
             result.append(
                 {
@@ -345,7 +348,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "created_at": chat_message.created_at,
                 }
             )
-            logger.debug(f"Converting message {chat_message.id}: usage={chat_message.usage}")
 
         return result
 
