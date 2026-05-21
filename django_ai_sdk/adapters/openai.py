@@ -2,14 +2,15 @@ import hashlib
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from agents.agent import Agent
 from agents.items import ItemHelpers
 from agents.run import RunConfig, Runner
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Runnable, Streamable
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.common import (
     ChatMessage,
@@ -34,14 +35,84 @@ from django_ai_sdk.logger import get_logger
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
+    from django_ai_sdk.suggestions import SuggestionGenerator
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
 
-class OpenAIAdapter(BasePipelineAdapter):
+class OpenAIRunnable(Runnable):
     """
-    OpenAI adapter that emits normalized events.
+    Runnable OpenAI adapter.
     """
+
+    model: str | None = None
+    instructions: str | None = None
+
+    def __init__(
+        self,
+        client: "AsyncOpenAI",
+        model: str | None = None,
+        instructions: str | None = None,
+    ) -> None:
+        self.client = client
+        self.model = model
+        self.instructions = instructions
+
+    def get_messages(self, messages: list[ChatMessage]) -> list[ChatCompletionMessageParam]:
+        conversation = [m for m in messages if m.role in ("user", "assistant")]
+        return [
+            cast("ChatCompletionMessageParam", {"role": msg.role, "content": msg.content})
+            for msg in conversation
+        ]
+
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
+        openai_messages = self.get_messages(messages)
+        if system_prompt:
+            openai_messages.insert(
+                0,
+                cast("ChatCompletionMessageParam", {"role": "system", "content": system_prompt}),
+            )
+
+        if response_format:
+            response = await self.client.beta.chat.completions.parse(
+                model=self.model or "",
+                messages=openai_messages,
+                response_format=response_format,
+            )
+            return response.choices[0].message.parsed
+
+        response = await self.client.chat.completions.create(
+            model=self.model or "",
+            messages=openai_messages,
+        )
+        return response.choices[0].message.content
+
+
+class OpenAIStream(Runnable, Streamable):
+    """
+    Streamable OpenAI adapter
+    """
+
+    model: str | None = None
+    instructions: str | None = None
+    suggestion_generator: "SuggestionGenerator | None" = None
+
+    # Message processing configuration
+    merge_messages: bool = False
 
     def __init__(
         self,
@@ -58,12 +129,14 @@ class OpenAIAdapter(BasePipelineAdapter):
         self.store = store
         self.storage_adapter = storage_adapter
         self.rag_pipeline = rag_pipeline  # RAG adapter with .retrieve() method
+        self.suggestion_generator = None
         self.message_result: ChatMessage | None = None  # Complete result
         self._rag_sources: list[dict] = []
+        self.query: str | None = None
 
         logger.debug(
             f"""
-            OpenAI adapter initialized with
+            OpenAIStream initialized with
             model={model}, store={store},
             storage_adapter={type(storage_adapter).__name__ if storage_adapter else None},
             rag_pipeline={type(rag_pipeline).__name__ if rag_pipeline else None}
@@ -206,25 +279,37 @@ class OpenAIAdapter(BasePipelineAdapter):
             case "error":
                 return ErrorEvent(error_message=message_chunk.content["error_message"])
 
-        return None
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
 
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
-
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         openai_messages: list[ChatCompletionMessageParam] = []
         conversation_messages = self.get_messages(messages)
         openai_messages.extend(cast("list[ChatCompletionMessageParam]", conversation_messages))
         if system_prompt:
             openai_messages = [{"role": "system", "content": system_prompt}, *openai_messages]
 
-        response = await self.client.chat.completions.create(  # type: ignore[attr-defined]
+        if response_format:
+            response = await self.client.beta.chat.completions.parse(
+                model=self.model or "",
+                messages=openai_messages,
+                response_format=response_format,
+            )
+            return response.choices[0].message.parsed
+
+        response = await self.client.chat.completions.create(
             model=self.model or "",
             messages=openai_messages,
         )
-
         return response.choices[0].message.content
 
     async def stream(  # type: ignore
@@ -244,7 +329,7 @@ class OpenAIAdapter(BasePipelineAdapter):
             logger.debug("Added system instructions (separate message)")
 
         # 2. Inject RAG context if configured (as separate, clearly marked system message)
-        self.query: str | None = None  # Store last user query for reuse in events
+        self.query = None  # Store last user query for reuse in events
         if self.rag_pipeline and messages:
             # Get the last user message as query
             for msg in reversed(list(messages)):
@@ -457,8 +542,12 @@ class OpenAIAdapter(BasePipelineAdapter):
         yield StreamEndEvent()
 
 
-class OpenAIAgentAdapter(BasePipelineAdapter):
-    """OpenAI agents adapter that emits normalized events."""
+class OpenAIAgentStream(Runnable, Streamable):
+    """OpenAI Agents adapter"""
+
+    model: str | None = None
+    instructions: str | None = None
+    suggestion_generator: "SuggestionGenerator | None" = None
 
     def __init__(
         self,
@@ -470,8 +559,9 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
         self.agent = agent
         self.runner = Runner
         self.runner_config = runner_config or None
-        self.store: bool = store
+        self.store = store
         self.storage_adapter = storage_adapter
+        self.suggestion_generator = None
 
         # Track tool calls: {tool_call_id: (tool_name, tool_input)}
         # TODO: move into schema, typed object
@@ -497,18 +587,29 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
             )
         return user_messages[-1].content
 
+    @overload
+    async def run(
+        self, messages: list[ChatMessage], *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | None = None,
-    ) -> str | None:
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
         agent_input = self.get_input(messages)
         result = await self.runner.run(
-            Agent(name="run", instructions=system_prompt),
+            Agent(
+                name="run",
+                instructions=system_prompt,
+                output_type=response_format,
+            ),
             input=agent_input,
             run_config=self.runner_config,  # type: ignore[arg-type] # OpenAI RunConfig type not available
         )
-
         return result.final_output
 
     async def stream(  # type: ignore
@@ -622,8 +723,6 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
 
                     # Add to StreamWriter if available
                     if stream_writer:
-                        from django_ai_sdk.common import MessageChunk
-
                         stream_writer.add_chunk(
                             MessageChunk(
                                 type="tool_output",
@@ -644,8 +743,6 @@ class OpenAIAgentAdapter(BasePipelineAdapter):
 
                         # Add to StreamWriter if available
                         if stream_writer:
-                            from django_ai_sdk.common import MessageChunk
-
                             stream_writer.add_chunk(
                                 MessageChunk(
                                     type="text",

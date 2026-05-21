@@ -1,5 +1,7 @@
 """Assistant registry for managing Assistant classes and instances."""
 
+from __future__ import annotations
+
 import threading
 import uuid
 from typing import TYPE_CHECKING, TypeVar
@@ -10,23 +12,17 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound="Assistant")
 
-# Namespace for deterministic UUID generation (fixed for Django AI SDK)
-# Using UUIDv5 with this namespace ensures stable IDs across restarts
+# Namespace for deterministic UUID generation
 ASSISTANT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 
 class AssistantRegistrationError(Exception):
-    """Raised when assistant registration fails.
-
-    Note: Currently registration is permissive - a class with the same ID
-    as an existing registration will override it. This allows for testing
-    scenarios where multiple test classes share the same name.
-    """
+    """Raised when assistant registration fails"""
 
     pass
 
 
-def auto_register[T: "Assistant"](cls: type[T]) -> type[T]:
+def auto_register[T: Assistant](cls: type[T]) -> type[T]:
     """Decorator to register an Assistant class with the registry.
 
     This is the recommended way to register assistants when using the
@@ -46,7 +42,7 @@ def auto_register[T: "Assistant"](cls: type[T]) -> type[T]:
         cls: The Assistant subclass to register
 
     Returns:
-        The registered class (unchanged, for decorator chaining)
+        The registered class
     """
     registry.register(cls)
     return cls
@@ -56,7 +52,7 @@ class AssistantRegistry:
     """Singleton registry for managing Assistant classes and instances.
 
     Supports two registration methods:
-    1. Settings-based: List paths in AI_SDK_ASSISTANTS setting (recommended)
+    1. Settings-based: List paths in AI_SDK_ASSISTANTS setting
     2. Decorator-based: Apply @auto_register to Assistant classes
 
     Both methods can be used together - a class will only be registered once.
@@ -91,10 +87,10 @@ class AssistantRegistry:
         assistant = registry.get(assistant_id)  # Get by UUID
     """
 
-    _instance: "AssistantRegistry | None" = None
+    _instance: AssistantRegistry | None = None
     _lock = threading.Lock()
 
-    def __new__(cls) -> "AssistantRegistry":
+    def __new__(cls) -> AssistantRegistry:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -103,42 +99,33 @@ class AssistantRegistry:
         return cls._instance
 
     def _reset(self) -> None:
-        """Reset registry state (mainly for testing)."""
+        """Reset registry state."""
         self._classes: dict[str, type[Assistant]] = {}
         self._instances: dict[str, Assistant] = {}
         self._initialized = False
 
     def register(self, assistant_class: type[T]) -> type[T]:
-        """Register an Assistant class (called automatically on subclass creation).
+        """Register an Assistant class
 
         Args:
             assistant_class: The Assistant subclass to register
 
         Returns:
-            The registered class (for chaining/decorator use)
+            The registered class
 
         Raises:
             AssistantRegistrationError: If assistant_id collision detected
         """
-        # Generate deterministic UUID v5 from full class path (module.ClassName)
-        # This ensures uniqueness - you cannot have two different classes with the
-        # same module and class name in Python (the second definition would overwrite
-        # the first). The only time we see "collisions" is in tests where multiple
-        # test fixtures define classes with the same name in the same test module.
+        # Generate deterministic UUID v5 from full class path
         class_path = f"{assistant_class.__module__}.{assistant_class.__name__}"
         assistant_id = str(uuid.uuid5(ASSISTANT_NAMESPACE, class_path))
 
-        # Check if already registered with same class (idempotent)
+        # Check if already registered with same class
         if assistant_id in self._classes:
             existing = self._classes[assistant_id]
             if existing is assistant_class:
-                # Same class being registered again (e.g., via both __init_subclass__ and @auto_register)
+                # Same class being registered again
                 return assistant_class
-            # Different class with same module.ClassName - this only happens in tests
-            # where multiple test fixtures define classes with the same name.
-            # In production, this is impossible since Python doesn't allow duplicate
-            # class definitions in the same module.
-
         self._classes[assistant_id] = assistant_class
         assistant_class._assistant_id = assistant_id
 
@@ -163,7 +150,7 @@ class AssistantRegistry:
         if self._initialized:
             return
 
-        # Load assistants from settings (recommended approach)
+        # Load assistants from settings
         if load_from_settings:
             from django.conf import settings
             from django.utils.module_loading import import_string
@@ -174,7 +161,6 @@ class AssistantRegistry:
                     import_string(path)
                 except ImportError:
                     # Class may not exist or path is wrong
-                    # It's okay - maybe using decorator-based registration instead
                     pass
 
         # Instantiate all registered assistants
@@ -184,7 +170,7 @@ class AssistantRegistry:
 
         self._initialized = True
 
-    def get(self, assistant_id: str) -> "Assistant | None":
+    def get(self, assistant_id: str) -> Assistant | None:
         """Get assistant instance by ID.
 
         Args:
@@ -208,7 +194,7 @@ class AssistantRegistry:
 
         return self._instances.get(assistant_id)
 
-    def all(self) -> dict[str, "Assistant"]:
+    def all(self) -> dict[str, Assistant]:
         """Get all assistant instances.
 
         Returns:
@@ -220,6 +206,16 @@ class AssistantRegistry:
         if not self._initialized:
             raise RuntimeError("Registry not initialized. Call setup() in AppConfig.ready()")
         return self._instances.copy()
+
+    def list(self) -> dict[str, Assistant]:
+        """Get only non-hidden assistant instances.
+
+        Hidden assistants (e.g. internal task assistants) are excluded.
+
+        Returns:
+            Dict mapping assistant_id to visible instance
+        """
+        return {aid: inst for aid, inst in self.all().items() if not getattr(inst, "hidden", False)}
 
     def ids(self) -> list[str]:
         """Get all registered assistant IDs.

@@ -1,17 +1,19 @@
-from typing import Any
+import os
 
 from asgiref.sync import async_to_sync
+from django.core.files.base import File
 from django.db.models import Count
 
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.files.services import FileService
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
     MemoryOut,
     ThreadMemoryOut,
 )
-from django_ai_sdk.memories.utils import extract_document, read_text_content
+from django_ai_sdk.memories.utils import extract_document
 
 
 class MemoryService:
@@ -125,12 +127,17 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def upload_document(memory_id: str, file: Any) -> DocumentOut | tuple[int, dict]:
+    async def upload_document(memory_id: str, file: File) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        file_name = file.name or ""
 
-        result = read_text_content(file)
+        # file service handles file processing
+        result = await FileService.process(file=file)
+
+        # get extension
+        file_name = file.name or ""
+        _, ext = os.path.splitext(file_name)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
         content, ext = result
@@ -284,12 +291,20 @@ class MemoryService:
         return thread.file_memory
 
     @staticmethod
-    async def upload_thread_file(thread_id: str, file: Any) -> DocumentOut | tuple[int, dict]:
+    async def upload_thread_file(thread_id: str, file: File) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
         memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
-        file_name = file.name or ""
 
-        result = read_text_content(file)
+        # get assistant from thread
+        assistant = await AssistantService.get_assistant(thread_id)
+
+        # file service handles file processing
+        result = await FileService.process(file=file, handler=assistant)
+
+        # get extension
+        file_name = file.name or ""
+        _, ext = os.path.splitext(file_name)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
         content, ext = result
@@ -342,6 +357,41 @@ class MemoryService:
         entry = await Entry.objects.aget(id=doc_id, memory_id=thread.file_memory_id)
         await entry.adelete()
 
+    @staticmethod
+    async def get_chunk_content(entry_id: str, chunk_id: str | None) -> str | None:
+        """Return a specific chunk from the vector store, falling back to full Entry content.
+
+        When chunk_id is None the document was not split into chunks, so the
+        full Entry content is returned directly without querying the vector store.
+
+        Chunk lookup uses the already-warmed RAG cache (get_cached_rag_instance) to
+        avoid opening a second connection on backends with exclusive file locks (Qdrant).
+        Falls back to entry.content when no warmed RAG is available for this memory.
+        """
+        from django_ai_sdk.assistants.registry import registry
+
+        try:
+            entry = await Entry.objects.aget(id=entry_id)
+        except Entry.DoesNotExist:
+            return None
+
+        if chunk_id is None:
+            return entry.content
+
+        memory_id = str(entry.memory_id)
+
+        for assistant in registry.all().values():
+            if assistant.rag_provider is None:
+                continue
+            rag = assistant.rag_provider.get_cached_rag_instance(assistant, memory_id)
+            if rag is None:
+                continue
+            chunk = await rag.get_chunk(chunk_id)
+            if chunk is not None:
+                return chunk
+
+        return entry.content
+
     # ============================================================================
     # Private helpers
     # ============================================================================
@@ -386,3 +436,4 @@ get_or_create_thread_file_memory = async_to_sync(MemoryService.get_or_create_thr
 upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
+get_chunk_content = async_to_sync(MemoryService.get_chunk_content)

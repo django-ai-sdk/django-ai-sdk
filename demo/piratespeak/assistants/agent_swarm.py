@@ -4,7 +4,7 @@ from typing import Annotated
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.haystack import HaystackAdapter
+from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from haystack import Pipeline
@@ -117,7 +117,7 @@ class AgentSwarmAssistant(Assistant):
             function=get_datetime,
         )
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "HaystackAdapter":
+    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "HaystackStream":
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 
@@ -137,7 +137,7 @@ class AgentSwarmAssistant(Assistant):
 
         pipeline.add_component("triage_agent", triage_agent)
 
-        return HaystackAdapter(
+        return HaystackStream(
             pipeline=pipeline,
             generator=triage_agent.chat_generator,
             storage_adapter=storage_adapter,

@@ -28,7 +28,7 @@ class Memory(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: object, **kwargs: object) -> None:
         if self._state.adding:
             if not self.slug and self.name:
                 base_slug = slugify(self.name)

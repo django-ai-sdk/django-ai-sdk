@@ -33,28 +33,24 @@ def attach_citations(
     non-overlapping indices: tool1 gets [1,2,3], tool2 gets [4,5].
     """
 
-    def _handler(documents: Any) -> str:
+    def _handler(documents: list[Any] | None) -> str:
         # Convert Haystack Document objects to plain dicts for the formatter.
-        # Handles both Haystack Document objects and dicts transparently.
         as_dicts = []
         for d in documents or []:
             if hasattr(d, "meta"):
-                # Haystack Document: extract id, content, meta fields
                 as_dicts.append(
                     {
-                        "id": getattr(d, "id", None),
+                        "chunk_id": getattr(d, "id", None),
                         "content": getattr(d, "content", "") or "",
                         "meta": dict(getattr(d, "meta", {}) or {}),
                     }
                 )
             else:
-                # Already a dict, pass through
                 as_dicts.append(dict(d))
 
-        # Format documents: returns (xml_for_llm, numbered_sources)
         text, sources = formatter.format(as_dicts, start_index=registry.next_index)
-        registry.add(sources)  # Store so we can emit SourceEvent and persist to DB
-        return text  # Return XML string for LLM to cite from
+        registry.add(sources)
+        return text
 
     tool.outputs_to_string = {"source": documents_key, "handler": _handler}
     return tool

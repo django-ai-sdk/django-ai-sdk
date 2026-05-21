@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 from django.http import StreamingHttpResponse
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
+from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 
 async def stream_response(
-    adapter: BasePipelineAdapter | Callable[[], BasePipelineAdapter],
+    adapter: Streamable | Callable[[], Streamable],
     messages: list[ChatMessage],
     protocol_handler: BaseProtocolHandler,
     extra_headers: dict[str, str] | None = None,
