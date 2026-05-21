@@ -129,30 +129,27 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement retrieve()")
 
-    @component.output_types(documents=list[HaystackDocument])
-    def run(
-        self, queries: list[str], top_k: int | None = None
-    ) -> dict[str, list[HaystackDocument]]:
-        """
-        Run multiple queries and return deduplicated results.
-
-        Args:
-            queries: List of query strings to execute
-            top_k: Maximum documents to return (uses self.top_k if None)
-
-        Returns:
-            Dict with "documents" key containing unique documents sorted by score
-        """
-        k = top_k if top_k is not None else self.top_k
-
-        # Run all queries
+    def _execute(self, queries: list[str], k: int) -> dict[str, list[HaystackDocument]]:
         results: list[dict[str, list[HaystackDocument]]] = []
         for query in queries:
             result = self.retrieve(query, k)
             results.append(result)
-
         docs = self.deduplicate_and_rank(results, k, self.min_score)
         return {"documents": docs}
+
+    @component.output_types(documents=list[HaystackDocument])
+    def run(
+        self, queries: list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        k = top_k if top_k is not None else self.top_k
+        return self._execute(queries, k)
+
+    @component.output_types(documents=list[HaystackDocument])
+    async def run_async(
+        self, queries: list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        k = top_k if top_k is not None else self.top_k
+        return self._execute(queries, k)
 
 
 @component
@@ -270,33 +267,14 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         )
         self._dense_embedder.warm_up()
 
-    @component.output_types(documents=list[HaystackDocument])
-    def run(
-        self, queries: str | list[str], top_k: int | None = None
-    ) -> dict[str, list[HaystackDocument]]:
-        """
-        Run hybrid search with multiple queries.
-
-        Args:
-            queries: Single query string or list of query strings
-            top_k: Maximum documents to return
-
-        Returns:
-            Dict with deduplicated documents sorted by score
-        """
+    def _ensure_warmed_up(self) -> None:
         if self._sparse_embedder is None:
             self.warm_up()
-
         if self._sparse_embedder is None or self._dense_embedder is None:
             raise ValueError("Embedders not initialized after warm_up()")
 
-        # Convert single query to list
-        if isinstance(queries, str):
-            queries = [queries]
-
-        k = top_k if top_k is not None else self.top_k
-
-        # Run hybrid search for all queries
+    def _execute(self, queries: list[str], k: int) -> list[HaystackDocument]:
+        self._ensure_warmed_up()
         results: list[dict[str, list[HaystackDocument]]] = []
         for query in queries:
             sparse_result = self._sparse_embedder.run(text=query)
@@ -311,7 +289,24 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
                 top_k=k,
             )
             results.append(result)
+        return self.deduplicate_and_rank(results, k, self.min_score)
 
-        # Deduplicate and rank using mixin
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+    @component.output_types(documents=list[HaystackDocument])
+    def run(
+        self, queries: str | list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        if isinstance(queries, str):
+            queries = [queries]
+        k = top_k if top_k is not None else self.top_k
+        docs = self._execute(queries, k)
+        return {"documents": docs}
+
+    @component.output_types(documents=list[HaystackDocument])
+    async def run_async(
+        self, queries: str | list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        if isinstance(queries, str):
+            queries = [queries]
+        k = top_k if top_k is not None else self.top_k
+        docs = self._execute(queries, k)
         return {"documents": docs}
