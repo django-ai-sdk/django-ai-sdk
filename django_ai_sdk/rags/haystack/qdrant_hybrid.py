@@ -327,7 +327,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
 
         return tool
 
-    def get_chunk(self, chunk_id: str) -> str | None:
+    async def get_chunk(self, chunk_id: str) -> str | None:
         """Fetch a single chunk from the Qdrant store by its Haystack document ID.
 
         Only uses the already-open cached store — never opens a second connection,

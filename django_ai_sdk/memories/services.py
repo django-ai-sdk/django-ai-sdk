@@ -1,6 +1,6 @@
 import os
 
-from asgiref.sync import async_to_sync, sync_to_async
+from asgiref.sync import async_to_sync
 from django.core.files.base import File
 from django.db.models import Count
 
@@ -13,7 +13,7 @@ from django_ai_sdk.memories.schemas import (
     MemoryOut,
     ThreadMemoryOut,
 )
-from django_ai_sdk.memories.utils import extract_document, read_text_content
+from django_ai_sdk.memories.utils import extract_document
 
 
 class MemoryService:
@@ -386,7 +386,7 @@ class MemoryService:
             rag = assistant.rag_provider.get_cached_rag_instance(assistant, memory_id)
             if rag is None:
                 continue
-            chunk = await sync_to_async(rag.get_chunk)(chunk_id)
+            chunk = await rag.get_chunk(chunk_id)
             if chunk is not None:
                 return chunk
 
