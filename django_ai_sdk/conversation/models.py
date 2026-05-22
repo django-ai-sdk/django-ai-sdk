@@ -86,6 +86,7 @@ class Message(models.Model):
         blank=True,
         choices=[(1, "good"), (-1, "bad")],
     )
+    rating_comment = models.CharField(max_length=255, blank=True, default="")
 
     # Soft delete
     is_deleted = models.BooleanField(default=False)
@@ -137,9 +138,10 @@ class Message(models.Model):
             ) from e
         return cls(id=message_id, thread=thread, result=chat_message.model_dump())
 
-    def rate(self, rating_value: int) -> "Message":
+    def rate(self, rating_value: int, comment: str = "") -> "Message":
         """Rate this message as good (1) or bad (-1)."""
         self.rating = rating_value
+        self.rating_comment = comment
         return self
 
     def delete_message(self) -> "Message":

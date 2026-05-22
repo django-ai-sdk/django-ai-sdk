@@ -255,13 +255,16 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self, message_id: str, rating: int | None, rating_comment: str = ""
+    ) -> bool:
         """
         Rate a message in this thread.
 
         Args:
             message_id: Message ID to rate
-            rating: 1 for good, -1 for bad
+            rating: 1 for good, -1 for bad, or None to unrate
+            rating_comment: Optional explanation for the rating
 
         Returns:
             True if rated successfully, False if message not found

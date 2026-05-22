@@ -192,6 +192,9 @@ class DbStorageAdapter(BaseStorageAdapter):
         async for msg in thread.messages.filter(is_deleted=False).order_by("created_at"):
             chat_message = msg.to_chat_message()
             chat_message.id = str(msg.id)
+            # Include rating metadata for protocol conversion
+            chat_message.metadata["rating"] = msg.rating
+            chat_message.metadata["rating_comment"] = msg.rating_comment
             messages.append(chat_message)
         logger.debug(f"Retrieved {len(messages)} messages from database")
         return messages
@@ -238,13 +241,18 @@ class DbStorageAdapter(BaseStorageAdapter):
             )
             return None
 
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self, message_id: str, rating: int | None, rating_comment: str = ""
+    ) -> bool:
         """Rate a message in this thread."""
         try:
             message = await Message.objects.aget(id=message_id, thread_id=self.thread_id)
             message.rating = rating
+            message.rating_comment = rating_comment
             await message.asave()
-            logger.debug(f"Rated message {message_id}: {rating}")
+            logger.debug(
+                f"Rated message {message_id}: rating={rating}, comment={rating_comment[:50] if rating_comment else 'empty'}"
+            )
             return True
         except Message.DoesNotExist:
             return False

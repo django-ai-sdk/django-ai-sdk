@@ -28,6 +28,7 @@ class MemoryMessage(BaseModel):
 
     # Message management fields
     rating: int | None = None  # 1 for good, -1 for bad
+    rating_comment: str = ""
     is_deleted: bool = False
     deleted_at: datetime | None = None
 
@@ -177,11 +178,12 @@ class MemoryStore:
         return None
 
     @classmethod
-    def rate_message(cls, message_id: str, rating: int) -> bool:
+    def rate_message(cls, message_id: str, rating: int | None, rating_comment: str = "") -> bool:
         """Rate a message."""
         message = cls.get_message(message_id)
         if message:
             message.rating = rating
+            message.rating_comment = rating_comment
             return True
         return False
 
@@ -377,9 +379,11 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             logger.error(f"Memory storage failed: {error}")
             return None
 
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self, message_id: str, rating: int | None, rating_comment: str = ""
+    ) -> bool:
         """Rate a message in this thread."""
-        success = MemoryStore.rate_message(message_id, rating)
+        success = MemoryStore.rate_message(message_id, rating, rating_comment)
         if success:
             logger.debug(f"Rated message {message_id}: {rating}")
         return success

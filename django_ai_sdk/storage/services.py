@@ -69,14 +69,17 @@ class ThreadService:
         return thread_id
 
     @staticmethod
-    async def rate_message(thread_id: str, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        thread_id: str, message_id: str, rating: int | None, rating_comment: str = ""
+    ) -> bool:
         """
         Rate a message in a thread.
 
         Args:
             thread_id: Thread ID containing the message
             message_id: Message ID to rate
-            rating: 1 for good, -1 for bad
+            rating: 1 for good, -1 for bad, or None to unrate
+            rating_comment: Optional explanation for the rating
 
         Returns:
             True if rated successfully
@@ -85,7 +88,7 @@ class ThreadService:
             ValueError: If thread or message not found
         """
         storage = await ThreadService.storage_for_thread(thread_id)
-        success = await storage.rate_message(message_id, rating)
+        success = await storage.rate_message(message_id, rating, rating_comment)
         if not success:
             raise ValueError("Message not found")
         return True
