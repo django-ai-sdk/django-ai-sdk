@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
-from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage, prompt
 from django_ai_sdk.logger import get_logger
+
+if TYPE_CHECKING:
+    from django_ai_sdk.assistant import Assistant
 
 logger = get_logger(__name__)
 
