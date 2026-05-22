@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from pydantic import BaseModel
-
-from django_ai_sdk.common import ChatMessage
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.events import StreamEvent
     from django_ai_sdk.suggestions import SuggestionGenerator
 

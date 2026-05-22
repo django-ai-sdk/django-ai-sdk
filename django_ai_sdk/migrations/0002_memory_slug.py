@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('django_ai_sdk', '0001_initial'),
+        ("django_ai_sdk", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='memory',
-            name='slug',
+            model_name="memory",
+            name="slug",
             field=models.SlugField(blank=True, editable=False, max_length=255, unique=True),
         ),
     ]
