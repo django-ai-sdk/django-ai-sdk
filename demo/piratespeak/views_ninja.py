@@ -5,6 +5,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import MessageFeedback
+from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.storage.services import (
@@ -81,6 +82,10 @@ class FeedbackResponse(Schema):
     rating: int
     feedback: str
     created_at: str | None = None
+
+
+class PatchThreadPayload(Schema):
+    assistant_id: str
 
 
 class MessageResponse(Schema):
@@ -180,6 +185,26 @@ async def delete_all_threads(request: HttpRequest) -> Any:
         return DeleteAllThreadsResponse(success=True, deleted_count=deleted_count)
     except Exception as e:
         return 500, Error(message=str(e))
+
+
+@router.patch("/threads/{thread_id}/", response={200: Success, 400: Error, 403: Error, 404: Error})
+async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
+    try:
+        AssistantService.from_registry(payload.assistant_id)
+        thread = await ThreadService.get_thread(thread_id, user=request.user)
+        if thread is None:
+            return 404, Error(message="Thread not found")
+        if thread.assistant_id:
+            await MemoryService.unlink_memories(thread.assistant_id, thread_id, user=request.user)
+        await ThreadService.update_thread(
+            thread_id, metadata={"assistant_id": payload.assistant_id}, user=request.user
+        )
+        await MemoryService.link_memories(payload.assistant_id, thread_id, user=request.user)
+        return Success(success=True)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 400, Error(message=str(e))
 
 
 @router.post(

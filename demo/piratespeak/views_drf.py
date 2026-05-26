@@ -11,6 +11,7 @@ from django_ai_sdk.assistants.services import (
     list_assistants,
 )
 from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
     ThreadService,
@@ -18,10 +19,12 @@ from django_ai_sdk.storage.services import (
     delete_all_threads,
     delete_message,
     delete_thread,
+    get_thread,
     get_thread_file_meta,
     get_thread_history,
     rate_message,
     restore_message,
+    update_thread,
 )
 from django_ai_sdk.views.schemas import Message
 from rest_framework import serializers
@@ -152,6 +155,25 @@ class ThreadDetailAPIView(APIView):
             return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+
+    def patch(self, request: Request, thread_id: str) -> Response:
+        assistant_id = request.data.get("assistant_id")
+        if not assistant_id:
+            return Response({"message": "assistant_id required"}, status=400)
+        try:
+            AssistantService.from_registry(assistant_id)
+            thread = get_thread(thread_id, user=request.user)
+            if thread is None:
+                return Response({"message": "Thread not found"}, status=404)
+            if thread.assistant_id:
+                unlink_memories(thread.assistant_id, thread_id, user=request.user)
+            update_thread(thread_id, metadata={"assistant_id": assistant_id}, user=request.user)
+            link_memories(assistant_id, thread_id, user=request.user)
+            return Response({"success": True})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=400)
 
 
 class ThreadFileMetaAPIView(APIView):
