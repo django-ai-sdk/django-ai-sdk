@@ -83,6 +83,7 @@ class MemoryIn(BaseModel):
     name: str
     slug: str = ""
     description: str = ""
+    is_public: bool = True
 
 
 class MemoryOut(BaseModel):
@@ -92,6 +93,7 @@ class MemoryOut(BaseModel):
     name: str
     slug: str
     description: str
+    is_public: bool
     document_count: int
     created_at: str
     updated_at: str

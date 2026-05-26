@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -14,6 +15,19 @@ class Memory(models.Model):
     slug = models.SlugField(max_length=255, unique=True, blank=True, editable=False)
     description = models.TextField(blank=True, default="")
     is_hidden = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="owned_memories",
+    )
+    contributors = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="memories",
+    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
