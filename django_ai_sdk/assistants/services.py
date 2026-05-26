@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, TypedDict
 
 from django_ai_sdk.assistants.registry import registry
@@ -17,12 +19,10 @@ class AssistantSummary(TypedDict):
 class AssistantService:
     """
     Service for resolving assistants from the registry.
-
-    All methods are static. No instance state is required.
     """
 
     @staticmethod
-    def from_registry(assistant_id: str) -> "Assistant":
+    def from_registry(assistant_id: str) -> Assistant:
         """Resolve assistant from registry or raise ValueError."""
         assistant = registry.get(assistant_id)
         if assistant is None:
@@ -30,7 +30,7 @@ class AssistantService:
         return assistant
 
     @staticmethod
-    async def get_assistant(thread_id: str, user: AbstractUser | None = None) -> "Assistant":
+    async def get_assistant(thread_id: str, user: AbstractUser | None = None) -> Assistant:
         """Find the thread and return its associated assistant.
 
         Args:

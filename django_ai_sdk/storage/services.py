@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
@@ -373,7 +375,7 @@ class ThreadService:
 
         Args:
             thread_id: Thread ID to get storage for
-            user: Optional user — if provided, checks VIEW_THREAD permission
+            user: User for permission checking
 
         Returns:
             Storage adapter instance bound to the thread
@@ -385,8 +387,7 @@ class ThreadService:
         thread_info = await _get_thread(thread_id)
         if thread_info is None:
             raise ValueError(f"Thread not found: {thread_id}")
-        if user is not None:
-            await _check_object_permission(thread_info, user, Operation.VIEW_THREAD)
+        await _check_object_permission(thread_info, user, Operation.VIEW_THREAD)
         return await _get_storage(thread_info)
 
     @staticmethod

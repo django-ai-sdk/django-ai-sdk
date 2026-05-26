@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
@@ -39,13 +41,13 @@ def _get_memory_permissions() -> list[type[BasePermission]]:
     return [import_string(p) for p in paths]
 
 
-async def _check_permission(user: AbstractUser, operation: Operation) -> None:
+async def _check_permission(user: AbstractUser | None, operation: Operation) -> None:
     """Permission check for memory operations."""
     await check_permissions(user, operation, _get_memory_permissions())
 
 
 # FIXME: add proper type hints to Memory
-async def _check_object_permission(user: AbstractUser, operation: Operation, obj: Any) -> None:
+async def _check_object_permission(user: AbstractUser | None, operation: Operation, obj: Any) -> None:
     """Object permission check for memory operations."""
     permissions = _get_memory_permissions()
     await check_permissions(user, operation, permissions)

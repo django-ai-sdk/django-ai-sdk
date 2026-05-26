@@ -493,6 +493,15 @@ class TestPermissions:
         user = MagicMock(pk="user-1")
         await check_permissions(user, Operation.CREATE_THREAD, [IsOwner])
 
+    async def test_is_owner_grants_all_for_memory_like_object(self):
+        """IsOwner checks user_id, not owner_id — Memory objects only have owner_id,
+        so IsOwner treats them as ownerless and grants all."""
+        from django_ai_sdk.permissions import IsOwner, Operation, check_object_permissions
+
+        user = MagicMock(pk="user-1")
+        memory = MagicMock(spec=["owner_id"], owner_id="user-1")
+        await check_object_permissions(user, Operation.VIEW_MEMORY, memory, [IsOwner])
+
     async def test_check_object_permissions_raises_on_first_failure(self):
         from django_ai_sdk.permissions import (
             AllowAll,
@@ -795,6 +804,20 @@ class TestMemoryDefaultPermission:
 
         result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
         assert result is True
+
+    async def test_has_object_permission_denies_all_for_ownerless(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="anyone", is_authenticated=True)
+        memory = MagicMock(
+            owner_id=None,
+            is_public=True,
+        )
+
+        for op in Operation:
+            result = await perm.has_object_permission(user, op, memory)
+            assert result is False, f"Ownerless memory allowed for {op}"
 
 
 @pytest.mark.asyncio
@@ -1099,3 +1122,153 @@ class TestMemoryServicePermissions:
             _get_memory_permissions.cache_clear()
 
         await mem.adelete()
+
+    async def test_ownerless_memory_denied_all(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.permissions import PermissionDenied
+        from django.test.utils import override_settings
+
+        user = await self._get_user(80, "anyone")
+
+        mem = await Memory.objects.acreate(
+            name="ownerless", description="x", owner=None, is_public=True
+        )
+
+        with override_settings(
+            AI_SDK_MEMORY_PERMISSIONS=[
+                "django_ai_sdk.permissions.MemoryDefaultPermission"
+            ]
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.get_memory(str(mem.id), user=user)
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.delete_memory(str(mem.id), user=user)
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.update_memory(str(mem.id), name="x", user=user)
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestOpenMode:
+    """Verify the SDK works without restriction under AllowAll + user=None."""
+
+    async def test_thread_service_create_with_none_user(
+        self, mock_assistants_registry, mock_storage_adapter_registry
+    ):
+        from django_ai_sdk.storage.services import ThreadService
+
+        mock_storage_class = MagicMock()
+        mock_storage_class.create_thread = AsyncMock(return_value="new-thread-id")
+        mock_assistants_registry.get.return_value.storage_adapter = mock_storage_class
+
+        result = await ThreadService.create_thread(
+            "test-assistant", messages=[], user=None
+        )
+        assert result == "new-thread-id"
+
+    async def test_thread_service_get_with_none_user(
+        self, mock_assistants_registry, mock_storage_adapter_registry
+    ):
+        from django_ai_sdk.storage.services import ThreadService
+
+        thread_info = MagicMock(
+            spec=["assistant_id", "user_id"],
+            assistant_id="test-assistant",
+            user_id=None,
+        )
+        mock_adapter_cls = make_mock_adapter_class(get_thread=thread_info)
+        mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]
+
+        result = await ThreadService.get_thread("thread-1", user=None)
+        assert result is not None
+        assert result.assistant_id == "test-assistant"
+
+    async def test_thread_service_storage_for_thread_with_none_user(
+        self, mock_assistants_registry
+    ):
+        from django_ai_sdk.storage.services import ThreadService, _get_thread, _get_storage
+
+        thread_info = MagicMock(
+            spec=["assistant_id", "user_id"],
+            assistant_id="test-assistant",
+            user_id=None,
+        )
+
+        with (
+            patch(
+                "django_ai_sdk.storage.services._get_thread",
+                return_value=thread_info,
+            ),
+            patch(
+                "django_ai_sdk.storage.services._get_storage",
+                return_value=MagicMock(),
+            ),
+        ):
+            result = await ThreadService.storage_for_thread("thread-1", user=None)
+            assert result is not None
+
+    async def test_thread_service_rate_with_none_user(
+        self, mock_assistants_registry, mock_storage_adapter_registry
+    ):
+        from django_ai_sdk.storage.services import ThreadService
+
+        thread_info = MagicMock(
+            spec=["assistant_id", "user_id"],
+            assistant_id="test-assistant",
+            user_id=None,
+        )
+        mock_adapter_cls = make_mock_adapter_class(get_thread=thread_info)
+        mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]
+
+        mock_storage = MagicMock()
+        mock_storage.rate_message = AsyncMock(return_value=True)
+
+        with patch(
+            "django_ai_sdk.storage.services._get_storage",
+            new_callable=AsyncMock,
+        ) as mock_storage_internal:
+            mock_storage_internal.return_value = mock_storage
+
+            result = await ThreadService.rate_message(
+                "thread-1", "msg-1", 1, user=None
+            )
+            assert result is True
+
+    async def test_memory_service_create_with_none_user(self):
+        from django_ai_sdk.memories.services import MemoryService, _get_memory_permissions
+        from django.test.utils import override_settings
+
+        with override_settings(AI_SDK_MEMORY_PERMISSIONS=[]):
+            _get_memory_permissions.cache_clear()
+
+            try:
+                result = await MemoryService.create_memory(
+                    name="open-test", user=None
+                )
+                assert result is not None
+            finally:
+                from django_ai_sdk.memories.models import Memory
+                await Memory.objects.filter(name="open-test").adelete()
+                _get_memory_permissions.cache_clear()
+
+    async def test_memory_service_list_with_none_user(self):
+        from django_ai_sdk.memories.services import MemoryService, _get_memory_permissions
+        from django.test.utils import override_settings
+
+        with override_settings(AI_SDK_MEMORY_PERMISSIONS=[]):
+            _get_memory_permissions.cache_clear()
+
+            result = await MemoryService.list_memories(user=None)
+            assert isinstance(result, list)
+
+            _get_memory_permissions.cache_clear()

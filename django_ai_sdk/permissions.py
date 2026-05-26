@@ -133,7 +133,10 @@ class MemoryDefaultPermission(BasePermission):
         if user is None or not bool(user.is_authenticated):
             return False
 
-        if obj.owner_id is not None and str(obj.owner_id) == str(user.pk):
+        if obj.owner_id is None:
+            return False
+
+        if str(obj.owner_id) == str(user.pk):
             return True
 
         if operation in self.OWNER:
