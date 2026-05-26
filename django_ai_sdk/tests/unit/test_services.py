@@ -92,7 +92,6 @@ class TestThreadServiceCreateThread:
                 assistant_id="test-assistant",
                 messages=[make_message("user", "Hello world")],
                 user=mock_user,
-                user_id="user-1",
             )
 
             assert result == "gen-thread-id"

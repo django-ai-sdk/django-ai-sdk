@@ -129,7 +129,6 @@ class ThreadCreateAPIView(APIView):
             thread_id = create_thread(
                 messages=messages,
                 user=request.user,
-                user_id=request.user.id,
             )
             return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
         except PermissionDenied as e:

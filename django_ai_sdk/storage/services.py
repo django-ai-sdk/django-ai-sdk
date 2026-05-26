@@ -82,7 +82,6 @@ class ThreadService:
         metadata: dict | None = None,
         *,
         user: AbstractUser | None,
-        user_id: str | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -97,8 +96,7 @@ class ThreadService:
             metadata: Additional metadata. Auto-populates model, assistant_name,
                      assistant_class, and created_via. Caller-provided values
                      take precedence over auto-generated ones.
-            user: Required user for permission checking
-            user_id: Optional user ID for the thread owner (defaults to user.id)
+            user: User for permission checking and thread ownership
             thread_id: Optional custom thread ID
 
         Returns:
@@ -126,7 +124,7 @@ class ThreadService:
         }
         default_metadata.update(metadata or {})
 
-        resolved_user_id = user_id or (str(getattr(user, "id", "")) if user else None)
+        resolved_user_id = str(user.pk) if user else None
 
         thread_id = await storage_class.create_thread(
             title=title,

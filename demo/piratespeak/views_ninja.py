@@ -121,7 +121,6 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
             assistant_id=payload.assistant_id or "",
             messages=payload.messages,
             user=request.user,
-            user_id=request.user.id,
         )
         return CreateThreadResponse(thread_id=thread_id)
     except ValueError as e:
