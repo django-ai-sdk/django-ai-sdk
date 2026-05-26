@@ -4,6 +4,8 @@ from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.conversation.models import MessageFeedback
+from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.storage.services import (
     ThreadService,
@@ -95,7 +97,7 @@ def health_check(request: HttpRequest) -> HealthResponse:
 @router.get("/threads/", response={200: ThreadListResponse, 500: Error})
 async def list_threads(request: HttpRequest) -> Any:
     try:
-        all_threads = await ThreadService.threads(user_id=request.user.id)
+        all_threads = await ThreadService.threads(user_id=request.user.id, user=request.user)
         items = [
             ThreadListItem(
                 id=t.id,
@@ -118,6 +120,7 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
         thread_id = await ThreadService.create_thread(
             assistant_id=payload.assistant_id or "",
             messages=payload.messages,
+            user=request.user,
             user_id=request.user.id,
         )
         return CreateThreadResponse(thread_id=thread_id)
@@ -127,10 +130,10 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetailResponse, 404: Error})
+@router.get("/threads/{thread_id}/", response={200: ThreadDetailResponse, 404: Error, 403: Error})
 async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     try:
-        data = await aget_thread_history(thread_id)
+        data = await aget_thread_history(thread_id, user=request.user)
         return ThreadDetailResponse(**data)
     except ValueError as e:
         return 404, Error(message=str(e))
@@ -145,22 +148,26 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
         return 404, Error(message=str(e))
 
 
-@router.post("/threads/{thread_id}/", response={404: Error, 500: Error})
+@router.post("/threads/{thread_id}/", response={403: Error, 404: Error, 500: Error})
 async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     try:
-        assistant = await AssistantService.get_assistant(thread_id)
-        return await assistant.as_view(payload.messages, thread_id=thread_id)
+        assistant = await AssistantService.get_assistant(thread_id, user=request.user)
+        return await assistant.as_view(payload.messages, thread_id=thread_id, user=request.user)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
-@router.delete("/threads/{thread_id}/", response={200: Success, 404: Error, 500: Error})
+@router.delete("/threads/{thread_id}/", response={200: Success, 403: Error, 404: Error, 500: Error})
 async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
     try:
-        success = await ThreadService.delete_thread(thread_id)
+        success = await ThreadService.delete_thread(thread_id, user=request.user)
         if success:
             return Success(success=True, message="Thread deleted successfully")
         return 404, Error(message="Thread not found")
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -178,7 +185,7 @@ async def delete_all_threads(request: HttpRequest) -> Any:
 
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/rate/",
-    response={200: MessageResponse, 404: Error},
+    response={200: MessageResponse, 403: Error, 404: Error},
 )
 async def rate_message(
     request: HttpRequest,
@@ -186,12 +193,10 @@ async def rate_message(
     message_id: str,
     payload: RateMessagePayload,
 ) -> Any:
-    from django_ai_sdk.conversation.models import MessageFeedback
 
     try:
-        user_id = str(request.user.id) if request.user.is_authenticated else None
         await ThreadService.rate_message(
-            thread_id, message_id, payload.rating, feedback=payload.feedback, user_id=user_id
+            thread_id, message_id, payload.rating, feedback=payload.feedback, user=request.user
         )
         # Fetch feedbacks to return in response
         feedbacks = [
@@ -205,30 +210,37 @@ async def rate_message(
             async for fb in MessageFeedback.objects.filter(message_id=message_id)
         ]
         return MessageResponse(id=message_id, is_deleted=False, feedbacks=feedbacks)
+
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/delete/",
-    response={200: MessageResponse, 404: Error},
+    response={200: MessageResponse, 403: Error, 404: Error},
 )
 async def delete_message(request: HttpRequest, thread_id: str, message_id: str) -> Any:
     try:
-        await ThreadService.delete_message(thread_id, message_id)
+        await ThreadService.delete_message(thread_id, message_id, user=request.user)
         return MessageResponse(id=message_id, is_deleted=True)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/restore/",
-    response={200: MessageResponse, 404: Error},
+    response={200: MessageResponse, 403: Error, 404: Error},
 )
 async def restore_message(request: HttpRequest, thread_id: str, message_id: str) -> Any:
     try:
-        await ThreadService.restore_message(thread_id, message_id)
+        await ThreadService.restore_message(thread_id, message_id, user=request.user)
         return MessageResponse(id=message_id, is_deleted=False)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 

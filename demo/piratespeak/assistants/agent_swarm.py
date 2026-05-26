@@ -63,7 +63,11 @@ class AgentSwarmAssistant(Assistant):
         Respond with text or tool calls as needed.
     """)
 
-    def get_tools(self) -> list:
+    def get_tools(
+        self,
+        thread_id: str = "",
+        user: str = "",  # FIXME: add AbstractUser type
+    ) -> list:
         """Return Haystack-compatible tools for agent swarm."""
         return [
             self._create_boat_expert_tool(),
@@ -72,7 +76,7 @@ class AgentSwarmAssistant(Assistant):
         ]
 
     # TODO: convert in utility function
-    def _create_boat_expert_tool(self) -> Tool:
+    def _create_boat_expert_tool(self, **kwargs: object) -> Tool:
         """Create Haystack tool for boat expertise."""
         return Tool(
             name="pirate_boat_expert",
@@ -90,7 +94,7 @@ class AgentSwarmAssistant(Assistant):
             function=pirate_boat_expert,
         )
 
-    def _create_treasure_tool(self) -> Tool:
+    def _create_treasure_tool(self, **kwargs: object) -> Tool:
         """Create Haystack tool for treasure finding."""
         return Tool(
             name="find_treasure",
@@ -108,7 +112,7 @@ class AgentSwarmAssistant(Assistant):
             function=find_treasure,
         )
 
-    def _create_date_tool(self) -> Tool:
+    def _create_date_tool(self, **kwargs: object) -> Tool:
         """Get current time and date in Europe/Amsterdam timezone."""
         return Tool(
             name="Today, current date",
@@ -117,7 +121,10 @@ class AgentSwarmAssistant(Assistant):
             function=get_datetime,
         )
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "HaystackStream":
+    # FIX typing
+    async def get_pipeline_adapter(
+        self, thread_id: str | None = None, user: Any | None = None
+    ) -> "HaystackStream":
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 
@@ -130,7 +137,7 @@ class AgentSwarmAssistant(Assistant):
                 api_key=Secret.from_token(settings.OPENAI_API_KEY),
                 api_base_url=getattr(settings, "OPENAI_API_URL", None),
             ),
-            tools=self.get_tools(),
+            tools=self.get_tools(thread_id=thread_id, user=user),
             system_prompt=self.get_system_prompt(),
             exit_conditions=["text"],
         )

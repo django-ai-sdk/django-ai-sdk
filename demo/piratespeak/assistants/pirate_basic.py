@@ -24,7 +24,7 @@ from haystack.tools import Tool
 from haystack.utils import Secret
 
 
-def get_datetime() -> dict:
+def get_datetime(**kwargs: object) -> dict:
     """Get current time and date in Europe/Amsterdam timezone."""
     tz = timezone.get_current_timezone()
     nowtz = timezone.now().astimezone(tz)
@@ -35,7 +35,7 @@ def get_datetime() -> dict:
     }
 
 
-def get_today() -> Tool:
+def get_today(**kwargs: object) -> Tool:
     """Current date and time tool."""
     return Tool(
         name="get_today",

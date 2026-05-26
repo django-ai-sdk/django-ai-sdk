@@ -6,6 +6,7 @@ from django.urls import path
 from django.views import View
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
     ThreadService,
@@ -104,7 +105,7 @@ class ChatRequestSerializer(serializers.Serializer):
 
 class ThreadListAPIView(APIView):
     def get(self, request: Request) -> Response:
-        all_threads = ThreadService.threads(user_id=request.user.id)
+        all_threads = ThreadService.threads(user_id=request.user.id, user=request.user)
         items = [
             {
                 "id": t.id,
@@ -125,8 +126,14 @@ class ThreadCreateAPIView(APIView):
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]
-            thread_id = create_thread(messages=messages, user_id=request.user.id)
+            thread_id = create_thread(
+                messages=messages,
+                user=request.user,
+                user_id=request.user.id,
+            )
             return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=400)
         except Exception as e:
@@ -136,8 +143,10 @@ class ThreadCreateAPIView(APIView):
 class ThreadDetailAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
         try:
-            data = get_thread_history(thread_id)
+            data = get_thread_history(thread_id, user=request.user)
             return Response(ThreadDetailSerializer(data).data)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -154,10 +163,12 @@ class ThreadFileMetaAPIView(APIView):
 class ThreadDeleteAPIView(APIView):
     def delete(self, request: Request, thread_id: str) -> Response:
         try:
-            success = delete_thread(thread_id)
+            success = delete_thread(thread_id, user=request.user)
             if success:
                 return Response({"success": True, "message": "Thread deleted successfully"})
             return Response({"message": "Thread not found"}, status=404)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -183,9 +194,8 @@ class RateMessageAPIView(APIView):
             return Response({"message": "rating is required"}, status=400)
         rating = request.data.get("rating")
         feedback_text = request.data.get("feedback", "")
-        user_id = str(request.user.id) if request.user.is_authenticated else None
         try:
-            rate_message(thread_id, message_id, rating, feedback=feedback_text, user_id=user_id)
+            rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)
             # Fetch feedbacks to return in response
             feedbacks = [
                 {
@@ -206,6 +216,8 @@ class RateMessageAPIView(APIView):
                     }
                 ).data
             )
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -213,7 +225,7 @@ class RateMessageAPIView(APIView):
 class DeleteMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
         try:
-            delete_message(thread_id, message_id)
+            delete_message(thread_id, message_id, user=request.user)
             return Response(
                 MessageResponseSerializer(
                     {
@@ -222,6 +234,8 @@ class DeleteMessageAPIView(APIView):
                     }
                 ).data
             )
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -229,7 +243,7 @@ class DeleteMessageAPIView(APIView):
 class RestoreMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
         try:
-            restore_message(thread_id, message_id)
+            restore_message(thread_id, message_id, user=request.user)
             return Response(
                 MessageResponseSerializer(
                     {
@@ -238,6 +252,8 @@ class RestoreMessageAPIView(APIView):
                     }
                 ).data
             )
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -298,8 +314,10 @@ class AssistantAPIView(View):
             serializer = ChatRequestSerializer(data=json.loads(request.body))
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]
-            assistant = await AssistantService.get_assistant(thread_id)
-            return await assistant.as_view(messages, thread_id=thread_id)
+            assistant = await AssistantService.get_assistant(thread_id, user=request.user)
+            return await assistant.as_view(messages, thread_id=thread_id, user=request.user)
+        except PermissionDenied as e:
+            return self._error_response({"message": str(e)}, 403)
         except ValidationError as e:
             return self._error_response({"message": str(e)}, 400)
         except ValueError as e:

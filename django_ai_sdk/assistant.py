@@ -302,8 +302,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     async def get_tools(
         self,
         thread_id: str = "",
-        user: AbstractUser | None = None,
-        model: str | None = None,
+        user: str = "",  # FIXME: add AbstractUser type
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
 
@@ -315,12 +314,10 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         To use a fixed model regardless of the assistant's model, simply ignore the
         `model` kwarg in the provider and construct the tool with the desired model.
         """
-        if model is None:
-            model = self.get_model()
         providers = getattr(self.__class__, "tools", [])
         result = []
         for provider in providers:
-            items = provider(thread_id=thread_id, user=user, model=model)
+            items = provider(thread_id=thread_id, user=user)
             if isinstance(items, list):
                 result.extend(items)
             else:
