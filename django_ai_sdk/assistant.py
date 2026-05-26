@@ -26,6 +26,8 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -101,6 +103,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
     # Default list of connected memories
     memories: list[str] = []
+
+    # Tool providers: callables that return Tool objects
+    tools: list = []
 
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
@@ -287,6 +292,11 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             return None
         return self.suggestion_generator(assistant=self)
 
+    def get_tool_providers(self) -> list[Callable]:
+        """Return tool provider callables from the class attribute."""
+        tools = getattr(self.__class__, "tools", [])
+        return tools if isinstance(tools, list) else []
+
     def get_tools(self) -> list[Any]:
         """
         Return list of available tools.
@@ -405,6 +415,29 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             system_prompt=system_prompt,
             response_format=response_format,
         )
+
+    mcp_servers: list[str] = []
+
+    async def get_mcp_tools(self, user_id: str | None = None) -> list:
+        """
+        Load MCP tool objects for this assistant.
+
+        Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
+        in self.mcp_servers. Returns an empty list if mcp_servers is empty or the
+        [mcp] extra is not installed.
+        """
+        if not self.mcp_servers:
+            return []
+        try:
+            from django.conf import settings
+
+            from django_ai_sdk.mcp.loader import load_mcp_tools
+
+            all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+            selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
+            return await load_mcp_tools(selected, user_id)
+        except ImportError:
+            return []
 
     @abstractmethod
     async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
