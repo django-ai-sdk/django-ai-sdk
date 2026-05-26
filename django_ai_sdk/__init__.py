@@ -4,6 +4,16 @@ Django AI SDK - A plug-and-play Django AI streaming SDK.
 
 from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.permissions import (
+    AllowAll,
+    BasePermission,
+    DenyAll,
+    IsAdminUser,
+    IsAuthenticated,
+    IsOwner,
+    Operation,
+    PermissionDenied,
+)
 from django_ai_sdk.protocols.vercel import StreamChunk
 from django_ai_sdk.responses import stream_response
 
@@ -13,4 +23,12 @@ __all__ = [
     "ChatMessage",
     "StreamChunk",
     "stream_response",
+    "BasePermission",
+    "AllowAll",
+    "DenyAll",
+    "IsAuthenticated",
+    "IsAdminUser",
+    "IsOwner",
+    "PermissionDenied",
+    "Operation",
 ]
