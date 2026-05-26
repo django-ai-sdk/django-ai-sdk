@@ -515,6 +515,30 @@ class TestPermissions:
         with pytest.raises(PermissionDenied):
             await check_object_permissions(user, Operation.DELETE_THREAD, obj, [DenyAll, AllowAll])
 
+    async def test_view_assistant_allows_with_allow_all(self):
+        from django_ai_sdk.permissions import AllowAll, Operation, check_permissions
+
+        await check_permissions(None, Operation.VIEW_ASSISTANT, [AllowAll])
+
+    async def test_view_assistant_denies_anonymous_with_is_authenticated(self):
+        from django_ai_sdk.permissions import IsAuthenticated, Operation, PermissionDenied, check_permissions
+
+        with pytest.raises(PermissionDenied):
+            await check_permissions(None, Operation.VIEW_ASSISTANT, [IsAuthenticated])
+
+    async def test_view_assistant_denies_regular_user_with_is_admin(self):
+        from django_ai_sdk.permissions import IsAdminUser, Operation, PermissionDenied, check_permissions
+
+        user = MagicMock(is_staff=False, is_superuser=False)
+        with pytest.raises(PermissionDenied):
+            await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
+
+    async def test_view_assistant_allows_admin_with_is_admin(self):
+        from django_ai_sdk.permissions import IsAdminUser, Operation, check_permissions
+
+        user = MagicMock(is_staff=True)
+        await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
+
 
 @pytest.mark.asyncio
 class TestThreadServiceCreateThreadPermissions:
@@ -1271,3 +1295,84 @@ class TestOpenMode:
             assert isinstance(result, list)
 
             _get_memory_permissions.cache_clear()
+
+
+@pytest.mark.asyncio
+class TestAssistantServicePermissions:
+    """Assistant listing and info permission checks."""
+
+    async def test_list_assistants_filters_by_permission(self):
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.permissions import AllowAll, IsAuthenticated, IsAdminUser
+
+        public_asst = MagicMock()
+        public_asst.name = "Public"
+        public_asst.model = "gpt-4"
+        public_asst.permissions = [AllowAll]
+
+        auth_asst = MagicMock()
+        auth_asst.name = "Auth Only"
+        auth_asst.model = "gpt-4"
+        auth_asst.permissions = [IsAuthenticated]
+
+        admin_asst = MagicMock()
+        admin_asst.name = "Admin Only"
+        admin_asst.model = "gpt-4"
+        admin_asst.permissions = [IsAdminUser]
+
+        mock_registry = {"public": public_asst, "auth": auth_asst, "admin": admin_asst}
+
+        with patch.object(registry, "all", return_value=mock_registry):
+            anon = MagicMock(is_authenticated=False, is_staff=False, is_superuser=False)
+            user = MagicMock(pk="user-1", is_authenticated=True, is_staff=False, is_superuser=False)
+            admin = MagicMock(pk="admin-1", is_authenticated=True, is_staff=True, is_superuser=False)
+
+            anon_result = await AssistantService.list_assistants(user=anon)
+            assert len(anon_result) == 1
+            assert anon_result[0]["id"] == "public"
+
+            user_result = await AssistantService.list_assistants(user=user)
+            assert len(user_result) == 2
+            ids = {r["id"] for r in user_result}
+            assert ids == {"public", "auth"}
+
+            admin_result = await AssistantService.list_assistants(user=admin)
+            assert len(admin_result) == 3
+
+    async def test_get_assistant_info_allows_with_view_permission(self):
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.permissions import AllowAll
+
+        asst = MagicMock()
+        asst.name = "Test"
+        asst.model = "gpt-4"
+        asst.permissions = [AllowAll]
+        asst.info = MagicMock(return_value={"name": "Test", "model": "gpt-4"})
+
+        with patch.object(registry, "get", return_value=asst):
+            result = await AssistantService.get_assistant_info("test", user=None)
+            assert result["name"] == "Test"
+
+    async def test_get_assistant_info_denies_without_permission(self):
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.permissions import IsAuthenticated, PermissionDenied
+
+        asst = MagicMock()
+        asst.name = "Secret"
+        asst.model = "gpt-4"
+        asst.permissions = [IsAuthenticated]
+
+        with patch.object(registry, "get", return_value=asst):
+            with pytest.raises(PermissionDenied):
+                await AssistantService.get_assistant_info("secret", user=None)
+
+    async def test_get_assistant_info_raises_on_unknown(self):
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.assistants.registry import registry
+
+        with patch.object(registry, "get", return_value=None):
+            with pytest.raises(ValueError, match="not found"):
+                await AssistantService.get_assistant_info("unknown", user=None)

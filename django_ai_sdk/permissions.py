@@ -45,6 +45,7 @@ class Operation(StrEnum):
     LIST_THREAD_MEMORIES = "list_thread_memories"
     LINK_MEMORY = "link_memory"
     UNLINK_MEMORY = "unlink_memory"
+    VIEW_ASSISTANT = "view_assistant"
 
 
 class BasePermission(ABC):

@@ -244,20 +244,23 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
         return 404, Error(message=str(e))
 
 
-@router.get("/assistants/", response={200: AssistantsListResponse, 500: Error})
+@router.get("/assistants/", response={200: AssistantsListResponse, 403: Error, 500: Error})
 async def list_assistants(request: HttpRequest) -> Any:
     try:
-        items = AssistantService.list_assistants()
+        items = await AssistantService.list_assistants(user=request.user)
         return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except Exception as e:
         return 500, Error(message=str(e))
 
 
-@router.get("/assistants/{assistant_id}/", response={200: AssistantInfo, 404: Error})
+@router.get("/assistants/{assistant_id}/", response={200: AssistantInfo, 403: Error, 404: Error})
 async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
-        return assistant.info()
+        return await AssistantService.get_assistant_info(assistant_id, user=request.user)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
