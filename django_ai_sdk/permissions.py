@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
+    from django_ai_sdk.memories.models import Memory
 
 
 class PermissionDenied(Exception):
@@ -13,7 +18,7 @@ class PermissionDenied(Exception):
         super().__init__(self.message)
 
 
-class Operation(str, Enum):
+class Operation(StrEnum):
     CHAT = "chat"
     VIEW_HISTORY = "view_history"
     CREATE_THREAD = "create_thread"
@@ -43,11 +48,11 @@ class Operation(str, Enum):
 
 
 class BasePermission(ABC):
-    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(self, user: AbstractUser, operation: Operation, **kwargs: Any) -> bool:
         return True
 
     async def has_object_permission(
-        self, user: Any, operation: Operation, obj: Any, **kwargs: Any
+        self, user: AbstractUser, operation: Operation, obj: Any, **kwargs: Any
     ) -> bool:
         return True
 
@@ -57,38 +62,34 @@ class AllowAll(BasePermission):
 
 
 class DenyAll(BasePermission):
-    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(self, user: AbstractUser, operation: Operation, **kwargs: Any) -> bool:
         return False
 
     async def has_object_permission(
-        self, user: Any, operation: Operation, obj: Any, **kwargs: Any
+        self, user: AbstractUser, operation: Operation, obj: Any, **kwargs: Any
     ) -> bool:
         return False
 
 
 class IsAuthenticated(BasePermission):
-    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
-        return user is not None and bool(getattr(user, "is_authenticated", False))
+    async def has_permission(self, user: AbstractUser, operation: Operation, **kwargs: Any) -> bool:
+        return user is not None and bool(user.is_authenticated)
 
 
 class IsAdminUser(BasePermission):
-    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
-        if user is None:
-            return False
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+    async def has_permission(self, user: AbstractUser, operation: Operation, **kwargs: Any) -> bool:
+        return user is not None and bool(user.is_staff or user.is_superuser)
 
 
 class IsOwner(BasePermission):
     async def has_object_permission(
-        self, user: Any, operation: Operation, obj: Any, **kwargs: Any
+        self, user: AbstractUser, operation: Operation, obj: Any, **kwargs: Any
     ) -> bool:
-        if user is None:
-            return False
-        user_id = str(getattr(user, "id", user))
-        obj_user_id = getattr(obj, "user_id", None)
-        if obj_user_id is None:
+        # SECURITY: this seems to deep, we might wanna pass on just the owner.
+        owner_id = getattr(obj, "user_id", None)
+        if owner_id is None:
             return True
-        return str(obj_user_id) == user_id
+        return user is not None and str(owner_id) == str(user.pk)
 
 
 class MemoryDefaultPermission(BasePermission):
@@ -123,17 +124,16 @@ class MemoryDefaultPermission(BasePermission):
         }
     )
 
-    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
-        return user is not None and bool(user.is_authenticated) | False
+    async def has_permission(self, user: AbstractUser, operation: Operation, **kwargs: Any) -> bool:
+        return user is not None and bool(user.is_authenticated)
 
     async def has_object_permission(
-        self, user: Any, operation: Operation, obj: Any, **kwargs: Any
+        self, user: AbstractUser, operation: Operation, obj: Memory, **kwargs: Any
     ) -> bool:
-        if user is None or not bool(user.is_authenticated) | False:
+        if user is None or not bool(user.is_authenticated):
             return False
 
-        owner_id = obj.owner_id
-        if owner_id is not None and str(owner_id) == str(user.pk):
+        if obj.owner_id is not None and str(obj.owner_id) == str(user.pk):
             return True
 
         if operation in self.OWNER:
@@ -149,7 +149,10 @@ class MemoryDefaultPermission(BasePermission):
 
 
 async def check_permissions(
-    user: Any, operation: Operation, permissions: list[type[BasePermission]], **kwargs: Any
+    user: AbstractUser,
+    operation: Operation,
+    permissions: list[type[BasePermission]],
+    **kwargs: Any,
 ) -> None:
     for perm_class in permissions:
         perm = perm_class()
@@ -158,7 +161,7 @@ async def check_permissions(
 
 
 async def check_object_permissions(
-    user: Any,
+    user: AbstractUser,
     operation: Operation,
     obj: Any,
     permissions: list[type[BasePermission]],

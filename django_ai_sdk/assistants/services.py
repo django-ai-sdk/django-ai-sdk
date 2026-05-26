@@ -1,8 +1,10 @@
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from django_ai_sdk.assistants.registry import registry
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
     from django_ai_sdk.assistant import Assistant
 
 
@@ -28,9 +30,7 @@ class AssistantService:
         return assistant
 
     @staticmethod
-    async def get_assistant(
-        thread_id: str, user: Any | None = None
-    ) -> "Assistant":
+    async def get_assistant(thread_id: str, user: AbstractUser | None = None) -> "Assistant":
         """Find the thread and return its associated assistant.
 
         Args:

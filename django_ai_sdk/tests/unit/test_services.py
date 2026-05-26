@@ -40,7 +40,7 @@ def make_mock_assistant(assistant_id="test-assistant", name="Test Assistant", mo
 @pytest.fixture
 def mock_user():
     user = MagicMock()
-    user.id = "user-1"
+    user.pk = "user-1"
     user.is_authenticated = True
     return user
 
@@ -467,14 +467,14 @@ class TestPermissions:
     async def test_is_owner_grants_when_user_id_matches(self):
         from django_ai_sdk.permissions import IsOwner, Operation, PermissionDenied, check_object_permissions
 
-        user = MagicMock(id="user-1")
+        user = MagicMock(pk="user-1")
         obj = MagicMock(user_id="user-1")
         await check_object_permissions(user, Operation.VIEW_THREAD, obj, [IsOwner])
 
     async def test_is_owner_denies_when_user_id_mismatch(self):
         from django_ai_sdk.permissions import IsOwner, Operation, PermissionDenied, check_object_permissions
 
-        user = MagicMock(id="user-1")
+        user = MagicMock(pk="user-1")
         obj = MagicMock(user_id="user-2")
         with pytest.raises(PermissionDenied):
             await check_object_permissions(user, Operation.VIEW_THREAD, obj, [IsOwner])
@@ -490,7 +490,7 @@ class TestPermissions:
         """IsOwner allows if the object has no user_id (e.g. assistant-level check)."""
         from django_ai_sdk.permissions import IsOwner, Operation, PermissionDenied, check_permissions
 
-        user = MagicMock(id="user-1")
+        user = MagicMock(pk="user-1")
         await check_permissions(user, Operation.CREATE_THREAD, [IsOwner])
 
     async def test_check_object_permissions_raises_on_first_failure(self):
@@ -576,7 +576,7 @@ class TestThreadServiceObjectPermissions:
         mock_storage = MagicMock()
         mock_storage.rate_message = AsyncMock(return_value=True)
 
-        owner_user = MagicMock(id="owner-user")
+        owner_user = MagicMock(pk="owner-user")
 
         with patch(
             "django_ai_sdk.storage.services._get_storage",

@@ -469,7 +469,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         """
         pass
 
-    async def history(self, thread_id: str, user: Any = None) -> ThreadDetail:
+    async def history(self, thread_id: str, user: AbstractUser | None = None) -> ThreadDetail:
         """
         Get conversation history for a thread.
 
@@ -523,7 +523,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         self,
         protocol_messages: list[Any],
         thread_id: str | None = None,
-        user: Any = None,
+        user: AbstractUser | None = None,
     ) -> Any:
         """
         Convert protocol messages to streaming HTTP response with optional storage.

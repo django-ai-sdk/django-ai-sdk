@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
@@ -13,6 +13,9 @@ from django_ai_sdk.permissions import (
 )
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
 
 logger = get_logger(__name__)
 
@@ -35,7 +38,7 @@ async def _get_storage(thread_info: ThreadInfo) -> Any:
 
 async def _check_object_permission(
     thread_info: ThreadInfo,
-    user: Any,
+    user: AbstractUser,
     operation: Operation,
 ) -> None:
     """Object-level permission using the thread's owning assistant's permission classes."""
@@ -52,7 +55,7 @@ async def _check_object_permission(
 
 
 async def _check_permission(
-    user: Any,
+    user: AbstractUser,
     operation: Operation,
     assistant: Any,
 ) -> None:
@@ -76,7 +79,7 @@ class ThreadService:
         title: str = "",
         metadata: dict | None = None,
         *,
-        user: Any,
+        user: AbstractUser | None,
         user_id: str | None = None,
         thread_id: str | None = None,
     ) -> str:
@@ -134,7 +137,7 @@ class ThreadService:
         return thread_id
 
     @staticmethod
-    async def get_thread(thread_id: str, *, user: Any) -> ThreadInfo | None:
+    async def get_thread(thread_id: str, *, user: AbstractUser | None) -> ThreadInfo | None:
         """
         Find thread by querying storage adapters.
 
@@ -161,7 +164,9 @@ class ThreadService:
         return thread
 
     @staticmethod
-    async def threads(user_id: str | None = None, *, user: Any | None = None) -> list[ThreadInfo]:
+    async def threads(
+        user_id: str | None = None, *, user: AbstractUser | None = None
+    ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
 
@@ -188,7 +193,7 @@ class ThreadService:
     async def update_thread(
         thread_id: str,
         *,
-        user: Any,
+        user: AbstractUser | None,
         title: str | None = None,
         metadata: dict | None = None,
     ) -> bool:
@@ -222,7 +227,7 @@ class ThreadService:
         return False
 
     @staticmethod
-    async def delete_thread(thread_id: str, *, user: Any) -> bool:
+    async def delete_thread(thread_id: str, *, user: AbstractUser | None) -> bool:
         """
         Delete a thread and all its messages.
 
@@ -265,7 +270,12 @@ class ThreadService:
 
     @staticmethod
     async def rate_message(
-        thread_id: str, message_id: str, rating: int | None, feedback: str = "", *, user: Any
+        thread_id: str,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        *,
+        user: AbstractUser | None,
     ) -> bool:
         """
         Rate a message in a thread.
@@ -289,13 +299,13 @@ class ThreadService:
         await _check_object_permission(thread, user, Operation.RATE_MESSAGE)
 
         storage = await _get_storage(thread)
-        success = await storage.rate_message(message_id, rating)
+        success = await storage.rate_message(message_id, rating, feedback)
         if not success:
             raise ValueError("Message not found")
         return True
 
     @staticmethod
-    async def delete_message(thread_id: str, message_id: str, *, user: Any) -> bool:
+    async def delete_message(thread_id: str, message_id: str, *, user: AbstractUser | None) -> bool:
         """
         Soft delete a message in a thread.
 
@@ -323,7 +333,9 @@ class ThreadService:
         return True
 
     @staticmethod
-    async def restore_message(thread_id: str, message_id: str, *, user: Any) -> bool:
+    async def restore_message(
+        thread_id: str, message_id: str, *, user: AbstractUser | None
+    ) -> bool:
         """
         Restore a soft-deleted message in a thread.
 
@@ -351,7 +363,7 @@ class ThreadService:
         return True
 
     @staticmethod
-    async def storage_for_thread(thread_id: str, *, user: Any | None = None) -> Any:
+    async def storage_for_thread(thread_id: str, *, user: AbstractUser | None = None) -> Any:
         """
         Resolve a thread's storage adapter, instantiated and bound to the thread.
 
@@ -404,7 +416,7 @@ class ThreadService:
 # ============================================================================
 
 
-async def aget_thread_history(thread_id: str, user: Any | None = None) -> dict[str, Any]:
+async def aget_thread_history(thread_id: str, user: AbstractUser | None = None) -> dict[str, Any]:
     """
     Get thread history: thread metadata and messages with feedbacks.
 
