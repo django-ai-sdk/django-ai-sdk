@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django_ai_sdk.assistants.registry import registry
 
@@ -28,11 +28,24 @@ class AssistantService:
         return assistant
 
     @staticmethod
-    async def get_assistant(thread_id: str) -> "Assistant":
-        """Find the thread and return its associated assistant."""
+    async def get_assistant(
+        thread_id: str, user: Any | None = None
+    ) -> "Assistant":
+        """Find the thread and return its associated assistant.
+
+        Args:
+            thread_id: Thread ID to look up
+            user: Optional user for permission checking on the thread lookup
+
+        Returns:
+            The assistant instance associated with the thread
+
+        Raises:
+            ValueError: If thread or assistant not found
+        """
         from django_ai_sdk.storage.services import ThreadService
 
-        thread = await ThreadService.get_thread(thread_id)
+        thread = await ThreadService.get_thread(thread_id, user=user)
         if thread is None:
             raise ValueError("Thread not found")
         return AssistantService.from_registry(thread.assistant_id)

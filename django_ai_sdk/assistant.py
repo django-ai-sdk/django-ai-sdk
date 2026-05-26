@@ -18,6 +18,13 @@ from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.permissions import (
+    AllowAll,
+    BasePermission,
+    Operation,
+    check_object_permissions,
+    check_permissions,
+)
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
@@ -100,6 +107,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     description: str
     model: str
     instructions: Prompt = prompt("You are a helpful assistant.")
+
+    # Permission classes used to gate access to this assistant's operations.
+    permissions: list[type[BasePermission]] = [AllowAll]
 
     # Default list of connected memories
     memories: list[str] = []
@@ -462,7 +472,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         """
         pass
 
-    async def history(self, thread_id: str) -> ThreadDetail:
+    async def history(self, thread_id: str, user: Any = None) -> ThreadDetail:
         """
         Get conversation history for a thread.
 
@@ -471,11 +481,17 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
         Args:
             thread_id: The thread ID to fetch history for
+            user: Optional user for permission checking
 
         Returns:
             ThreadDetail containing thread metadata and protocol-formatted messages
+
+        Raises:
+            PermissionDenied: If user has no VIEW_THREAD permission
         """
         logger.debug(f"Fetching history for thread: {thread_id}")
+
+        await check_permissions(user, Operation.VIEW_THREAD, self.permissions)
 
         storage = await self.get_storage_adapter(thread_id)
 
@@ -486,6 +502,8 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         thread_info = await storage.__class__.get_thread(thread_id)
         if not thread_info:
             raise ValueError(f"Thread not found: {thread_id}")
+
+        await check_object_permissions(user, Operation.VIEW_THREAD, thread_info, self.permissions)
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
@@ -519,16 +537,21 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         Args:
             protocol_messages: Raw protocol messages (e.g., Vercel Message objects)
             thread_id: Optional thread ID for conversation persistence
-            user: Optional user for conversation attribution
+            user: Optional user for conversation attribution and permission checks
 
         Returns:
             StreamingHttpResponse ready for Django views
+
+        Raises:
+            PermissionDenied: If user has no CHAT permission for this assistant/thread
         """
         logger.debug(
             f"Assistant as_view called: assistant={self.__class__.__name__}, "
             f"messages={len(protocol_messages) if protocol_messages else 0}, "
             f"thread_id={thread_id}, user={user}"
         )
+
+        await check_permissions(user, Operation.CHAT, self.permissions)
 
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
@@ -579,10 +602,12 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
         # TODO: fix type error for argument, can never be None, now nested
         if thread_id:
-            thread = await ThreadService.get_thread(thread_id)
+            thread = await ThreadService.get_thread(thread_id, user=user)
+            if thread:
+                await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
             if self.title_generation and thread and not thread.title:
                 title = await generate_thread_title(assistant=self, messages=messages)
-                await ThreadService.update_thread(thread_id, title)
+                await ThreadService.update_thread(thread_id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
