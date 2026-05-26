@@ -5,7 +5,11 @@ from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.assistants.services import (
+    AssistantService,
+    get_assistant_info,
+    list_assistants,
+)
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
@@ -259,15 +263,20 @@ class RestoreMessageAPIView(APIView):
 
 class ListAssistantsAPIView(APIView):
     def get(self, request: Request) -> Response:
-        items = AssistantService.list_assistants()
-        return Response(ListAssistantsSerializer({"assistants": items}).data)
+        try:
+            items = list_assistants(user=request.user)
+            return Response(ListAssistantsSerializer({"assistants": items}).data)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
 
 
 class AssistantInfoAPIView(APIView):
     def get(self, request: Request, assistant_id: str) -> Response:
         try:
-            assistant = AssistantService.from_registry(assistant_id)
-            return Response(AssistantInfoSerializer(assistant.info()).data)
+            info = get_assistant_info(assistant_id, user=request.user)
+            return Response(AssistantInfoSerializer(info).data)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypedDict
 
+from asgiref.sync import async_to_sync
+
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.permissions import AllowAll, Operation, PermissionDenied, check_permissions
 
@@ -75,3 +77,7 @@ class AssistantService:
         perm_classes: list = getattr(assistant, "permissions", [AllowAll])
         await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
         return assistant.info()
+
+
+list_assistants = async_to_sync(AssistantService.list_assistants)
+get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
