@@ -4,9 +4,9 @@ from typing import Annotated
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
+from django_ai_sdk.permissions import IsAdminUser
 from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -50,6 +50,7 @@ class AgentSwarmAssistant(Assistant):
     name = "Pirate Agent Swarm"
     description = "An agent swarm assistant with specialized pirate expertise."
     model = settings.AI_SDK_DEFAULT_MODEL
+    permissions = [IsAdminUser]
     instructions = prompt("""\
         You are a Triage Agent for a crew of pirate specialists.
 
