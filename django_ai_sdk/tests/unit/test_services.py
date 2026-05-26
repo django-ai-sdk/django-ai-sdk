@@ -618,3 +618,484 @@ class TestThreadServiceObjectPermissions:
                 "thread-1", "msg-1", 1, user=mock_user
             )
             assert result is True
+
+
+# ============================================================================
+# Memory Permission Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestMemoryDefaultPermission:
+    """Test MemoryDefaultPermission class logic directly."""
+
+    async def test_has_permission_allows_authenticated_for_create(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(is_authenticated=True)
+        result = await perm.has_permission(user, Operation.CREATE_MEMORY)
+        assert result is True
+
+    async def test_has_permission_denies_anonymous_for_create(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(is_authenticated=False)
+        result = await perm.has_permission(user, Operation.CREATE_MEMORY)
+        assert result is False
+
+    async def test_has_permission_denies_none_for_create(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        result = await perm.has_permission(None, Operation.CREATE_MEMORY)
+        assert result is False
+
+    async def test_has_permission_requires_auth_for_all_ops(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(is_authenticated=True)
+        anon = MagicMock(is_authenticated=False)
+
+        for op in Operation:
+            result = await perm.has_permission(user, op)
+            assert result is True, f"Auth user denied for {op}"
+            result = await perm.has_permission(anon, op)
+            assert result is False, f"Anon allowed for {op}"
+            result = await perm.has_permission(None, op)
+            assert result is False, f"None allowed for {op}"
+
+    async def test_has_object_permission_grants_owner_all(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="owner-1", is_authenticated=True)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=False,
+        )
+
+        for op in Operation:
+            result = await perm.has_object_permission(user, op, memory)
+            assert result is True, f"Owner denied for {op}"
+
+    async def test_has_object_permission_denies_non_contributor_private(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="stranger", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=False,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
+        assert result is False
+
+    async def test_has_object_permission_allows_public_read_for_non_contributor(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="stranger", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=True,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
+        assert result is True
+
+    async def test_has_object_permission_blocks_public_write_for_non_contributor(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="stranger", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=True,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
+        assert result is False
+
+    async def test_has_object_permission_denies_anonymous_even_public(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=True,
+        )
+
+        result = await perm.has_object_permission(None, Operation.VIEW_MEMORY, memory)
+        assert result is False
+
+    async def test_has_object_permission_denies_contributor_owner_ops(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="contributor-1", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=True,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.DELETE_MEMORY, memory)
+        assert result is False
+
+        result = await perm.has_object_permission(user, Operation.UPDATE_MEMORY, memory)
+        assert result is False
+
+    async def test_has_object_permission_grants_contributor_write_ops(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="contributor-1", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=True,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
+        assert result is True
+
+        result = await perm.has_object_permission(user, Operation.DELETE_DOCUMENT, memory)
+        assert result is True
+
+    async def test_has_object_permission_grants_contributor_read_ops(self):
+        from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
+
+        perm = MemoryDefaultPermission()
+        user = MagicMock(pk="contributor-1", is_authenticated=True)
+        mock_contrib = MagicMock()
+        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        memory = MagicMock(
+            owner_id="owner-1",
+            is_public=False,
+            contributors=mock_contrib,
+        )
+
+        result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
+        assert result is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestMemoryServicePermissions:
+    """Integration tests: MemoryService methods enforce permissions."""
+
+    async def _get_admin(self):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user, _ = await User.objects.aupdate_or_create(
+            id=1,
+            defaults={"username": "admin", "is_superuser": True},
+        )
+        return user
+
+    async def _get_user(self, pk, username):
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user, _ = await User.objects.aupdate_or_create(
+            id=pk,
+            defaults={"username": username},
+        )
+        return user
+
+    async def test_create_memory_requires_authenticated_user(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        with pytest.raises(PermissionDenied):
+            await MemoryService.create_memory(
+                name="test", user=None
+            )
+
+    async def test_owner_can_delete_memory(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(20, "owner2")
+
+        mem = await Memory.objects.acreate(
+            name="to-delete", description="x", owner=owner, is_public=False
+        )
+
+        with override_settings(
+            AI_SDK_MEMORY_PERMISSIONS=[
+                "django_ai_sdk.permissions.MemoryDefaultPermission"
+            ]
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            await MemoryService.delete_memory(str(mem.id), user=owner)
+
+            _get_memory_permissions.cache_clear()
+
+        assert not await Memory.objects.filter(id=mem.id).aexists()
+
+    async def test_stranger_cannot_delete_private_memory(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.permissions import PermissionDenied
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(30, "owner3")
+        stranger = await self._get_user(31, "stranger3")
+
+        mem = await Memory.objects.acreate(
+            name="private", description="x", owner=owner, is_public=False
+        )
+
+        with override_settings(
+            AI_SDK_MEMORY_PERMISSIONS=[
+                "django_ai_sdk.permissions.MemoryDefaultPermission"
+            ]
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.delete_memory(str(mem.id), user=stranger)
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()
+
+    async def test_stranger_can_read_public_memory(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(40, "owner4")
+        stranger = await self._get_user(41, "stranger4")
+
+        mem = await Memory.objects.acreate(
+            name="public", description="x", owner=owner, is_public=True
+        )
+
+        with override_settings(
+            AI_SDK_MEMORY_PERMISSIONS=[
+                "django_ai_sdk.permissions.MemoryDefaultPermission"
+            ]
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            result = await MemoryService.get_memory(str(mem.id), user=stranger)
+            assert str(result.id) == str(mem.id)
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()
+
+    async def test_get_memory_denied_for_private_not_owner(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.permissions import PermissionDenied
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(50, "owner5")
+        stranger = await self._get_user(51, "stranger5")
+
+        mem = await Memory.objects.acreate(
+            name="private-no-peek", description="x", owner=owner, is_public=False
+        )
+
+        with override_settings(
+            AI_SDK_MEMORY_PERMISSIONS=[
+                "django_ai_sdk.permissions.MemoryDefaultPermission"
+            ]
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.get_memory(str(mem.id), user=stranger)
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()
+
+    async def test_link_memories_links_assistant_memories(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from django.test.utils import override_settings
+        from django_ai_sdk.assistants.services import registry
+
+        owner = await self._get_user(60, "link-owner")
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="link-test", owner=owner, is_public=False
+        )
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [mem.slug]
+
+        with (
+            patch.object(registry, "get", return_value=mock_assistant),
+            override_settings(
+                AI_SDK_MEMORY_PERMISSIONS=[
+                    "django_ai_sdk.permissions.MemoryDefaultPermission"
+                ]
+            ),
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            await MemoryService.link_memories(
+                "test-asst", str(thread.id), user=owner
+            )
+
+            _get_memory_permissions.cache_clear()
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert linked
+
+        await mem.adelete()
+
+    async def test_unlink_memories_unlinks_assistant_memories(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from django.test.utils import override_settings
+        from django_ai_sdk.assistants.services import registry
+
+        owner = await self._get_user(61, "unlink-owner")
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="unlink-test", owner=owner, is_public=False
+        )
+        await ThreadMemory.objects.acreate(
+            thread=thread, memory=mem, active=True
+        )
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [mem.slug]
+
+        with (
+            patch.object(registry, "get", return_value=mock_assistant),
+            override_settings(
+                AI_SDK_MEMORY_PERMISSIONS=[
+                    "django_ai_sdk.permissions.MemoryDefaultPermission"
+                ]
+            ),
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            await MemoryService.unlink_memories(
+                "test-asst", str(thread.id), user=owner
+            )
+
+            _get_memory_permissions.cache_clear()
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert not linked
+
+        await mem.adelete()
+
+    async def test_link_memories_requires_user(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.permissions import PermissionDenied
+        from django_ai_sdk.assistants.services import registry
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(70, "link-user-req")
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-link", owner=owner, is_public=False
+        )
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [mem.slug]
+
+        with (
+            patch.object(registry, "get", return_value=mock_assistant),
+            override_settings(
+                AI_SDK_MEMORY_PERMISSIONS=[
+                    "django_ai_sdk.permissions.MemoryDefaultPermission"
+                ]
+            ),
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.link_memories(
+                    "test-asst", str(thread.id), user=None
+                )
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()
+
+    async def test_unlink_memories_requires_user(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.permissions import PermissionDenied
+        from django_ai_sdk.assistants.services import registry
+        from django.test.utils import override_settings
+
+        owner = await self._get_user(71, "unlink-user-req")
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-unlink", owner=owner, is_public=False
+        )
+
+        mock_assistant = MagicMock()
+        mock_assistant.memories = [mem.slug]
+
+        with (
+            patch.object(registry, "get", return_value=mock_assistant),
+            override_settings(
+                AI_SDK_MEMORY_PERMISSIONS=[
+                    "django_ai_sdk.permissions.MemoryDefaultPermission"
+                ]
+            ),
+        ):
+            from django_ai_sdk.memories.services import _get_memory_permissions
+            _get_memory_permissions.cache_clear()
+
+            with pytest.raises(PermissionDenied):
+                await MemoryService.unlink_memories(
+                    "test-asst", str(thread.id), user=None
+                )
+
+            _get_memory_permissions.cache_clear()
+
+        await mem.adelete()

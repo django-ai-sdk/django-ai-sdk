@@ -11,6 +11,7 @@ from django_ai_sdk.permissions import (
     IsAdminUser,
     IsAuthenticated,
     IsOwner,
+    MemoryDefaultPermission,
     Operation,
     PermissionDenied,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "IsAuthenticated",
     "IsAdminUser",
     "IsOwner",
+    "MemoryDefaultPermission",
     "PermissionDenied",
     "Operation",
 ]

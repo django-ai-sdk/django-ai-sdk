@@ -30,6 +30,16 @@ class Operation(str, Enum):
     VIEW_FILE = "view_file"
     REINDEX = "reindex"
     VIEW_MEMORY = "view_memory"
+    CREATE_MEMORY = "create_memory"
+    UPDATE_MEMORY = "update_memory"
+    DELETE_MEMORY = "delete_memory"
+    VIEW_DOCUMENT = "view_document"
+    LIST_DOCUMENTS = "list_documents"
+    UPLOAD_DOCUMENT = "upload_document"
+    DELETE_DOCUMENT = "delete_document"
+    LIST_THREAD_MEMORIES = "list_thread_memories"
+    LINK_MEMORY = "link_memory"
+    UNLINK_MEMORY = "unlink_memory"
 
 
 class BasePermission(ABC):
@@ -79,6 +89,63 @@ class IsOwner(BasePermission):
         if obj_user_id is None:
             return True
         return str(obj_user_id) == user_id
+
+
+class MemoryDefaultPermission(BasePermission):
+    """Three-tier permission for memories.
+
+    - Owner: full access (read, write entries, update/delete memory).
+    - Contributor: read + write entries (not update/delete memory).
+    - Public: read-only (gated by is_public flag on memory).
+    - Anonymous: blocked unless public read + global gate allows.
+    """
+
+    READ: frozenset[Operation] = frozenset(
+        {
+            Operation.VIEW_MEMORY,
+            Operation.VIEW_DOCUMENT,
+            Operation.LIST_DOCUMENTS,
+            Operation.LIST_THREAD_MEMORIES,
+        }
+    )
+    WRITE: frozenset[Operation] = frozenset(
+        {
+            Operation.UPLOAD_DOCUMENT,
+            Operation.DELETE_DOCUMENT,
+            Operation.LINK_MEMORY,
+            Operation.UNLINK_MEMORY,
+        }
+    )
+    OWNER: frozenset[Operation] = frozenset(
+        {
+            Operation.UPDATE_MEMORY,
+            Operation.DELETE_MEMORY,
+        }
+    )
+
+    async def has_permission(self, user: Any, operation: Operation, **kwargs: Any) -> bool:
+        return user is not None and bool(user.is_authenticated) | False
+
+    async def has_object_permission(
+        self, user: Any, operation: Operation, obj: Any, **kwargs: Any
+    ) -> bool:
+        if user is None or not bool(user.is_authenticated) | False:
+            return False
+
+        owner_id = obj.owner_id
+        if owner_id is not None and str(owner_id) == str(user.pk):
+            return True
+
+        if operation in self.OWNER:
+            return False
+
+        if await obj.contributors.filter(id=user.pk).aexists():
+            return True
+
+        if operation in self.READ and obj.is_public:
+            return True
+
+        return False
 
 
 async def check_permissions(
