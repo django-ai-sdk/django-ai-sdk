@@ -14,9 +14,7 @@ class Migration(migrations.Migration):
             fields=[
                 (
                     "server_name",
-                    models.CharField(
-                        max_length=100, primary_key=True, serialize=False, unique=True
-                    ),
+                    models.CharField(max_length=100, primary_key=True, serialize=False),
                 ),
                 ("client_id", models.CharField(max_length=500)),
                 ("client_secret", models.TextField(blank=True)),

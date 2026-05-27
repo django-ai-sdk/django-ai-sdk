@@ -10,7 +10,7 @@ from django_ai_sdk.mcp.models import MCPOAuthToken
 
 
 @require_http_methods(["GET"])
-def list_connections(request: HttpRequest) -> JsonResponse:
+async def list_connections(request: HttpRequest) -> JsonResponse:
     """GET connections/ — list all MCP servers with type and connection status."""
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Not authenticated"}, status=401)
@@ -18,7 +18,12 @@ def list_connections(request: HttpRequest) -> JsonResponse:
     all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
 
     connected = set(
-        MCPOAuthToken.objects.filter(user=request.user).values_list("server_name", flat=True)
+        [
+            sn
+            async for sn in MCPOAuthToken.objects.filter(user=request.user).values_list(
+                "server_name", flat=True
+            )
+        ]
     )
 
     # Derive the SDK mount base from the request's own path (/…/connections/ → /…/).
@@ -42,12 +47,14 @@ def list_connections(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["DELETE"])
-def disconnect_server(request: HttpRequest, server_name: str) -> JsonResponse:
+async def disconnect_server(request: HttpRequest, server_name: str) -> JsonResponse:
     """DELETE connections/<server_name>/ — revoke stored OAuth token."""
     if not request.user.is_authenticated:
         return JsonResponse({"error": "Not authenticated"}, status=401)
 
-    deleted, _ = MCPOAuthToken.objects.filter(user=request.user, server_name=server_name).delete()
+    deleted, _ = await MCPOAuthToken.objects.filter(
+        user=request.user, server_name=server_name
+    ).adelete()
     if deleted:
         return JsonResponse({"disconnected": server_name})
     return JsonResponse({"error": "Not connected"}, status=404)

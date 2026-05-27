@@ -438,7 +438,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
     mcp_servers: list[str] = []
 
-    async def get_mcp_tools(self, user_id: str | None = None) -> list:
+    async def get_mcp_tools(self, user_id: str | None = None) -> list[Any]:
         """
         Load MCP tool objects for this assistant.
 

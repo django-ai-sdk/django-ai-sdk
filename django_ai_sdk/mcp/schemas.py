@@ -38,6 +38,16 @@ class OAuthMCPServer(BaseModel):
     token_endpoint: str = ""
     tools: list[str] = []
 
+    @model_validator(mode="after")
+    def validate_endpoints(self) -> OAuthMCPServer:
+        has_auth = bool(self.authorization_endpoint)
+        has_token = bool(self.token_endpoint)
+        if has_auth != has_token:
+            raise ValueError(
+                "authorization_endpoint and token_endpoint must both be set or both be empty"
+            )
+        return self
+
 
 MCPServer = Annotated[
     StaticMCPServer | TokenMCPServer | OAuthMCPServer,

@@ -9,7 +9,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from django_ai_sdk.mcp.loader import _refresh
+from django_ai_sdk.mcp.loader import refresh_oauth_token
 from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.schemas import OAuthMCPServer
 
@@ -72,7 +72,7 @@ class Command(BaseCommand):
                 continue
 
             try:
-                result = await _refresh(token_obj, server_config)
+                result = await refresh_oauth_token(token_obj, server_config)
                 if result:
                     self.stdout.write(
                         self.style.SUCCESS(

@@ -84,7 +84,7 @@ class MCPOAuthToken(models.Model):
 class MCPOAuthClient(models.Model):
     """Stores dynamically-registered OAuth client credentials (RFC 7591) per MCP server."""
 
-    server_name = models.CharField(max_length=100, unique=True, primary_key=True)
+    server_name = models.CharField(max_length=100, primary_key=True)
     client_id = models.CharField(max_length=500)
     client_secret = models.TextField(blank=True)
     redirect_uri = models.URLField()
@@ -97,7 +97,7 @@ class MCPOAuthClient(models.Model):
         return f"OAuthClient({self.server_name})"
 
     def set_credentials(self, client_id: str, client_secret: str) -> None:
-        """Store credentials encrypted."""
+        """Store client credentials; client_secret is encrypted, client_id is plaintext."""
         f = _get_fernet()
         self.client_id = client_id
         if client_secret:

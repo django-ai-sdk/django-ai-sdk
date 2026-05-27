@@ -4,6 +4,7 @@ from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.urls import reverse
 from django.utils import timezone
 
 MCP_STATUS_ACTIVE = "active"
@@ -55,7 +56,11 @@ async def get_mcp_server_status(assistant: Any, user_id: Any) -> list[dict]:
                 status = MCP_STATUS_EXPIRED
             else:
                 status = MCP_STATUS_ACTIVE
-            connect_url = f"/api/mcp/oauth/{name}/start/" if status != MCP_STATUS_ACTIVE else None
+            connect_url = (
+                reverse("django_ai_sdk_mcp:oauth_start", kwargs={"server_name": name})
+                if status != MCP_STATUS_ACTIVE
+                else None
+            )
         else:
             status = MCP_STATUS_ACTIVE
             connect_url = None

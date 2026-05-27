@@ -91,9 +91,13 @@ async def oauth_start(
     # Dynamic client registration (RFC 7591) if registration_endpoint is available
     if discovery.registration_endpoint and not client_id:
         try:
-            # Check if we already have a registered client
-            try:
-                oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
+            # aget_or_create atomically claims the slot, preventing duplicate DB saves
+            # on concurrent OAuth starts for the same server.
+            oauth_client, created = await MCPOAuthClient.objects.aget_or_create(
+                server_name=server_name,
+                defaults={"redirect_uri": redirect_uri},
+            )
+            if not created and oauth_client.client_id:
                 client_id = oauth_client.client_id
                 client_secret = oauth_client.get_client_secret()
                 logger.info(
@@ -101,7 +105,7 @@ async def oauth_start(
                     server_name,
                     client_id,
                 )
-            except MCPOAuthClient.DoesNotExist:
+            else:
                 # Perform dynamic registration
                 client_name = getattr(settings, "AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client")
                 registration_data = {
@@ -110,8 +114,8 @@ async def oauth_start(
                     "grant_types": ["authorization_code", "refresh_token"],
                     "response_types": ["code"],
                 }
-                async with httpx.AsyncClient(timeout=10) as client:
-                    reg_response = await client.post(
+                async with httpx.AsyncClient(timeout=10) as http_client:
+                    reg_response = await http_client.post(
                         discovery.registration_endpoint,
                         json=registration_data,
                     )
@@ -126,8 +130,6 @@ async def oauth_start(
                 logger.info(
                     "Dynamically registered client for %r: client_id=%s", server_name, client_id
                 )
-                # Store in database
-                oauth_client = MCPOAuthClient(server_name=server_name, redirect_uri=redirect_uri)
                 oauth_client.set_credentials(client_id, client_secret)
                 await oauth_client.asave()
         except (httpx.HTTPError, ValueError, KeyError) as e:
@@ -171,6 +173,7 @@ async def oauth_start(
     return HttpResponseRedirect(auth_url)
 
 
+@require_http_methods(["GET"])
 async def oauth_callback(
     request: HttpRequest, server_name: str
 ) -> HttpResponseRedirect | JsonResponse:
