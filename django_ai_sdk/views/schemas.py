@@ -21,6 +21,6 @@ class ChatRequest(BaseModel):
 
 class RateMessagePayload(BaseModel):
     rating: int | None = Field(
-        ..., description="Rating value: 1 for good, -1 for bad, or None to unrate"
+        None, description="Rating value: 1 for good, -1 for bad, or None to unrate (optional)"
     )
-    rating_comment: str = Field(default="", description="Optional explanation for the rating")
+    feedback: str = Field(default="", description="Optional explanation for the rating")

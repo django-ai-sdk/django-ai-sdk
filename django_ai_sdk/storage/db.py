@@ -1,4 +1,3 @@
-import traceback
 import uuid
 
 from django.utils import timezone
@@ -180,23 +179,47 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def get_messages(self) -> list[ChatMessage]:
         """
         Retrieve all ChatMessages for this thread from database.
-        Excludes deleted messages.
+        Excludes deleted messages. Includes all feedbacks in metadata.
 
         Returns:
             List of ChatMessage objects ordered by creation time
         """
+        from django_ai_sdk.conversation.models import MessageFeedback
+
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
-        messages = []
-        # Filter out deleted messages
+
+        # Get all messages for this thread
+        messages_list = []
         async for msg in thread.messages.filter(is_deleted=False).order_by("created_at"):
+            messages_list.append(msg)
+
+        # Batch-fetch all feedbacks for these messages
+        message_ids = [msg.id for msg in messages_list]
+        all_feedbacks = {}
+        if message_ids:
+            async for fb in MessageFeedback.objects.filter(message_id__in=message_ids):
+                if fb.message_id not in all_feedbacks:
+                    all_feedbacks[fb.message_id] = []
+                all_feedbacks[fb.message_id].append(
+                    {
+                        "id": str(fb.id),
+                        "user_id": str(fb.user_id) if fb.user_id else None,
+                        "rating": fb.rating,
+                        "feedback": fb.feedback,
+                        "created_at": fb.created_at.isoformat() if fb.created_at else None,
+                    }
+                )
+
+        # Convert to ChatMessages with feedbacks in metadata
+        messages = []
+        for msg in messages_list:
             chat_message = msg.to_chat_message()
             chat_message.id = str(msg.id)
-            # Include rating metadata for protocol conversion
-            chat_message.metadata["rating"] = msg.rating
-            chat_message.metadata["rating_comment"] = msg.rating_comment
+            chat_message.metadata["feedbacks"] = all_feedbacks.get(msg.id, [])
             messages.append(chat_message)
-        logger.debug(f"Retrieved {len(messages)} messages from database")
+
+        logger.debug(f"Retrieved {len(messages)} messages with feedbacks from database")
         return messages
 
     async def store_chat_message(self, chat_message: ChatMessage) -> str:
@@ -235,24 +258,45 @@ class DbStorageAdapter(BaseStorageAdapter):
             await message.asave()
             logger.debug(f"Message saved: id={message.id}, thread={message.thread_id}")
             return str(message.id)
-        except Exception as database_error:
-            logger.error(
-                f"Database storage failed: {database_error}\nThread ID: {self.thread_id}\nMessage thread_id: {message.thread_id if 'message' in locals() else 'N/A'}\nMessage content: {chat_message.content[:200] if chat_message.content else 'None'}...\nStack trace:\n{traceback.format_exc()}"
+        except Exception:
+            logger.exception(
+                f"Database storage failed for thread {self.thread_id}. Content length: {len(chat_message.content) if chat_message.content else 0}"
             )
             return None
 
     async def rate_message(
-        self, message_id: str, rating: int | None, rating_comment: str = ""
+        self, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
     ) -> bool:
         """Rate a message in this thread."""
+        from django_ai_sdk.conversation.models import MessageFeedback
+
         try:
-            message = await Message.objects.aget(id=message_id, thread_id=self.thread_id)
-            message.rating = rating
-            message.rating_comment = rating_comment
-            await message.asave()
-            logger.debug(
-                f"Rated message {message_id}: rating={rating}, comment={rating_comment[:50] if rating_comment else 'empty'}"
-            )
+            # Verify message exists and belongs to this thread
+            await Message.objects.aget(id=message_id, thread_id=self.thread_id)
+            if rating is not None:
+                # Try to get existing feedback
+                try:
+                    fb = await MessageFeedback.objects.aget(message_id=message_id, user_id=user_id)
+                    # Update existing
+                    fb.rating = rating
+                    fb.feedback = feedback
+                    await fb.asave(update_fields=["rating", "feedback"])
+                    logger.debug(f"Updated feedback for message {message_id}: rating={rating}")
+                except MessageFeedback.DoesNotExist:
+                    # Create new
+                    await MessageFeedback.objects.acreate(
+                        message_id=message_id,
+                        user_id=user_id,
+                        rating=rating,
+                        feedback=feedback,
+                    )
+                    logger.debug(f"Created feedback for message {message_id}: rating={rating}")
+            else:
+                # Delete feedback when rating is None
+                await MessageFeedback.objects.filter(
+                    message_id=message_id, user_id=user_id
+                ).adelete()
+                logger.debug(f"Deleted feedback for message {message_id}")
             return True
         except Message.DoesNotExist:
             return False

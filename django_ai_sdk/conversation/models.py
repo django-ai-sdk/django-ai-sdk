@@ -80,14 +80,6 @@ class Message(models.Model):
     # Store complete ChatMessage as JSON
     result = models.JSONField()
 
-    # User feedback
-    rating = models.SmallIntegerField(
-        null=True,
-        blank=True,
-        choices=[(1, "good"), (-1, "bad")],
-    )
-    rating_comment = models.CharField(max_length=255, blank=True, default="")
-
     # Soft delete
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -138,12 +130,6 @@ class Message(models.Model):
             ) from e
         return cls(id=message_id, thread=thread, result=chat_message.model_dump())
 
-    def rate(self, rating_value: int, comment: str = "") -> "Message":
-        """Rate this message as good (1) or bad (-1)."""
-        self.rating = rating_value
-        self.rating_comment = comment
-        return self
-
     def delete_message(self) -> "Message":
         """Soft delete this message."""
         self.is_deleted = True
@@ -155,3 +141,34 @@ class Message(models.Model):
         self.is_deleted = False
         self.deleted_at = None
         return self
+
+
+class MessageFeedback(models.Model):
+    """
+    Feedback (rating + optional comment) on a message.
+    Supports multiple feedbacks per message (one per user).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="feedbacks")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_feedbacks",
+    )
+    rating = models.SmallIntegerField(choices=[(1, "good"), (-1, "bad")])
+    feedback = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    # Type hints for related fields
+    message_id: str
+    user_id: str | None
+
+    class Meta:
+        db_table = "django_ai_sdk_message_feedbacks"
+        unique_together = [("message", "user")]
+
+    def __str__(self) -> str:
+        return f"Feedback on message {self.message_id}: {self.rating}"

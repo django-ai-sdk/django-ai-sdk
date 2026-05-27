@@ -70,7 +70,11 @@ class ThreadService:
 
     @staticmethod
     async def rate_message(
-        thread_id: str, message_id: str, rating: int | None, rating_comment: str = ""
+        thread_id: str,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user_id: str | None = None,
     ) -> bool:
         """
         Rate a message in a thread.
@@ -79,7 +83,8 @@ class ThreadService:
             thread_id: Thread ID containing the message
             message_id: Message ID to rate
             rating: 1 for good, -1 for bad, or None to unrate
-            rating_comment: Optional explanation for the rating
+            feedback: Optional explanation for the rating
+            user_id: Optional user ID (for multi-user feedback)
 
         Returns:
             True if rated successfully
@@ -88,7 +93,7 @@ class ThreadService:
             ValueError: If thread or message not found
         """
         storage = await ThreadService.storage_for_thread(thread_id)
-        success = await storage.rate_message(message_id, rating, rating_comment)
+        success = await storage.rate_message(message_id, rating, feedback, user_id)
         if not success:
             raise ValueError("Message not found")
         return True
@@ -291,7 +296,10 @@ class ThreadService:
 
 async def aget_thread_history(thread_id: str) -> dict[str, Any]:
     """
-    Get thread history: thread metadata and messages only.
+    Get thread history: thread metadata and messages with feedbacks.
+
+    Messages include feedbacks via the protocol handler which reads them from
+    ChatMessage metadata. No feedbacks are duplicated in the response.
 
     For memories, use GET /memories/thread/{thread_id}/
     For file metadata, use aget_thread_file_meta().
@@ -300,7 +308,7 @@ async def aget_thread_history(thread_id: str) -> dict[str, Any]:
         thread_id: Thread ID to retrieve history for
 
     Returns:
-        Dict with thread and messages
+        Dict with thread and messages (each message includes feedbacks)
 
     Raises:
         ValueError: If thread or assistant not found

@@ -62,9 +62,10 @@ class TestMemoryStorageAdapter:
         success = await thread_context.rate_message(message_id, rating=1)
         assert success is True
 
-        # Verify rating persisted by checking MemoryStore directly (Message object has rating)
+        # Verify rating persisted by checking MemoryStore directly
         stored_messages = MemoryStore.get_messages(thread_context.thread_id)
-        assert stored_messages[0].rating == 1
+        assert len(stored_messages[0].feedbacks) == 1
+        assert stored_messages[0].feedbacks[0]["rating"] == 1
 
     @pytest.mark.asyncio
     async def test_negative_rating(self, thread_context):
@@ -78,7 +79,8 @@ class TestMemoryStorageAdapter:
 
         # Verify rating persisted by checking MemoryStore directly
         stored_messages = MemoryStore.get_messages(thread_context.thread_id)
-        assert stored_messages[0].rating == -1
+        assert len(stored_messages[0].feedbacks) == 1
+        assert stored_messages[0].feedbacks[0]["rating"] == -1
 
     @pytest.mark.asyncio
     async def test_rating_nonexistent_message(self, thread_context):

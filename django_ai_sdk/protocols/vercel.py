@@ -322,8 +322,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
                     "usage": chat_message.usage,
-                    "rating": chat_message.metadata.get("rating"),
-                    "rating_comment": chat_message.metadata.get("rating_comment", ""),
+                    "feedbacks": chat_message.metadata.get("feedbacks", []),
                     "created_at": chat_message.created_at,
                 }
             )

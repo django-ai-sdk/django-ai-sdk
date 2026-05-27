@@ -113,7 +113,8 @@ class TestBaseAssistant:
 
         # Verify rating persisted by checking MemoryStore directly
         stored_messages = MemoryStore.get_messages(thread_id)
-        assert stored_messages[0].rating == 1
+        assert len(stored_messages[0].feedbacks) == 1
+        assert stored_messages[0].feedbacks[0]["rating"] == 1
 
     @pytest.mark.asyncio
     async def test_conversation_history_retrieval(self, assistant, thread_id):
