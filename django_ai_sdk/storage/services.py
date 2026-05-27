@@ -124,7 +124,7 @@ class ThreadService:
         }
         default_metadata.update(metadata or {})
 
-        resolved_user_id = str(user.pk) if user else None
+        resolved_user_id = str(user.pk) if user and user.is_authenticated else None
 
         thread_id = await storage_class.create_thread(
             title=title,
@@ -254,16 +254,24 @@ class ThreadService:
         return False
 
     @staticmethod
-    async def delete_all_threads() -> int:
+    async def delete_all_threads(*, user: AbstractUser | None) -> int:
         """
-        Delete all threads and their messages.
+        Delete current user's threads and their messages.
+
+        Args:
+            user: Required user for permission checking and thread ownership
 
         Returns:
             Total number of threads deleted
+
+        Raises:
+            PermissionDenied: If user has no DELETE_ALL_THREADS permission
         """
+        await _check_permission(user, Operation.DELETE_ALL_THREADS, None)
+        resolved_user_id = str(user.pk) if user and user.is_authenticated else None
         total_deleted = 0
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            count = await adapter_class.delete_all_threads()
+            count = await adapter_class.delete_all_threads(user_id=resolved_user_id)
             if count and count > 0:
                 logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
                 total_deleted += count

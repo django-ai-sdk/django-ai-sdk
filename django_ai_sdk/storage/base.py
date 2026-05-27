@@ -200,9 +200,12 @@ class BaseStorageAdapter(ABC):
 
     @classmethod
     @abstractmethod
-    async def delete_all_threads(cls) -> int:
+    async def delete_all_threads(cls, user_id: str | None = None) -> int:
         """
-        Delete all threads and their messages.
+        Delete threads and their messages, optionally filtered by user.
+
+        Args:
+            user_id: If provided, only delete threads belonging to this user
 
         Returns:
             Number of threads deleted

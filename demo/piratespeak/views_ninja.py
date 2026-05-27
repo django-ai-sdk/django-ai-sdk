@@ -178,11 +178,13 @@ async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.delete("/threads/", response={200: DeleteAllThreadsResponse, 500: Error})
+@router.delete("/threads/", response={200: DeleteAllThreadsResponse, 403: Error, 500: Error})
 async def delete_all_threads(request: HttpRequest) -> Any:
     try:
-        deleted_count = await ThreadService.delete_all_threads()
+        deleted_count = await ThreadService.delete_all_threads(user=request.user)
         return DeleteAllThreadsResponse(success=True, deleted_count=deleted_count)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except Exception as e:
         return 500, Error(message=str(e))
 

@@ -10,8 +10,8 @@ from django_ai_sdk.assistants.services import (
     get_assistant_info,
     list_assistants,
 )
-from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.memories.services import link_memories, unlink_memories
+from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
     ThreadService,
@@ -201,12 +201,14 @@ class ThreadDeleteAPIView(APIView):
 class ThreadDeleteAllAPIView(APIView):
     def delete(self, request: Request) -> Response:
         try:
-            deleted_count = delete_all_threads()
+            deleted_count = delete_all_threads(user=request.user)
             return Response(
                 DeleteAllThreadsResponseSerializer(
                     {"success": True, "deleted_count": deleted_count}
                 ).data
             )
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
         except Exception as e:
             return Response({"message": str(e)}, status=500)
 

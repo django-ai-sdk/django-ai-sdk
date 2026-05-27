@@ -25,6 +25,7 @@ class Operation(StrEnum):
     VIEW_THREAD = "view_thread"
     UPDATE_THREAD = "update_thread"
     DELETE_THREAD = "delete_thread"
+    DELETE_ALL_THREADS = "delete_all_threads"
     VIEW_MESSAGES = "view_messages"
     SEND_MESSAGE = "send_message"
     RATE_MESSAGE = "rate_message"

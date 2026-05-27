@@ -148,16 +148,20 @@ class DbStorageAdapter(BaseStorageAdapter):
             return False
 
     @classmethod
-    async def delete_all_threads(cls) -> int:
-        """Delete all threads and their messages from database."""
+    async def delete_all_threads(cls, user_id: str | None = None) -> int:
+        """Delete threads and their messages, optionally filtered by user."""
         from django_ai_sdk.conversation.models import Message
 
+        threads_qs = Thread.objects.all()
+        if user_id:
+            threads_qs = threads_qs.filter(user_id=user_id)
+
         # Get count before deleting
-        count = await Thread.objects.acount() or 0
-        # Delete all messages first
-        await Message.objects.all().adelete()
-        # Delete all threads
-        await Thread.objects.all().adelete()
+        thread_ids = [str(t.id) async for t in threads_qs.values_list("id", flat=True)]
+        count = len(thread_ids)
+        if count:
+            await Message.objects.filter(thread_id__in=thread_ids).adelete()
+            await Thread.objects.filter(id__in=thread_ids).adelete()
         return count
 
     # ============================================================================
