@@ -291,19 +291,27 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         self,
         thread_id: str = "",
         user_id: str = "",
-        model: str = "",
+        model: str | None = None,
     ) -> list[Any]:
         """Build Tool objects for a request with context. Override in subclasses.
 
         Tool providers often need context at request time to customize behavior:
         - thread_id: Allows tools to access conversation history, thread-scoped state
         - user_id: Enables user-specific tool filtering, permissions, personalization
-        - model: Lets tools adapt to the LLM being used (capabilities, token limits)
+        - model: Defaults to assistant's model; override to test against different LLMs
+
+        Individual tools can override their model by setting `tool._model_override`.
+        Useful for tools that require a specific LLM (e.g., translation always uses
+        translategemma).
 
         Base implementation calls each callable in the class-level `tools` attribute
-        with context kwargs, flattening any lists returned. Tool providers should accept
-        these as kwargs: `def get_my_tool(thread_id="", user_id="", model="", **kwargs)`
+        with context kwargs, flattening any lists returned. Tool providers can:
+        - Accept all params: `def get_my_tool(thread_id="", user_id="", model="", **kwargs)`
+        - Use only what's needed: `def get_my_tool(user_id="", **kwargs)`
+        - Ignore context: `def get_my_tool(**kwargs)`
         """
+        if model is None:
+            model = self.get_model()
         providers = getattr(self.__class__, "tools", [])
         result = []
         for provider in providers:
@@ -312,6 +320,11 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
                 result.extend(items)
             else:
                 result.append(items)
+            # Check if any tool declared its own model preference
+            for item in items if isinstance(items, list) else [items]:
+                if hasattr(item, "_model_override"):
+                    # Update the model for this specific tool
+                    item._model = item._model_override
         return result
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
