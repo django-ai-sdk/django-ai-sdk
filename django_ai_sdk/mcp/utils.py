@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
@@ -29,12 +30,15 @@ async def get_mcp_server_status(assistant: Any, user_id: Any) -> list[dict]:
 
     all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
 
-    oauth_tokens = {
-        row["server_name"]: row
-        for row in MCPOAuthToken.objects.filter(
-            user=user_id, server_name__in=mcp_server_names
-        ).values("server_name", "expires_at")
-    }
+    def _get_tokens() -> dict[str, dict]:
+        return {
+            row["server_name"]: row
+            for row in MCPOAuthToken.objects.filter(
+                user=user_id, server_name__in=mcp_server_names
+            ).values("server_name", "expires_at")
+        }
+
+    oauth_tokens = await sync_to_async(_get_tokens)()
 
     now = timezone.now()
     result = []
