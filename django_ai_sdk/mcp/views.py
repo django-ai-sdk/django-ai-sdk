@@ -86,7 +86,6 @@ async def oauth_start(
         return JsonResponse({"error": f"OAuth start failed: {e}"}, status=500)
 
     client_id = server.client_id
-    client_secret = server.client_secret
 
     # Dynamic client registration (RFC 7591) if registration_endpoint is available
     if discovery.registration_endpoint and not client_id:
@@ -99,7 +98,6 @@ async def oauth_start(
             )
             if not created and oauth_client.client_id:
                 client_id = oauth_client.client_id
-                client_secret = oauth_client.get_client_secret()
                 logger.info(
                     "Using previously registered client for %r: client_id=%s",
                     server_name,
@@ -213,7 +211,9 @@ async def oauth_callback(
         client_id = oauth_client.client_id
         client_secret = oauth_client.get_client_secret()
     except MCPOAuthClient.DoesNotExist:
-        pass
+        logger.debug(
+            "No dynamically registered OAuth client for %r, using static credentials", server_name
+        )
 
     for key_template in _SESSION_KEYS:
         request.session.pop(key_template.format(server_name), None)

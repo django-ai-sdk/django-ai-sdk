@@ -139,7 +139,10 @@ async def refresh_oauth_token(
         client_id = oauth_client.client_id
         client_secret = oauth_client.get_client_secret()
     except MCPOAuthClient.DoesNotExist:
-        pass
+        logger.debug(
+            "No dynamically registered OAuth client for %r, using static credentials",
+            token_obj.server_name,
+        )
 
     payload: dict[str, str] = {
         "grant_type": "refresh_token",
@@ -185,8 +188,8 @@ def _backend_path() -> str:
             "AI_SDK_MCP_BACKEND is not set. "
             "Add it to your settings, e.g.:\n"
             "  AI_SDK_MCP_BACKEND = 'django_ai_sdk.mcp.backends.haystack'\n"
-            "Or implement your own backend module with "
-            "async def connect(url, token, tools) -> list."
+            "Or implement a custom backend by implementing the MCPBackend protocol "
+            "from django_ai_sdk.mcp.backends."
         )
     return path
 

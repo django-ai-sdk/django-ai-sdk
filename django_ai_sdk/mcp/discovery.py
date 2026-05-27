@@ -204,8 +204,8 @@ async def _probe_resource_metadata(mcp_url: str) -> str:
                     url = match.group(1)
                     if _is_safe_url(url):
                         return url
-    except httpx.HTTPError:
-        pass
+    except httpx.HTTPError as e:
+        logger.debug("Probe for resource metadata failed: %s", e)
 
     parsed = urlparse(mcp_url)
     base = f"{parsed.scheme}://{parsed.netloc}"
@@ -217,8 +217,8 @@ async def _probe_resource_metadata(mcp_url: str) -> str:
             response = await client.get(base + "/.well-known/oauth-protected-resource")
             if response.status_code == 200:
                 return base + "/.well-known/oauth-protected-resource"
-    except httpx.HTTPError:
-        pass
+    except httpx.HTTPError as e:
+        logger.debug("Well-known resource metadata endpoint not found: %s", e)
 
     raise ValueError(f"Cannot discover resource metadata for {mcp_url}")
 
