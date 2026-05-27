@@ -26,8 +26,6 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -104,8 +102,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     # Default list of connected memories
     memories: list[str] = []
 
-    # Tool providers: callables that return Tool objects
-    tools: list = []
+    tools: list[str] = []
 
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
@@ -218,8 +215,6 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             else MemoryStorageAdapter
         )
 
-        self.tools = self.get_tools()
-
         if self.warmup_on_init and self.rag_provider is not None:
             # Warmup RAG provider on init
             # TODO: delegate this to background task and check status.
@@ -292,20 +287,45 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             return None
         return self.suggestion_generator(assistant=self)
 
-    def get_tool_providers(self) -> list[Callable]:
-        """Return tool provider callables from the class attribute."""
-        tools = getattr(self.__class__, "tools", [])
-        return tools if isinstance(tools, list) else []
+    async def get_tools(
+        self,
+        thread_id: str = "",
+        user_id: str = "",
+        model: str | None = None,
+    ) -> list[Any]:
+        """Build Tool objects for a request with context. Override in subclasses.
 
-    def get_tools(self) -> list[Any]:
-        """
-        Return list of available tools.
+        Tool providers often need context at request time to customize behavior:
+        - thread_id: Allows tools to access conversation history, thread-scoped state
+        - user_id: Enables user-specific tool filtering, permissions, personalization
+        - model: Defaults to assistant's model; override to test against different LLMs
 
-        Override this method if your assistant has tools.
-        Tools can be defined as methods on the assistant class
-        for better organization and co-location.
+        Individual tools can override their model by setting `tool._model_override`.
+        Useful for tools that require a specific LLM (e.g., translation always uses
+        translategemma).
+
+        Base implementation calls each callable in the class-level `tools` attribute
+        with context kwargs, flattening any lists returned. Tool providers can:
+        - Accept all params: `def get_my_tool(thread_id="", user_id="", model="", **kwargs)`
+        - Use only what's needed: `def get_my_tool(user_id="", **kwargs)`
+        - Ignore context: `def get_my_tool(**kwargs)`
         """
-        return []
+        if model is None:
+            model = self.get_model()
+        providers = getattr(self.__class__, "tools", [])
+        result = []
+        for provider in providers:
+            items = provider(thread_id=thread_id, user_id=user_id, model=model)
+            if isinstance(items, list):
+                result.extend(items)
+            else:
+                result.append(items)
+            # Check if any tool declared its own model preference
+            for item in items if isinstance(items, list) else [items]:
+                if hasattr(item, "_model_override"):
+                    # Update the model for this specific tool
+                    item._model = item._model_override
+        return result
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
         """

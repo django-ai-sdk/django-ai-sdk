@@ -1,35 +1,14 @@
 """Utilities for Assistant tool management."""
 
-from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
 from django.utils import timezone
 
-# NOTE: move to eventual haystack framework?
-from haystack.tools import Tool
-
 MCP_STATUS_ACTIVE = "active"
 MCP_STATUS_EXPIRED = "expired"
 MCP_STATUS_DISCONNECTED = "disconnected"
 MCP_STATUSES = (MCP_STATUS_ACTIVE, MCP_STATUS_EXPIRED, MCP_STATUS_DISCONNECTED)
-
-
-async def get_tools_from_providers(
-    tool_providers: list[Callable],
-    thread_id: str = "",
-    user_id: str = "",
-    model: str = "",
-) -> list[Tool]:
-    """Build a flat list of Tool objects from callables, passing context to each."""
-    tools = []
-    for provider in tool_providers:
-        result = provider(thread_id=thread_id, user_id=user_id, model=model)
-        if isinstance(result, list):
-            tools.extend(result)
-        else:
-            tools.append(result)
-    return tools
 
 
 async def get_mcp_server_status(assistant: Any, user_id: Any) -> list[dict]:
