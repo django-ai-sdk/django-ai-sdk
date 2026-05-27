@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
+import importlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
-from django_ai_sdk.mcp.haystack import get_mcp_server
 from django_ai_sdk.mcp.schemas import OAuthMCPServer, StaticMCPServer, TokenMCPServer
 
 if TYPE_CHECKING:
@@ -30,14 +30,16 @@ def _ttl() -> int:
 async def load_mcp_tools(
     config: dict[str, Any],
     user_id: str | None = None,
-) -> list:
+) -> list[Any]:
     """
-    Load Haystack tool objects for all servers in config.
+    Load tool objects from all MCP servers in config.
+
+    Returns generic tool objects from the configured AI_SDK_MCP_BACKEND.
 
     Static and token servers are cached in-process with TTL.
     OAuth servers connect per-request using the user's stored token.
     """
-    tools: list = []
+    tools: list[Any] = []
     for name, server in config.items():
         try:
             server_tools = await _load_server(name, server, user_id)
@@ -47,7 +49,7 @@ async def load_mcp_tools(
     return tools
 
 
-async def _load_server(name: str, server: Any, user_id: str | None) -> list:
+async def _load_server(name: str, server: Any, user_id: str | None) -> list[Any]:
     if isinstance(server, StaticMCPServer):
         return await _load_cached(name, server.url, token=None, tools=server.tools or None)
     if isinstance(server, TokenMCPServer):
@@ -63,7 +65,7 @@ async def _load_cached(
     url: str,
     token: str | None,
     tools: list[str] | None,
-) -> list:
+) -> list[Any]:
     ttl = _ttl()
     now = time.monotonic()
 
@@ -82,7 +84,7 @@ async def _load_cached(
     return result
 
 
-async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) -> list:
+async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) -> list[Any]:
     if not user_id:
         return []
 
@@ -96,7 +98,7 @@ async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) ->
 
     if token_obj.is_expired():
         logger.info("Access token expired for %r — attempting refresh", name)
-        token_obj = await _refresh(token_obj, server)
+        token_obj = await refresh_oauth_token(token_obj, server)
         if token_obj is None:
             return []
 
@@ -109,7 +111,9 @@ async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) ->
     return await _connect(server.url, access_token, server.tools or None)
 
 
-async def _refresh(token_obj: MCPOAuthToken, server: OAuthMCPServer) -> MCPOAuthToken | None:
+async def refresh_oauth_token(
+    token_obj: MCPOAuthToken, server: OAuthMCPServer
+) -> MCPOAuthToken | None:
     """Attempt a refresh_token grant. Returns the updated token_obj or None on failure."""
     refresh_token = token_obj.get_refresh_token()
     if not refresh_token:
@@ -174,9 +178,22 @@ async def _refresh(token_obj: MCPOAuthToken, server: OAuthMCPServer) -> MCPOAuth
     return token_obj
 
 
-async def _connect(url: str, token: str | None, tools: list[str] | None) -> list:
-    """Connect to an MCP server and return its tool objects."""
-    toolset = await asyncio.to_thread(get_mcp_server, url=url, token=token, tools=tools)
-    result = list(toolset)
+def _backend_path() -> str:
+    path = getattr(settings, "AI_SDK_MCP_BACKEND", None)
+    if not path:
+        raise ImproperlyConfigured(
+            "AI_SDK_MCP_BACKEND is not set. "
+            "Add it to your settings, e.g.:\n"
+            "  AI_SDK_MCP_BACKEND = 'django_ai_sdk.mcp.backends.haystack'\n"
+            "Or implement your own backend module with "
+            "async def connect(url, token, tools) -> list."
+        )
+    return path
+
+
+async def _connect(url: str, token: str | None, tools: list[str] | None) -> list[Any]:
+    """Connect to an MCP server via the configured AI_SDK_MCP_BACKEND."""
+    backend = importlib.import_module(_backend_path())
+    result = await backend.connect(url, token, tools)
     logger.info("Loaded %d tool(s) from %s", len(result), url)
     return result
