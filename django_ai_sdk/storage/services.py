@@ -15,10 +15,11 @@ from django_ai_sdk.permissions import (
     get_default_permissions,
 )
 from django_ai_sdk.storage.base import StorageAdapterRegistry
-from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+
+    from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
 
 logger = get_logger(__name__)
 

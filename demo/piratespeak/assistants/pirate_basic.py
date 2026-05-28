@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.db.models import QuerySet
 from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
@@ -29,6 +28,7 @@ from haystack.utils import Secret
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+    from django.db.models import QuerySet
 
 
 def get_datetime(**kwargs: object) -> dict:

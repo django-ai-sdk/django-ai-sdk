@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
@@ -18,6 +17,8 @@ from django_ai_sdk.storage.schemas import ThreadInfo
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+
+    from django_ai_sdk.common import ChatMessage
 
 logger = get_logger(__name__)
 

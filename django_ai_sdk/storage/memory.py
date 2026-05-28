@@ -396,7 +396,11 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             return None
 
     async def rate_message(
-        self, message_id: str, rating: int | None, feedback: str = "", user: AbstractUser | None = None
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractUser | None = None,
     ) -> bool:
         """Rate a message in this thread."""
         user_id = str(user.pk) if user and user.is_authenticated else None

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.conf import settings
-from django.core.files.base import File
 from django.db.models import Count
 from django.utils.module_loading import import_string
 
@@ -31,6 +30,7 @@ from django_ai_sdk.permissions import (
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+    from django.core.files.base import File
 
 
 @lru_cache(maxsize=1)

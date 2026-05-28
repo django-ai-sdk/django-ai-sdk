@@ -4,11 +4,11 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from django.db import models
-from django.db.models import QuerySet
 from django.utils import timezone
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+    from django.db.models import QuerySet
 
 
 class ThreadManager(models.Manager):

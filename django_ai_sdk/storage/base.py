@@ -4,12 +4,11 @@ from abc import ABC, abstractmethod
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from django_ai_sdk.storage.schemas import ThreadInfo
-
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
 
     from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.storage.schemas import ThreadInfo
 
 
 class StorageType(IntEnum):
@@ -249,7 +248,11 @@ class BaseStorageAdapter(ABC):
 
     @abstractmethod
     async def rate_message(
-        self, message_id: str, rating: int | None, feedback: str = "", user: AbstractUser | None = None
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractUser | None = None,
     ) -> bool:
         """
         Rate a message in this thread.
