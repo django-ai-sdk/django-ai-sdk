@@ -4,7 +4,6 @@ from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
-from django_ai_sdk.conversation.models import MessageFeedback
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.storage.schemas import ThreadInfo
@@ -91,7 +90,6 @@ class PatchThreadPayload(Schema):
 class MessageResponse(Schema):
     id: str
     is_deleted: bool = False
-    feedbacks: list[FeedbackResponse] = []
 
 
 @router.get("/health/", response={200: HealthResponse})
@@ -226,18 +224,7 @@ async def rate_message(
         await ThreadService.rate_message(
             thread_id, message_id, payload.rating, feedback=payload.feedback, user=request.user
         )
-        # Fetch feedbacks to return in response
-        feedbacks = [
-            FeedbackResponse(
-                id=str(fb.id),
-                user_id=str(fb.user_id) if fb.user_id else None,
-                rating=fb.rating,
-                feedback=fb.feedback,
-                created_at=fb.created_at.isoformat() if fb.created_at else None,
-            )
-            async for fb in MessageFeedback.objects.filter(message_id=message_id)
-        ]
-        return MessageResponse(id=message_id, is_deleted=False, feedbacks=feedbacks)
+        return MessageResponse(id=message_id, is_deleted=False)
 
     except PermissionDenied as e:
         return 403, Error(message=str(e))
