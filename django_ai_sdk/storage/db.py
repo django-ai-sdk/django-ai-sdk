@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from django_ai_sdk.common import ChatMessage
@@ -94,7 +95,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                 metadata=thread.metadata,
                 message_count=message_count,
             )
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return None
 
     @classmethod
@@ -139,7 +140,7 @@ class DbStorageAdapter(BaseStorageAdapter):
 
             await thread.asave()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
 
     @classmethod
@@ -152,7 +153,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             # Delete thread
             await thread.adelete()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
 
     # ============================================================================
