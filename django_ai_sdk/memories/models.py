@@ -16,23 +16,13 @@ class Memory(models.Model):
     description = models.TextField(blank=True, default="")
     is_hidden = models.BooleanField(default=False)
     is_public = models.BooleanField(default=True)
-    owner = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="owned_memories",
-    )
-    contributors = models.ManyToManyField(
-        settings.AUTH_USER_MODEL,
-        blank=True,
-        related_name="memories",
-    )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     # Reverse relation type hints
     entries: models.Manager["Entry"]
+    owners: models.Manager["MemoryOwner"]
+
     # Annotated field from queries
     document_count: int
 
@@ -72,9 +62,7 @@ class Memory(models.Model):
 
 
 class MemoryOwner(models.Model):
-    memory = models.ForeignKey(
-        Memory, on_delete=models.CASCADE, related_name="owners"
-    )
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="owners")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -82,6 +70,9 @@ class MemoryOwner(models.Model):
     )
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Reverse relation type hints
+    user_id: int
 
     class Meta:
         unique_together = [["memory", "user"]]

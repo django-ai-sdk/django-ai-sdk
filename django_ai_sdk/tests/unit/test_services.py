@@ -906,7 +906,7 @@ class TestMemoryServicePermissions:
 
     async def test_stranger_cannot_delete_private_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.permissions import PermissionDenied
         from django.test.utils import override_settings
 
@@ -914,8 +914,9 @@ class TestMemoryServicePermissions:
         stranger = await self._get_user(31, "stranger3")
 
         mem = await Memory.objects.acreate(
-            name="private", description="x", owner=owner, is_public=False
+            name="private", description="x", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         with override_settings(
             AI_SDK_MEMORY_PERMISSIONS=[
@@ -934,15 +935,16 @@ class TestMemoryServicePermissions:
 
     async def test_stranger_can_read_public_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django.test.utils import override_settings
 
         owner = await self._get_user(40, "owner4")
         stranger = await self._get_user(41, "stranger4")
 
         mem = await Memory.objects.acreate(
-            name="public", description="x", owner=owner, is_public=True
+            name="public", description="x", is_public=True
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         with override_settings(
             AI_SDK_MEMORY_PERMISSIONS=[
@@ -961,7 +963,7 @@ class TestMemoryServicePermissions:
 
     async def test_get_memory_denied_for_private_not_owner(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.permissions import PermissionDenied
         from django.test.utils import override_settings
 
@@ -969,8 +971,9 @@ class TestMemoryServicePermissions:
         stranger = await self._get_user(51, "stranger5")
 
         mem = await Memory.objects.acreate(
-            name="private-no-peek", description="x", owner=owner, is_public=False
+            name="private-no-peek", description="x", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         with override_settings(
             AI_SDK_MEMORY_PERMISSIONS=[
@@ -1076,7 +1079,7 @@ class TestMemoryServicePermissions:
 
     async def test_link_memories_requires_user(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.permissions import PermissionDenied
         from django_ai_sdk.assistants.services import registry
@@ -1086,8 +1089,9 @@ class TestMemoryServicePermissions:
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
-            name="req-link", owner=owner, is_public=False
+            name="req-link", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         mock_assistant = MagicMock()
         mock_assistant.memories = [mem.slug]
@@ -1114,7 +1118,7 @@ class TestMemoryServicePermissions:
 
     async def test_unlink_memories_requires_user(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.permissions import PermissionDenied
         from django_ai_sdk.assistants.services import registry
@@ -1124,8 +1128,9 @@ class TestMemoryServicePermissions:
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
-            name="req-unlink", owner=owner, is_public=False
+            name="req-unlink", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         mock_assistant = MagicMock()
         mock_assistant.memories = [mem.slug]
