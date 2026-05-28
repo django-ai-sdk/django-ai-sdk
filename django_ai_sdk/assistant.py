@@ -26,6 +26,8 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -290,7 +292,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     async def get_tools(
         self,
         thread_id: str = "",
-        user_id: str = "",
+        user: AbstractUser | None = None,
         model: str | None = None,
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
@@ -308,7 +310,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         providers = getattr(self.__class__, "tools", [])
         result = []
         for provider in providers:
-            items = provider(thread_id=thread_id, user_id=user_id, model=model)
+            items = provider(thread_id=thread_id, user=user, model=model)
             if isinstance(items, list):
                 result.extend(items)
             else:
