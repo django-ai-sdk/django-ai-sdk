@@ -122,11 +122,13 @@ async def list_threads(request: HttpRequest) -> Any:
 @router.post("/threads/", response={200: CreateThreadResponse, 400: Error, 500: Error})
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     try:
+        assistant_id = payload.assistant_id or ""
         thread_id = await ThreadService.create_thread(
-            assistant_id=payload.assistant_id or "",
+            assistant_id=assistant_id,
             messages=payload.messages,
             user=request.user,
         )
+        await MemoryService.link_memories(assistant_id, thread_id, user=request.user)
         return CreateThreadResponse(thread_id=thread_id)
     except ValueError as e:
         return 400, Error(message=str(e))
