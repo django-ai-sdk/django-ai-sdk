@@ -9,6 +9,7 @@ from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
+    PermissionDenied,
     check_object_permissions,
     check_permissions,
     get_default_permissions,
