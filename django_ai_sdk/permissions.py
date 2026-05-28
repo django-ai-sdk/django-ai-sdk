@@ -21,6 +21,7 @@ class PermissionDenied(Exception):
 class Operation(StrEnum):
     CHAT = "chat"
     VIEW_HISTORY = "view_history"
+    LIST_THREADS = "list_threads"
     CREATE_THREAD = "create_thread"
     VIEW_THREAD = "view_thread"
     UPDATE_THREAD = "update_thread"

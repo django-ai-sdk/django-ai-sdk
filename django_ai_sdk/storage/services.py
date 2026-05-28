@@ -176,11 +176,14 @@ class ThreadService:
         """
         all_threads: list[ThreadInfo] = []
 
-        await _check_permission(user, Operation.LIST_THREADS, None)
-
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             threads = await adapter_class.list_threads(user)
-            all_threads.extend(threads)
+            for thread in threads:
+                try:
+                    await _check_object_permission(thread, user, Operation.LIST_THREADS)
+                    all_threads.append(thread)
+                except PermissionDenied:
+                    continue
             logger.debug(f"Found {len(threads)} threads in {adapter_class.__name__}")
 
         all_threads.sort(key=lambda t: t.updated_at, reverse=True)
@@ -266,14 +269,19 @@ class ThreadService:
         Raises:
             PermissionDenied: If user has no DELETE_ALL_THREADS permission
         """
-        await _check_permission(user, Operation.DELETE_ALL_THREADS, None)
-
         total_deleted = 0
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            count = await adapter_class.delete_all_threads(user=user)
-            if count and count > 0:
-                logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
-                total_deleted += count
+            threads = await adapter_class.list_threads(user)
+            for thread in threads:
+                try:
+                    await _check_object_permission(thread, user, Operation.DELETE_ALL_THREADS)
+                    if await adapter_class.delete_thread(thread.id):
+                        total_deleted += 1
+                except PermissionDenied:
+                    continue
+            logger.debug(f"Deleted threads from {adapter_class.__name__}")
+
+        return total_deleted
 
     @staticmethod
     async def rate_message(
