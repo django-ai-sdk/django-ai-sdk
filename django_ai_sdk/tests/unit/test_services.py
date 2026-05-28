@@ -705,8 +705,11 @@ class TestMemoryDefaultPermission:
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="owner-1", is_authenticated=True)
+        mock_owner = MagicMock(can_manage=True)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=mock_owner)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=False,
         )
 
@@ -714,49 +717,46 @@ class TestMemoryDefaultPermission:
             result = await perm.has_object_permission(user, op, memory)
             assert result is True, f"Owner denied for {op}"
 
-    async def test_has_object_permission_denies_non_contributor_private(self):
+    async def test_has_object_permission_denies_stranger_private(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="stranger", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=None)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=False,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
         assert result is False
 
-    async def test_has_object_permission_allows_public_read_for_non_contributor(self):
+    async def test_has_object_permission_allows_public_read_for_stranger(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="stranger", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=None)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=True,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
         assert result is True
 
-    async def test_has_object_permission_blocks_public_write_for_non_contributor(self):
+    async def test_has_object_permission_blocks_public_write_for_stranger(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="stranger", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=None)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=True,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
@@ -767,24 +767,23 @@ class TestMemoryDefaultPermission:
 
         perm = MemoryDefaultPermission()
         memory = MagicMock(
-            owner_id="owner-1",
             is_public=True,
         )
 
         result = await perm.has_object_permission(None, Operation.VIEW_MEMORY, memory)
         assert result is False
 
-    async def test_has_object_permission_denies_contributor_owner_ops(self):
+    async def test_has_object_permission_denies_owner_manager_ops(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="contributor-1", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        mock_owner = MagicMock(can_manage=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=mock_owner)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=True,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.DELETE_MEMORY, memory)
@@ -793,17 +792,17 @@ class TestMemoryDefaultPermission:
         result = await perm.has_object_permission(user, Operation.UPDATE_MEMORY, memory)
         assert result is False
 
-    async def test_has_object_permission_grants_contributor_write_ops(self):
+    async def test_has_object_permission_grants_owner_write_ops(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="contributor-1", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        mock_owner = MagicMock(can_manage=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=mock_owner)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=True,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
@@ -812,17 +811,17 @@ class TestMemoryDefaultPermission:
         result = await perm.has_object_permission(user, Operation.DELETE_DOCUMENT, memory)
         assert result is True
 
-    async def test_has_object_permission_grants_contributor_read_ops(self):
+    async def test_has_object_permission_grants_owner_read_ops(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="contributor-1", is_authenticated=True)
-        mock_contrib = MagicMock()
-        mock_contrib.filter.return_value.aexists = AsyncMock(return_value=True)
+        mock_owner = MagicMock(can_manage=False)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=mock_owner)
         memory = MagicMock(
-            owner_id="owner-1",
+            owners=mock_owners,
             is_public=False,
-            contributors=mock_contrib,
         )
 
         result = await perm.has_object_permission(user, Operation.VIEW_MEMORY, memory)
@@ -833,9 +832,11 @@ class TestMemoryDefaultPermission:
 
         perm = MemoryDefaultPermission()
         user = MagicMock(pk="anyone", is_authenticated=True)
+        mock_owners = MagicMock()
+        mock_owners.filter.return_value.afirst = AsyncMock(return_value=None)
         memory = MagicMock(
-            owner_id=None,
-            is_public=True,
+            owners=mock_owners,
+            is_public=False,
         )
 
         for op in Operation:
@@ -879,14 +880,15 @@ class TestMemoryServicePermissions:
 
     async def test_owner_can_delete_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django.test.utils import override_settings
 
         owner = await self._get_user(20, "owner2")
 
         mem = await Memory.objects.acreate(
-            name="to-delete", description="x", owner=owner, is_public=False
+            name="to-delete", description="x", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         with override_settings(
             AI_SDK_MEMORY_PERMISSIONS=[
@@ -987,7 +989,7 @@ class TestMemoryServicePermissions:
 
     async def test_link_memories_links_assistant_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from django.test.utils import override_settings
         from django_ai_sdk.assistants.services import registry
@@ -996,8 +998,9 @@ class TestMemoryServicePermissions:
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
-            name="link-test", owner=owner, is_public=False
+            name="link-test", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
 
         mock_assistant = MagicMock()
         mock_assistant.memories = [mem.slug]
@@ -1028,7 +1031,7 @@ class TestMemoryServicePermissions:
 
     async def test_unlink_memories_unlinks_assistant_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from django.test.utils import override_settings
         from django_ai_sdk.assistants.services import registry
@@ -1037,8 +1040,9 @@ class TestMemoryServicePermissions:
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
-            name="unlink-test", owner=owner, is_public=False
+            name="unlink-test", is_public=False
         )
+        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
         await ThreadMemory.objects.acreate(
             thread=thread, memory=mem, active=True
         )
@@ -1155,7 +1159,7 @@ class TestMemoryServicePermissions:
         user = await self._get_user(80, "anyone")
 
         mem = await Memory.objects.acreate(
-            name="ownerless", description="x", owner=None, is_public=True
+            name="ownerless", description="x", is_public=False
         )
 
         with override_settings(
