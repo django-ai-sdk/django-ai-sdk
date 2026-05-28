@@ -100,7 +100,7 @@ def health_check(request: HttpRequest) -> HealthResponse:
 @router.get("/threads/", response={200: ThreadListResponse, 500: Error})
 async def list_threads(request: HttpRequest) -> Any:
     try:
-        all_threads = await ThreadService.threads(user_id=request.user.id, user=request.user)
+        all_threads = await ThreadService.threads(user=request.user)
         items = [
             ThreadListItem(
                 id=t.id,
