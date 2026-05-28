@@ -7,12 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from django.test.utils import override_settings
 
-from django_ai_sdk.storage.services import ThreadService
-from django_ai_sdk.views.schemas import Message, MessagePart
 
-
-def make_message(role: str, text: str, message_id: str = None) -> Message:
-    return Message(role=role, parts=[MessagePart(type="text", text=text)], id=message_id)
 
 
 @pytest.mark.asyncio
