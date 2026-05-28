@@ -66,7 +66,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         """
         # Use provided thread_id or generate new UUID
         thread_id = thread_id or str(uuid.uuid4())
-        user_id = str(user.pk) if user else None
+        user_id = str(user.pk) if user and user.is_authenticated else None
 
         # Create in database
         thread = await Thread.objects.acreate(
@@ -101,7 +101,7 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def list_threads(cls, user: AbstractUser | None = None) -> list[ThreadInfo]:
         """List all threads from database."""
         queryset = Thread.objects.all()
-        user_id = str(user.pk) if user else None
+        user_id = str(user.pk) if user and user.is_authenticated else None
         if user_id:
             queryset = queryset.filter(user_id=user_id)
 

@@ -49,9 +49,9 @@ async def _check_object_permission(
     except ValueError:
         assistant = None
 
-    # SECURITY: this should be backed up by tests, and we should also test the other way.
-    # We should also document that by default we allow all, instead of allowing none.
-    perm_classes: list[type[BasePermission]] = getattr(assistant, "permissions", get_default_permissions())
+    perm_classes: list[type[BasePermission]] = getattr(
+        assistant, "permissions", get_default_permissions()
+    )
     await check_permissions(user, operation, perm_classes)
     await check_object_permissions(user, operation, thread_info, perm_classes)
 
@@ -62,7 +62,9 @@ async def _check_permission(
     assistant: Any,
 ) -> None:
     """Check a global permission for an assistant."""
-    perm_classes: list[type[BasePermission]] = getattr(assistant, "permissions", get_default_permissions())
+    perm_classes: list[type[BasePermission]] = getattr(
+        assistant, "permissions", get_default_permissions()
+    )
     await check_permissions(user, operation, perm_classes)
 
 

@@ -275,7 +275,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         thread_id = thread_id or str(uuid.uuid4())
         assistant_id = metadata.get("assistant_id", "") if metadata else ""
         model = metadata.get("model", "") if metadata else ""
-        user_id = str(user.pk) if user else None
+        user_id = str(user.pk) if user and user.is_authenticated else None
 
         MemoryStore.create_thread(
             thread_id=thread_id,
@@ -311,7 +311,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     @classmethod
     async def list_threads(cls, user: AbstractUser | None = None) -> list[ThreadInfo]:
         """List all threads in memory."""
-        user_id = str(user.pk) if user else None
+        user_id = str(user.pk) if user and user.is_authenticated else None
         threads = MemoryStore.list_threads(user_id)
         result = []
         for thread in threads:
@@ -399,7 +399,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         self, message_id: str, rating: int | None, feedback: str = "", user: AbstractUser | None = None
     ) -> bool:
         """Rate a message in this thread."""
-        user_id = str(user.pk) if user else None
+        user_id = str(user.pk) if user and user.is_authenticated else None
         success = MemoryStore.rate_message(message_id, rating, feedback, user_id)
         if success:
             logger.debug(f"Rated message {message_id}: {rating}")
