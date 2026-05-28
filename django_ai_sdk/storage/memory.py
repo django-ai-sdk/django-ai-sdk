@@ -27,14 +27,17 @@ class MemoryMessage(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Message management fields
-    rating: int | None = None  # 1 for good, -1 for bad
+    feedbacks: list[dict] = Field(default_factory=list)  # List of {user_id, rating, feedback}
     is_deleted: bool = False
     deleted_at: datetime | None = None
 
     def to_chat_message(self) -> ChatMessage:
         """Convert stored data to ChatMessage object."""
         # ID is already in self.result from model_dump(), model_validate restores it
-        return ChatMessage.model_validate(self.result)
+        chat_message = ChatMessage.model_validate(self.result)
+        # Include feedbacks in metadata
+        chat_message.metadata["feedbacks"] = self.feedbacks
+        return chat_message
 
     @classmethod
     def from_chat_message(cls, thread_id: str, chat_message: ChatMessage) -> "MemoryMessage":
@@ -162,7 +165,7 @@ class MemoryStore:
         """Get messages for thread, optionally including deleted ones."""
         messages = cls.messages.get(thread_id, [])
 
-        # Filter out sofd-deleted messages
+        # Filter out soft-deleted messages
         if not include_deleted:
             messages = [m for m in messages if not m.is_deleted]
         return messages
@@ -177,11 +180,32 @@ class MemoryStore:
         return None
 
     @classmethod
-    def rate_message(cls, message_id: str, rating: int) -> bool:
+    def rate_message(
+        cls, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
+    ) -> bool:
         """Rate a message."""
         message = cls.get_message(message_id)
         if message:
-            message.rating = rating
+            if rating is not None:
+                # Update or create feedback for this user
+                existing_feedback = None
+                for fb in message.feedbacks:
+                    if fb.get("user_id") == user_id:
+                        existing_feedback = fb
+                        break
+
+                if existing_feedback:
+                    existing_feedback["rating"] = rating
+                    existing_feedback["feedback"] = feedback
+                else:
+                    message.feedbacks.append(
+                        {"user_id": user_id, "rating": rating, "feedback": feedback}
+                    )
+            else:
+                # Delete feedback when rating is None
+                message.feedbacks[:] = [
+                    fb for fb in message.feedbacks if fb.get("user_id") != user_id
+                ]
             return True
         return False
 
@@ -373,13 +397,15 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             MemoryStore.add_message(self.thread_id, message)
             logger.debug(f"Message saved to memory store with ID: {message.id}")
             return message.id
-        except Exception as error:
+        except (ValueError, KeyError, RuntimeError) as error:
             logger.error(f"Memory storage failed: {error}")
             return None
 
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
+    ) -> bool:
         """Rate a message in this thread."""
-        success = MemoryStore.rate_message(message_id, rating)
+        success = MemoryStore.rate_message(message_id, rating, feedback, user_id)
         if success:
             logger.debug(f"Rated message {message_id}: {rating}")
         return success

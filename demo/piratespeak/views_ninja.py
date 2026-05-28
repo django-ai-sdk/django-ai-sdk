@@ -73,10 +73,18 @@ class DeleteAllThreadsResponse(Schema):
     deleted_count: int
 
 
+class FeedbackResponse(Schema):
+    id: str
+    user_id: str | None = None
+    rating: int
+    feedback: str
+    created_at: str | None = None
+
+
 class MessageResponse(Schema):
     id: str
-    rating: int | None = None
     is_deleted: bool = False
+    feedbacks: list[FeedbackResponse] = []
 
 
 @router.get("/health/", response={200: HealthResponse})
@@ -178,9 +186,25 @@ async def rate_message(
     message_id: str,
     payload: RateMessagePayload,
 ) -> Any:
+    from django_ai_sdk.conversation.models import MessageFeedback
+
     try:
-        await ThreadService.rate_message(thread_id, message_id, payload.rating)
-        return MessageResponse(id=message_id, rating=payload.rating, is_deleted=False)
+        user_id = str(request.user.id) if request.user.is_authenticated else None
+        await ThreadService.rate_message(
+            thread_id, message_id, payload.rating, feedback=payload.feedback, user_id=user_id
+        )
+        # Fetch feedbacks to return in response
+        feedbacks = [
+            FeedbackResponse(
+                id=str(fb.id),
+                user_id=str(fb.user_id) if fb.user_id else None,
+                rating=fb.rating,
+                feedback=fb.feedback,
+                created_at=fb.created_at.isoformat() if fb.created_at else None,
+            )
+            async for fb in MessageFeedback.objects.filter(message_id=message_id)
+        ]
+        return MessageResponse(id=message_id, is_deleted=False, feedbacks=feedbacks)
     except ValueError as e:
         return 404, Error(message=str(e))
 

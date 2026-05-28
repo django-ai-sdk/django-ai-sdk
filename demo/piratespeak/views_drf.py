@@ -53,10 +53,18 @@ class CreateThreadResponseSerializer(serializers.Serializer):
     thread_id = serializers.CharField(allow_null=True)
 
 
+class FeedbackResponseSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    user_id = serializers.CharField(allow_null=True)
+    rating = serializers.IntegerField()
+    feedback = serializers.CharField()
+    created_at = serializers.CharField(allow_null=True)
+
+
 class MessageResponseSerializer(serializers.Serializer):
     id = serializers.CharField()
-    rating = serializers.IntegerField(allow_null=True)
     is_deleted = serializers.BooleanField()
+    feedbacks = FeedbackResponseSerializer(many=True, default=[])
 
 
 class DeleteAllThreadsResponseSerializer(serializers.Serializer):
@@ -169,17 +177,32 @@ class ThreadDeleteAllAPIView(APIView):
 
 class RateMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
-        rating = request.data.get("rating")
-        if rating is None:
+        from django_ai_sdk.conversation.models import MessageFeedback
+
+        if "rating" not in request.data:
             return Response({"message": "rating is required"}, status=400)
+        rating = request.data.get("rating")
+        feedback_text = request.data.get("feedback", "")
+        user_id = str(request.user.id) if request.user.is_authenticated else None
         try:
-            rate_message(thread_id, message_id, rating)
+            rate_message(thread_id, message_id, rating, feedback=feedback_text, user_id=user_id)
+            # Fetch feedbacks to return in response
+            feedbacks = [
+                {
+                    "id": str(fb.id),
+                    "user_id": str(fb.user_id) if fb.user_id else None,
+                    "rating": fb.rating,
+                    "feedback": fb.feedback,
+                    "created_at": fb.created_at.isoformat() if fb.created_at else None,
+                }
+                for fb in MessageFeedback.objects.filter(message_id=message_id)
+            ]
             return Response(
                 MessageResponseSerializer(
                     {
                         "id": message_id,
-                        "rating": rating,
                         "is_deleted": False,
+                        "feedbacks": feedbacks,
                     }
                 ).data
             )
