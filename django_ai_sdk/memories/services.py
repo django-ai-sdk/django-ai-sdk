@@ -13,10 +13,11 @@ from django.utils.module_loading import import_string
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.files.services import FileService
-from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
+from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryOwner, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
     MemoryOut,
+    MemoryOwnerOut,
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.utils import extract_document
@@ -83,8 +84,13 @@ class MemoryService:
             slug=slug or None,
             description=description,
             is_public=is_public,
-            owner=user if user else None,  # This needs to change.
         )
+        if user and user.is_authenticated:
+            await MemoryOwner.objects.acreate(
+                memory=memory,
+                user=user,
+                can_manage=True,
+            )
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
@@ -95,6 +101,84 @@ class MemoryService:
             created_at=memory.created_at.isoformat(),
             updated_at=memory.updated_at.isoformat(),
         )
+
+    # ============================================================================
+    # Memory Owner Management
+    # ============================================================================
+
+    @staticmethod
+    async def list_owners(
+        memory_id: str, *, user: AbstractUser | None
+    ) -> list[MemoryOwnerOut]:
+        """List all owners of a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        return [
+            MemoryOwnerOut(
+                user_id=str(o.user_id),
+                can_manage=o.can_manage,
+                created_at=o.created_at.isoformat(),
+            )
+            async for o in memory.owners.all().select_related("user")
+        ]
+
+    @staticmethod
+    async def add_owner(
+        memory_id: str,
+        user_id: str,
+        can_manage: bool = False,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOwnerOut:
+        """Add a user as owner of a memory."""
+        from django.contrib.auth import get_user_model
+
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        UserModel = get_user_model()
+        owner_user = await UserModel.objects.aget(id=user_id)
+        ownership, _created = await MemoryOwner.objects.aupdate_or_create(
+            memory=memory,
+            user=owner_user,
+            defaults={"can_manage": can_manage},
+        )
+        return MemoryOwnerOut(
+            user_id=str(ownership.user_id),
+            can_manage=ownership.can_manage,
+            created_at=ownership.created_at.isoformat(),
+        )
+
+    @staticmethod
+    async def update_owner(
+        memory_id: str,
+        user_id: str,
+        can_manage: bool,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOwnerOut:
+        """Update an owner's can_manage flag."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        ownership = await memory.owners.select_related("user").aget(user_id=user_id)
+        ownership.can_manage = can_manage
+        await ownership.asave(update_fields=["can_manage"])
+        return MemoryOwnerOut(
+            user_id=str(ownership.user_id),
+            can_manage=ownership.can_manage,
+            created_at=ownership.created_at.isoformat(),
+        )
+
+    @staticmethod
+    async def remove_owner(
+        memory_id: str, user_id: str, *, user: AbstractUser | None
+    ) -> None:
+        """Remove an owner from a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        ownership = await memory.owners.aget(user_id=user_id)
+        await ownership.adelete()
+
+    # ============================================================================
 
     @staticmethod
     async def list_memories(*, user: AbstractUser | None = None) -> list[MemoryOut]:
@@ -543,3 +627,7 @@ upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
+list_owners = async_to_sync(MemoryService.list_owners)
+add_owner = async_to_sync(MemoryService.add_owner)
+update_owner = async_to_sync(MemoryService.update_owner)
+remove_owner = async_to_sync(MemoryService.remove_owner)

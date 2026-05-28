@@ -141,3 +141,24 @@ class ToggleMemoryActiveIn(BaseModel):
     """Schema for toggling memory active status."""
 
     active: bool
+
+
+class MemoryOwnerOut(BaseModel):
+    """Schema for memory owner output."""
+
+    user_id: str
+    can_manage: bool
+    created_at: str
+
+
+class AddMemoryOwnerIn(BaseModel):
+    """Schema for adding an owner to a memory."""
+
+    user_id: str
+    can_manage: bool = False
+
+
+class UpdateMemoryOwnerIn(BaseModel):
+    """Schema for updating a memory owner."""
+
+    can_manage: bool
