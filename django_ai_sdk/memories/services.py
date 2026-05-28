@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.conf import settings
@@ -47,9 +47,8 @@ async def _check_permission(user: AbstractUser | None, operation: Operation) -> 
     await check_permissions(user, operation, _get_memory_permissions())
 
 
-# FIXME: add proper type hints to Memory
 async def _check_object_permission(
-    user: AbstractUser | None, operation: Operation, obj: Any
+    user: AbstractUser | None, operation: Operation, obj: Memory
 ) -> None:
     """Object permission check for memory operations."""
     permissions = _get_memory_permissions()

@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import random
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
+from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.permissions import IsAdminUser
@@ -12,6 +15,9 @@ from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
 
 
 def pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
@@ -67,7 +73,7 @@ class AgentSwarmAssistant(Assistant):
     def get_tools(
         self,
         thread_id: str = "",
-        user: str = "",  # FIXME: add AbstractUser type
+        user: AbstractUser | None = None,
     ) -> list:
         """Return Haystack-compatible tools for agent swarm."""
         return [
@@ -124,8 +130,10 @@ class AgentSwarmAssistant(Assistant):
 
     # FIX typing
     async def get_pipeline_adapter(
-        self, thread_id: str | None = None, user: Any | None = None
-    ) -> "HaystackStream":
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> HaystackStream:
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 

@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
@@ -22,6 +26,9 @@ from django_ai_sdk.storage.db import DbStorageAdapter
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
 
 
 def get_datetime(**kwargs: object) -> dict:
@@ -134,7 +141,11 @@ class PirateBasicAssistant(Assistant):
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackStream:
+    async def get_pipeline_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> HaystackStream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
         # Build generator

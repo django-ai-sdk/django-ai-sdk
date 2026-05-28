@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import random
+from typing import TYPE_CHECKING
 
 from agents.agent import Agent
 from agents.run import RunConfig
@@ -11,6 +14,9 @@ from django_ai_sdk.common import prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.providers.nebul import NebulModelProvider
 from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
 
 
 @auto_register
@@ -125,7 +131,11 @@ class PirateAgentAssistant(Assistant):
         ]
         return random.choice(status_reports)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIAgentStream":
+    async def get_pipeline_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> OpenAIAgentStream:
         """OpenAI agent adapter with pirate tools."""
         client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,

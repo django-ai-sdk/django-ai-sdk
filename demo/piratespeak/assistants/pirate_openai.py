@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.openai import OpenAIStream
@@ -10,6 +14,9 @@ from django_ai_sdk.rags import (
     RAGProvider,
 )
 from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
 
 
 @auto_register
@@ -119,14 +126,16 @@ class PirateOpenAIAssistant(Assistant):
             ),
         ]
 
-    async def get_rag_pipeline(self, memory_id: str | None = None) -> "BM25RAG | None":
+    async def get_rag_pipeline(self, memory_id: str | None = None) -> BM25RAG | None:
         """
         Build BM25 RAG pipeline with example documents.
         """
         documents = self.get_example_documents()
         return BM25RAG(documents=documents, config=BM25Config(top_k=2))
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> "OpenAIStream":
+    async def get_pipeline_adapter(
+        self, thread_id: str | None = None, user: AbstractUser | None = None
+    ) -> OpenAIStream:
         """
         Create OpenAI adapter with RAG support.
         """

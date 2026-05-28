@@ -5,6 +5,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from django.conf import settings
 from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -18,6 +19,7 @@ from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
     AllowAll,
     BasePermission,
@@ -302,22 +304,20 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     async def get_tools(
         self,
         thread_id: str = "",
-        user: str = "",  # FIXME: add AbstractUser type
+        user: AbstractUser | None = None,
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
 
         Each callable in the class-level `tools` list is called with context kwargs
         and may return a single tool or a list. Providers can use any subset:
-          def get_my_tool(thread_id="", user_id="", model="", **kwargs): ...
+          def get_my_tool(thread_id="", user_id="", **kwargs): ...
           def get_my_tool(user_id="", **kwargs): ...
 
-        To use a fixed model regardless of the assistant's model, simply ignore the
-        `model` kwarg in the provider and construct the tool with the desired model.
         """
-        providers = getattr(self.__class__, "tools", [])
+        tools = getattr(self.__class__, "tools", [])
         result = []
-        for provider in providers:
-            items = provider(thread_id=thread_id, user=user)
+        for tool in tools:
+            items = tool(thread_id=thread_id, user=user)
             if isinstance(items, list):
                 result.extend(items)
             else:
@@ -440,24 +440,21 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         Load MCP tool objects for this assistant.
 
         Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
-        in self.mcp_servers. Returns an empty list if mcp_servers is empty or the
-        [mcp] extra is not installed.
+        in self.mcp_servers.
         """
         if not self.mcp_servers:
             return []
-        try:
-            from django.conf import settings
 
-            from django_ai_sdk.mcp.loader import load_mcp_tools
-
-            all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-            selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-            return await load_mcp_tools(selected, user_id)
-        except ImportError:
-            return []
+        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+        selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
+        return await load_mcp_tools(selected, user_id)
 
     @abstractmethod
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
+    async def get_pipeline_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> Any:
         """
         Create and return pipeline adapter.
 
@@ -590,7 +587,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         # Create fresh adapter each time
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
-        adapter = await self.get_pipeline_adapter(thread_id=thread_id)
+        adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
 
         # Wire suggestion generator onto the adapter
         suggestion_generator = self.get_suggestion_generator()
