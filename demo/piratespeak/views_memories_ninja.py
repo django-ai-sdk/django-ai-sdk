@@ -86,7 +86,9 @@ async def upload_document(
 
 
 @router.get("/{memory_id}/documents", response={200: list[DocumentOut], 403: dict})
-async def list_documents(request: HttpRequest, memory_id: str) -> list[DocumentOut] | tuple[int, dict]:
+async def list_documents(
+    request: HttpRequest, memory_id: str
+) -> list[DocumentOut] | tuple[int, dict]:
     try:
         return await MemoryService.list_documents(memory_id, user=request.user)
     except PermissionDenied as e:
@@ -227,7 +229,9 @@ async def add_owner(
         return 403, {"detail": str(e)}
 
 
-@router.patch("/{memory_id}/owners/{user_id}/", response={200: MemoryOwnerOut, 403: dict, 404: dict})
+@router.patch(
+    "/{memory_id}/owners/{user_id}/", response={200: MemoryOwnerOut, 403: dict, 404: dict}
+)
 async def update_owner(
     request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryOwnerIn
 ) -> MemoryOwnerOut | tuple[int, dict]:

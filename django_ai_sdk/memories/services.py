@@ -48,7 +48,9 @@ async def _check_permission(user: AbstractUser | None, operation: Operation) -> 
 
 
 # FIXME: add proper type hints to Memory
-async def _check_object_permission(user: AbstractUser | None, operation: Operation, obj: Any) -> None:
+async def _check_object_permission(
+    user: AbstractUser | None, operation: Operation, obj: Any
+) -> None:
     """Object permission check for memory operations."""
     permissions = _get_memory_permissions()
     await check_permissions(user, operation, permissions)
@@ -81,7 +83,7 @@ class MemoryService:
 
         memory = await Memory.objects.acreate(
             name=name,
-            slug=slug or None,
+            slug=slug,
             description=description,
             is_public=is_public,
         )
@@ -107,9 +109,7 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def list_owners(
-        memory_id: str, *, user: AbstractUser | None
-    ) -> list[MemoryOwnerOut]:
+    async def list_owners(memory_id: str, *, user: AbstractUser | None) -> list[MemoryOwnerOut]:
         """List all owners of a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         # TODO: permission check
@@ -169,9 +169,7 @@ class MemoryService:
         )
 
     @staticmethod
-    async def remove_owner(
-        memory_id: str, user_id: str, *, user: AbstractUser | None
-    ) -> None:
+    async def remove_owner(memory_id: str, user_id: str, *, user: AbstractUser | None) -> None:
         """Remove an owner from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         # TODO: permission check

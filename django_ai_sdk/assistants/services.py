@@ -61,17 +61,13 @@ class AssistantService:
             perm_classes: list = getattr(assistant, "permissions", [AllowAll])
             try:
                 await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
-                result.append(
-                    AssistantSummary(id=aid, name=assistant.name, model=assistant.model)
-                )
+                result.append(AssistantSummary(id=aid, name=assistant.name, model=assistant.model))
             except PermissionDenied:
                 continue
         return result
 
     @staticmethod
-    async def get_assistant_info(
-        assistant_id: str, user: AbstractUser | None = None
-    ) -> dict:
+    async def get_assistant_info(assistant_id: str, user: AbstractUser | None = None) -> dict:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = AssistantService.from_registry(assistant_id)
         perm_classes: list = getattr(assistant, "permissions", [AllowAll])

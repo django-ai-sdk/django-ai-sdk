@@ -6,25 +6,43 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('django_ai_sdk', '0003_add_memory_permission_fields'),
+        ("django_ai_sdk", "0003_add_memory_permission_fields"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='MemoryOwner',
+            name="MemoryOwner",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('can_manage', models.BooleanField(default=False)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('memory', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='owners', to='django_ai_sdk.memory')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='memory_ownerships', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("can_manage", models.BooleanField(default=False)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "memory",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="owners",
+                        to="django_ai_sdk.memory",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="memory_ownerships",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'django_ai_sdk_memory_owners',
-                'unique_together': {('memory', 'user')},
+                "db_table": "django_ai_sdk_memory_owners",
+                "unique_together": {("memory", "user")},
             },
         ),
     ]
