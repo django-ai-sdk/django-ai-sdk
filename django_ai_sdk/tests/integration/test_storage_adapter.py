@@ -9,7 +9,7 @@ import uuid
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.storage.memory import MemoryStorageAdapter, MemoryStore
 from django_ai_sdk.storage.base import BaseStorageAdapter
-from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
+from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
 
 
 class TestMemoryStorageAdapter:
@@ -55,7 +55,7 @@ class TestMemoryStorageAdapter:
     @pytest.mark.asyncio
     async def test_rating_persists_correctly(self, thread_context):
         """Test that message rating persists correctly."""
-        msg = ChatMessageFactory.build(assistant=True)
+        msg = ChatMessageFactory.build()
         message_id = await thread_context.store_chat_message(msg)
 
         # Rate as good
@@ -70,7 +70,7 @@ class TestMemoryStorageAdapter:
     @pytest.mark.asyncio
     async def test_negative_rating(self, thread_context):
         """Test negative rating functionality."""
-        msg = ChatMessageFactory.build(assistant=True)
+        msg = ChatMessageFactory.build()
         message_id = await thread_context.store_chat_message(msg)
 
         # Rate as bad
@@ -93,9 +93,9 @@ class TestMemoryStorageAdapter:
         """Test that conversation history is returned in correct order."""
         # Store multiple messages
         messages = [
-            ChatMessageFactory.build(user=True, content="First"),
-            ChatMessageFactory.build(assistant=True, content="Response 1"),
-            ChatMessageFactory.build(user=True, content="Second"),
+            ChatMessageFactory.build(role="user", content="First"),
+            ChatMessageFactory.build(role="assistant", content="Response 1"),
+            ChatMessageFactory.build(role="user", content="Second"),
         ]
 
         for msg in messages:
@@ -111,7 +111,7 @@ class TestMemoryStorageAdapter:
     @pytest.mark.asyncio
     async def test_delete_message(self, thread_context):
         """Test message deletion (soft delete)."""
-        msg = ChatMessageFactory.build(assistant=True)
+        msg = ChatMessageFactory.build()
         message_id = await thread_context.store_chat_message(msg)
 
         # Delete message
