@@ -40,7 +40,7 @@ async def _get_storage(thread_info: ThreadInfo) -> Any:
 
 async def _check_object_permission(
     thread_info: ThreadInfo,
-    user: AbstractUser,
+    user: AbstractUser | None,
     operation: Operation,
 ) -> None:
     """Object-level permission using the thread's owning assistant's permission classes."""
@@ -57,7 +57,7 @@ async def _check_object_permission(
 
 
 async def _check_permission(
-    user: AbstractUser,
+    user: AbstractUser | None,
     operation: Operation,
     assistant: Any,
 ) -> None:
@@ -124,12 +124,10 @@ class ThreadService:
         }
         default_metadata.update(metadata or {})
 
-        resolved_user_id = str(user.pk) if user and user.is_authenticated else None
-
         thread_id = await storage_class.create_thread(
             title=title,
             metadata=default_metadata,
-            user_id=resolved_user_id,
+            user=user,
             thread_id=thread_id,
         )
 
@@ -165,22 +163,23 @@ class ThreadService:
 
     @staticmethod
     async def threads(
-        user_id: str | None = None, *, user: AbstractUser | None = None
+        user: AbstractUser | None = None,
     ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
 
         Args:
-            user_id: Optional filter by user ID
-            user: Optional user for permission filtering
+            user: Optional user for filtering thread ownership
 
         Returns:
             List of ThreadInfo from all storage types
         """
         all_threads: list[ThreadInfo] = []
 
+        await _check_permission(user, Operation.LIST_THREADS, None)
+
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            threads = await adapter_class.list_threads(user_id)
+            threads = await adapter_class.list_threads(user)
             all_threads.extend(threads)
             logger.debug(f"Found {len(threads)} threads in {adapter_class.__name__}")
 
@@ -268,10 +267,10 @@ class ThreadService:
             PermissionDenied: If user has no DELETE_ALL_THREADS permission
         """
         await _check_permission(user, Operation.DELETE_ALL_THREADS, None)
-        resolved_user_id = str(user.pk) if user and user.is_authenticated else None
+
         total_deleted = 0
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            count = await adapter_class.delete_all_threads(user_id=resolved_user_id)
+            count = await adapter_class.delete_all_threads(user=user)
             if count and count > 0:
                 logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
                 total_deleted += count
@@ -307,7 +306,7 @@ class ThreadService:
         await _check_object_permission(thread, user, Operation.RATE_MESSAGE)
 
         storage = await _get_storage(thread)
-        success = await storage.rate_message(message_id, rating, feedback)
+        success = await storage.rate_message(message_id, rating, feedback, user=user)
         if not success:
             raise ValueError("Message not found")
         return True
