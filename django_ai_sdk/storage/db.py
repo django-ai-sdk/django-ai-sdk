@@ -155,23 +155,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         except Thread.DoesNotExist:
             return False
 
-    @classmethod
-    async def delete_all_threads(cls, user: AbstractUser | None = None) -> int:
-        """Delete threads and their messages, optionally filtered by user."""
-
-        threads_qs = Thread.objects.all()
-        user_id = str(user.pk) if user else None
-        if user_id:
-            threads_qs = threads_qs.filter(user_id=user_id)
-
-        # Get count before deleting
-        thread_ids = [str(t.id) async for t in threads_qs.values_list("id", flat=True)]
-        count = len(thread_ids)
-        if count:
-            await Message.objects.filter(thread_id__in=thread_ids).adelete()
-            await Thread.objects.filter(id__in=thread_ids).adelete()
-        return count
-
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
     # ============================================================================
