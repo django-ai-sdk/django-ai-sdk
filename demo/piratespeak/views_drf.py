@@ -14,7 +14,6 @@ from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
-    ThreadService,
     create_thread,
     delete_all_threads,
     delete_message,
@@ -22,6 +21,7 @@ from django_ai_sdk.storage.services import (
     get_thread,
     get_thread_file_meta,
     get_thread_history,
+    list_threads,
     rate_message,
     restore_message,
     update_thread,
@@ -112,7 +112,7 @@ class ChatRequestSerializer(serializers.Serializer):
 
 class ThreadListAPIView(APIView):
     def get(self, request: Request) -> Response:
-        all_threads = ThreadService.threads(user_id=request.user.id, user=request.user)
+        threads = list_threads(user=request.user)
         items = [
             {
                 "id": t.id,
@@ -122,7 +122,7 @@ class ThreadListAPIView(APIView):
                 "updated_at": t.updated_at.isoformat(),
                 "message_count": t.message_count,
             }
-            for t in all_threads
+            for t in threads
         ]
         return Response(ThreadListResponseSerializer({"threads": items}).data)
 
