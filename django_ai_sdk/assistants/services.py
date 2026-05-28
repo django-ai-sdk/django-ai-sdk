@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, TypedDict
 from asgiref.sync import async_to_sync
 
 from django_ai_sdk.assistants.registry import registry
-from django_ai_sdk.permissions import AllowAll, Operation, PermissionDenied, check_permissions
+from django_ai_sdk.permissions import (
+    Operation,
+    PermissionDenied,
+    check_permissions,
+    get_default_permissions,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -58,7 +63,7 @@ class AssistantService:
         """Return all registered assistants the user is allowed to view."""
         result: list[AssistantSummary] = []
         for aid, assistant in registry.all().items():
-            perm_classes: list = getattr(assistant, "permissions", [AllowAll])
+            perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
             try:
                 await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
                 result.append(AssistantSummary(id=aid, name=assistant.name, model=assistant.model))
@@ -70,7 +75,7 @@ class AssistantService:
     async def get_assistant_info(assistant_id: str, user: AbstractUser | None = None) -> dict:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = AssistantService.from_registry(assistant_id)
-        perm_classes: list = getattr(assistant, "permissions", [AllowAll])
+        perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
         await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
         return assistant.info()
 

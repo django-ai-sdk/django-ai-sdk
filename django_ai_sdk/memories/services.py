@@ -22,11 +22,11 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.utils import extract_document
 from django_ai_sdk.permissions import (
-    AllowAll,
     BasePermission,
     Operation,
     check_object_permissions,
     check_permissions,
+    get_default_permissions,
 )
 
 if TYPE_CHECKING:
@@ -38,7 +38,7 @@ def _get_memory_permissions() -> list[type[BasePermission]]:
     """Resolve permission classes from settings (cached)."""
     paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
     if not paths:
-        return [AllowAll]
+        return get_default_permissions()
     return [import_string(p) for p in paths]
 
 

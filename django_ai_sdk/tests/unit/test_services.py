@@ -539,6 +539,62 @@ class TestPermissions:
         user = MagicMock(is_staff=True)
         await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
 
+    # --- get_default_permissions ---
+
+    async def test_get_default_permissions_falls_back_to_allow_all(self):
+        from django_ai_sdk.permissions import AllowAll, get_default_permissions
+
+        get_default_permissions.cache_clear()
+        result = get_default_permissions()
+        assert result == [AllowAll]
+
+    async def test_get_default_permissions_from_setting_single(self):
+        from django.test.utils import override_settings
+
+        from django_ai_sdk.permissions import DenyAll, get_default_permissions
+
+        with override_settings(AI_SDK_DEFAULT_PERMISSIONS=["django_ai_sdk.permissions.DenyAll"]):
+            get_default_permissions.cache_clear()
+            result = get_default_permissions()
+            assert result == [DenyAll]
+
+    async def test_get_default_permissions_from_setting_multiple(self):
+        from django.test.utils import override_settings
+
+        from django_ai_sdk.permissions import DenyAll, IsAuthenticated, get_default_permissions
+
+        with override_settings(
+            AI_SDK_DEFAULT_PERMISSIONS=[
+                "django_ai_sdk.permissions.DenyAll",
+                "django_ai_sdk.permissions.IsAuthenticated",
+            ]
+        ):
+            get_default_permissions.cache_clear()
+            result = get_default_permissions()
+            assert result == [DenyAll, IsAuthenticated]
+
+    async def test_get_default_permissions_used_as_fallback_in_assistant_permissions(self):
+        from django.test.utils import override_settings
+
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import AllowAll, DenyAll, get_default_permissions
+
+        get_default_permissions.cache_clear()
+        with override_settings(AI_SDK_DEFAULT_PERMISSIONS=["django_ai_sdk.permissions.DenyAll"]):
+            get_default_permissions.cache_clear()
+            reg = MagicMock()
+            assistant_a = MagicMock(name="a", id="a")
+            del assistant_a.permissions
+            assistant_b = MagicMock(name="b", id="b", permissions=[AllowAll])
+            reg.all.return_value = {"a": assistant_a, "b": assistant_b}
+            reg.get.side_effect = lambda id: reg.all.return_value.get(id)
+            with patch("django_ai_sdk.assistants.services.registry", reg):
+                summaries = await AssistantService.list_assistants(None)
+                assert len(summaries) == 1
+                assert summaries[0]["id"] == "b"
+
+        get_default_permissions.cache_clear()
+
 
 @pytest.mark.asyncio
 class TestThreadServiceCreateThreadPermissions:

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from abc import ABC
 from enum import StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
+
+from django.conf import settings
+from django.utils.module_loading import import_string
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
@@ -155,6 +159,15 @@ class MemoryDefaultPermission(BasePermission):
         if operation in self.MANAGER:
             return ownership.can_manage
         return True
+
+
+@lru_cache(maxsize=1)
+def get_default_permissions() -> list[type[BasePermission]]:
+    """Resolve default permission classes from settings, falling back to AllowAll."""
+    paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
+    if not paths:
+        return [AllowAll]
+    return [import_string(p) for p in paths]
 
 
 async def check_permissions(
