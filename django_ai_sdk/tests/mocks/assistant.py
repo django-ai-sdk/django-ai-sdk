@@ -5,7 +5,7 @@ Assistants have side effects (LLM calls, registry registration, storage I/O),
 so we use controlled MagicMock instances in unit tests instead of real subclasses.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from django_ai_sdk.permissions import AllowAll
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
@@ -53,3 +53,19 @@ def create_mock_adapter_class(get_thread=None):
     adapter_cls.__name__ = "MockAdapter"
     adapter_cls.get_thread = AsyncMock(return_value=get_thread)
     return adapter_cls
+
+
+def mock_assistant_memories(slugs):
+    """Return a ``patch.object`` context manager that mocks
+    ``registry.get`` to return an assistant with the given memory slugs.
+
+    Usage::
+
+        with mock_assistant_memories([mem1.slug]):
+            result = await MemoryService.get_assistant_memories("test-asst")
+    """
+    from django_ai_sdk.assistants.services import registry
+
+    mock_assistant = MagicMock()
+    mock_assistant.memories = slugs
+    return patch.object(registry, "get", return_value=mock_assistant)

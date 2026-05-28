@@ -72,6 +72,21 @@ def mock_assistants_registry():
 
 
 @pytest.fixture
+def assistant_permissions(mock_assistants_registry):
+    """Fixture returning a setter that changes the registry assistant's permissions.
+
+    Usage::
+
+        def test_something(self, assistant_permissions):
+            assistant_permissions(DenyAll)        # single
+            assistant_permissions(IsOwner, DenyAll)  # multiple
+    """
+    def set_perms(*perms):
+        mock_assistants_registry.get.return_value.permissions = list(perms)
+    return set_perms
+
+
+@pytest.fixture
 def mock_storage_adapter_registry():
     """Patch the StorageAdapterRegistry."""
     from unittest.mock import MagicMock, patch

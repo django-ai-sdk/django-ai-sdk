@@ -12,7 +12,7 @@ from django_ai_sdk.tests.mocks.assistant import create_assistant_mock
 
 
 @contextmanager
-def patch_registry(assistant=None, assistants=None):
+def patch_registry(assistant=None, assistants=None, permissions=None):
     """Context manager that patches the global assistant registry.
 
     Both import paths (``django_ai_sdk.assistants.registry.registry`` and
@@ -24,13 +24,15 @@ def patch_registry(assistant=None, assistants=None):
             reg.get.return_value = None   # simulate "not found"
 
     Parameters:
-        assistant:  The mock assistant to return from ``reg.get()``.
-                    Default: ``create_assistant_mock()``
-        assistants: Dict mapping id -> assistant for ``reg.all()``.
-                    Default: ``{assistant.id: assistant}``
+        assistant:   The mock assistant to return from ``reg.get()``.
+                     Default: ``create_assistant_mock()``
+        assistants:  Dict mapping id -> assistant for ``reg.all()``.
+                     Default: ``{assistant.id: assistant}``
+        permissions: Passed to ``create_assistant_mock()`` when *assistant*
+                     is not provided.
     """
     if assistant is None:
-        assistant = create_assistant_mock()
+        assistant = create_assistant_mock(permissions=permissions)
     if assistants is None:
         assistants = {assistant.id: assistant}
 
