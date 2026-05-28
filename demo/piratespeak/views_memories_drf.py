@@ -1,5 +1,6 @@
 from django.urls import path
 from django_ai_sdk.memories.services import (
+    add_owner,
     bulk_connect_memories,
     create_memory,
     delete_document,
@@ -11,11 +12,14 @@ from django_ai_sdk.memories.services import (
     link_memory_to_thread,
     list_documents,
     list_memories,
+    list_owners,
     list_thread_files,
     list_thread_memories,
+    remove_owner,
     toggle_memory_active,
     unlink_memory_from_thread,
     update_memory,
+    update_owner,
     upload_document,
     upload_thread_file,
 )
@@ -73,6 +77,21 @@ class BulkConnectMemoriesInSerializer(serializers.Serializer):
 
 class ToggleMemoryActiveInSerializer(serializers.Serializer):
     active = serializers.BooleanField()
+
+
+class MemoryOwnerOutSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField()
+    created_at = serializers.CharField()
+
+
+class AddMemoryOwnerInSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class UpdateMemoryOwnerInSerializer(serializers.Serializer):
+    can_manage = serializers.BooleanField()
 
 
 class MemoryListCreateAPIView(APIView):
@@ -250,6 +269,60 @@ class ThreadFileDetailAPIView(APIView):
         return Response(status=204)
 
 
+class MemoryOwnerListCreateAPIView(APIView):
+    def get(self, request: Request, memory_id: str) -> Response:
+        try:
+            owners = list_owners(memory_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(MemoryOwnerOutSerializer(owners, many=True).data)
+
+    def post(self, request: Request, memory_id: str) -> Response:
+        serializer = AddMemoryOwnerInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            owner = add_owner(
+                memory_id,
+                serializer.validated_data["user_id"],
+                serializer.validated_data.get("can_manage", False),
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(MemoryOwnerOutSerializer(owner).data)
+
+
+class MemoryOwnerDetailAPIView(APIView):
+    def patch(self, request: Request, memory_id: str, user_id: str) -> Response:
+        serializer = UpdateMemoryOwnerInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            owner = update_owner(
+                memory_id,
+                user_id,
+                serializer.validated_data["can_manage"],
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(MemoryOwnerOutSerializer(owner).data)
+
+    def delete(self, request: Request, memory_id: str, user_id: str) -> Response:
+        try:
+            remove_owner(memory_id, user_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(status=204)
+
+
 urlpatterns = [
     path("memories/", MemoryListCreateAPIView.as_view(), name="memory-list-create"),
     path("memories/<str:memory_id>/", MemoryDetailAPIView.as_view(), name="memory-detail"),
@@ -292,5 +365,15 @@ urlpatterns = [
         "memories/thread/<str:thread_id>/<str:memory_id>/",
         ThreadMemoryToggleAPIView.as_view(),
         name="thread-memory-toggle",
+    ),
+    path(
+        "memories/<str:memory_id>/owners/",
+        MemoryOwnerListCreateAPIView.as_view(),
+        name="memory-owner-list-create",
+    ),
+    path(
+        "memories/<str:memory_id>/owners/<str:user_id>/",
+        MemoryOwnerDetailAPIView.as_view(),
+        name="memory-owner-detail",
     ),
 ]

@@ -1,11 +1,14 @@
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
+    AddMemoryOwnerIn,
     BulkConnectMemoriesIn,
     DocumentOut,
     MemoryIn,
     MemoryOut,
+    MemoryOwnerOut,
     ThreadMemoryOut,
     ToggleMemoryActiveIn,
+    UpdateMemoryOwnerIn,
 )
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -194,5 +197,58 @@ async def disconnect_memory_from_thread(
     try:
         await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=request.user)
         return 204, None
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.get("/{memory_id}/owners/", response={200: list[MemoryOwnerOut], 403: dict, 404: dict})
+async def list_owners(
+    request: HttpRequest, memory_id: str
+) -> list[MemoryOwnerOut] | tuple[int, dict]:
+    try:
+        return await MemoryService.list_owners(memory_id, user=request.user)
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.post("/{memory_id}/owners/", response={200: MemoryOwnerOut, 403: dict, 404: dict})
+async def add_owner(
+    request: HttpRequest, memory_id: str, payload: AddMemoryOwnerIn
+) -> MemoryOwnerOut | tuple[int, dict]:
+    try:
+        return await MemoryService.add_owner(
+            memory_id, payload.user_id, payload.can_manage, user=request.user
+        )
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.patch("/{memory_id}/owners/{user_id}/", response={200: MemoryOwnerOut, 403: dict, 404: dict})
+async def update_owner(
+    request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryOwnerIn
+) -> MemoryOwnerOut | tuple[int, dict]:
+    try:
+        return await MemoryService.update_owner(
+            memory_id, user_id, payload.can_manage, user=request.user
+        )
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.delete("/{memory_id}/owners/{user_id}/", response={204: None, 403: dict, 404: dict})
+async def remove_owner(
+    request: HttpRequest, memory_id: str, user_id: str
+) -> tuple[int, None | dict]:
+    try:
+        await MemoryService.remove_owner(memory_id, user_id, user=request.user)
+        return 204, None
+    except ValueError as e:
+        return 404, {"detail": str(e)}
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
