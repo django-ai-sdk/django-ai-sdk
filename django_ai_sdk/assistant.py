@@ -102,6 +102,8 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     # Default list of connected memories
     memories: list[str] = []
 
+    tools: list[str] = []
+
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
 
@@ -213,8 +215,6 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             else MemoryStorageAdapter
         )
 
-        self.tools = self.get_tools()
-
         if self.warmup_on_init and self.rag_provider is not None:
             # Warmup RAG provider on init
             # TODO: delegate this to background task and check status.
@@ -287,15 +287,33 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             return None
         return self.suggestion_generator(assistant=self)
 
-    def get_tools(self) -> list[Any]:
-        """
-        Return list of available tools.
+    async def get_tools(
+        self,
+        thread_id: str = "",
+        user_id: str = "",
+        model: str | None = None,
+    ) -> list[Any]:
+        """Build tool objects for a request. Override in subclasses for full control.
 
-        Override this method if your assistant has tools.
-        Tools can be defined as methods on the assistant class
-        for better organization and co-location.
+        Each callable in the class-level `tools` list is called with context kwargs
+        and may return a single tool or a list. Providers can use any subset:
+          def get_my_tool(thread_id="", user_id="", model="", **kwargs): ...
+          def get_my_tool(user_id="", **kwargs): ...
+
+        To use a fixed model regardless of the assistant's model, simply ignore the
+        `model` kwarg in the provider and construct the tool with the desired model.
         """
-        return []
+        if model is None:
+            model = self.get_model()
+        providers = getattr(self.__class__, "tools", [])
+        result = []
+        for provider in providers:
+            items = provider(thread_id=thread_id, user_id=user_id, model=model)
+            if isinstance(items, list):
+                result.extend(items)
+            else:
+                result.append(items)
+        return result
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
         """
