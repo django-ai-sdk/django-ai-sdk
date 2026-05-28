@@ -3,7 +3,7 @@ import uuid
 from django.utils import timezone
 
 from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.conversation.models import Message, Thread
+from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
@@ -150,7 +150,6 @@ class DbStorageAdapter(BaseStorageAdapter):
     @classmethod
     async def delete_all_threads(cls, user_id: str | None = None) -> int:
         """Delete threads and their messages, optionally filtered by user."""
-        from django_ai_sdk.conversation.models import Message
 
         threads_qs = Thread.objects.all()
         if user_id:
@@ -188,7 +187,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         Returns:
             List of ChatMessage objects ordered by creation time
         """
-        from django_ai_sdk.conversation.models import MessageFeedback
 
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
