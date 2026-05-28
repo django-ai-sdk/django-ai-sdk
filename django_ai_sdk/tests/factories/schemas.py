@@ -13,7 +13,19 @@ from datetime import datetime, timezone
 from polyfactory.factories.pydantic_factory import ModelFactory
 
 from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.views.schemas import Message, MessagePart
 from django_ai_sdk.storage.schemas import ThreadInfo
+
+
+def chat_message(
+    role: str, text: str, message_id: str | None = None
+) -> Message:
+    """Quick message builder for unit tests."""
+    return Message(
+        role=role,
+        parts=[MessagePart(type="text", text=text)],
+        id=message_id,
+    )
 
 
 def _now() -> datetime:
