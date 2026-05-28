@@ -97,8 +97,8 @@ class IsOwner(BasePermission):
 class MemoryDefaultPermission(BasePermission):
     """Three-tier permission for memories.
 
-    - Owner: full access (read, write entries, update/delete memory).
-    - Contributor: read + write entries (not update/delete memory).
+    - Manager (can_manage=True): full access.
+    - Owner (can_manage=False): read + write entries (not update/delete memory).
     - Public: read-only (gated by is_public flag on memory).
     - Anonymous: blocked unless public read + global gate allows.
     """
@@ -119,7 +119,7 @@ class MemoryDefaultPermission(BasePermission):
             Operation.UNLINK_MEMORY,
         }
     )
-    OWNER: frozenset[Operation] = frozenset(
+    MANAGER: frozenset[Operation] = frozenset(
         {
             Operation.UPDATE_MEMORY,
             Operation.DELETE_MEMORY,
@@ -135,22 +135,15 @@ class MemoryDefaultPermission(BasePermission):
         if user is None or not bool(user.is_authenticated):
             return False
 
-        if obj.owner_id is None:
+        ownership = await obj.owners.filter(user=user).afirst()
+        if ownership is None:
+            if operation in self.READ and obj.is_public:
+                return True
             return False
 
-        if str(obj.owner_id) == str(user.pk):
-            return True
-
-        if operation in self.OWNER:
-            return False
-
-        if await obj.contributors.filter(id=user.pk).aexists():
-            return True
-
-        if operation in self.READ and obj.is_public:
-            return True
-
-        return False
+        if operation in self.MANAGER:
+            return ownership.can_manage
+        return True
 
 
 async def check_permissions(

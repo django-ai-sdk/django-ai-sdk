@@ -71,6 +71,26 @@ class Memory(models.Model):
         )
 
 
+class MemoryOwner(models.Model):
+    memory = models.ForeignKey(
+        Memory, on_delete=models.CASCADE, related_name="owners"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="memory_ownerships",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["memory", "user"]]
+        db_table = "django_ai_sdk_memory_owners"
+
+    def __str__(self) -> str:
+        return f"{self.user} - {self.memory.name}"
+
+
 class Entry(models.Model):
     """
     A piece of knowledge stored in a Memory.
