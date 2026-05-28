@@ -50,7 +50,9 @@ class Operation(StrEnum):
 
 
 class BasePermission(ABC):
-    async def has_permission(self, user: AbstractUser | None, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(
+        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
         return True
 
     async def has_object_permission(
@@ -64,7 +66,9 @@ class AllowAll(BasePermission):
 
 
 class DenyAll(BasePermission):
-    async def has_permission(self, user: AbstractUser | None, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(
+        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
         return False
 
     async def has_object_permission(
@@ -74,12 +78,16 @@ class DenyAll(BasePermission):
 
 
 class IsAuthenticated(BasePermission):
-    async def has_permission(self, user: AbstractUser | None, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(
+        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
         return user is not None and bool(user.is_authenticated)
 
 
 class IsAdminUser(BasePermission):
-    async def has_permission(self, user: AbstractUser | None, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(
+        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
         return user is not None and bool(user.is_staff or user.is_superuser)
 
 
@@ -126,7 +134,9 @@ class MemoryDefaultPermission(BasePermission):
         }
     )
 
-    async def has_permission(self, user: AbstractUser | None, operation: Operation, **kwargs: Any) -> bool:
+    async def has_permission(
+        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
         return user is not None and bool(user.is_authenticated)
 
     async def has_object_permission(
