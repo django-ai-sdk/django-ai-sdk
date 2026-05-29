@@ -324,6 +324,51 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
                 result.append(items)
         return result
 
+    async def get_rag_tools(
+        self,
+        thread_id: str,
+        *,
+        citation_registry: CitationRegistry | None = None,
+        citation_formatter: CitationFormatter | None = None,
+        user: AbstractUser | None = None,
+    ) -> list[Any]:
+        """Build RAG tools from active ThreadMemory links for a thread.
+
+        Each memory with documents becomes a framework-specific tool.
+        Memories with 0 documents are skipped with a warning log.
+
+        Returns:
+            List of tool objects to include in the pipeline.
+        """
+        if not self.rag_provider or not thread_id:
+            return []
+
+        from django_ai_sdk.memories.models import ThreadMemory  # noqa: PLC0415
+
+        tools: list[Any] = []
+        memory_links = ThreadMemory.objects.filter(thread_id=thread_id, active=True).select_related(
+            "memory"
+        )
+
+        async for link in memory_links:
+            spec = await link.memory.get_tool_spec()
+            tool = await self.rag_provider.get_tool(
+                self,
+                str(link.memory.id),
+                spec=spec,
+                citation_registry=citation_registry,
+                citation_formatter=citation_formatter,
+            )
+            if tool is None:
+                logger.warning(
+                    "Memory '{}' has 0 documents — no RAG tool created",
+                    link.memory.name,
+                )
+                continue
+            tools.append(tool)
+
+        return tools
+
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
         """
         Override to return a Django QuerySet of documents for RAG.
