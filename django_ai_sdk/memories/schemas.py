@@ -83,6 +83,7 @@ class MemoryIn(BaseModel):
     name: str
     slug: str = ""
     description: str = ""
+    is_public: bool = True
 
 
 class MemoryOut(BaseModel):
@@ -92,6 +93,7 @@ class MemoryOut(BaseModel):
     name: str
     slug: str
     description: str
+    is_public: bool
     document_count: int
     created_at: str
     updated_at: str
@@ -139,3 +141,24 @@ class ToggleMemoryActiveIn(BaseModel):
     """Schema for toggling memory active status."""
 
     active: bool
+
+
+class MemoryOwnerOut(BaseModel):
+    """Schema for memory owner output."""
+
+    user_id: str
+    can_manage: bool
+    created_at: str
+
+
+class AddMemoryOwnerIn(BaseModel):
+    """Schema for adding an owner to a memory."""
+
+    user_id: str
+    can_manage: bool = False
+
+
+class UpdateMemoryOwnerIn(BaseModel):
+    """Schema for updating a memory owner."""
+
+    can_manage: bool

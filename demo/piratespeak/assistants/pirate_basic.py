@@ -1,5 +1,8 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.conf import settings
-from django.db.models import QuerySet
 from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
@@ -23,8 +26,12 @@ from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
 
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+    from django.db.models import QuerySet
 
-def get_datetime() -> dict:
+
+def get_datetime(**kwargs: object) -> dict:
     """Get current time and date in Europe/Amsterdam timezone."""
     tz = timezone.get_current_timezone()
     nowtz = timezone.now().astimezone(tz)
@@ -35,7 +42,7 @@ def get_datetime() -> dict:
     }
 
 
-def get_today() -> Tool:
+def get_today(**kwargs: object) -> Tool:
     """Current date and time tool."""
     return Tool(
         name="get_today",
@@ -134,7 +141,11 @@ class PirateBasicAssistant(Assistant):
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> HaystackStream:
+    async def get_pipeline_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> HaystackStream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
         # Build generator

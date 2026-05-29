@@ -111,7 +111,7 @@ class TestDefaultCitationFormatter:
 
         _, sources = formatter.format(docs, start_index=1)
 
-        assert sources[0].title == "report.pdf · p3"
+        assert sources[0].title == "report.pdf · §1"
 
     def test_title_with_section_marker(self):
         """Title adds section marker if split_id but no page_number."""

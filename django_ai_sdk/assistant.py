@@ -5,6 +5,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from django.conf import settings
 from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -18,6 +19,14 @@ from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.files.handlers import ContentHandler, FileHandler
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.mcp.loader import load_mcp_tools
+from django_ai_sdk.permissions import (
+    AllowAll,
+    BasePermission,
+    Operation,
+    check_object_permissions,
+    check_permissions,
+)
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
@@ -100,6 +109,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     description: str
     model: str
     instructions: Prompt = prompt("You are a helpful assistant.")
+
+    # Permission classes used to gate access to this assistant's operations.
+    permissions: list[type[BasePermission]] = [AllowAll]
 
     # Default list of connected memories
     memories: list[str] = []
@@ -293,24 +305,19 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         self,
         thread_id: str = "",
         user: AbstractUser | None = None,
-        model: str | None = None,
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
 
         Each callable in the class-level `tools` list is called with context kwargs
         and may return a single tool or a list. Providers can use any subset:
-          def get_my_tool(thread_id="", user_id="", model="", **kwargs): ...
+          def get_my_tool(thread_id="", user_id="", **kwargs): ...
           def get_my_tool(user_id="", **kwargs): ...
 
-        To use a fixed model regardless of the assistant's model, simply ignore the
-        `model` kwarg in the provider and construct the tool with the desired model.
         """
-        if model is None:
-            model = self.get_model()
-        providers = getattr(self.__class__, "tools", [])
+        tools = getattr(self.__class__, "tools", [])
         result = []
-        for provider in providers:
-            items = provider(thread_id=thread_id, user=user, model=model)
+        for tool in tools:
+            items = tool(thread_id=thread_id, user=user)
             if isinstance(items, list):
                 result.extend(items)
             else:
@@ -433,24 +440,21 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         Load MCP tool objects for this assistant.
 
         Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
-        in self.mcp_servers. Returns an empty list if mcp_servers is empty or the
-        [mcp] extra is not installed.
+        in self.mcp_servers.
         """
         if not self.mcp_servers:
             return []
-        try:
-            from django.conf import settings
 
-            from django_ai_sdk.mcp.loader import load_mcp_tools
-
-            all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-            selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-            return await load_mcp_tools(selected, user_id)
-        except ImportError:
-            return []
+        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+        selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
+        return await load_mcp_tools(selected, user_id)
 
     @abstractmethod
-    async def get_pipeline_adapter(self, thread_id: str | None = None) -> Any:
+    async def get_pipeline_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractUser | None = None,
+    ) -> Any:
         """
         Create and return pipeline adapter.
 
@@ -462,7 +466,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         """
         pass
 
-    async def history(self, thread_id: str) -> ThreadDetail:
+    async def history(self, thread_id: str, user: AbstractUser | None = None) -> ThreadDetail:
         """
         Get conversation history for a thread.
 
@@ -471,11 +475,17 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
         Args:
             thread_id: The thread ID to fetch history for
+            user: Optional user for permission checking
 
         Returns:
             ThreadDetail containing thread metadata and protocol-formatted messages
+
+        Raises:
+            PermissionDenied: If user has no VIEW_THREAD permission
         """
         logger.debug(f"Fetching history for thread: {thread_id}")
+
+        await check_permissions(user, Operation.VIEW_THREAD, self.permissions)
 
         storage = await self.get_storage_adapter(thread_id)
 
@@ -486,6 +496,8 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         thread_info = await storage.__class__.get_thread(thread_id)
         if not thread_info:
             raise ValueError(f"Thread not found: {thread_id}")
+
+        await check_object_permissions(user, Operation.VIEW_THREAD, thread_info, self.permissions)
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
@@ -508,7 +520,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         self,
         protocol_messages: list[Any],
         thread_id: str | None = None,
-        user: Any = None,
+        user: AbstractUser | None = None,
     ) -> Any:
         """
         Convert protocol messages to streaming HTTP response with optional storage.
@@ -519,16 +531,21 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         Args:
             protocol_messages: Raw protocol messages (e.g., Vercel Message objects)
             thread_id: Optional thread ID for conversation persistence
-            user: Optional user for conversation attribution
+            user: Optional user for conversation attribution and permission checks
 
         Returns:
             StreamingHttpResponse ready for Django views
+
+        Raises:
+            PermissionDenied: If user has no CHAT permission for this assistant/thread
         """
         logger.debug(
             f"Assistant as_view called: assistant={self.__class__.__name__}, "
             f"messages={len(protocol_messages) if protocol_messages else 0}, "
             f"thread_id={thread_id}, user={user}"
         )
+
+        await check_permissions(user, Operation.CHAT, self.permissions)
 
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
@@ -570,7 +587,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         # Create fresh adapter each time
         # RAG is cached separately via get_rag(), so adapter is not tied to it
         logger.debug("Creating pipeline adapter")
-        adapter = await self.get_pipeline_adapter(thread_id=thread_id)
+        adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
 
         # Wire suggestion generator onto the adapter
         suggestion_generator = self.get_suggestion_generator()
@@ -579,10 +596,12 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
         # TODO: fix type error for argument, can never be None, now nested
         if thread_id:
-            thread = await ThreadService.get_thread(thread_id)
+            thread = await ThreadService.get_thread(thread_id, user=user)
+            if thread:
+                await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
             if self.title_generation and thread and not thread.title:
                 title = await generate_thread_title(assistant=self, messages=messages)
-                await ThreadService.update_thread(thread_id, title)
+                await ThreadService.update_thread(thread_id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 

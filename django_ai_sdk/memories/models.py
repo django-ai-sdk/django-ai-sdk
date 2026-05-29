@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -14,11 +15,14 @@ class Memory(models.Model):
     slug = models.SlugField(max_length=255, unique=True, blank=True, editable=False)
     description = models.TextField(blank=True, default="")
     is_hidden = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     # Reverse relation type hints
     entries: models.Manager["Entry"]
+    owners: models.Manager["MemoryOwner"]
+
     # Annotated field from queries
     document_count: int
 
@@ -55,6 +59,27 @@ class Memory(models.Model):
             doc_count=doc_count,
             metadata={"memory_id": str(self.id), "memory_name": self.name},
         )
+
+
+class MemoryOwner(models.Model):
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="owners")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="memory_ownerships",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Reverse relation type hints
+    user_id: int
+
+    class Meta:
+        unique_together = [["memory", "user"]]
+        db_table = "django_ai_sdk_memory_owners"
+
+    def __str__(self) -> str:
+        return f"{self.user} - {self.memory.name}"
 
 
 class Entry(models.Model):

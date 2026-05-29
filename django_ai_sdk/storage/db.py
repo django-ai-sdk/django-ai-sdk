@@ -1,9 +1,12 @@
-import uuid
+from __future__ import annotations
 
+import uuid
+from typing import TYPE_CHECKING
+
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.conversation.models import Message, Thread
+from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
@@ -11,6 +14,11 @@ from django_ai_sdk.storage.base import (
     StorageType,
 )
 from django_ai_sdk.storage.schemas import ThreadInfo
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
+    from django_ai_sdk.common import ChatMessage
 
 logger = get_logger(__name__)
 
@@ -43,7 +51,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         cls,
         title: str,
         metadata: dict | None = None,
-        user_id: str | None = None,
+        user: AbstractUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -52,7 +60,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         Args:
             title: Thread title
             metadata: Should include assistant_id, model
-            user_id: Optional user ID
+            user: Optional user
             thread_id: Optional custom thread ID
 
         Returns:
@@ -60,6 +68,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         """
         # Use provided thread_id or generate new UUID
         thread_id = thread_id or str(uuid.uuid4())
+        user_id = str(user.pk) if user and user.is_authenticated else None
 
         # Create in database
         thread = await Thread.objects.acreate(
@@ -87,13 +96,14 @@ class DbStorageAdapter(BaseStorageAdapter):
                 metadata=thread.metadata,
                 message_count=message_count,
             )
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return None
 
     @classmethod
-    async def list_threads(cls, user_id: str | None = None) -> list[ThreadInfo]:
+    async def list_threads(cls, user: AbstractUser | None = None) -> list[ThreadInfo]:
         """List all threads from database."""
         queryset = Thread.objects.all()
+        user_id = str(user.pk) if user and user.is_authenticated else None
         if user_id:
             queryset = queryset.filter(user_id=user_id)
 
@@ -131,7 +141,7 @@ class DbStorageAdapter(BaseStorageAdapter):
 
             await thread.asave()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
 
     @classmethod
@@ -144,21 +154,8 @@ class DbStorageAdapter(BaseStorageAdapter):
             # Delete thread
             await thread.adelete()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
-
-    @classmethod
-    async def delete_all_threads(cls) -> int:
-        """Delete all threads and their messages from database."""
-        from django_ai_sdk.conversation.models import Message
-
-        # Get count before deleting
-        count = await Thread.objects.acount() or 0
-        # Delete all messages first
-        await Message.objects.all().adelete()
-        # Delete all threads
-        await Thread.objects.all().adelete()
-        return count
 
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
@@ -184,7 +181,6 @@ class DbStorageAdapter(BaseStorageAdapter):
         Returns:
             List of ChatMessage objects ordered by creation time
         """
-        from django_ai_sdk.conversation.models import MessageFeedback
 
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
@@ -265,7 +261,11 @@ class DbStorageAdapter(BaseStorageAdapter):
             return None
 
     async def rate_message(
-        self, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractUser | None = None,
     ) -> bool:
         """Rate a message in this thread."""
         from django_ai_sdk.conversation.models import MessageFeedback
@@ -276,7 +276,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             if rating is not None:
                 # Try to get existing feedback
                 try:
-                    fb = await MessageFeedback.objects.aget(message_id=message_id, user_id=user_id)
+                    fb = await MessageFeedback.objects.aget(message_id=message_id, user=user)
                     # Update existing
                     fb.rating = rating
                     fb.feedback = feedback
@@ -286,16 +286,14 @@ class DbStorageAdapter(BaseStorageAdapter):
                     # Create new
                     await MessageFeedback.objects.acreate(
                         message_id=message_id,
-                        user_id=user_id,
+                        user=user,
                         rating=rating,
                         feedback=feedback,
                     )
                     logger.debug(f"Created feedback for message {message_id}: rating={rating}")
             else:
                 # Delete feedback when rating is None
-                await MessageFeedback.objects.filter(
-                    message_id=message_id, user_id=user_id
-                ).adelete()
+                await MessageFeedback.objects.filter(message_id=message_id, user=user).adelete()
                 logger.debug(f"Deleted feedback for message {message_id}")
             return True
         except Message.DoesNotExist:

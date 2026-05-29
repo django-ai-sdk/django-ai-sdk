@@ -1,19 +1,59 @@
+from __future__ import annotations
+
 import os
+from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
-from django.core.files.base import File
+from django.conf import settings
 from django.db.models import Count
+from django.utils.module_loading import import_string
 
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.files.services import FileService
-from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, ThreadMemory
+from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryOwner, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
     MemoryOut,
+    MemoryOwnerOut,
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.utils import extract_document
+from django_ai_sdk.permissions import (
+    BasePermission,
+    Operation,
+    check_object_permissions,
+    check_permissions,
+    get_default_permissions,
+)
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+    from django.core.files.base import File
+
+
+@lru_cache(maxsize=1)
+def _get_memory_permissions() -> list[type[BasePermission]]:
+    """Resolve permission classes from settings (cached)."""
+    paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
+    if not paths:
+        return get_default_permissions()
+    return [import_string(p) for p in paths]
+
+
+async def _check_permission(user: AbstractUser | None, operation: Operation) -> None:
+    """Permission check for memory operations."""
+    await check_permissions(user, operation, _get_memory_permissions())
+
+
+async def _check_object_permission(
+    user: AbstractUser | None, operation: Operation, obj: Memory
+) -> None:
+    """Object permission check for memory operations."""
+    permissions = _get_memory_permissions()
+    await check_permissions(user, operation, permissions)
+    await check_object_permissions(user, operation, obj, permissions)
 
 
 class MemoryService:
@@ -29,26 +69,119 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def create_memory(name: str, description: str = "", slug: str = "") -> MemoryOut:
+    async def create_memory(
+        name: str,
+        description: str = "",
+        slug: str = "",
+        is_public: bool = True,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOut:
         """Create a new memory."""
+        await _check_permission(user, Operation.CREATE_MEMORY)
+
         memory = await Memory.objects.acreate(
             name=name,
-            slug=slug or None,
+            slug=slug,
             description=description,
+            is_public=is_public,
         )
+        if user and user.is_authenticated:
+            await MemoryOwner.objects.acreate(
+                memory=memory,
+                user=user,
+                can_manage=True,
+            )
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
             slug=memory.slug,
             description=memory.description,
+            is_public=memory.is_public,
             document_count=0,
             created_at=memory.created_at.isoformat(),
             updated_at=memory.updated_at.isoformat(),
         )
 
+    # ============================================================================
+    # Memory Owner Management
+    # ============================================================================
+
     @staticmethod
-    async def list_memories() -> list[MemoryOut]:
+    async def list_owners(memory_id: str, *, user: AbstractUser | None) -> list[MemoryOwnerOut]:
+        """List all owners of a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        return [
+            MemoryOwnerOut(
+                user_id=str(o.user_id),
+                can_manage=o.can_manage,
+                created_at=o.created_at.isoformat(),
+            )
+            async for o in memory.owners.all().select_related("user")
+        ]
+
+    @staticmethod
+    async def add_owner(
+        memory_id: str,
+        user_id: str,
+        can_manage: bool = False,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOwnerOut:
+        """Add a user as owner of a memory."""
+        from django.contrib.auth import get_user_model
+
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        UserModel = get_user_model()
+        owner_user = await UserModel.objects.aget(id=user_id)
+        ownership, _created = await MemoryOwner.objects.aupdate_or_create(
+            memory=memory,
+            user=owner_user,
+            defaults={"can_manage": can_manage},
+        )
+        return MemoryOwnerOut(
+            user_id=str(ownership.user_id),
+            can_manage=ownership.can_manage,
+            created_at=ownership.created_at.isoformat(),
+        )
+
+    @staticmethod
+    async def update_owner(
+        memory_id: str,
+        user_id: str,
+        can_manage: bool,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOwnerOut:
+        """Update an owner's can_manage flag."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        ownership = await memory.owners.select_related("user").aget(user_id=user_id)
+        ownership.can_manage = can_manage
+        await ownership.asave(update_fields=["can_manage"])
+        return MemoryOwnerOut(
+            user_id=str(ownership.user_id),
+            can_manage=ownership.can_manage,
+            created_at=ownership.created_at.isoformat(),
+        )
+
+    @staticmethod
+    async def remove_owner(memory_id: str, user_id: str, *, user: AbstractUser | None) -> None:
+        """Remove an owner from a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        # TODO: permission check
+        ownership = await memory.owners.aget(user_id=user_id)
+        await ownership.adelete()
+
+    # ============================================================================
+
+    @staticmethod
+    async def list_memories(*, user: AbstractUser | None = None) -> list[MemoryOut]:
         """List all visible memories."""
+        await _check_permission(user, Operation.VIEW_MEMORY)
+
         memories = (
             Memory.objects.filter(is_hidden=False)
             .annotate(document_count=Count("entries"))
@@ -60,6 +193,7 @@ class MemoryService:
                 name=memory.name,
                 slug=memory.slug,
                 description=memory.description,
+                is_public=memory.is_public,
                 document_count=memory.document_count,
                 created_at=memory.created_at.isoformat(),
                 updated_at=memory.updated_at.isoformat(),
@@ -75,35 +209,51 @@ class MemoryService:
         ]
 
     @staticmethod
-    async def link_memories(assistant_id: str, thread_id: str) -> None:
+    async def link_memories(
+        assistant_id: str, thread_id: str, *, user: AbstractUser | None
+    ) -> None:
         for memory_id in await MemoryService.get_assistant_memories(assistant_id):
-            await MemoryService.link_memory_to_thread(memory_id, thread_id)
+            await MemoryService.link_memory_to_thread(memory_id, thread_id, user=user)
 
     @staticmethod
-    async def unlink_memories(assistant_id: str, thread_id: str) -> None:
+    async def unlink_memories(
+        assistant_id: str, thread_id: str, *, user: AbstractUser | None
+    ) -> None:
         for memory_id in await MemoryService.get_assistant_memories(assistant_id):
-            await MemoryService.unlink_memory_from_thread(memory_id, thread_id)
+            await MemoryService.unlink_memory_from_thread(memory_id, thread_id, user=user)
 
     @staticmethod
-    async def get_memory(memory_id: str) -> MemoryOut:
+    async def get_memory(memory_id: str, *, user: AbstractUser | None = None) -> MemoryOut:
         """Get a single memory by ID."""
         memory = await Memory.objects.annotate(document_count=Count("entries")).aget(id=memory_id)
+        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
             slug=memory.slug,
             description=memory.description,
+            is_public=memory.is_public,
             document_count=memory.document_count,
             created_at=memory.created_at.isoformat(),
             updated_at=memory.updated_at.isoformat(),
         )
 
     @staticmethod
-    async def update_memory(memory_id: str, name: str, description: str = "") -> MemoryOut:
+    async def update_memory(
+        memory_id: str,
+        name: str,
+        description: str = "",
+        is_public: bool | None = None,
+        *,
+        user: AbstractUser | None,
+    ) -> MemoryOut:
         """Update a memory."""
         memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         memory.name = name
         memory.description = description
+        if is_public is not None:
+            memory.is_public = is_public
         await memory.asave()
         doc_count = await memory.entries.acount()
         return MemoryOut(
@@ -111,15 +261,17 @@ class MemoryService:
             name=memory.name,
             slug=memory.slug,
             description=memory.description,
+            is_public=memory.is_public,
             document_count=doc_count,
             created_at=memory.created_at.isoformat(),
             updated_at=memory.updated_at.isoformat(),
         )
 
     @staticmethod
-    async def delete_memory(memory_id: str) -> None:
+    async def delete_memory(memory_id: str, *, user: AbstractUser | None) -> None:
         """Delete a memory and all its entries."""
         memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.DELETE_MEMORY, memory)
         await memory.adelete()
 
     # ============================================================================
@@ -127,9 +279,12 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def upload_document(memory_id: str, file: File) -> DocumentOut | tuple[int, dict]:
+    async def upload_document(
+        memory_id: str, file: File, *, user: AbstractUser | None
+    ) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
 
         # file service handles file processing
         result = await FileService.process(file=file)
@@ -164,8 +319,12 @@ class MemoryService:
         return MemoryService._entry_doc_to_out(entry_doc)
 
     @staticmethod
-    async def list_documents(memory_id: str) -> list[DocumentOut]:
+    async def list_documents(
+        memory_id: str, *, user: AbstractUser | None = None
+    ) -> list[DocumentOut]:
         """List all file-backed documents in a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.LIST_DOCUMENTS, memory)
         entry_docs = (
             EntryDocument.objects.filter(entry__memory_id=memory_id)
             .select_related("entry")
@@ -174,16 +333,22 @@ class MemoryService:
         return [MemoryService._entry_doc_to_out(ed) async for ed in entry_docs]
 
     @staticmethod
-    async def get_document(memory_id: str, doc_id: str) -> DocumentOut:
+    async def get_document(
+        memory_id: str, doc_id: str, *, user: AbstractUser | None = None
+    ) -> DocumentOut:
         """Get a single document from a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.VIEW_DOCUMENT, memory)
         entry_doc = await EntryDocument.objects.select_related("entry").aget(
             entry_id=doc_id, entry__memory_id=memory_id
         )
         return MemoryService._entry_doc_to_out(entry_doc)
 
     @staticmethod
-    async def delete_document(memory_id: str, doc_id: str) -> None:
+    async def delete_document(memory_id: str, doc_id: str, *, user: AbstractUser | None) -> None:
         """Delete a document (and its entry) from a memory."""
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.DELETE_DOCUMENT, memory)
         entry = await Entry.objects.aget(id=doc_id, memory_id=memory_id)
         await entry.adelete()
 
@@ -192,9 +357,12 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def link_memory_to_thread(memory_id: str, thread_id: str) -> None:
+    async def link_memory_to_thread(
+        memory_id: str, thread_id: str, *, user: AbstractUser | None
+    ) -> None:
         """Link a memory to a thread."""
         memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.LINK_MEMORY, memory)
         thread = await Thread.objects.aget(id=thread_id)
         await ThreadMemory.objects.aget_or_create(
             thread=thread,
@@ -202,13 +370,19 @@ class MemoryService:
         )
 
     @staticmethod
-    async def unlink_memory_from_thread(memory_id: str, thread_id: str) -> None:
+    async def unlink_memory_from_thread(
+        memory_id: str, thread_id: str, *, user: AbstractUser | None
+    ) -> None:
         """Unlink a memory from a thread."""
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.UNLINK_MEMORY, memory)
         link = await ThreadMemory.objects.aget(memory_id=memory_id, thread_id=thread_id)
         await link.adelete()
 
     @staticmethod
-    async def list_thread_memories(thread_id: str) -> list[ThreadMemoryOut]:
+    async def list_thread_memories(
+        thread_id: str, *, user: AbstractUser | None = None
+    ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
         thread_memories_query = (
             ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
@@ -218,6 +392,7 @@ class MemoryService:
 
         memories = []
         async for tm in thread_memories_query:
+            await _check_object_permission(user, Operation.LIST_THREAD_MEMORIES, tm.memory)
             memories.append(
                 ThreadMemoryOut(
                     id=str(tm.memory.id),
@@ -232,28 +407,34 @@ class MemoryService:
         return memories
 
     @staticmethod
-    async def bulk_connect_memories(thread_id: str, memory_ids: list[str]) -> list[ThreadMemoryOut]:
+    async def bulk_connect_memories(
+        thread_id: str, memory_ids: list[str], *, user: AbstractUser | None
+    ) -> list[ThreadMemoryOut]:
         """Connect multiple memories to a thread at once."""
         thread = await Thread.objects.aget(id=thread_id)
 
         for memory_id in memory_ids:
             memory = await Memory.objects.aget(id=memory_id)
+            await _check_object_permission(user, Operation.LINK_MEMORY, memory)
             await ThreadMemory.objects.aget_or_create(
                 thread=thread,
                 memory=memory,
                 defaults={"active": True},
             )
 
-        return await MemoryService.list_thread_memories(thread_id)
+        return await MemoryService.list_thread_memories(thread_id, user=user)
 
     @staticmethod
-    async def toggle_memory_active(thread_id: str, memory_id: str, active: bool) -> ThreadMemoryOut:
+    async def toggle_memory_active(
+        thread_id: str, memory_id: str, active: bool, *, user: AbstractUser | None
+    ) -> ThreadMemoryOut:
         """Toggle the active status of a memory for a thread."""
         thread_memory = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.LINK_MEMORY, memory)
         thread_memory.active = active
         await thread_memory.asave()
 
-        memory = await Memory.objects.aget(id=memory_id)
         doc_count = await Entry.objects.filter(memory_id=memory_id).acount()
 
         return ThreadMemoryOut(
@@ -266,9 +447,13 @@ class MemoryService:
         )
 
     @staticmethod
-    async def disconnect_memory_from_thread(thread_id: str, memory_id: str) -> None:
+    async def disconnect_memory_from_thread(
+        thread_id: str, memory_id: str, *, user: AbstractUser | None
+    ) -> None:
         """Disconnect a memory from a thread."""
         link = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
+        memory = await Memory.objects.aget(id=memory_id)
+        await _check_object_permission(user, Operation.UNLINK_MEMORY, memory)
         await link.adelete()
 
     # ============================================================================
@@ -426,6 +611,8 @@ upload_document = async_to_sync(MemoryService.upload_document)
 list_documents = async_to_sync(MemoryService.list_documents)
 get_document = async_to_sync(MemoryService.get_document)
 delete_document = async_to_sync(MemoryService.delete_document)
+link_memories = async_to_sync(MemoryService.link_memories)
+unlink_memories = async_to_sync(MemoryService.unlink_memories)
 link_memory_to_thread = async_to_sync(MemoryService.link_memory_to_thread)
 unlink_memory_from_thread = async_to_sync(MemoryService.unlink_memory_from_thread)
 list_thread_memories = async_to_sync(MemoryService.list_thread_memories)
@@ -437,3 +624,7 @@ upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
+list_owners = async_to_sync(MemoryService.list_owners)
+add_owner = async_to_sync(MemoryService.add_owner)
+update_owner = async_to_sync(MemoryService.update_owner)
+remove_owner = async_to_sync(MemoryService.remove_owner)
