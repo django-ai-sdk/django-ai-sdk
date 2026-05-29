@@ -32,7 +32,7 @@ from django_ai_sdk.events import (
     ErrorEvent,
     SourceEvent,
 )
-from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
+from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
 
 
 class TestVercelProtocolHandler:
@@ -102,8 +102,8 @@ class TestVercelProtocolHandler:
     async def test_message_conversion_from_chat_messages(self, handler):
         """Test converting ChatMessages back to protocol format."""
         chat_messages = [
-            ChatMessageFactory.build(user=True, content="User msg"),
-            ChatMessageFactory.build(assistant=True, content="Assistant msg"),
+            ChatMessageFactory.build(role="user", content="User msg"),
+            ChatMessageFactory.build(role="assistant", content="Assistant msg"),
         ]
 
         protocol_messages = handler.from_chat_messages(chat_messages)

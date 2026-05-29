@@ -23,7 +23,7 @@ from django_ai_sdk.events import (
     ReasoningChunkEvent,
 )
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
-from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
+from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
 
 
 class TestOpenAIStream:
@@ -65,7 +65,7 @@ class TestOpenAIStream:
 
         # Collect all events
         events = []
-        async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+        async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
             events.append(event)
 
         # Find message_start event
@@ -109,7 +109,7 @@ class TestOpenAIStream:
         )
 
         events = []
-        async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+        async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
             events.append(event)
 
         # Check event sequence
@@ -152,7 +152,7 @@ class TestOpenAIStream:
         )
 
         events = []
-        async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+        async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
             events.append(event)
 
         # Should have reasoning event
@@ -191,7 +191,7 @@ class TestOpenAIStream:
         )
 
         events = []
-        async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+        async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
             events.append(event)
 
         # Check tool event sequence
@@ -212,7 +212,7 @@ class TestOpenAIStream:
         )
 
         events = []
-        async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+        async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
             events.append(event)
 
         # Should have error event
@@ -251,7 +251,7 @@ class TestOpenAIAgentStream:
             mock_runner.run_streamed = MagicMock(return_value=mock_result)
 
             events = []
-            async for event in adapter.stream([ChatMessageFactory.build(user=True)]):
+            async for event in adapter.stream([ChatMessageFactory.build(role="user")]):
                 events.append(event)
 
             # Find message start

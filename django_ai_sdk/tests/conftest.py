@@ -46,6 +46,57 @@ def mock_storage_adapter():
 
 
 @pytest.fixture
+def mock_user():
+    """Mock user with predictable pk and is_authenticated."""
+    from unittest.mock import MagicMock
+
+    user = MagicMock()
+    user.pk = "user-1"
+    user.is_authenticated = True
+    return user
+
+
+@pytest.fixture
+def mock_assistants_registry():
+    """Patch the global assistant registry at both import paths."""
+    from unittest.mock import MagicMock, patch
+    from django_ai_sdk.tests.mocks.assistant import create_assistant_mock
+
+    assistant = create_assistant_mock()
+    with \
+        patch("django_ai_sdk.assistants.registry.registry") as reg, \
+        patch("django_ai_sdk.assistants.services.registry", reg):
+        reg.get = MagicMock(return_value=assistant)
+        reg.all = MagicMock(return_value={"test-assistant": assistant})
+        yield reg
+
+
+@pytest.fixture
+def assistant_permissions(mock_assistants_registry):
+    """Fixture returning a setter that changes the registry assistant's permissions.
+
+    Usage::
+
+        def test_something(self, assistant_permissions):
+            assistant_permissions(DenyAll)        # single
+            assistant_permissions(IsOwner, DenyAll)  # multiple
+    """
+    def set_perms(*perms):
+        mock_assistants_registry.get.return_value.permissions = list(perms)
+    return set_perms
+
+
+@pytest.fixture
+def mock_storage_adapter_registry():
+    """Patch the StorageAdapterRegistry."""
+    from unittest.mock import MagicMock, patch
+
+    with patch("django_ai_sdk.storage.services.StorageAdapterRegistry") as sr:
+        sr.get_all_adapters = MagicMock(return_value=[])
+        yield sr
+
+
+@pytest.fixture
 def sample_thread_id():
     """Sample thread ID."""
     return "thread_test_12345"

@@ -11,7 +11,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.storage.memory import MemoryStorageAdapter, MemoryStore
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-from django_ai_sdk.tests.factories.message_factory import ChatMessageFactory
+from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
 
 
 @pytest.mark.django_db
@@ -81,7 +81,7 @@ class TestBaseAssistant:
         assert storage is not None
 
         # Store user message
-        user_msg = ChatMessageFactory.build(user=True)
+        user_msg = ChatMessageFactory.build(role="user")
         message_id = await storage.store_chat_message(user_msg)
 
         # Verify storage
@@ -104,7 +104,7 @@ class TestBaseAssistant:
         assert storage is not None
 
         # Store message
-        msg = ChatMessageFactory.build(assistant=True)
+        msg = ChatMessageFactory.build()
         message_id = await storage.store_chat_message(msg)
 
         # Rate the message
@@ -131,9 +131,9 @@ class TestBaseAssistant:
 
         # Create conversation history
         messages = [
-            ChatMessageFactory.build(user=True, content="Question 1"),
-            ChatMessageFactory.build(assistant=True, content="Answer 1"),
-            ChatMessageFactory.build(user=True, content="Question 2"),
+            ChatMessageFactory.build(role="user", content="Question 1"),
+            ChatMessageFactory.build(role="assistant", content="Answer 1"),
+            ChatMessageFactory.build(role="user", content="Question 2"),
         ]
 
         for msg in messages:
