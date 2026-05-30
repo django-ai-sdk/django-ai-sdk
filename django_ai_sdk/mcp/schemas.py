@@ -53,3 +53,22 @@ MCPServer = Annotated[
     StaticMCPServer | TokenMCPServer | OAuthMCPServer,
     Field(discriminator="type"),
 ]
+
+
+class ConnectionOut(BaseModel):
+    """MCP server connection status."""
+
+    server_name: str
+    label: str
+    type: str
+    connected: bool | None = None
+
+
+class AssistantMCPServerStatus(BaseModel):
+    """MCP server status for an assistant."""
+
+    server_name: str
+    label: str
+    type: str
+    status: str  # "active", "expired", "disconnected"
+    tool_names: list[str]

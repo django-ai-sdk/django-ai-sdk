@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypedDict
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
+from django.conf import settings
+from django.utils import timezone
 
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.permissions import (
@@ -13,9 +15,12 @@ from django_ai_sdk.permissions import (
 )
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from django.contrib.auth.models import AbstractUser
 
     from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
 
 
 class AssistantSummary(TypedDict):
@@ -79,6 +84,77 @@ class AssistantService:
         await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
         return assistant.info()
 
+    @staticmethod
+    async def get_mcp_server_status(
+        assistant: Any, *, user: AbstractUser | None = None
+    ) -> list[AssistantMCPServerStatus]:
+        """Get MCP server connection status for an assistant.
+
+        Requires VIEW_ASSISTANT permission.
+
+        Returns a list of AssistantMCPServerStatus with status: 'active', 'expired', or 'disconnected'.
+        """
+        perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
+        await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
+
+        try:
+            from django_ai_sdk.mcp.constants import (
+                MCP_STATUS_ACTIVE,
+                MCP_STATUS_DISCONNECTED,
+                MCP_STATUS_EXPIRED,
+            )
+            from django_ai_sdk.mcp.models import MCPOAuthToken
+            from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus, OAuthMCPServer
+        except ImportError:
+            return []
+
+        mcp_server_names: list[str] = getattr(assistant, "mcp_servers", [])
+        if not mcp_server_names:
+            return []
+
+        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+
+        def _get_tokens() -> dict[str, dict]:
+            return {
+                row["server_name"]: row
+                for row in MCPOAuthToken.objects.filter(
+                    user=user, server_name__in=mcp_server_names
+                ).values("server_name", "expires_at")
+            }
+
+        oauth_tokens = await sync_to_async(_get_tokens)()
+
+        now = timezone.now()
+        result = []
+        for name in mcp_server_names:
+            server = all_servers.get(name)
+            if server is None:
+                continue
+
+            if isinstance(server, OAuthMCPServer):
+                token_row = oauth_tokens.get(name)
+                if token_row is None:
+                    status = MCP_STATUS_DISCONNECTED
+                elif token_row["expires_at"] and token_row["expires_at"] <= now:
+                    status = MCP_STATUS_EXPIRED
+                else:
+                    status = MCP_STATUS_ACTIVE
+            else:
+                status = MCP_STATUS_ACTIVE
+
+            result.append(
+                AssistantMCPServerStatus(
+                    server_name=name,
+                    label=server.label or name.title(),
+                    type=server.type,
+                    status=status,
+                    tool_names=server.tools or [],
+                )
+            )
+
+        return result
+
 
 list_assistants = async_to_sync(AssistantService.list_assistants)
 get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
+get_mcp_server_status = async_to_sync(AssistantService.get_mcp_server_status)
