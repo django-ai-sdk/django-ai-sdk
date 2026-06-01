@@ -64,8 +64,19 @@ class MCPService:
         result = []
         for server_name, server_config in all_servers.items():
             # Determine if this server is connected
+            is_connected = None
             if server_config.type == "oauth":
-                is_connected = server_name in connected
+                if server_name in connected:
+                    # Check if token is expired
+                    try:
+                        token_obj = await MCPOAuthToken.objects.aget(
+                            user=user, server_name=server_name
+                        )
+                        is_connected = not token_obj.is_expired()
+                    except MCPOAuthToken.DoesNotExist:
+                        is_connected = False
+                else:
+                    is_connected = False
             else:
                 # Static/token servers don't have OAuth tokens, so no "connection" state
                 is_connected = None
@@ -76,6 +87,7 @@ class MCPService:
                     label=server_config.label or server_name.title(),
                     type=server_config.type,
                     connected=is_connected,
+                    has_token=server_name in connected,
                 )
             )
 
@@ -158,6 +170,12 @@ class MCPService:
             return oauth_client.client_id, oauth_client.get_client_secret()
 
         # Perform dynamic registration (RFC 7591)
+        if not discovery.registration_endpoint:
+            raise ValueError(
+                f"Server {server_name!r} has no registration_endpoint; "
+                "provide static client_id/client_secret instead."
+            )
+
         client_name = getattr(settings, "AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client")
         registration_data = {
             "client_name": client_name,
@@ -238,6 +256,69 @@ class MCPService:
         logger.info("Stored token for %r user=%s", server_name, user)
         return token_obj
 
+    @staticmethod
+    async def refresh_access_token(server_name: str, *, user: AbstractUser | None) -> MCPOAuthToken:
+        """Refresh the OAuth access token using the stored refresh_token.
+
+        Raises:
+            ValueError: no token, no refresh_token, or bad token response
+            httpx.HTTPStatusError: token endpoint rejected the grant
+        """
+        if not user:
+            raise ValueError("User required")
+
+        try:
+            token_obj = await MCPOAuthToken.objects.aget(user=user, server_name=server_name)
+        except MCPOAuthToken.DoesNotExist:
+            raise ValueError(f"No token for server {server_name!r}")
+
+        refresh_token = token_obj.get_refresh_token()
+        if not refresh_token:
+            raise ValueError(f"No refresh_token stored for {server_name!r}")
+
+        discovery = await MCPService.get_oauth_discovery(server_name)
+
+        # Resolve client credentials — dynamic registration takes precedence over static config
+        all_servers = _get_mcp_servers()
+        server = all_servers.get(server_name)
+        if not server or server.type != "oauth":
+            raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+
+        client_id = getattr(server, "client_id", "") or ""
+        client_secret = getattr(server, "client_secret", "") or ""
+        try:
+            oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
+            client_id = oauth_client.client_id
+            client_secret = oauth_client.get_client_secret()
+        except MCPOAuthClient.DoesNotExist:
+            pass
+
+        token_data: dict[str, str] = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+        }
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            if client_secret:
+                token_data.pop("client_id")
+                response = await client.post(
+                    discovery.token_endpoint, data=token_data, auth=(client_id, client_secret)
+                )
+            else:
+                response = await client.post(discovery.token_endpoint, data=token_data)
+
+        response.raise_for_status()
+        token_response = response.json()
+        if "access_token" not in token_response:
+            raise ValueError("No access_token in refresh response")
+
+        token_obj = await MCPService.store_token(
+            user=user, server_name=server_name, token_response=token_response
+        )
+        logger.info("Refreshed OAuth token for %r user=%s", server_name, user)
+        return token_obj
+
     # ============================================================================
     # OAuth Discovery
     # ============================================================================
@@ -270,3 +351,4 @@ get_oauth_discovery_sync = async_to_sync(MCPService.get_oauth_discovery)
 get_or_register_client_sync = async_to_sync(MCPService.get_or_register_client)
 exchange_token_sync = async_to_sync(MCPService.exchange_token)
 store_token_sync = async_to_sync(MCPService.store_token)
+refresh_access_token_sync = async_to_sync(MCPService.refresh_access_token)

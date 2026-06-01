@@ -62,6 +62,7 @@ class ConnectionOut(BaseModel):
     label: str
     type: str
     connected: bool | None = None
+    has_token: bool = False
 
 
 class AssistantMCPServerStatus(BaseModel):
