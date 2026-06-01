@@ -59,7 +59,11 @@ class MCPService:
             ):
                 connected.add(sn)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to load MCP OAuth token connections for user=%s; continuing with no connected servers.",
+                getattr(user, "pk", None),
+                exc_info=True,
+            )
 
         result = []
         for server_name, server_config in all_servers.items():
@@ -291,7 +295,10 @@ class MCPService:
             client_id = oauth_client.client_id
             client_secret = oauth_client.get_client_secret()
         except MCPOAuthClient.DoesNotExist:
-            pass
+            logger.debug(
+                "No registered OAuth client for %r; using static server credentials",
+                server_name,
+            )
 
         token_data: dict[str, str] = {
             "grant_type": "refresh_token",
