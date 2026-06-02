@@ -56,7 +56,7 @@ def mock_thread_model(aexists=True, thread_db=None):
     Usage::
 
         with mock_thread_model(aexists=True, thread_db=my_thread_db) as mock_thread:
-            result = await aget_thread_file_meta("thread-1")
+            result = await aget_thread_file_meta("thread-1", user=None)
     """
     with patch("django_ai_sdk.conversation.models.Thread") as mock_thread:
         mock_thread.objects.filter.return_value.aexists = AsyncMock(
