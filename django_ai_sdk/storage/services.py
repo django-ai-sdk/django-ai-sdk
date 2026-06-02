@@ -41,13 +41,13 @@ async def _get_storage(thread_info: ThreadInfo) -> Any:
 
 
 async def _check_object_permission(
-    thread_info: ThreadInfo,
     user: AbstractUser | None,
     operation: Operation,
+    obj: ThreadInfo,
 ) -> None:
     """Object-level permission using the thread's owning assistant's permission classes."""
     try:
-        assistant = AssistantService.from_registry(thread_info.assistant_id)
+        assistant = AssistantService.from_registry(obj.assistant_id)
     except ValueError:
         assistant = None
 
@@ -55,7 +55,7 @@ async def _check_object_permission(
         assistant, "permissions", get_default_permissions()
     )
     await check_permissions(user, operation, perm_classes)
-    await check_object_permissions(user, operation, thread_info, perm_classes)
+    await check_object_permissions(user, operation, obj, perm_classes)
 
 
 async def _check_permission(
@@ -157,7 +157,7 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(thread, user, Operation.VIEW_THREAD)
+            await _check_object_permission(user, Operation.VIEW_THREAD, thread)
             logger.debug(f"Found thread {thread_id} in adapter, assistant: {thread.assistant_id}")
 
         if not thread:
@@ -184,7 +184,7 @@ class ThreadService:
             threads = await adapter_class.list_threads(user)
             for thread in threads:
                 try:
-                    await _check_object_permission(thread, user, Operation.LIST_THREADS)
+                    await _check_object_permission(user, Operation.LIST_THREADS, thread)
                     all_threads.append(thread)
                 except PermissionDenied:
                     continue
@@ -222,7 +222,7 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(thread, user, Operation.UPDATE_THREAD)
+            await _check_object_permission(user, Operation.UPDATE_THREAD, thread)
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.update_thread(thread_id, title, metadata)
@@ -249,7 +249,7 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(thread, user, Operation.DELETE_THREAD)
+            await _check_object_permission(user, Operation.DELETE_THREAD, thread)
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.delete_thread(thread_id)
@@ -278,7 +278,7 @@ class ThreadService:
             threads = await adapter_class.list_threads(user)
             for thread in threads:
                 try:
-                    await _check_object_permission(thread, user, Operation.DELETE_ALL_THREADS)
+                    await _check_object_permission(user, Operation.DELETE_ALL_THREADS, thread)
                     if await adapter_class.delete_thread(thread.id):
                         total_deleted += 1
                 except PermissionDenied:
@@ -315,7 +315,7 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(thread, user, Operation.RATE_MESSAGE)
+        await _check_object_permission(user, Operation.RATE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.rate_message(message_id, rating, feedback, user=user)
@@ -343,7 +343,7 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(thread, user, Operation.DELETE_MESSAGE)
+        await _check_object_permission(user, Operation.DELETE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.delete_message(message_id)
@@ -373,7 +373,7 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(thread, user, Operation.RESTORE_MESSAGE)
+        await _check_object_permission(user, Operation.RESTORE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.restore_message(message_id)
@@ -401,11 +401,11 @@ class ThreadService:
             ValueError: If the thread does not exist or has no storage
             PermissionDenied: If user has no VIEW_THREAD permission
         """
-        thread_info = await _get_thread(thread_id)
-        if thread_info is None:
+        thread = await _get_thread(thread_id)
+        if thread is None:
             raise ValueError(f"Thread not found: {thread_id}")
-        await _check_object_permission(thread_info, user, Operation.VIEW_THREAD)
-        return await _get_storage(thread_info)
+        await _check_object_permission(user, Operation.VIEW_THREAD, thread)
+        return await _get_storage(thread)
 
     @staticmethod
     def get_storage(assistant: Any) -> type:
