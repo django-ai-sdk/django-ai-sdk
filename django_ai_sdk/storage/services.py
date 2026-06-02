@@ -491,30 +491,27 @@ async def aget_thread_file_meta(thread_id: str, *, user: AbstractUser | None) ->
         ValueError: If thread not found in DB
         PermissionDenied: If user has no VIEW_THREAD permission
     """
+    thread = await _get_thread(thread_id)
+    if thread is None:
+        raise ValueError("Thread not found")
+    await _check_object_permission(user, Operation.VIEW_THREAD, thread)
+
+    # FIX: additional query, but we have not yet added it to info
     from django_ai_sdk.conversation.models import Thread
     from django_ai_sdk.memories.models import Entry
 
-    if not await Thread.objects.filter(id=thread_id).aexists():
-        raise ValueError("Thread not found")
-
-    thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
-
-    await _check_object_permission(user, "view_thread", thread)
-
-    file_memory_id = str(thread.file_memory_id) if thread.file_memory_id else None
+    file_memory_id = await (
+        Thread.objects.filter(id=thread_id).values_list("file_memory_id", flat=True).afirst()
+    )
+    file_memory_id_str = str(file_memory_id) if file_memory_id else None
     file_count = (
-        await Entry.objects.filter(memory_id=thread.file_memory_id).acount()
-        if file_memory_id
-        else 0
+        await Entry.objects.filter(memory_id=file_memory_id).acount() if file_memory_id_str else 0
     )
 
     return {
         "file_count": file_count,
-        "file_memory_id": file_memory_id,
+        "file_memory_id": file_memory_id_str,
     }
-
-
-get_thread_file_meta = async_to_sync(aget_thread_file_meta)
 
 
 # ============================================================================
@@ -530,3 +527,4 @@ list_threads = async_to_sync(ThreadService.threads)
 update_thread = async_to_sync(ThreadService.update_thread)
 delete_thread = async_to_sync(ThreadService.delete_thread)
 delete_all_threads = async_to_sync(ThreadService.delete_all_threads)
+get_thread_file_meta = async_to_sync(aget_thread_file_meta)

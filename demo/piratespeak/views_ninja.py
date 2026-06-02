@@ -146,7 +146,7 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
 @router.get("/threads/{thread_id}/file-meta/", response={200: ThreadFileMeta, 404: Error})
 async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
     try:
-        data = await aget_thread_file_meta(thread_id)
+        data = await aget_thread_file_meta(thread_id, user=request.user)
         return ThreadFileMeta(**data)
     except ValueError as e:
         return 404, Error(message=str(e))

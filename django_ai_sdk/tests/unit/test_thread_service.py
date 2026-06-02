@@ -295,40 +295,35 @@ class TestGetThreadHistory:
 @pytest.mark.asyncio
 class TestGetThreadFileMeta:
     async def test_returns_file_meta(self):
-        from django_ai_sdk.tests.mocks.storage import mock_thread_model
-
         file_memory_id = str(uuid4())
-        thread_db = MagicMock()
-        thread_db.file_memory_id = file_memory_id
 
-        with mock_thread_model(aexists=True, thread_db=thread_db):
-            result = await aget_thread_file_meta("thread-1")
+        with (
+            patch("django_ai_sdk.storage.services._get_thread", return_value=MagicMock(assistant_id="test")),
+            patch("django_ai_sdk.conversation.models.Thread") as mock_thread,
+        ):
+            mock_thread.objects.filter.return_value.values_list.return_value.afirst = AsyncMock(return_value=file_memory_id)
+
+            result = await aget_thread_file_meta("thread-1", user=None)
             assert result["file_memory_id"] == file_memory_id
             assert "file_count" in result
 
     async def test_raises_when_thread_not_found(self):
-        from django_ai_sdk.tests.mocks.storage import mock_thread_model
-
-        with mock_thread_model(aexists=False):
+        with patch("django_ai_sdk.storage.services._get_thread", return_value=None):
             with pytest.raises(ValueError, match="not found"):
-                await aget_thread_file_meta("nonexistent")
+                await aget_thread_file_meta("nonexistent", user=None)
 
     async def test_counts_files_when_memory_exists(self):
-        from unittest.mock import patch
-        from django_ai_sdk.tests.mocks.storage import mock_thread_model
-
         file_memory_id = str(uuid4())
-        thread_db = MagicMock()
-        thread_db.file_memory_id = file_memory_id
-
         mock_entry_qs = MagicMock()
         mock_entry_qs.acount = AsyncMock(return_value=5)
 
         with (
-            mock_thread_model(aexists=True, thread_db=thread_db),
+            patch("django_ai_sdk.storage.services._get_thread", return_value=MagicMock(assistant_id="test")),
+            patch("django_ai_sdk.conversation.models.Thread") as mock_thread,
             patch("django_ai_sdk.memories.models.Entry") as mock_entry,
         ):
+            mock_thread.objects.filter.return_value.values_list.return_value.afirst = AsyncMock(return_value=file_memory_id)
             mock_entry.objects.filter.return_value = mock_entry_qs
 
-            result = await aget_thread_file_meta("thread-1")
+            result = await aget_thread_file_meta("thread-1", user=None)
             assert result["file_count"] == 5
