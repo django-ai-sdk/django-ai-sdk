@@ -15,6 +15,12 @@ from haystack_integrations.components.embedders.fastembed import (
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 from pydantic import Field
+from tenacity import (
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.config import QdrantStorageConfig
@@ -74,16 +80,32 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
         if storage.is_persistent and storage.persist_path:
             os.makedirs(storage.persist_path, exist_ok=True)
 
-            return QdrantDocumentStore(
-                path=storage.persist_path,
-                index="documents",
-                recreate_index=recreate,
-                return_embedding=True,
-                use_sparse_embeddings=True,
-                embedding_dim=self.config.embedding_dim,
-                on_disk=storage.qdrant_on_disk,
-                similarity=storage.qdrant_similarity,
-            )
+            for attempt in Retrying(
+                stop=stop_after_attempt(5),
+                wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
+                retry=retry_if_exception(
+                    lambda e: isinstance(e, RuntimeError) and "already accessed" in str(e)
+                ),
+                reraise=True,
+                before_sleep=lambda rs: logger.warning(
+                    "Qdrant store at {} locked by another process, "
+                    "retrying in {:.1f}s (attempt {}/5)",
+                    storage.persist_path,
+                    rs.next_action.sleep if rs.next_action else 0,
+                    rs.attempt_number,
+                ),
+            ):
+                with attempt:
+                    return QdrantDocumentStore(
+                        path=storage.persist_path,
+                        index="documents",
+                        recreate_index=recreate,
+                        return_embedding=True,
+                        use_sparse_embeddings=True,
+                        embedding_dim=self.config.embedding_dim,
+                        on_disk=storage.qdrant_on_disk,
+                        similarity=storage.qdrant_similarity,
+                    )
         else:
             return QdrantDocumentStore(
                 ":memory:",
