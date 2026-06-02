@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from django.conf import settings
 from django.http import StreamingHttpResponse
 
 from django_ai_sdk.adapters.protocols import Streamable
@@ -48,7 +49,9 @@ async def stream_response(
 
     # Default SSE headers
     response["Cache-Control"] = "no-cache"
-    response["Access-Control-Allow-Origin"] = "*"
+    cors_origin = getattr(settings, "AI_SDK_STREAM_CORS_ORIGIN", None)
+    if cors_origin:
+        response["Access-Control-Allow-Origin"] = cors_origin
     response["Access-Control-Allow-Headers"] = "Cache-Control"
 
     # TODO: Vercel AI UI message stream version, needs to be optional

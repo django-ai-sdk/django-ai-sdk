@@ -111,7 +111,7 @@ class MemoryService:
     async def list_owners(memory_id: str, *, user: AbstractUser | None) -> list[MemoryOwnerOut]:
         """List all owners of a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        # TODO: permission check
+        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
         return [
             MemoryOwnerOut(
                 user_id=str(o.user_id),
@@ -133,7 +133,7 @@ class MemoryService:
         from django.contrib.auth import get_user_model
 
         memory = await Memory.objects.aget(id=memory_id)
-        # TODO: permission check
+        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         UserModel = get_user_model()
         owner_user = await UserModel.objects.aget(id=user_id)
         ownership, _created = await MemoryOwner.objects.aupdate_or_create(
@@ -157,7 +157,7 @@ class MemoryService:
     ) -> MemoryOwnerOut:
         """Update an owner's can_manage flag."""
         memory = await Memory.objects.aget(id=memory_id)
-        # TODO: permission check
+        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         ownership = await memory.owners.select_related("user").aget(user_id=user_id)
         ownership.can_manage = can_manage
         await ownership.asave(update_fields=["can_manage"])
@@ -171,7 +171,7 @@ class MemoryService:
     async def remove_owner(memory_id: str, user_id: str, *, user: AbstractUser | None) -> None:
         """Remove an owner from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        # TODO: permission check
+        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         ownership = await memory.owners.aget(user_id=user_id)
         await ownership.adelete()
 
@@ -476,8 +476,12 @@ class MemoryService:
         return thread.file_memory
 
     @staticmethod
-    async def upload_thread_file(thread_id: str, file: File) -> DocumentOut | tuple[int, dict]:
+    async def upload_thread_file(
+        thread_id: str, file: File, *, user: AbstractUser | None = None
+    ) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
+        thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+        await _check_object_permission(user, Operation.UPLOAD_FILE, thread)
         memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
 
         # get assistant from thread
@@ -516,12 +520,16 @@ class MemoryService:
         return MemoryService._entry_doc_to_out(entry_doc)
 
     @staticmethod
-    async def list_thread_files(thread_id: str) -> list[DocumentOut]:
+    async def list_thread_files(
+        thread_id: str, *, user: AbstractUser | None = None
+    ) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
         try:
             thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
         except Thread.DoesNotExist:
             return []
+
+        await _check_object_permission(user, Operation.VIEW_FILE, thread)
 
         if not thread.file_memory_id:
             return []
@@ -534,16 +542,21 @@ class MemoryService:
         return [MemoryService._entry_doc_to_out(ed) async for ed in entry_docs]
 
     @staticmethod
-    async def delete_thread_file(thread_id: str, doc_id: str) -> None:
+    async def delete_thread_file(
+        thread_id: str, doc_id: str, *, user: AbstractUser | None = None
+    ) -> None:
         """Delete a file from a thread."""
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+        await _check_object_permission(user, Operation.DELETE_FILE, thread)
         if not thread.file_memory_id:
             return
         entry = await Entry.objects.aget(id=doc_id, memory_id=thread.file_memory_id)
         await entry.adelete()
 
     @staticmethod
-    async def get_chunk_content(entry_id: str, chunk_id: str | None) -> str | None:
+    async def get_chunk_content(
+        entry_id: str, chunk_id: str | None, *, user: AbstractUser | None = None
+    ) -> str | None:
         """Return a specific chunk from the vector store, falling back to full Entry content.
 
         When chunk_id is None the document was not split into chunks, so the
@@ -559,6 +572,8 @@ class MemoryService:
             entry = await Entry.objects.aget(id=entry_id)
         except Entry.DoesNotExist:
             return None
+
+        await _check_object_permission(user, Operation.VIEW_DOCUMENT, entry)
 
         if chunk_id is None:
             return entry.content

@@ -4,6 +4,8 @@ import uuid
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
+from django.db import models
+from django.db.models import Count
 from django.utils import timezone
 
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
@@ -81,9 +83,9 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def get_thread(cls, thread_id: str) -> ThreadInfo | None:
         """Get thread metadata by ID."""
         try:
-            thread = await Thread.objects.aget(id=thread_id)
-            # Get message count (excluding deleted)
-            message_count = await thread.messages.filter(is_deleted=False).acount()
+            thread = await Thread.objects.annotate(
+                msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
+            ).aget(id=thread_id)
 
             return ThreadInfo(
                 id=str(thread.id),
@@ -94,7 +96,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                 created_at=thread.created_at,
                 updated_at=thread.updated_at,
                 metadata=thread.metadata,
-                message_count=message_count,
+                message_count=thread.msg_count,
             )
         except (Thread.DoesNotExist, ValidationError):
             return None
@@ -107,9 +109,12 @@ class DbStorageAdapter(BaseStorageAdapter):
         if user_id:
             queryset = queryset.filter(user_id=user_id)
 
+        queryset = queryset.annotate(
+            msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
+        ).order_by("-updated_at")
+
         threads = []
-        async for thread in queryset.order_by("-updated_at"):
-            message_count = await thread.messages.filter(is_deleted=False).acount()
+        async for thread in queryset:
             threads.append(
                 ThreadInfo(
                     id=str(thread.id),
@@ -120,7 +125,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                     created_at=thread.created_at,
                     updated_at=thread.updated_at,
                     metadata=thread.metadata,
-                    message_count=message_count,
+                    message_count=thread.msg_count,
                 )
             )
         return threads

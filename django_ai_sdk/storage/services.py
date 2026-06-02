@@ -474,20 +474,22 @@ get_thread_history = async_to_sync(aget_thread_history)
 # ============================================================================
 
 
-async def aget_thread_file_meta(thread_id: str) -> dict[str, Any]:
+async def aget_thread_file_meta(thread_id: str, *, user: AbstractUser | None) -> dict[str, Any]:
     """
     Get file metadata for a thread: file_count and file_memory_id.
 
-    Does not raise if thread has no file memory — returns {file_count: 0, file_memory_id: None}.
+    Does not raise if thread has no file memory - returns {file_count: 0, file_memory_id: None}.
 
     Args:
         thread_id: Thread ID to retrieve file metadata for
+        user: Required user for permission check
 
     Returns:
         Dict with file_count and file_memory_id
 
     Raises:
         ValueError: If thread not found in DB
+        PermissionDenied: If user has no VIEW_THREAD permission
     """
     from django_ai_sdk.conversation.models import Thread
     from django_ai_sdk.memories.models import Entry
@@ -496,6 +498,9 @@ async def aget_thread_file_meta(thread_id: str) -> dict[str, Any]:
         raise ValueError("Thread not found")
 
     thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
+
+    await _check_object_permission(user, "view_thread", thread)
+
     file_memory_id = str(thread.file_memory_id) if thread.file_memory_id else None
     file_count = (
         await Entry.objects.filter(memory_id=thread.file_memory_id).acount()
