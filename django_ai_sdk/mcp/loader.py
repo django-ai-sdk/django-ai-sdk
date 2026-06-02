@@ -88,6 +88,7 @@ async def _load_cached(
 
 async def _load_oauth(name: str, server: OAuthMCPServer, user: AbstractUser | None) -> list[Any]:
     if not user:
+        logger.debug("No user provided for OAuth server %r", name)
         return []
 
     from django_ai_sdk.mcp.models import MCPOAuthToken
@@ -96,6 +97,9 @@ async def _load_oauth(name: str, server: OAuthMCPServer, user: AbstractUser | No
         token_obj = await MCPOAuthToken.objects.aget(user_id=user.pk, server_name=name)
     except MCPOAuthToken.DoesNotExist:
         logger.debug("No OAuth token stored for user %s / server %r", user.pk, name)
+        return []
+    except Exception as e:
+        logger.warning("Error loading OAuth token for user %s / server %r: %s", user.pk, name, e)
         return []
 
     if token_obj.is_expired():
