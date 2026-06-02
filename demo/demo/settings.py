@@ -162,3 +162,9 @@ AI_SDK_MEMORY_PERMISSIONS = [
 
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
+
+# MCP Server Configuration
+AI_SDK_MCP_SERVERS = {}
+
+# MCP Backend
+AI_SDK_MCP_BACKEND = "django_ai_sdk.mcp.backends.haystack"

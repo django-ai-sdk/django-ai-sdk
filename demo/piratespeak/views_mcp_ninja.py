@@ -2,7 +2,10 @@
 
 from typing import Literal
 
+import httpx
+from django.conf import settings
 from django.http import HttpRequest
+from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.services import MCPService
 from ninja import Router, Schema
 
@@ -35,10 +38,13 @@ class ErrorResponse(Schema):
 @router.get("/connections/", response=list[MCPConnectionOut])
 async def list_connections(request: HttpRequest) -> list[MCPConnectionOut]:
     """List all MCP servers with connection status."""
-    if not request.user.is_authenticated:
+    from django.contrib.auth.models import AnonymousUser
+
+    user = request.user
+    if isinstance(user, AnonymousUser) or not user.is_authenticated:
         return []
 
-    connections = await MCPService.list_connections(user=request.user)
+    connections = await MCPService.list_connections(user=user)
     return [
         MCPConnectionOut(
             server_name=conn.server_name,
@@ -71,10 +77,6 @@ async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
     """Test connectivity to an MCP server."""
     if not request.user.is_authenticated:
         return MCPTestOut(status="not_connected", message="Not authenticated")
-
-    import httpx
-    from django.conf import settings
-    from django_ai_sdk.mcp.models import MCPOAuthToken
 
     all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
     server = all_servers.get(server_name)

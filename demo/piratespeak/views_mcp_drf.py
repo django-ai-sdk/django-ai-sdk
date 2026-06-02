@@ -1,6 +1,9 @@
 """Demo MCP views using Django REST Framework."""
 
+import httpx
+from django.conf import settings
 from django.http import HttpRequest
+from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.services import (
     disconnect_sync,
     list_connections_sync,
@@ -74,10 +77,6 @@ class MCPViewSet(viewsets.ViewSet):
                 "message": "Not authenticated",
             }
             return Response(MCPTestSerializer(result).data)
-
-        import httpx
-        from django.conf import settings
-        from django_ai_sdk.mcp.models import MCPOAuthToken
 
         server_name = pk
         all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
