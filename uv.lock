@@ -569,6 +569,7 @@ dependencies = [
     { name = "mimetypes-magic" },
     { name = "pydantic" },
     { name = "python-magic" },
+    { name = "tenacity" },
 ]
 
 [package.optional-dependencies]
@@ -659,6 +660,7 @@ requires-dist = [
     { name = "python-magic", specifier = ">=0.4.27" },
     { name = "qdrant-haystack", marker = "extra == 'haystack'", specifier = ">=10.2.1" },
     { name = "sentence-transformers", marker = "extra == 'haystack'", specifier = ">=5.2.3" },
+    { name = "tenacity", specifier = ">=9.1.4" },
 ]
 provides-extras = ["all", "haystack", "mcp", "mistral", "openai", "rag", "restframework"]
 
