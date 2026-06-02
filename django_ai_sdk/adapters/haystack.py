@@ -405,6 +405,12 @@ class HaystackStream(Runnable, Streamable):
                             logger.debug(f"Tool call queued: {tool_call.tool_name}")
 
                 if chunk.tool_call_result:
+                    if chunk.tool_call_result.error:
+                        logger.error(
+                            f"Tool call failed: "
+                            f"tool={chunk.tool_call_result.origin.tool_name}, "
+                            f"result={chunk.tool_call_result.result}"
+                        )
                     queue_ref.put_nowait(("tool_result", chunk.tool_call_result))
                     logger.debug("Tool result queued")
 
@@ -511,6 +517,15 @@ class HaystackStream(Runnable, Streamable):
                         elif event_type == "tool_result":
                             # Tool result received
                             tool_call_id = payload.origin.id
+
+                            # Detect tool execution errors (hallucinations) and log prominently
+                            if payload.error:
+                                logger.error(
+                                    f"Tool call failed: "
+                                    f"tool={payload.origin.tool_name}, "
+                                    f"result={payload.result}"
+                                )
+
                             # Ensure the output is JSON serializable
                             tool_output = parse_tool_output(payload.to_dict())
 

@@ -8,7 +8,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
-from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
+from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags.config import QdrantStorageConfig
@@ -161,24 +161,10 @@ class PirateBasicAssistant(Assistant):
         # Create tools list
         tools = [get_today()]
 
-        # Add RAG tools for each memory
+        # Add RAG tools for each active memory link
         if self.rag_provider and thread_id:
-            memory_links = ThreadMemory.objects.filter(
-                thread_id=thread_id, active=True
-            ).prefetch_related("memory")
-
-            async for link in memory_links:
-                try:
-                    memory = await Memory.objects.aget(id=link.memory.id)
-                    spec = await memory.get_tool_spec()
-
-                    rag = await self.rag_provider.get_rag_instance(self, str(memory.id))
-                    if rag:
-                        tool = rag.get_tool(spec)
-                        tools.append(tool)
-
-                except Memory.DoesNotExist:
-                    continue
+            rag_tools = await self.get_rag_tools(thread_id=thread_id)
+            tools.extend(rag_tools)
 
         # Build tool agent with all tools
         tool_agent = ToolAgent(
