@@ -14,6 +14,8 @@ from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.mcp.schemas import OAuthMCPServer, StaticMCPServer, TokenMCPServer
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractUser
+
     from django_ai_sdk.mcp.models import MCPOAuthToken
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ def _ttl() -> int:
 
 async def load_mcp_tools(
     config: dict[str, Any],
-    user_id: str | None = None,
+    user: AbstractUser | None = None,
 ) -> list[Any]:
     """
     Load tool objects from all MCP servers in config.
@@ -42,20 +44,20 @@ async def load_mcp_tools(
     tools: list[Any] = []
     for name, server in config.items():
         try:
-            server_tools = await _load_server(name, server, user_id)
+            server_tools = await _load_server(name, server, user)
             tools.extend(server_tools)
         except Exception:
             logger.exception("Failed to load MCP tools for server %r", name)
     return tools
 
 
-async def _load_server(name: str, server: Any, user_id: str | None) -> list[Any]:
+async def _load_server(name: str, server: Any, user: AbstractUser | None) -> list[Any]:
     if isinstance(server, StaticMCPServer):
         return await _load_cached(name, server.url, token=None, tools=server.tools or None)
     if isinstance(server, TokenMCPServer):
         return await _load_cached(name, server.url, token=server.token, tools=server.tools or None)
     if isinstance(server, OAuthMCPServer):
-        return await _load_oauth(name, server, user_id)
+        return await _load_oauth(name, server, user)
     logger.warning("Unrecognised MCP server type for %r: %s", name, type(server).__name__)
     return []
 
@@ -84,16 +86,16 @@ async def _load_cached(
     return result
 
 
-async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) -> list[Any]:
-    if not user_id:
+async def _load_oauth(name: str, server: OAuthMCPServer, user: AbstractUser | None) -> list[Any]:
+    if not user:
         return []
 
     from django_ai_sdk.mcp.models import MCPOAuthToken
 
     try:
-        token_obj = await MCPOAuthToken.objects.aget(user_id=user_id, server_name=name)
+        token_obj = await MCPOAuthToken.objects.aget(user_id=user.pk, server_name=name)
     except MCPOAuthToken.DoesNotExist:
-        logger.debug("No OAuth token stored for user %s / server %r", user_id, name)
+        logger.debug("No OAuth token stored for user %s / server %r", user.pk, name)
         return []
 
     if token_obj.is_expired():
@@ -104,10 +106,10 @@ async def _load_oauth(name: str, server: OAuthMCPServer, user_id: str | None) ->
 
     access_token = token_obj.get_access_token()
     if not access_token:
-        logger.warning("Empty access token for user %s / server %r", user_id, name)
+        logger.warning("Empty access token for user %s / server %r", user.pk, name)
         return []
 
-    logger.info("Connecting to OAuth MCP server %r for user %s", name, user_id)
+    logger.info("Connecting to OAuth MCP server %r for user %s", name, user.pk)
     return await _connect(server.url, access_token, server.tools or None)
 
 

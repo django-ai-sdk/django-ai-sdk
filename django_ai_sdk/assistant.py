@@ -480,7 +480,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
     mcp_servers: list[str] = []
 
-    async def get_mcp_tools(self, user_id: str | None = None) -> list[Any]:
+    async def get_mcp_tools(self, user: AbstractUser | None = None) -> list[Any]:
         """
         Load MCP tool objects for this assistant.
 
@@ -492,7 +492,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
         all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
         selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-        return await load_mcp_tools(selected, user_id)
+        return await load_mcp_tools(selected, user)
 
     @abstractmethod
     async def get_pipeline_adapter(
