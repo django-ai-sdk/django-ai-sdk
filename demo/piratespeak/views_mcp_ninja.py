@@ -4,6 +4,7 @@ from typing import Literal
 
 import httpx
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
 from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.services import MCPService
@@ -38,7 +39,6 @@ class ErrorResponse(Schema):
 @router.get("/connections/", response=list[MCPConnectionOut])
 async def list_connections(request: HttpRequest) -> list[MCPConnectionOut]:
     """List all MCP servers with connection status."""
-    from django.contrib.auth.models import AnonymousUser
 
     user = request.user
     if isinstance(user, AnonymousUser) or not user.is_authenticated:
