@@ -139,6 +139,10 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     # Enable automatic thread title generation based on chat messages
     title_generation: bool = True
 
+    # Timeout (seconds) for title generation. If exceeded, thread title won't be set
+    # Set to 0 or negative to disable timeout.
+    title_generation_timeout: float = 5.0
+
     # Citation formatter used to render retrieved documents for the LLM.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
 
@@ -645,8 +649,26 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             if thread:
                 await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
             if self.title_generation and thread and not thread.title:
-                title = await generate_thread_title(assistant=self, messages=messages)
-                await ThreadService.update_thread(thread_id, title=title, user=user)
+                try:
+                    timeout = (
+                        self.title_generation_timeout if self.title_generation_timeout > 0 else None
+                    )
+                    title = await asyncio.wait_for(
+                        generate_thread_title(assistant=self, messages=messages),
+                        timeout=timeout,
+                    )
+                    if title:
+                        await ThreadService.update_thread(thread_id, title=title, user=user)
+                except TimeoutError:
+                    logger.warning(
+                        f"Title generation timed out for thread {thread_id} after {self.title_generation_timeout}s. "
+                        f"Streaming will continue without title."
+                    )
+                except Exception as e:
+                    logger.exception(
+                        f"Title generation failed for thread {thread_id}: {type(e).__name__}: {e}. "
+                        f"Streaming will continue without title."
+                    )
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
