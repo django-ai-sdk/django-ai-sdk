@@ -8,7 +8,7 @@ These helpers patch it at both import paths simultaneously to avoid that.
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-from django_ai_sdk.tests.mocks.assistant import create_assistant_mock
+from tests.mocks.assistant import create_assistant_mock
 
 
 @contextmanager

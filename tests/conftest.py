@@ -60,7 +60,7 @@ def mock_user():
 def mock_assistants_registry():
     """Patch the global assistant registry at both import paths."""
     from unittest.mock import MagicMock, patch
-    from django_ai_sdk.tests.mocks.assistant import create_assistant_mock
+    from tests.mocks.assistant import create_assistant_mock
 
     assistant = create_assistant_mock()
     with \

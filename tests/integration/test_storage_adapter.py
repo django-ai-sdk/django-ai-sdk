@@ -9,7 +9,7 @@ import uuid
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.storage.memory import MemoryStorageAdapter, MemoryStore
 from django_ai_sdk.storage.base import BaseStorageAdapter
-from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
+from tests.factories.schemas import ChatMessageFactory
 
 
 class TestMemoryStorageAdapter:

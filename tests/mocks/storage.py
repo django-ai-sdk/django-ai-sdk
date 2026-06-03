@@ -35,8 +35,8 @@ def setup_thread_adapter(registry, user_id="user-1", assistant_id="test-assistan
 
     Returns ``(thread_info, adapter_cls)`` for further configuration.
     """
-    from django_ai_sdk.tests.mocks.assistant import create_mock_adapter_class
-    from django_ai_sdk.tests.factories.schemas import ThreadInfoFactory
+    from tests.mocks.assistant import create_mock_adapter_class
+    from tests.factories.schemas import ThreadInfoFactory
 
     thread_info = ThreadInfoFactory.build(
         assistant_id=assistant_id, user_id=user_id

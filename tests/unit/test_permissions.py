@@ -227,7 +227,7 @@ class TestMemoryDefaultPermission:
             Operation,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         manager = await UserFactory.acreate()
         memory = await self._make_owner(manager, can_manage=True)
@@ -244,7 +244,7 @@ class TestMemoryDefaultPermission:
             PermissionDenied,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         contributor = await UserFactory.acreate()
         memory = await self._make_owner(contributor, can_manage=False)
@@ -261,7 +261,7 @@ class TestMemoryDefaultPermission:
             Operation,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         contributor = await UserFactory.acreate()
         memory = await self._make_owner(contributor, can_manage=False)
@@ -279,7 +279,7 @@ class TestMemoryDefaultPermission:
             PermissionDenied,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         stranger = await UserFactory.acreate()
         memory = await self._make_private_memory()
@@ -297,7 +297,7 @@ class TestMemoryDefaultPermission:
             PermissionDenied,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         stranger = await UserFactory.acreate()
         memory = await self._make_public_memory()
@@ -356,7 +356,7 @@ class TestMemoryDefaultPermission:
             PermissionDenied,
             check_object_permissions,
         )
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         stranger = await UserFactory.acreate()
         memory = await self._make_public_memory()

@@ -8,7 +8,7 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.memories.models import Entry, ThreadMemory
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
-from django_ai_sdk.tests.factories.db import MemoryFactory
+from tests.factories.db import MemoryFactory
 
 
 class RagToolsAssistant(Assistant):

@@ -12,7 +12,7 @@ from django_ai_sdk.storage.services import (
     aget_thread_file_meta,
     aget_thread_history,
 )
-from django_ai_sdk.tests.factories.schemas import chat_message
+from tests.factories.schemas import chat_message
 
 
 # ============================================================================
@@ -81,7 +81,7 @@ class TestThreadServiceRateMessage:
     async def test_rates_message_success(
         self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
     ):
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry)
 
@@ -104,7 +104,7 @@ class TestThreadServiceRateMessage:
     async def test_raises_when_message_not_found(
         self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
     ):
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry)
 
@@ -125,7 +125,7 @@ class TestThreadServiceDeleteMessage:
     async def test_deletes_message_success(
         self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
     ):
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry)
 
@@ -156,7 +156,7 @@ class TestThreadServiceRestoreMessage:
     async def test_restores_message_success(
         self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
     ):
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry)
 
@@ -236,7 +236,7 @@ class TestThreadServiceObjectPermissions:
         self, assistant_permissions, mock_storage_adapter_registry, mock_user
     ):
         from django_ai_sdk.permissions import IsOwner, PermissionDenied
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter
+        from tests.mocks.storage import setup_thread_adapter
 
         assistant_permissions(IsOwner)
         setup_thread_adapter(mock_storage_adapter_registry, user_id="other-user")
@@ -250,7 +250,7 @@ class TestThreadServiceObjectPermissions:
         self, assistant_permissions, mock_storage_adapter_registry, mock_user
     ):
         from django_ai_sdk.permissions import IsOwner
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         assistant_permissions(IsOwner)
         setup_thread_adapter(mock_storage_adapter_registry)
@@ -273,7 +273,7 @@ class TestGetThreadHistory:
     async def test_returns_thread_and_messages(
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter
+        from tests.mocks.storage import setup_thread_adapter
 
         setup_thread_adapter(mock_storage_adapter_registry)
         result = await aget_thread_history("thread-1")
@@ -282,7 +282,7 @@ class TestGetThreadHistory:
     async def test_raises_when_thread_not_found(
         self, mock_storage_adapter_registry
     ):
-        from django_ai_sdk.tests.mocks.assistant import create_mock_adapter_class
+        from tests.mocks.assistant import create_mock_adapter_class
 
         mock_adapter_cls = create_mock_adapter_class(get_thread=None)
         mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]

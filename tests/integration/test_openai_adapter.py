@@ -23,7 +23,7 @@ from django_ai_sdk.events import (
     ReasoningChunkEvent,
 )
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
-from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
+from tests.factories.schemas import ChatMessageFactory
 
 
 class TestOpenAIStream:

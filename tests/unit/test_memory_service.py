@@ -18,7 +18,7 @@ class TestMemoryServiceGetAssistantMemories:
     async def test_filters_by_slug(self):
         from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.assistant import mock_assistant_memories
 
         mem1 = await Memory.objects.acreate(name="Legal Documents")
         await Memory.objects.acreate(name="General Docs")
@@ -29,7 +29,7 @@ class TestMemoryServiceGetAssistantMemories:
 
     async def test_returns_empty_list_when_no_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.assistant import mock_assistant_memories
 
         with mock_assistant_memories([]):
             result = await MemoryService.get_assistant_memories("test-asst")
@@ -37,7 +37,7 @@ class TestMemoryServiceGetAssistantMemories:
 
     async def test_skips_nonexistent_slugs(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.assistant import mock_assistant_memories
 
         with mock_assistant_memories(["nonexistent-slug"]):
             result = await MemoryService.get_assistant_memories("test-asst")
@@ -55,12 +55,12 @@ class TestMemoryServicePermissions:
     """Integration tests: MemoryService methods enforce permissions."""
 
     async def _get_admin(self):
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         return await UserFactory.acreate(is_superuser=True)
 
     async def _get_user(self):
-        from django_ai_sdk.tests.factories.db import UserFactory
+        from tests.factories.db import UserFactory
 
         return await UserFactory.acreate()
 
@@ -76,7 +76,7 @@ class TestMemoryServicePermissions:
     async def test_owner_can_delete_memory(self):
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         owner = await self._get_user()
 
@@ -94,7 +94,7 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.permissions import PermissionDenied
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         owner = await self._get_user()
         stranger = await self._get_user()
@@ -113,7 +113,7 @@ class TestMemoryServicePermissions:
     async def test_stranger_can_read_public_memory(self):
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         owner = await self._get_user()
         stranger = await self._get_user()
@@ -133,7 +133,7 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.permissions import PermissionDenied
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         owner = await self._get_user()
         stranger = await self._get_user()
@@ -153,8 +153,8 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
 
         owner = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -183,8 +183,8 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
 
         owner = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -217,8 +217,8 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.permissions import PermissionDenied
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
 
         owner = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -244,8 +244,8 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.models import Memory, MemoryOwner
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.permissions import PermissionDenied
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
-        from django_ai_sdk.tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
 
         owner = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -270,7 +270,7 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.permissions import PermissionDenied
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         user = await self._get_user()
 
@@ -319,7 +319,7 @@ class TestOpenMode:
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter
+        from tests.mocks.storage import setup_thread_adapter
 
         thread_info, _ = setup_thread_adapter(
             mock_storage_adapter_registry, user_id=None
@@ -332,7 +332,7 @@ class TestOpenMode:
         self, mock_assistants_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
-        from django_ai_sdk.tests.factories.schemas import ThreadInfoFactory
+        from tests.factories.schemas import ThreadInfoFactory
 
         thread_info = ThreadInfoFactory.build(assistant_id="test-assistant", user_id=None)
 
@@ -353,7 +353,7 @@ class TestOpenMode:
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
-        from django_ai_sdk.tests.mocks.storage import setup_thread_adapter, mock_get_storage
+        from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry, user_id=None)
 
@@ -365,7 +365,7 @@ class TestOpenMode:
 
     async def test_memory_service_create_with_none_user(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         with memory_permissions():
             try:
@@ -379,7 +379,7 @@ class TestOpenMode:
 
     async def test_memory_service_list_with_none_user(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.tests.mocks.permissions import memory_permissions
+        from tests.mocks.permissions import memory_permissions
 
         with memory_permissions():
             result = await MemoryService.list_memories(user=None)

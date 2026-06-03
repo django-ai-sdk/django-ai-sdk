@@ -32,7 +32,7 @@ from django_ai_sdk.events import (
     ErrorEvent,
     SourceEvent,
 )
-from django_ai_sdk.tests.factories.schemas import ChatMessageFactory
+from tests.factories.schemas import ChatMessageFactory
 
 
 class TestVercelProtocolHandler:
