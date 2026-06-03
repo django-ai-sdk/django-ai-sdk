@@ -345,8 +345,8 @@ class VercelProtocolHandler(BaseProtocolHandler):
         self.reasoning_started = False
         self.reasoning_id = None
 
-        events = adapter.stream(messages)  # type: ignore
-        protocol_stream = self.handle_stream(events)  # type: ignore
+        events = adapter.stream(messages)
+        protocol_stream = self.handle_stream(events)
 
         try:
             async for chunk in protocol_stream:

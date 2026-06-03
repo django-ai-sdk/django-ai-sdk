@@ -7,7 +7,7 @@ different protocol handlers based on the target format.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
 
 from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
@@ -30,10 +30,10 @@ class BaseProtocolHandler(ABC):
         pass
 
     @abstractmethod
-    def sse(
+    async def sse(
         self,
         adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""
-        pass
+        yield cast("bytes", None)  # pragma: no cover

@@ -615,7 +615,7 @@ class OpenAIAgentStream(Runnable, Streamable):
     async def stream(
         self,
         messages: list[ChatMessage],
-    ) -> AsyncGenerator["StreamEvent", None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         agent_input = self.get_input(messages)
         self._tool_call_registry.clear()  # Clear registry for new stream
         pending_tool_calls = []  # Track tool calls waiting for output
