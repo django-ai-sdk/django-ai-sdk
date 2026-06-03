@@ -17,9 +17,11 @@ from django_ai_sdk.permissions import (
 if TYPE_CHECKING:
     from typing import Any
 
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.assistants.mixins import AssistantInfo
     from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
 
 
@@ -43,7 +45,9 @@ class AssistantService:
         return assistant
 
     @staticmethod
-    async def get_assistant(thread_id: str, user: AbstractUser | None = None) -> Assistant:
+    async def get_assistant(
+        thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> Assistant:
         """Find the thread and return its associated assistant.
 
         Args:
@@ -64,7 +68,9 @@ class AssistantService:
         return AssistantService.from_registry(thread.assistant_id)
 
     @staticmethod
-    async def list_assistants(user: AbstractUser | None = None) -> list[AssistantSummary]:
+    async def list_assistants(
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[AssistantSummary]:
         """Return all registered assistants the user is allowed to view."""
         result: list[AssistantSummary] = []
         for aid, assistant in registry.all().items():
@@ -77,7 +83,9 @@ class AssistantService:
         return result
 
     @staticmethod
-    async def get_assistant_info(assistant_id: str, user: AbstractUser | None = None) -> dict:
+    async def get_assistant_info(
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> AssistantInfo:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = AssistantService.from_registry(assistant_id)
         perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
@@ -86,7 +94,7 @@ class AssistantService:
 
     @staticmethod
     async def get_mcp_server_status(
-        assistant: Any, *, user: AbstractUser | None = None
+        assistant: Any, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[AssistantMCPServerStatus]:
         """Get MCP server connection status for an assistant.
 

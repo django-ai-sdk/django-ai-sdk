@@ -35,9 +35,13 @@ class Thread(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     metadata = models.JSONField(default=dict, blank=True)
 
-    # Reverse relation type hint
+    # Reverse relation type hints
     messages: models.Manager["Message"]
     user_id: str | None
+    file_memory_id: str | None
+
+    # Annotated field from querysets
+    msg_count: int
 
     # Custom manager
     objects = ThreadManager()

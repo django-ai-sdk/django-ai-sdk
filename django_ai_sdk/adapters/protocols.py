@@ -35,7 +35,7 @@ class Streamable(Protocol):
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None
 
-    async def stream(
+    def stream(
         self,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[StreamEvent, None]: ...

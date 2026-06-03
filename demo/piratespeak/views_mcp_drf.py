@@ -61,8 +61,10 @@ class MCPViewSet(viewsets.ViewSet):
         """Disconnect (revoke) an OAuth MCP connection."""
         if not request.user.is_authenticated:
             return Response({"detail": "Not authenticated"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not pk:
+            return Response({"detail": "Server name required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        server_name = pk
+        server_name: str = pk
         deleted = disconnect_sync(server_name, user=request.user)
         if not deleted:
             return Response({"detail": "Not connected"}, status=status.HTTP_404_NOT_FOUND)
@@ -77,8 +79,10 @@ class MCPViewSet(viewsets.ViewSet):
                 "message": "Not authenticated",
             }
             return Response(MCPTestSerializer(result).data)
+        if not pk:
+            return Response({"detail": "Server name required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        server_name = pk
+        server_name: str = pk
         all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
         server = all_servers.get(server_name)
         if not server:

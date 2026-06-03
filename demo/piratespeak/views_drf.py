@@ -108,6 +108,7 @@ class MessageSerializer(serializers.Serializer):
 
 class ChatRequestSerializer(serializers.Serializer):
     messages = MessageSerializer(many=True)
+    assistant_id = serializers.CharField(required=False, default="")
 
 
 class ThreadListAPIView(APIView):
@@ -133,7 +134,9 @@ class ThreadCreateAPIView(APIView):
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]
+            assistant_id = request.data.get("assistant_id", "")
             thread_id = create_thread(
+                assistant_id=assistant_id,
                 messages=messages,
                 user=request.user,
             )
@@ -179,7 +182,7 @@ class ThreadDetailAPIView(APIView):
 class ThreadFileMetaAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
         try:
-            data = get_thread_file_meta(thread_id)
+            data = get_thread_file_meta(thread_id, user=request.user)
             return Response(ThreadFileMetaSerializer(data).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)

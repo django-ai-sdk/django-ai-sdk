@@ -91,6 +91,7 @@ class Entry(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="entries")
+    memory_id: str
     content = models.TextField(blank=True, default="")
     data = models.JSONField(default=dict, blank=True)
     name = models.CharField(max_length=255, blank=True, default="")

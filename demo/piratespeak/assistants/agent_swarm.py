@@ -146,7 +146,7 @@ class AgentSwarmAssistant(Assistant):
                 api_key=Secret.from_token(settings.OPENAI_API_KEY),
                 api_base_url=getattr(settings, "OPENAI_API_URL", None),
             ),
-            tools=self.get_tools(thread_id=thread_id, user=user),
+            tools=self.get_tools(thread_id=thread_id or "", user=user),
             system_prompt=self.get_system_prompt(),
             exit_conditions=["text"],
         )

@@ -24,6 +24,7 @@ def _get_fernet() -> Fernet:
 
 
 class MCPOAuthToken(models.Model):
+    user_id: int
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
