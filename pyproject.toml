@@ -3,9 +3,7 @@ requires = ["setuptools>=75", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["django_ai_sdk*"]
-exclude = ["demo*", "logs*", "ideas*"]
 
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
@@ -71,7 +69,7 @@ filterwarnings = [
 python_classes = ["Test*"]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
-testpaths = ["django_ai_sdk/tests"]
+testpaths = ["tests"]
 
 [tool.coverage.run]
 omit = ["*/tests/*", "*/migrations/*"]
