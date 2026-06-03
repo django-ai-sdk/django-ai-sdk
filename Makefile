@@ -1,4 +1,4 @@
-PHONY: setup format test typecheck
+PHONY: setup format test typecheck tag build publish release
 
 setup:
 	uv sync --all-extras
@@ -13,3 +13,15 @@ test:
 
 typecheck:
 	uv run pyright
+
+tag:
+	@read -p "Tag (e.g. v0.1.0rc1): " TAG; \
+	git tag -a $$TAG -m "Release $$TAG" && git push origin $$TAG
+
+build:
+	uv build
+
+publish:
+	uv publish
+
+release: tag build publish
