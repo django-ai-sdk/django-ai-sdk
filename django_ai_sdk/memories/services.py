@@ -29,7 +29,10 @@ from django_ai_sdk.permissions import (
 )
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from typing import Any
+
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
     from django.core.files.base import File
 
 
@@ -42,13 +45,15 @@ def _get_memory_permissions() -> list[type[BasePermission]]:
     return [import_string(p) for p in paths]
 
 
-async def _check_permission(user: AbstractUser | None, operation: Operation) -> None:
+async def _check_permission(
+    user: AbstractBaseUser | AnonymousUser | None, operation: Operation
+) -> None:
     """Permission check for memory operations."""
     await check_permissions(user, operation, _get_memory_permissions())
 
 
 async def _check_object_permission(
-    user: AbstractUser | None, operation: Operation, obj: Memory
+    user: AbstractBaseUser | AnonymousUser | None, operation: Operation, obj: Any
 ) -> None:
     """Object permission check for memory operations."""
     permissions = _get_memory_permissions()
@@ -75,7 +80,7 @@ class MemoryService:
         slug: str = "",
         is_public: bool = True,
         *,
-        user: AbstractUser | None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOut:
         """Create a new memory."""
         await _check_permission(user, Operation.CREATE_MEMORY)
@@ -108,7 +113,9 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def list_owners(memory_id: str, *, user: AbstractUser | None) -> list[MemoryOwnerOut]:
+    async def list_owners(
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+    ) -> list[MemoryOwnerOut]:
         """List all owners of a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
@@ -127,7 +134,7 @@ class MemoryService:
         user_id: str,
         can_manage: bool = False,
         *,
-        user: AbstractUser | None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOwnerOut:
         """Add a user as owner of a memory."""
         from django.contrib.auth import get_user_model
@@ -153,7 +160,7 @@ class MemoryService:
         user_id: str,
         can_manage: bool,
         *,
-        user: AbstractUser | None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOwnerOut:
         """Update an owner's can_manage flag."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -168,7 +175,9 @@ class MemoryService:
         )
 
     @staticmethod
-    async def remove_owner(memory_id: str, user_id: str, *, user: AbstractUser | None) -> None:
+    async def remove_owner(
+        memory_id: str, user_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+    ) -> None:
         """Remove an owner from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
@@ -178,7 +187,9 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def list_memories(*, user: AbstractUser | None = None) -> list[MemoryOut]:
+    async def list_memories(
+        *, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[MemoryOut]:
         """List all visible memories."""
         await _check_permission(user, Operation.VIEW_MEMORY)
 
@@ -210,20 +221,22 @@ class MemoryService:
 
     @staticmethod
     async def link_memories(
-        assistant_id: str, thread_id: str, *, user: AbstractUser | None
+        assistant_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         for memory_id in await MemoryService.get_assistant_memories(assistant_id):
             await MemoryService.link_memory_to_thread(memory_id, thread_id, user=user)
 
     @staticmethod
     async def unlink_memories(
-        assistant_id: str, thread_id: str, *, user: AbstractUser | None
+        assistant_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         for memory_id in await MemoryService.get_assistant_memories(assistant_id):
             await MemoryService.unlink_memory_from_thread(memory_id, thread_id, user=user)
 
     @staticmethod
-    async def get_memory(memory_id: str, *, user: AbstractUser | None = None) -> MemoryOut:
+    async def get_memory(
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> MemoryOut:
         """Get a single memory by ID."""
         memory = await Memory.objects.annotate(document_count=Count("entries")).aget(id=memory_id)
         await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
@@ -245,7 +258,7 @@ class MemoryService:
         description: str = "",
         is_public: bool | None = None,
         *,
-        user: AbstractUser | None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOut:
         """Update a memory."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -268,7 +281,9 @@ class MemoryService:
         )
 
     @staticmethod
-    async def delete_memory(memory_id: str, *, user: AbstractUser | None) -> None:
+    async def delete_memory(
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+    ) -> None:
         """Delete a memory and all its entries."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.DELETE_MEMORY, memory)
@@ -280,7 +295,7 @@ class MemoryService:
 
     @staticmethod
     async def upload_document(
-        memory_id: str, file: File, *, user: AbstractUser | None
+        memory_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -311,7 +326,7 @@ class MemoryService:
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
-            content_type=file.content_type or "",
+            content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
             extracted=bool(extraction),
         )
@@ -320,7 +335,7 @@ class MemoryService:
 
     @staticmethod
     async def list_documents(
-        memory_id: str, *, user: AbstractUser | None = None
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[DocumentOut]:
         """List all file-backed documents in a memory."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -334,7 +349,7 @@ class MemoryService:
 
     @staticmethod
     async def get_document(
-        memory_id: str, doc_id: str, *, user: AbstractUser | None = None
+        memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> DocumentOut:
         """Get a single document from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -345,7 +360,9 @@ class MemoryService:
         return MemoryService._entry_doc_to_out(entry_doc)
 
     @staticmethod
-    async def delete_document(memory_id: str, doc_id: str, *, user: AbstractUser | None) -> None:
+    async def delete_document(
+        memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+    ) -> None:
         """Delete a document (and its entry) from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.DELETE_DOCUMENT, memory)
@@ -358,7 +375,7 @@ class MemoryService:
 
     @staticmethod
     async def link_memory_to_thread(
-        memory_id: str, thread_id: str, *, user: AbstractUser | None
+        memory_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         """Link a memory to a thread."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -371,7 +388,7 @@ class MemoryService:
 
     @staticmethod
     async def unlink_memory_from_thread(
-        memory_id: str, thread_id: str, *, user: AbstractUser | None
+        memory_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         """Unlink a memory from a thread."""
         memory = await Memory.objects.aget(id=memory_id)
@@ -381,7 +398,7 @@ class MemoryService:
 
     @staticmethod
     async def list_thread_memories(
-        thread_id: str, *, user: AbstractUser | None = None
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
         thread_memories_query = (
@@ -408,7 +425,7 @@ class MemoryService:
 
     @staticmethod
     async def bulk_connect_memories(
-        thread_id: str, memory_ids: list[str], *, user: AbstractUser | None
+        thread_id: str, memory_ids: list[str], *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[ThreadMemoryOut]:
         """Connect multiple memories to a thread at once."""
         thread = await Thread.objects.aget(id=thread_id)
@@ -426,7 +443,11 @@ class MemoryService:
 
     @staticmethod
     async def toggle_memory_active(
-        thread_id: str, memory_id: str, active: bool, *, user: AbstractUser | None
+        thread_id: str,
+        memory_id: str,
+        active: bool,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> ThreadMemoryOut:
         """Toggle the active status of a memory for a thread."""
         thread_memory = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
@@ -448,7 +469,7 @@ class MemoryService:
 
     @staticmethod
     async def disconnect_memory_from_thread(
-        thread_id: str, memory_id: str, *, user: AbstractUser | None
+        thread_id: str, memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         """Disconnect a memory from a thread."""
         link = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
@@ -477,7 +498,7 @@ class MemoryService:
 
     @staticmethod
     async def upload_thread_file(
-        thread_id: str, file: File, *, user: AbstractUser | None = None
+        thread_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> DocumentOut | tuple[int, dict]:
         """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
@@ -512,7 +533,7 @@ class MemoryService:
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
-            content_type=file.content_type or "",
+            content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
             extracted=bool(extraction),
         )
@@ -521,7 +542,7 @@ class MemoryService:
 
     @staticmethod
     async def list_thread_files(
-        thread_id: str, *, user: AbstractUser | None = None
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
         try:
@@ -543,7 +564,7 @@ class MemoryService:
 
     @staticmethod
     async def delete_thread_file(
-        thread_id: str, doc_id: str, *, user: AbstractUser | None = None
+        thread_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> None:
         """Delete a file from a thread."""
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
@@ -555,7 +576,7 @@ class MemoryService:
 
     @staticmethod
     async def get_chunk_content(
-        entry_id: str, chunk_id: str | None, *, user: AbstractUser | None = None
+        entry_id: str, chunk_id: str | None, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> str | None:
         """Return a specific chunk from the vector store, falling back to full Entry content.
 

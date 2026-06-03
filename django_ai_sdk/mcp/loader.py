@@ -14,7 +14,8 @@ from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.mcp.schemas import OAuthMCPServer, StaticMCPServer, TokenMCPServer
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.mcp.models import MCPOAuthToken
 
@@ -31,7 +32,7 @@ def _ttl() -> int:
 
 async def load_mcp_tools(
     config: dict[str, Any],
-    user: AbstractUser | None = None,
+    user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> list[Any]:
     """
     Load tool objects from all MCP servers in config.
@@ -51,7 +52,9 @@ async def load_mcp_tools(
     return tools
 
 
-async def _load_server(name: str, server: Any, user: AbstractUser | None) -> list[Any]:
+async def _load_server(
+    name: str, server: Any, user: AbstractBaseUser | AnonymousUser | None
+) -> list[Any]:
     if isinstance(server, StaticMCPServer):
         return await _load_cached(name, server.url, token=None, tools=server.tools or None)
     if isinstance(server, TokenMCPServer):
@@ -86,7 +89,9 @@ async def _load_cached(
     return result
 
 
-async def _load_oauth(name: str, server: OAuthMCPServer, user: AbstractUser | None) -> list[Any]:
+async def _load_oauth(
+    name: str, server: OAuthMCPServer, user: AbstractBaseUser | AnonymousUser | None
+) -> list[Any]:
     if not user:
         logger.debug("No user provided for OAuth server %r", name)
         return []

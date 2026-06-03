@@ -35,7 +35,8 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.rags.schemas import RagDocument
@@ -304,7 +305,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     async def get_tools(
         self,
         thread_id: str = "",
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
 
@@ -330,7 +331,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         *,
         citation_registry: CitationRegistry | None = None,
         citation_formatter: CitationFormatter | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         """Build RAG tools from active ThreadMemory links for a thread.
 
@@ -452,6 +453,10 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     ) -> str | None: ...
     @overload
     async def run(
+        self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: None = None
+    ) -> str | None: ...
+    @overload
+    async def run(
         self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: type[T]
     ) -> T | None: ...
 
@@ -480,7 +485,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
     mcp_servers: list[str] = []
 
-    async def get_mcp_tools(self, user: AbstractUser | None = None) -> list[Any]:
+    async def get_mcp_tools(
+        self, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[Any]:
         """
         Load MCP tool objects for this assistant.
 
@@ -498,7 +505,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
         """
         Create and return pipeline adapter.
@@ -511,7 +518,9 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         """
         pass
 
-    async def history(self, thread_id: str, user: AbstractUser | None = None) -> ThreadDetail:
+    async def history(
+        self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> ThreadDetail:
         """
         Get conversation history for a thread.
 
@@ -565,7 +574,7 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
         self,
         protocol_messages: list[Any],
         thread_id: str | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
         """
         Convert protocol messages to streaming HTTP response with optional storage.
