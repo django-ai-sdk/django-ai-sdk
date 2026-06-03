@@ -167,7 +167,7 @@ class QdrantBM25HybridRAG(HaystackRAGBase):
                 should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
             )
 
-            self._cached_document_store.delete_by_filter(filters=filter_obj)
+            self._cached_document_store.delete_by_filter(filters=filter_obj)  # type: ignore[arg-type]
             logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
         except Exception as e:
             logger.error(f"Failed to remove documents: {e}")

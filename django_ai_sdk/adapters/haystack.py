@@ -102,9 +102,9 @@ class HaystackRunnable(Runnable):
         converted: list[HaystackChatMessage] = []
         for role, content in conversation:
             if role == "user":
-                converted.append(HaystackChatMessage.from_user(content))
+                converted.append(HaystackChatMessage.from_user(content))  # type: ignore[arg-type]
             elif role == "assistant":
-                converted.append(HaystackChatMessage.from_assistant(content))
+                converted.append(HaystackChatMessage.from_assistant(content))  # type: ignore[arg-type]
         return converted
 
     @overload
