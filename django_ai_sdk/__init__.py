@@ -18,7 +18,12 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.protocols.vercel import StreamChunk
 from django_ai_sdk.responses import stream_response
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version
+
+    __version__ = version("django-ai-sdk")
+except Exception:
+    __version__ = "0.0.0"
 __all__ = [
     "Assistant",
     "ChatMessage",

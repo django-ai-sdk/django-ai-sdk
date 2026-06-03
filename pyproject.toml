@@ -1,7 +1,14 @@
+[build-system]
+requires = ["setuptools>=75", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["django_ai_sdk*"]
 exclude = ["demo*", "logs*", "ideas*"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
 
 [project]
 dependencies = [
@@ -18,7 +25,7 @@ description = "Django AI SDK is a library that provides tools and utilities for 
 name = "django-ai-sdk"
 readme = "README.md"
 requires-python = ">=3.12"
-version = "0.1.0"
+dynamic = ["version"]
 
 [project.optional-dependencies]
 all = ["django-ai-sdk[rag,haystack,openai,mistral,restframework,mcp]"]

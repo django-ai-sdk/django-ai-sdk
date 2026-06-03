@@ -558,8 +558,7 @@ wheels = [
 
 [[package]]
 name = "django-ai-sdk"
-version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "daphne" },
     { name = "django" },
@@ -640,7 +639,7 @@ requires-dist = [
     { name = "chroma-haystack", marker = "extra == 'haystack'", specifier = ">=4.1.1" },
     { name = "daphne", specifier = ">=4.2.1" },
     { name = "django", specifier = ">=5.2.6" },
-    { name = "django-ai-sdk", extras = ["rag", "haystack", "openai", "mistral", "restframework", "mcp"], marker = "extra == 'all'" },
+    { name = "django-ai-sdk", extras = ["haystack", "mcp", "mistral", "openai", "rag", "restframework"], marker = "extra == 'all'" },
     { name = "django-environ", specifier = ">=0.12.1" },
     { name = "django-ninja", specifier = ">=1.5.3" },
     { name = "djangorestframework", marker = "extra == 'restframework'", specifier = ">=3.14.0" },
