@@ -35,4 +35,4 @@ class MCPBackend(Protocol):
         Returns:
             A list of tool objects compatible with the framework.
         """
-        pass
+        ...

@@ -5,7 +5,8 @@ from enum import IntEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.storage.schemas import ThreadInfo
@@ -121,7 +122,7 @@ class BaseStorageAdapter(ABC):
         cls,
         title: str,
         metadata: dict[str, Any] | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -154,7 +155,9 @@ class BaseStorageAdapter(ABC):
 
     @classmethod
     @abstractmethod
-    async def list_threads(cls, user: AbstractUser | None = None) -> list[ThreadInfo]:
+    async def list_threads(
+        cls, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[ThreadInfo]:
         """
         List all threads in this storage.
 
@@ -252,7 +255,7 @@ class BaseStorageAdapter(ABC):
         message_id: str,
         rating: int | None,
         feedback: str = "",
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> bool:
         """
         Rate a message in this thread.

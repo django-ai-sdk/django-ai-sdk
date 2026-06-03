@@ -17,7 +17,7 @@ from haystack.tools import Tool
 from haystack.utils import Secret
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
 
 
 def pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
@@ -73,7 +73,7 @@ class AgentSwarmAssistant(Assistant):
     def get_tools(
         self,
         thread_id: str = "",
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | None = None,
     ) -> list:
         """Return Haystack-compatible tools for agent swarm."""
         return [
@@ -132,7 +132,7 @@ class AgentSwarmAssistant(Assistant):
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | None = None,
     ) -> HaystackStream:
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
@@ -146,7 +146,7 @@ class AgentSwarmAssistant(Assistant):
                 api_key=Secret.from_token(settings.OPENAI_API_KEY),
                 api_base_url=getattr(settings, "OPENAI_API_URL", None),
             ),
-            tools=self.get_tools(thread_id=thread_id, user=user),
+            tools=self.get_tools(thread_id=thread_id or "", user=user),
             system_prompt=self.get_system_prompt(),
             exit_conditions=["text"],
         )

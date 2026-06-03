@@ -18,7 +18,8 @@ from django_ai_sdk.storage.base import (
 from django_ai_sdk.storage.schemas import ThreadInfo
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
 
@@ -53,7 +54,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         cls,
         title: str,
         metadata: dict | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -102,7 +103,9 @@ class DbStorageAdapter(BaseStorageAdapter):
             return None
 
     @classmethod
-    async def list_threads(cls, user: AbstractUser | None = None) -> list[ThreadInfo]:
+    async def list_threads(
+        cls, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[ThreadInfo]:
         """List all threads from database."""
         queryset = Thread.objects.all()
         user_id = str(user.pk) if user and user.is_authenticated else None
@@ -270,7 +273,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         message_id: str,
         rating: int | None,
         feedback: str = "",
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> bool:
         """Rate a message in this thread."""
         from django_ai_sdk.conversation.models import MessageFeedback

@@ -107,10 +107,10 @@ class MemoryListCreateAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             memory = create_memory(
-                name=serializer.validated_data["name"],
-                slug=serializer.validated_data.get("slug", ""),
-                description=serializer.validated_data.get("description", ""),
-                is_public=serializer.validated_data.get("is_public", True),
+                name=serializer.validated_data["name"],  # type: ignore[index, optional-subscript]
+                slug=serializer.validated_data.get("slug", ""),  # type: ignore[union-attr]
+                description=serializer.validated_data.get("description", ""),  # type: ignore[union-attr]
+                is_public=serializer.validated_data.get("is_public", True),  # type: ignore[union-attr]
                 user=request.user,
             )
         except PermissionDenied as e:
@@ -132,9 +132,9 @@ class MemoryDetailAPIView(APIView):
         try:
             memory = update_memory(
                 memory_id=memory_id,
-                name=serializer.validated_data["name"],
-                description=serializer.validated_data.get("description", ""),
-                is_public=serializer.validated_data.get("is_public", True),
+                name=serializer.validated_data["name"],  # type: ignore[index, optional-subscript]
+                description=serializer.validated_data.get("description", ""),  # type: ignore[union-attr]
+                is_public=serializer.validated_data.get("is_public", True),  # type: ignore[union-attr]
                 user=request.user,
             )
         except PermissionDenied as e:
@@ -160,7 +160,7 @@ class DocumentListCreateAPIView(APIView):
         return Response(DocumentOutSerializer(documents, many=True).data)
 
     def post(self, request: Request, memory_id: str) -> Response:
-        uploaded_file = request.FILES.get("file")
+        uploaded_file = request.FILES.get("file")  # type: ignore[union-attr]
         if not uploaded_file:
             return Response({"detail": "file is required"}, status=400)
         try:
@@ -219,7 +219,9 @@ class ThreadMemoryBulkConnectAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             memories = bulk_connect_memories(
-                thread_id, serializer.validated_data["memory_ids"], user=request.user
+                thread_id,
+                serializer.validated_data["memory_ids"],  # type: ignore[index, optional-subscript]
+                user=request.user,
             )
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
@@ -232,7 +234,10 @@ class ThreadMemoryToggleAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             result = toggle_memory_active(
-                thread_id, memory_id, serializer.validated_data["active"], user=request.user
+                thread_id,
+                memory_id,
+                serializer.validated_data["active"],  # type: ignore[index, optional-subscript]
+                user=request.user,
             )
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
@@ -254,7 +259,7 @@ class ThreadFileListCreateAPIView(APIView):
         return Response(DocumentOutSerializer(files, many=True).data)
 
     def post(self, request: Request, thread_id: str) -> Response:
-        uploaded_file = request.FILES.get("file")
+        uploaded_file = request.FILES.get("file")  # type: ignore[union-attr]
         if not uploaded_file:
             return Response({"detail": "file is required"}, status=400)
         result = upload_thread_file(thread_id, uploaded_file)
@@ -285,8 +290,8 @@ class MemoryOwnerListCreateAPIView(APIView):
         try:
             owner = add_owner(
                 memory_id,
-                serializer.validated_data["user_id"],
-                serializer.validated_data.get("can_manage", False),
+                serializer.validated_data["user_id"],  # type: ignore[index, optional-subscript]
+                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
                 user=request.user,
             )
         except PermissionDenied as e:
@@ -304,7 +309,7 @@ class MemoryOwnerDetailAPIView(APIView):
             owner = update_owner(
                 memory_id,
                 user_id,
-                serializer.validated_data["can_manage"],
+                serializer.validated_data["can_manage"],  # type: ignore[index, optional-subscript]
                 user=request.user,
             )
         except PermissionDenied as e:

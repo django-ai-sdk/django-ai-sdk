@@ -16,7 +16,7 @@ from django_ai_sdk.providers.nebul import NebulModelProvider
 from openai import AsyncOpenAI
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
 
 
 @auto_register
@@ -134,7 +134,7 @@ class PirateAgentAssistant(Assistant):
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | None = None,
     ) -> OpenAIAgentStream:
         """OpenAI agent adapter with pirate tools."""
         client = AsyncOpenAI(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -38,4 +38,5 @@ class Streamable(Protocol):
     async def stream(
         self,
         messages: list[ChatMessage],
-    ) -> AsyncGenerator[StreamEvent, None]: ...
+    ) -> AsyncGenerator[StreamEvent, None]:
+        yield cast("StreamEvent", None)  # pragma: no cover

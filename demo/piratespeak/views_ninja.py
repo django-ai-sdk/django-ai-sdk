@@ -35,8 +35,8 @@ class HealthResponse(Schema):
 
 class AssistantItem(Schema):
     id: str
-    name: str
-    model: str
+    name: str | None = None
+    model: str | None = None
 
 
 class AssistantsListResponse(Schema):

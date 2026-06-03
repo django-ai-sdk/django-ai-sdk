@@ -37,8 +37,6 @@ async def stream_response(
     logger.debug(f"Adapter resolved: {type(adapter).__name__}")
 
     logger.debug("Creating streaming response with SSE headers")
-    # Note: sse() is an async generator method, calling it returns a coroutine
-    # that resolves to an async generator. StreamingHttpResponse handles this.
     sse_stream = protocol_handler.sse(adapter, messages)
 
     # Build streaming HTTP response

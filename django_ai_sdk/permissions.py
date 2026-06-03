@@ -9,7 +9,8 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.memories.models import Memory
 
@@ -56,12 +57,16 @@ class Operation(StrEnum):
 
 class BasePermission(ABC):
     async def has_permission(
-        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
         return True
 
     async def has_object_permission(
-        self, user: AbstractUser | None, operation: Operation, obj: Any, **kwargs: Any
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
     ) -> bool:
         return True
 
@@ -72,33 +77,43 @@ class AllowAll(BasePermission):
 
 class DenyAll(BasePermission):
     async def has_permission(
-        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
         return False
 
     async def has_object_permission(
-        self, user: AbstractUser | None, operation: Operation, obj: Any, **kwargs: Any
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
     ) -> bool:
         return False
 
 
 class IsAuthenticated(BasePermission):
     async def has_permission(
-        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
         return user is not None and bool(user.is_authenticated)
 
 
 class IsAdminUser(BasePermission):
     async def has_permission(
-        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
-        return user is not None and bool(user.is_staff or user.is_superuser)
+        return user is not None and bool(
+            getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+        )
 
 
 class IsOwner(BasePermission):
     async def has_object_permission(
-        self, user: AbstractUser | None, operation: Operation, obj: Any, **kwargs: Any
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
     ) -> bool:
         # SECURITY: this seems to deep, we might wanna pass on just the owner.
         owner_id = getattr(obj, "user_id", None)
@@ -140,12 +155,16 @@ class MemoryDefaultPermission(BasePermission):
     )
 
     async def has_permission(
-        self, user: AbstractUser | None, operation: Operation, **kwargs: Any
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
     ) -> bool:
         return user is not None and bool(user.is_authenticated)
 
     async def has_object_permission(
-        self, user: AbstractUser | None, operation: Operation, obj: Memory, **kwargs: Any
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Memory,
+        **kwargs: Any,
     ) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
@@ -171,7 +190,7 @@ def get_default_permissions() -> list[type[BasePermission]]:
 
 
 async def check_permissions(
-    user: AbstractUser | None,
+    user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
     permissions: list[type[BasePermission]],
     **kwargs: Any,
@@ -183,7 +202,7 @@ async def check_permissions(
 
 
 async def check_object_permissions(
-    user: AbstractUser | None,
+    user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
     obj: Any,
     permissions: list[type[BasePermission]],

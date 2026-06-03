@@ -27,7 +27,7 @@ from haystack.tools import Tool
 from haystack.utils import Secret
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
     from django.db.models import QuerySet
 
 
@@ -144,7 +144,7 @@ class PirateBasicAssistant(Assistant):
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractUser | None = None,
+        user: AbstractBaseUser | None = None,
     ) -> HaystackStream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 

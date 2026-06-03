@@ -7,14 +7,14 @@ from django.db import models
 from django.utils import timezone
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import AbstractUser
+    from django.contrib.auth.base_user import AbstractBaseUser
     from django.db.models import QuerySet
 
 
 class ThreadManager(models.Manager):
     """Custom manager for Thread model with helpful query methods."""
 
-    def for_user(self, user: AbstractUser) -> QuerySet:
+    def for_user(self, user: AbstractBaseUser) -> QuerySet:
         """Get threads for a specific user."""
         return self.filter(user=user)
 

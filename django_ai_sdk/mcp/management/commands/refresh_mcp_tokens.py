@@ -46,7 +46,7 @@ class Command(BaseCommand):
         if server:
             query = query.filter(server_name=server)
 
-        tokens = [t async for t in query.aall()]
+        tokens = [t async for t in query.all()]
 
         if not tokens:
             self.stdout.write(self.style.SUCCESS(f"No tokens expiring within {threshold} minutes"))

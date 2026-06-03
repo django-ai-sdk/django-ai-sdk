@@ -108,6 +108,7 @@ class MessageSerializer(serializers.Serializer):
 
 class ChatRequestSerializer(serializers.Serializer):
     messages = MessageSerializer(many=True)
+    assistant_id = serializers.CharField(required=False, default="")
 
 
 class ThreadListAPIView(APIView):
@@ -132,8 +133,10 @@ class ThreadCreateAPIView(APIView):
         try:
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            messages = [Message(**m) for m in serializer.validated_data["messages"]]
+            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+            assistant_id = request.data.get("assistant_id", "")  # type: ignore[union-attr]
             thread_id = create_thread(
+                assistant_id=assistant_id,
                 messages=messages,
                 user=request.user,
             )
@@ -157,7 +160,7 @@ class ThreadDetailAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
     def patch(self, request: Request, thread_id: str) -> Response:
-        assistant_id = request.data.get("assistant_id")
+        assistant_id = request.data.get("assistant_id")  # type: ignore[union-attr]
         if not assistant_id:
             return Response({"message": "assistant_id required"}, status=400)
         try:
@@ -179,7 +182,7 @@ class ThreadDetailAPIView(APIView):
 class ThreadFileMetaAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
         try:
-            data = get_thread_file_meta(thread_id)
+            data = get_thread_file_meta(thread_id, user=request.user)
             return Response(ThreadFileMetaSerializer(data).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
@@ -216,12 +219,12 @@ class ThreadDeleteAllAPIView(APIView):
 class RateMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
 
-        if "rating" not in request.data:
+        if "rating" not in request.data:  # type: ignore[operator]
             return Response({"message": "rating is required"}, status=400)
-        rating = request.data.get("rating")
-        feedback_text = request.data.get("feedback", "")
+        rating = request.data.get("rating")  # type: ignore[union-attr]
+        feedback_text = request.data.get("feedback", "")  # type: ignore[union-attr]
         try:
-            rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)
+            rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)  # type: ignore[arg-type]
 
             return Response(
                 MessageResponseSerializer(
@@ -295,11 +298,11 @@ class AssistantInfoAPIView(APIView):
 
 class ReindexAssistantAPIView(APIView):
     def post(self, request: Request, assistant_id: str) -> Response:
-        memory_id = request.data.get("memory_id")
-        force_rebuild = request.data.get("force_rebuild", False)
+        memory_id = request.data.get("memory_id")  # type: ignore[union-attr]
+        force_rebuild = request.data.get("force_rebuild", False)  # type: ignore[union-attr]
         try:
             assistant = AssistantService.from_registry(assistant_id)
-            result = Assistant.reindex(assistant, memory_id, force_rebuild)
+            result = Assistant.reindex(assistant, memory_id, force_rebuild)  # type: ignore[arg-type]
 
             if not result:
                 return Response(
@@ -333,7 +336,7 @@ class AssistantAPIView(View):
         try:
             serializer = ChatRequestSerializer(data=json.loads(request.body))
             serializer.is_valid(raise_exception=True)
-            messages = [Message(**m) for m in serializer.validated_data["messages"]]
+            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
             assistant = await AssistantService.get_assistant(thread_id, user=request.user)
             return await assistant.as_view(messages, thread_id=thread_id, user=request.user)
         except PermissionDenied as e:
