@@ -9,6 +9,20 @@ include = ["django_ai_sdk*"]
 fallback_version = "0.0.0"
 
 [project]
+authors = [{name = "terminalkitten"}]
+license = {file = "LICENSE"}
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: Django",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: BSD License",
+  "Natural Language :: English",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["django", "ai", "assistant", "rag", "llm", "streaming", "sse"]
 dependencies = [
   "daphne>=4.2.1",
   "django>=5.2.6",
@@ -24,6 +38,12 @@ name = "django-ai-sdk"
 readme = "README.md"
 requires-python = ">=3.12"
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/django-ai-sdk/django-ai-sdk"
+Repository = "https://github.com/django-ai-sdk/django-ai-sdk"
+Issues = "https://github.com/django-ai-sdk/django-ai-sdk/issues"
+Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
 all = ["django-ai-sdk[rag,haystack,openai,mistral,restframework,mcp]"]
