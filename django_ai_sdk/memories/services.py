@@ -430,14 +430,17 @@ class MemoryService:
         """Connect multiple memories to a thread at once."""
         thread = await Thread.objects.aget(id=thread_id)
 
+        memories = {str(m.id): m async for m in Memory.objects.filter(id__in=memory_ids)}
+
+        links = []
         for memory_id in memory_ids:
-            memory = await Memory.objects.aget(id=memory_id)
+            memory = memories.get(memory_id)
+            if not memory:
+                continue
             await _check_object_permission(user, Operation.LINK_MEMORY, memory)
-            await ThreadMemory.objects.aget_or_create(
-                thread=thread,
-                memory=memory,
-                defaults={"active": True},
-            )
+            links.append(ThreadMemory(thread=thread, memory=memory, active=True))
+
+        await ThreadMemory.objects.abulk_create(links, ignore_conflicts=True)
 
         return await MemoryService.list_thread_memories(thread_id, user=user)
 
