@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import time
@@ -21,9 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# TTL cache for static and token servers — keyed by server name.
-# OAuth is per-user so is not cached here.
 _tool_cache: dict[str, tuple[float, list]] = {}
+_cache_locks: dict[str, asyncio.Lock] = {}
 
 
 def _ttl() -> int:
@@ -80,11 +80,19 @@ async def _load_cached(
             logger.debug("MCP cache hit for %r (%d tools)", name, len(cached))
             return cached
 
-    logger.info("Connecting to MCP server %r", name)
-    result = await _connect(url, token, tools)
+    lock = _cache_locks.setdefault(name, asyncio.Lock())
+    async with lock:
+        fresh_now = time.monotonic()
+        if ttl > 0 and name in _tool_cache:
+            expires_at, cached = _tool_cache[name]
+            if fresh_now < expires_at:
+                return cached
 
-    if ttl > 0:
-        _tool_cache[name] = (now + ttl, result)
+        logger.info("Connecting to MCP server %r", name)
+        result = await _connect(url, token, tools)
+
+        if ttl > 0:
+            _tool_cache[name] = (fresh_now + ttl, result)
 
     return result
 
