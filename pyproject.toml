@@ -10,12 +10,11 @@ fallback_version = "0.0.0"
 
 [project]
 authors = [{name = "terminalkitten"}]
-license = {file = "LICENSE"}
+license = "BSD-3-Clause"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Framework :: Django",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: BSD License",
   "Natural Language :: English",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
