@@ -626,7 +626,7 @@ requires-dist = [
     { name = "bm25s", marker = "extra == 'rag'", specifier = ">=0.3.9" },
     { name = "chroma-haystack", marker = "extra == 'haystack'", specifier = ">=4.3.0" },
     { name = "daphne", specifier = ">=4.2.2" },
-    { name = "django", specifier = ">=6.0.6" },
+    { name = "django", specifier = ">=5.2.6,<6.1" },
     { name = "django-ai-sdk", extras = ["haystack", "mcp", "mistral", "openai", "rag", "restframework"], marker = "extra == 'all'" },
     { name = "django-environ", specifier = ">=0.13.0" },
     { name = "django-ninja", specifier = ">=1.6.2" },
