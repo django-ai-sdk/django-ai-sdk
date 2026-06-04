@@ -1,0 +1,8 @@
+prune .github
+prune demo
+prune public
+prune tests
+exclude lefthook.yml
+exclude Makefile
+exclude .gitignore
+exclude uv.lock
