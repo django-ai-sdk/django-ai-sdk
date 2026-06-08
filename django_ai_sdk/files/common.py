@@ -2,6 +2,7 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.files.handlers import ContentHandler, FileHandler
+from django_ai_sdk.files.processors import TextFileProcessor
 
 
 def get_default_content_handler() -> ContentHandler:
@@ -24,7 +25,7 @@ def get_default_file_handler() -> FileHandler:
 
 
 class DefaultMemoryFileHandler(FileHandler):
-    file_processors = []
+    file_processors = [TextFileProcessor]
 
 
 class DefaultMemoryContentHandler(ContentHandler):
