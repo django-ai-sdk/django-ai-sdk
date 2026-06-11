@@ -98,6 +98,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                 updated_at=thread.updated_at,
                 metadata=thread.metadata,
                 message_count=thread.msg_count,
+                file_memory_id=str(thread.file_memory_id) if thread.file_memory_id else None,
             )
         except (Thread.DoesNotExist, ValidationError):
             return None
@@ -129,6 +130,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                     updated_at=thread.updated_at,
                     metadata=thread.metadata,
                     message_count=thread.msg_count,
+                    file_memory_id=str(thread.file_memory_id) if thread.file_memory_id else None,
                 )
             )
         return threads

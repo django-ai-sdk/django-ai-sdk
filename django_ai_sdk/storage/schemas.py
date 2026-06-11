@@ -18,6 +18,7 @@ class ThreadInfo(BaseModel):
     updated_at: datetime
     metadata: dict = Field(default_factory=dict)
     message_count: int = 0
+    file_memory_id: str | None = None
 
 
 class ThreadDetail(BaseModel):

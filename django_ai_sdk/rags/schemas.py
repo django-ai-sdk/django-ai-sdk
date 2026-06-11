@@ -1,4 +1,3 @@
-import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -35,7 +34,7 @@ class RagDocument(BaseModel):
         })
     """
 
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    id: str = ""
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     title: str | None = None
@@ -68,7 +67,7 @@ class RagDocument(BaseModel):
         metadata = data.get("metadata") or data.get("meta", {})
 
         return cls(
-            id=str(data.get("id", uuid.uuid4())),
+            id=str(data.get("id", "")),
             content=content,
             metadata=metadata if isinstance(metadata, dict) else {},
             title=data.get("title"),
