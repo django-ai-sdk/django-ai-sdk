@@ -44,3 +44,27 @@ class ContentProcessor(Protocol):
         response_format: type[T] | None = None,
     ) -> T | str | None:
         pass
+
+
+class TextFileProcessor(FileProcessor):
+    ALLOWED_MIME_TYPES = [
+        "text/plain",
+        "text/markdown",
+        "text/x-markdown",
+    ]
+
+    def run(
+        self,
+        file: str | Path | File,
+        *,
+        response_format: type[T] | None = None,
+    ) -> T | str | None:
+        if isinstance(file, (str, Path)):
+            with open(file, encoding="utf-8") as f:
+                return f.read()
+
+        file.seek(0)
+        content = file.read()
+        if isinstance(content, bytes):
+            content = content.decode("utf-8")
+        return content
