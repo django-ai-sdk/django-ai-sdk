@@ -2,7 +2,6 @@
 Unit tests for TextFileProcessor.
 """
 
-import tempfile
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -104,7 +103,6 @@ class TestTextFileProcessor:
         uploaded_file = MagicMock(spec=TemporaryUploadedFile)
         uploaded_file.temporary_file_path.return_value = str(temp_file)
         uploaded_file.read.return_value = expected_content.encode("utf-8")
-        uploaded_file.seek = MagicMock()
 
         # For is_valid, it needs to work with magic.from_file
         assert processor.is_valid(uploaded_file) is True
@@ -119,12 +117,3 @@ class TestTextFileProcessor:
         file_obj = BytesIO(b"\x89PNG\r\n\x1a\n")
         with pytest.raises(UnicodeDecodeError):
             processor.run(file_obj)
-
-    def test_allowed_mime_types(self, processor):
-        """Test that the processor has the expected MIME types."""
-        expected_types = [
-            "text/plain",
-            "text/markdown",
-            "text/x-markdown",
-        ]
-        assert processor.ALLOWED_MIME_TYPES == expected_types

@@ -5,10 +5,13 @@ These tests use in-memory Qdrant (no LLM needed).
 Document indexing uses local FastEmbed models.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from django_ai_sdk.rags.haystack.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.schemas import RagDocument
+from tenacity import wait_none
 
 
 class TestQdrantRAGInit:
@@ -235,90 +238,77 @@ class TestQdrantRAGRefreshDocuments:
 class TestQdrantFileLockRetry:
     """Tests for Qdrant file lock retry logic (_create_document_store)."""
 
-    def test_retry_on_file_lock_contention(self):
+    @pytest.fixture(autouse=True)
+    def no_retry_wait(self):
+        """Disable retry backoff sleeps so exhaustion tests run instantly."""
+        with patch(
+            "django_ai_sdk.rags.haystack.qdrant_hybrid.wait_exponential",
+            return_value=wait_none(),
+        ):
+            yield
+
+    @pytest.fixture
+    def rag(self, tmp_path):
+        """Persistent-mode RAG instance backed by a temp directory."""
+        storage = QdrantStorageConfig(mode="persistent", persist_path=str(tmp_path))
+        config = QdrantBM25HybridRAGConfig(storage=storage)
+        docs = [RagDocument(id="1", content="test", title="Test")]
+        return QdrantBM25HybridRAG(documents=docs, config=config)
+
+    def test_retry_on_file_lock_contention(self, rag):
         """Verify retry succeeds when first QdrantDocumentStore call raises lock error."""
-        import tempfile
-        from unittest.mock import MagicMock, patch
+        valid_store = MagicMock()
+        valid_store.count_documents.return_value = 0
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = QdrantStorageConfig(mode="persistent", persist_path=tmpdir)
-            config = QdrantBM25HybridRAGConfig(storage=storage)
+        call_count = 0
 
-            docs = [RagDocument(id="1", content="test", title="Test")]
-            rag = QdrantBM25HybridRAG(documents=docs, config=config)
+        def mock_qdrant_store(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError(
+                    "Storage folder "
+                    f"{rag.config.storage.persist_path} is already accessed by another "
+                    "instance of Qdrant client"
+                )
+            return valid_store
 
-            valid_store = MagicMock()
-            valid_store.count_documents.return_value = 0
+        with patch(
+            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            side_effect=mock_qdrant_store,
+        ):
+            rag.warmup()
 
-            call_count = 0
+        assert call_count == 2
+        assert rag._is_warmed_up
+        assert rag._cached_document_store is valid_store
 
-            def mock_qdrant_store(*args, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    raise RuntimeError(
-                        "Storage folder "
-                        f"{storage.persist_path} is already accessed by another "
-                        "instance of Qdrant client"
-                    )
-                return valid_store
+    def test_exhausts_retries(self, rag):
+        """Verify retry raises after exhausting attempts."""
+        def always_fail(*args, **kwargs):
+            raise RuntimeError(
+                f"Storage folder {rag.config.storage.persist_path} is already accessed by "
+                "another instance of Qdrant client"
+            )
 
-            with patch(
-                "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
-                side_effect=mock_qdrant_store,
-            ):
+        with patch(
+            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            side_effect=always_fail,
+        ):
+            with pytest.raises(RuntimeError, match="already accessed by another"):
                 rag.warmup()
 
-            assert call_count == 2
-            assert rag._is_warmed_up
-            assert rag._cached_document_store is valid_store
+        assert not rag._is_warmed_up
+        assert rag._cached_document_store is None
 
-    def test_exhausts_retries(self):
-        """Verify retry raises after exhausting attempts."""
-        import tempfile
-        from unittest.mock import MagicMock, patch
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = QdrantStorageConfig(mode="persistent", persist_path=tmpdir)
-            config = QdrantBM25HybridRAGConfig(storage=storage)
-
-            docs = [RagDocument(id="1", content="test", title="Test")]
-            rag = QdrantBM25HybridRAG(documents=docs, config=config)
-
-            def always_fail(*args, **kwargs):
-                raise RuntimeError(
-                    f"Storage folder {storage.persist_path} is already accessed by "
-                    "another instance of Qdrant client"
-                )
-
-            with patch(
-                "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
-                side_effect=always_fail,
-            ):
-                with pytest.raises(RuntimeError, match="already accessed by another"):
-                    rag.warmup()
-
-            assert not rag._is_warmed_up
-            assert rag._cached_document_store is None
-
-    def test_non_lock_errors_propagate_immediately(self):
+    def test_non_lock_errors_propagate_immediately(self, rag):
         """Verify non-lock RuntimeErrors are not retried."""
-        import tempfile
-        from unittest.mock import MagicMock, patch
+        with patch(
+            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            side_effect=RuntimeError("Something else went wrong"),
+        ):
+            with pytest.raises(RuntimeError, match="Something else went wrong"):
+                rag.warmup()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = QdrantStorageConfig(mode="persistent", persist_path=tmpdir)
-            config = QdrantBM25HybridRAGConfig(storage=storage)
-
-            docs = [RagDocument(id="1", content="test", title="Test")]
-            rag = QdrantBM25HybridRAG(documents=docs, config=config)
-
-            with patch(
-                "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
-                side_effect=RuntimeError("Something else went wrong"),
-            ):
-                with pytest.raises(RuntimeError, match="Something else went wrong"):
-                    rag.warmup()
-
-            assert not rag._is_warmed_up
-            assert rag._cached_document_store is None
+        assert not rag._is_warmed_up
+        assert rag._cached_document_store is None
