@@ -217,6 +217,7 @@ __marimo__/
 
 # Dev
 .agents/
+.claude/
 skills-lock.json
 logs/
 tmp/
