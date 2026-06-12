@@ -82,10 +82,12 @@ class PirateBasicAssistant(Assistant):
     # Enable file upload UI for this assistant
     file_upload = True
 
-    processing_pipelines = [
+    file_pipelines = [
         FilePipeline(
             TextFileProcessor(),
-            transforms=[DocumentExtractionTransform(PirateExtractionAssistant())],
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAssistant()),
+            ],
         ),
     ]
 

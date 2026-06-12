@@ -140,7 +140,7 @@ class Assistant(ABC, AssistantInfoMixin):
     # Declare one FilePipeline per supported file type.
     # First pipeline whose processor accepts the uploaded file is used.
     # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
-    processing_pipelines: list[FilePipeline] = []
+    file_pipelines: list[FilePipeline] = []
 
     # Enable automatic thread title generation based on chat messages
     title_generation: bool = True
@@ -269,7 +269,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
     def get_file_pipeline(self, file: object) -> FilePipeline | None:
         """Return the first FilePipeline whose processor accepts file, or None."""
-        for pipeline in self.processing_pipelines:
+        for pipeline in self.file_pipelines:
             if pipeline.accepts(file):
                 return pipeline
         return None
