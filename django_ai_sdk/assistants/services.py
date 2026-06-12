@@ -73,7 +73,7 @@ class AssistantService:
     ) -> list[AssistantSummary]:
         """Return all registered assistants the user is allowed to view."""
         result: list[AssistantSummary] = []
-        for aid, assistant in registry.all().items():
+        for aid, assistant in registry.list().items():
             perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
             try:
                 await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)

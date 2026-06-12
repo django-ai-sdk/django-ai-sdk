@@ -11,7 +11,7 @@ from django.utils.module_loading import import_string
 
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
-from django_ai_sdk.files.services import FileService
+from django_ai_sdk.files.common import get_default_file_pipeline
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryOwner, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
@@ -303,12 +303,17 @@ class MemoryService:
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
+        pipeline = get_default_file_pipeline(file)
+        result = await pipeline.run(file)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
 
         entry = await Entry.objects.acreate(
             memory=memory,
             name=file_name,
+            content=result.content,
+            data=result.data,
         )
 
         entry_doc = await EntryDocument.objects.acreate(
@@ -318,6 +323,7 @@ class MemoryService:
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
+            extracted=bool(result.data),
         )
 
         return MemoryService._entry_doc_to_out(entry_doc)
@@ -503,12 +509,17 @@ class MemoryService:
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
+        pipeline = assistant.get_file_pipeline(file) or get_default_file_pipeline(file)
+        result = await pipeline.run(file, assistant=assistant)
+
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
 
         entry = await Entry.objects.acreate(
             memory=memory,
             name=file_name,
+            content=result.content,
+            data=result.data,
         )
 
         entry_doc = await EntryDocument.objects.acreate(
@@ -518,6 +529,7 @@ class MemoryService:
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
+            extracted=bool(result.data),
         )
 
         return MemoryService._entry_doc_to_out(entry_doc)
@@ -608,6 +620,7 @@ class MemoryService:
             content=entry.content,
             extraction=entry.extraction,
             file_name=entry_doc.file_name,
+            data=entry.data or {},
             file_size=entry_doc.file_size,
             content_type=entry_doc.content_type,
             file_extension=entry_doc.file_extension,

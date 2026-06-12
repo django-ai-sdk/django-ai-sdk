@@ -124,6 +124,19 @@ class Entry(models.Model):
     def to_rag_document(self) -> RagDocument:
         """Convert to RagDocument for retrieval. Enriches with extraction data when present."""
         extraction = self.extraction
+        if extraction:
+            parts = [self.content]
+            if extraction.summary:
+                parts.append(f"Summary: {extraction.summary}")
+            if extraction.facts:
+                parts.append(f"Key facts: {'. '.join(f.text for f in extraction.facts)}")
+            if extraction.keywords:
+                parts.append(f"Keywords: {', '.join(extraction.keywords)}")
+            if extraction.entities:
+                parts.append(f"Named entities: {', '.join(f'{e.text} ({e.type})' for e in extraction.entities)}")
+            content = "\n\n".join(parts)
+        else:
+            content = self.content
         return RagDocument(
             id=str(self.id),
             content=content,
