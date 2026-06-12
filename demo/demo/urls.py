@@ -26,7 +26,7 @@ from piratespeak.views_ninja import router as piratespeak_router
 # Create the main API instance
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
 
-api.add_router("/piratespeak", piratespeak_router)
+api.add_router("/", piratespeak_router)
 api.add_router("/memories", memories_router)
 api.add_router("/mcp", mcp_router)
 

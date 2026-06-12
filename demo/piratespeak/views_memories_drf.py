@@ -7,6 +7,7 @@ from django_ai_sdk.memories.services import (
     delete_memory,
     delete_thread_file,
     disconnect_memory_from_thread,
+    get_chunk_content,
     get_document,
     get_memory,
     link_memory_to_thread,
@@ -92,6 +93,10 @@ class AddMemoryOwnerInSerializer(serializers.Serializer):
 
 class UpdateMemoryOwnerInSerializer(serializers.Serializer):
     can_manage = serializers.BooleanField()
+
+
+class SourceContentSerializer(serializers.Serializer):
+    content = serializers.CharField()
 
 
 class MemoryListCreateAPIView(APIView):
@@ -301,6 +306,14 @@ class MemoryOwnerListCreateAPIView(APIView):
         return Response(MemoryOwnerOutSerializer(owner).data)
 
 
+class SourceContentAPIView(APIView):
+    def get(self, request: Request, entry_id: str, chunk_id: str) -> Response:
+        content = get_chunk_content(entry_id, chunk_id or None)
+        if content is None:
+            return Response({"detail": f"Entry not found: {entry_id}"}, status=404)
+        return Response(SourceContentSerializer({"content": content}).data)
+
+
 class MemoryOwnerDetailAPIView(APIView):
     def patch(self, request: Request, memory_id: str, user_id: str) -> Response:
         serializer = UpdateMemoryOwnerInSerializer(data=request.data)
@@ -380,5 +393,10 @@ urlpatterns = [
         "memories/<str:memory_id>/owners/<str:user_id>/",
         MemoryOwnerDetailAPIView.as_view(),
         name="memory-owner-detail",
+    ),
+    path(
+        "memories/source/<str:entry_id>/<str:chunk_id>/",
+        SourceContentAPIView.as_view(),
+        name="memory-source-content",
     ),
 ]

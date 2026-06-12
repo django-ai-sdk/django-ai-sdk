@@ -48,7 +48,11 @@ class PirateAgentAssistant(Assistant):
 
     protocol = VercelProtocolHandler
 
-    def get_tools(self) -> list:
+    async def get_tools(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | None = None,
+    ) -> list:
         """Return pirate-themed tools as methods."""
         return [
             self.get_pirate_insult,
@@ -144,9 +148,9 @@ class PirateAgentAssistant(Assistant):
 
         agent = Agent(
             name=self.name,
-            instructions=self.get_instructions(),
+            instructions=self.get_system_prompt(),
             model=self.model,
-            tools=self.get_tools(),
+            tools=await self.get_tools(),
         )
 
         return OpenAIAgentStream(

@@ -8,8 +8,10 @@ from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.permissions import IsAdminUser
+from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -70,7 +72,10 @@ class AgentSwarmAssistant(Assistant):
         Respond with text or tool calls as needed.
     """)
 
-    def get_tools(
+    citation_formatter_class = DefaultCitationFormatter
+    suggestion_generator = DefaultSuggestionGenerator
+
+    async def get_tools(
         self,
         thread_id: str = "",
         user: AbstractBaseUser | None = None,
@@ -146,7 +151,7 @@ class AgentSwarmAssistant(Assistant):
                 api_key=Secret.from_token(settings.OPENAI_API_KEY),
                 api_base_url=getattr(settings, "OPENAI_API_URL", None),
             ),
-            tools=self.get_tools(thread_id=thread_id or "", user=user),
+            tools=await self.get_tools(thread_id=thread_id or "", user=user),
             system_prompt=self.get_system_prompt(),
             exit_conditions=["text"],
         )
@@ -157,4 +162,6 @@ class AgentSwarmAssistant(Assistant):
             pipeline=pipeline,
             generator=triage_agent.chat_generator,
             storage_adapter=storage_adapter,
+            citation_registry=self.get_citation_registry(),
+            suggestion_generator=self.get_suggestion_generator(),
         )

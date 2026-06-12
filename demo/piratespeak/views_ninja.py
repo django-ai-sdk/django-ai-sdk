@@ -2,8 +2,8 @@ from typing import Any
 
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants import AssistantInfo
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.storage.schemas import ThreadInfo
@@ -16,6 +16,7 @@ from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from ninja import Router, Schema
 
 router = Router()
+logger = get_logger(__name__)
 
 
 class Error(Schema):
@@ -43,6 +44,36 @@ class AssistantsListResponse(Schema):
     assistants: list[AssistantItem]
 
 
+class AssistantInfoResponse(Schema):
+    id: str
+    name: str | None = None
+    model: str | None = None
+    class_name: str
+    description: str | None = None
+    instructions: str | None = None
+    file_upload: bool = False
+
+
+class Tool(Schema):
+    label: str
+    description: str | None = None
+    children: list["Tool"] = []
+
+
+class MCPServerStatus(Schema):
+    server_name: str
+    label: str
+    type: str
+    status: str
+    tool_names: list[str]
+    connect_url: str | None = None
+
+
+class ToolsResponse(Schema):
+    tools: list[Tool]
+    mcp: list[MCPServerStatus] = []
+
+
 class ThreadListItem(Schema):
     id: str
     title: str
@@ -60,9 +91,31 @@ class CreateThreadResponse(Schema):
     thread_id: str | None = None
 
 
+class FeedbackResponse(Schema):
+    id: str
+    user_id: str | None = None
+    rating: int
+    feedback: str
+    created_at: str | None = None
+
+
+class ThreadMessage(Schema):
+    id: str
+    role: str
+    parts: list = []
+    adapter_type: str = ""
+    finish_reason: str | None = None
+    tool_calls: list = []
+    processing_time_ms: int | None = None
+    has_errors: bool = False
+    usage: dict | None = None
+    feedback: FeedbackResponse | None = None
+    created_at: str | None = None
+
+
 class ThreadDetailResponse(Schema):
     thread: ThreadInfo
-    messages: list
+    messages: list[ThreadMessage]
 
 
 class ThreadFileMeta(Schema):
@@ -75,14 +128,6 @@ class DeleteAllThreadsResponse(Schema):
     deleted_count: int
 
 
-class FeedbackResponse(Schema):
-    id: str
-    user_id: str | None = None
-    rating: int
-    feedback: str
-    created_at: str | None = None
-
-
 class PatchThreadPayload(Schema):
     assistant_id: str
 
@@ -90,14 +135,17 @@ class PatchThreadPayload(Schema):
 class MessageResponse(Schema):
     id: str
     is_deleted: bool = False
+    feedback: FeedbackResponse | None = None
 
 
-@router.get("/health/", response={200: HealthResponse})
+@router.get("/health/", response={200: HealthResponse}, operation_id="health_check")
 def health_check(request: HttpRequest) -> HealthResponse:
     return HealthResponse(status="ok", service="piratespeak")
 
 
-@router.get("/threads/", response={200: ThreadListResponse, 500: Error})
+@router.get(
+    "/threads/", response={200: ThreadListResponse, 500: Error}, operation_id="list_threads"
+)
 async def list_threads(request: HttpRequest) -> Any:
     try:
         all_threads = await ThreadService.threads(user=request.user)
@@ -117,7 +165,11 @@ async def list_threads(request: HttpRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.post("/threads/", response={200: CreateThreadResponse, 400: Error, 500: Error})
+@router.post(
+    "/threads/",
+    response={200: CreateThreadResponse, 400: Error, 500: Error},
+    operation_id="create_thread",
+)
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     try:
         assistant_id = payload.assistant_id or ""
@@ -134,16 +186,39 @@ async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.get("/threads/{thread_id}/", response={200: ThreadDetailResponse, 404: Error, 403: Error})
+@router.get(
+    "/threads/{thread_id}/",
+    response={200: ThreadDetailResponse, 404: Error, 403: Error},
+    operation_id="get_thread_history",
+)
 async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     try:
         data = await aget_thread_history(thread_id, user=request.user)
+
+        # Filter feedbacks to current user only
+        for message in data.get("messages", []):
+            feedbacks = message.get("feedbacks", [])
+            user_feedback = None
+            if feedbacks:
+                user_feedback = next(
+                    (fb for fb in feedbacks if fb.get("user_id") == str(request.user.pk)),
+                    None,
+                )
+            message["feedback"] = user_feedback
+            del message["feedbacks"]
+
         return ThreadDetailResponse(**data)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
-@router.get("/threads/{thread_id}/file-meta/", response={200: ThreadFileMeta, 404: Error})
+@router.get(
+    "/threads/{thread_id}/file-meta/",
+    response={200: ThreadFileMeta, 404: Error},
+    operation_id="get_thread_file_meta",
+)
 async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
     try:
         data = await aget_thread_file_meta(thread_id, user=request.user)
@@ -152,7 +227,11 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
         return 404, Error(message=str(e))
 
 
-@router.post("/threads/{thread_id}/", response={403: Error, 404: Error, 500: Error})
+@router.post(
+    "/threads/{thread_id}/",
+    response={403: Error, 404: Error, 500: Error},
+    operation_id="add_message_to_thread",
+)
 async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     try:
         assistant = await AssistantService.get_assistant(thread_id, user=request.user)
@@ -163,7 +242,11 @@ async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: C
         return 404, Error(message=str(e))
 
 
-@router.delete("/threads/{thread_id}/", response={200: Success, 403: Error, 404: Error, 500: Error})
+@router.delete(
+    "/threads/{thread_id}/",
+    response={200: Success, 403: Error, 404: Error, 500: Error},
+    operation_id="delete_thread",
+)
 async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
     try:
         success = await ThreadService.delete_thread(thread_id, user=request.user)
@@ -178,7 +261,11 @@ async def delete_thread(request: HttpRequest, thread_id: str) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.delete("/threads/", response={200: DeleteAllThreadsResponse, 403: Error, 500: Error})
+@router.delete(
+    "/threads/",
+    response={200: DeleteAllThreadsResponse, 403: Error, 500: Error},
+    operation_id="delete_all_threads",
+)
 async def delete_all_threads(request: HttpRequest) -> Any:
     try:
         deleted_count = await ThreadService.delete_all_threads(user=request.user)
@@ -189,7 +276,11 @@ async def delete_all_threads(request: HttpRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.patch("/threads/{thread_id}/", response={200: Success, 400: Error, 403: Error, 404: Error})
+@router.patch(
+    "/threads/{thread_id}/",
+    response={200: Success, 400: Error, 403: Error, 404: Error},
+    operation_id="patch_thread",
+)
 async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
     try:
         AssistantService.from_registry(payload.assistant_id)
@@ -212,6 +303,7 @@ async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThrea
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/rate/",
     response={200: MessageResponse, 403: Error, 404: Error},
+    operation_id="rate_message",
 )
 async def rate_message(
     request: HttpRequest,
@@ -219,13 +311,11 @@ async def rate_message(
     message_id: str,
     payload: RateMessagePayload,
 ) -> Any:
-
     try:
         await ThreadService.rate_message(
             thread_id, message_id, payload.rating, feedback=payload.feedback, user=request.user
         )
         return MessageResponse(id=message_id, is_deleted=False)
-
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
@@ -235,6 +325,7 @@ async def rate_message(
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/delete/",
     response={200: MessageResponse, 403: Error, 404: Error},
+    operation_id="delete_message",
 )
 async def delete_message(request: HttpRequest, thread_id: str, message_id: str) -> Any:
     try:
@@ -249,6 +340,7 @@ async def delete_message(request: HttpRequest, thread_id: str, message_id: str) 
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/restore/",
     response={200: MessageResponse, 403: Error, 404: Error},
+    operation_id="restore_message",
 )
 async def restore_message(request: HttpRequest, thread_id: str, message_id: str) -> Any:
     try:
@@ -260,7 +352,11 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
         return 404, Error(message=str(e))
 
 
-@router.get("/assistants/", response={200: AssistantsListResponse, 403: Error, 500: Error})
+@router.get(
+    "/assistants/",
+    response={200: AssistantsListResponse, 403: Error, 500: Error},
+    operation_id="list_assistants",
+)
 async def list_assistants(request: HttpRequest) -> Any:
     try:
         items = await AssistantService.list_assistants(user=request.user)
@@ -271,19 +367,77 @@ async def list_assistants(request: HttpRequest) -> Any:
         return 500, Error(message=str(e))
 
 
-@router.get("/assistants/{assistant_id}/", response={200: AssistantInfo, 403: Error, 404: Error})
+@router.get(
+    "/assistants/{assistant_id}/",
+    response={200: AssistantInfoResponse, 403: Error, 404: Error},
+    operation_id="get_assistant_info",
+)
 async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        return await AssistantService.get_assistant_info(assistant_id, user=request.user)
+        assistant = AssistantService.from_registry(assistant_id)
+        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
+        return AssistantInfoResponse(
+            id=info.id,
+            name=info.name,
+            model=info.model,
+            class_name=info.class_name,
+            description=info.description,
+            instructions=assistant.get_system_prompt(),
+            file_upload=info.file_upload,
+        )
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
+@router.get(
+    "/assistants/{assistant_id}/tools/",
+    response={200: ToolsResponse, 404: Error},
+    operation_id="get_assistant_tools",
+)
+async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
+    try:
+        assistant = AssistantService.from_registry(assistant_id)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+    tools_data = []
+    try:
+        tool_objs = await assistant.get_tools()
+        tools_data = [
+            Tool(
+                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
+                description=t.description or "",
+            )
+            for t in tool_objs
+        ]
+    except Exception:
+        logger.exception("Failed to build tools for assistant %s", assistant_id)
+
+    mcp_data = []
+    try:
+        mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
+        mcp_data = [
+            MCPServerStatus(
+                server_name=s.server_name,
+                label=s.label,
+                type=s.type,
+                status=s.status,
+                tool_names=s.tool_names,
+            )
+            for s in mcp_status
+        ]
+    except Exception:
+        logger.exception("Failed to load MCP status for assistant %s", assistant_id)
+
+    return ToolsResponse(tools=tools_data, mcp=mcp_data)
+
+
 @router.post(
     "/assistants/{assistant_id}/reindex/",
     response={200: Success, 404: Error, 500: Error},
+    operation_id="reindex_assistant",
 )
 async def reindex_assistant(
     request: HttpRequest,

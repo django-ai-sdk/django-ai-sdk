@@ -12,13 +12,22 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
-from ninja import File, Router
+from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 
 router = Router()
 
 
-@router.post("", response={200: MemoryOut, 403: dict})
+class SourceContentOut(Schema):
+    content: str
+
+
+class Error(Schema):
+    message: str
+    code: int | None = None
+
+
+@router.post("", response={200: MemoryOut, 403: dict}, operation_id="create_memory")
 async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | tuple[int, dict]:
     try:
         return await MemoryService.create_memory(
@@ -32,7 +41,7 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | 
         return 403, {"detail": str(e)}
 
 
-@router.get("", response={200: list[MemoryOut], 403: dict})
+@router.get("", response={200: list[MemoryOut], 403: dict}, operation_id="list_memories")
 async def list_memories(request: HttpRequest) -> list[MemoryOut] | tuple[int, dict]:
     try:
         return await MemoryService.list_memories(user=request.user)
@@ -40,7 +49,7 @@ async def list_memories(request: HttpRequest) -> list[MemoryOut] | tuple[int, di
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}", response={200: MemoryOut, 403: dict})
+@router.get("/{memory_id}", response={200: MemoryOut, 403: dict}, operation_id="get_memory")
 async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOut | tuple[int, dict]:
     try:
         return await MemoryService.get_memory(memory_id, user=request.user)
@@ -48,7 +57,7 @@ async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOut | tuple[
         return 403, {"detail": str(e)}
 
 
-@router.put("/{memory_id}", response={200: MemoryOut, 403: dict})
+@router.put("/{memory_id}", response={200: MemoryOut, 403: dict}, operation_id="update_memory")
 async def update_memory(
     request: HttpRequest, memory_id: str, payload: MemoryIn
 ) -> MemoryOut | tuple[int, dict]:
@@ -64,7 +73,7 @@ async def update_memory(
         return 403, {"detail": str(e)}
 
 
-@router.delete("/{memory_id}", response={204: None, 403: dict})
+@router.delete("/{memory_id}", response={204: None, 403: dict}, operation_id="delete_memory")
 async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None | dict]:
     try:
         await MemoryService.delete_memory(memory_id, user=request.user)
@@ -73,7 +82,11 @@ async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None
         return 403, {"detail": str(e)}
 
 
-@router.post("/{memory_id}/documents", response={200: DocumentOut, 400: dict, 403: dict})
+@router.post(
+    "/{memory_id}/documents",
+    response={200: DocumentOut, 400: dict, 403: dict},
+    operation_id="upload_document",
+)
 async def upload_document(
     request: HttpRequest,
     memory_id: str,
@@ -85,7 +98,11 @@ async def upload_document(
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}/documents", response={200: list[DocumentOut], 403: dict})
+@router.get(
+    "/{memory_id}/documents",
+    response={200: list[DocumentOut], 403: dict},
+    operation_id="list_documents",
+)
 async def list_documents(
     request: HttpRequest, memory_id: str
 ) -> list[DocumentOut] | tuple[int, dict]:
@@ -95,7 +112,11 @@ async def list_documents(
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}/documents/{doc_id}", response={200: DocumentOut, 403: dict})
+@router.get(
+    "/{memory_id}/documents/{doc_id}",
+    response={200: DocumentOut, 403: dict},
+    operation_id="get_document",
+)
 async def get_document(
     request: HttpRequest, memory_id: str, doc_id: str
 ) -> DocumentOut | tuple[int, dict]:
@@ -105,7 +126,11 @@ async def get_document(
         return 403, {"detail": str(e)}
 
 
-@router.delete("/{memory_id}/documents/{doc_id}", response={204: None, 403: dict})
+@router.delete(
+    "/{memory_id}/documents/{doc_id}",
+    response={204: None, 403: dict},
+    operation_id="delete_document",
+)
 async def delete_document(
     request: HttpRequest, memory_id: str, doc_id: str
 ) -> tuple[int, None | dict]:
@@ -116,7 +141,9 @@ async def delete_document(
         return 403, {"detail": str(e)}
 
 
-@router.post("/{memory_id}/link/{thread_id}", response={204: None, 403: dict})
+@router.post(
+    "/{memory_id}/link/{thread_id}", response={204: None, 403: dict}, operation_id="link_thread"
+)
 async def link_thread(
     request: HttpRequest, memory_id: str, thread_id: str
 ) -> tuple[int, None | dict]:
@@ -127,7 +154,9 @@ async def link_thread(
         return 403, {"detail": str(e)}
 
 
-@router.delete("/{memory_id}/link/{thread_id}", response={204: None, 403: dict})
+@router.delete(
+    "/{memory_id}/link/{thread_id}", response={204: None, 403: dict}, operation_id="unlink_thread"
+)
 async def unlink_thread(
     request: HttpRequest, memory_id: str, thread_id: str
 ) -> tuple[int, None | dict]:
@@ -138,7 +167,11 @@ async def unlink_thread(
         return 403, {"detail": str(e)}
 
 
-@router.get("/thread/{thread_id}", response={200: list[ThreadMemoryOut], 403: dict})
+@router.get(
+    "/thread/{thread_id}",
+    response={200: list[ThreadMemoryOut], 403: dict},
+    operation_id="list_thread_memories",
+)
 async def list_thread_memories(
     request: HttpRequest, thread_id: str
 ) -> list[ThreadMemoryOut] | tuple[int, dict]:
@@ -148,7 +181,11 @@ async def list_thread_memories(
         return 403, {"detail": str(e)}
 
 
-@router.post("/thread/{thread_id}/bulk", response={200: list[ThreadMemoryOut], 403: dict})
+@router.post(
+    "/thread/{thread_id}/bulk",
+    response={200: list[ThreadMemoryOut], 403: dict},
+    operation_id="bulk_connect_memories",
+)
 async def bulk_connect_memories(
     request: HttpRequest, thread_id: str, payload: BulkConnectMemoriesIn
 ) -> list[ThreadMemoryOut] | tuple[int, dict]:
@@ -160,7 +197,11 @@ async def bulk_connect_memories(
         return 403, {"detail": str(e)}
 
 
-@router.post("/thread/{thread_id}/files", response={200: DocumentOut, 400: dict})
+@router.post(
+    "/thread/{thread_id}/files",
+    response={200: DocumentOut, 400: dict},
+    operation_id="upload_thread_file",
+)
 async def upload_thread_file(
     request: HttpRequest,
     thread_id: str,
@@ -169,18 +210,26 @@ async def upload_thread_file(
     return await MemoryService.upload_thread_file(thread_id, file)
 
 
-@router.get("/thread/{thread_id}/files", response=list[DocumentOut])
+@router.get(
+    "/thread/{thread_id}/files", response=list[DocumentOut], operation_id="list_thread_files"
+)
 async def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
     return await MemoryService.list_thread_files(thread_id)
 
 
-@router.delete("/thread/{thread_id}/files/{doc_id}", response={204: None})
+@router.delete(
+    "/thread/{thread_id}/files/{doc_id}", response={204: None}, operation_id="delete_thread_file"
+)
 async def delete_thread_file(request: HttpRequest, thread_id: str, doc_id: str) -> tuple[int, None]:
     await MemoryService.delete_thread_file(thread_id, doc_id)
     return 204, None
 
 
-@router.patch("/thread/{thread_id}/{memory_id}", response={200: ThreadMemoryOut, 403: dict})
+@router.patch(
+    "/thread/{thread_id}/{memory_id}",
+    response={200: ThreadMemoryOut, 403: dict},
+    operation_id="toggle_memory_active",
+)
 async def toggle_memory_active(
     request: HttpRequest, thread_id: str, memory_id: str, payload: ToggleMemoryActiveIn
 ) -> ThreadMemoryOut | tuple[int, dict]:
@@ -192,7 +241,11 @@ async def toggle_memory_active(
         return 403, {"detail": str(e)}
 
 
-@router.delete("/thread/{thread_id}/{memory_id}", response={204: None, 403: dict})
+@router.delete(
+    "/thread/{thread_id}/{memory_id}",
+    response={204: None, 403: dict},
+    operation_id="disconnect_memory_from_thread",
+)
 async def disconnect_memory_from_thread(
     request: HttpRequest, thread_id: str, memory_id: str
 ) -> tuple[int, None | dict]:
@@ -203,7 +256,11 @@ async def disconnect_memory_from_thread(
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}/owners/", response={200: list[MemoryOwnerOut], 403: dict, 404: dict})
+@router.get(
+    "/{memory_id}/owners/",
+    response={200: list[MemoryOwnerOut], 403: dict, 404: dict},
+    operation_id="list_owners",
+)
 async def list_owners(
     request: HttpRequest, memory_id: str
 ) -> list[MemoryOwnerOut] | tuple[int, dict]:
@@ -215,7 +272,11 @@ async def list_owners(
         return 403, {"detail": str(e)}
 
 
-@router.post("/{memory_id}/owners/", response={200: MemoryOwnerOut, 403: dict, 404: dict})
+@router.post(
+    "/{memory_id}/owners/",
+    response={200: MemoryOwnerOut, 403: dict, 404: dict},
+    operation_id="add_owner",
+)
 async def add_owner(
     request: HttpRequest, memory_id: str, payload: AddMemoryOwnerIn
 ) -> MemoryOwnerOut | tuple[int, dict]:
@@ -230,7 +291,9 @@ async def add_owner(
 
 
 @router.patch(
-    "/{memory_id}/owners/{user_id}/", response={200: MemoryOwnerOut, 403: dict, 404: dict}
+    "/{memory_id}/owners/{user_id}/",
+    response={200: MemoryOwnerOut, 403: dict, 404: dict},
+    operation_id="update_owner",
 )
 async def update_owner(
     request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryOwnerIn
@@ -245,7 +308,11 @@ async def update_owner(
         return 403, {"detail": str(e)}
 
 
-@router.delete("/{memory_id}/owners/{user_id}/", response={204: None, 403: dict, 404: dict})
+@router.delete(
+    "/{memory_id}/owners/{user_id}/",
+    response={204: None, 403: dict, 404: dict},
+    operation_id="remove_owner",
+)
 async def remove_owner(
     request: HttpRequest, memory_id: str, user_id: str
 ) -> tuple[int, None | dict]:
@@ -256,3 +323,17 @@ async def remove_owner(
         return 404, {"detail": str(e)}
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
+
+
+@router.get(
+    "/source/{entry_id}/{chunk_id}",
+    response={200: SourceContentOut, 404: Error},
+    operation_id="get_source_content",
+)
+async def get_source_content(
+    request: HttpRequest, entry_id: str, chunk_id: str
+) -> tuple[int, Error] | SourceContentOut:
+    content = await MemoryService.get_chunk_content(entry_id, chunk_id or None)
+    if content is None:
+        return 404, Error(message=f"Entry not found: {entry_id}")
+    return SourceContentOut(content=content)

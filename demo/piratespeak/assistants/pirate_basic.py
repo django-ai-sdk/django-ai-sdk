@@ -7,6 +7,7 @@ from django.utils import timezone
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
@@ -22,6 +23,7 @@ from django_ai_sdk.rags.haystack import (
 )
 from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
+from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
@@ -78,6 +80,11 @@ class PirateBasicAssistant(Assistant):
 
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
+
+    tools: list = [get_today]
+
+    citation_formatter_class = DefaultCitationFormatter
+    suggestion_generator = DefaultSuggestionGenerator
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Entry]:
         """Return queryset of documents for RAG."""
@@ -158,12 +165,25 @@ class PirateBasicAssistant(Assistant):
         # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        # Create tools list
-        tools = [get_today()]
+        # One registry/formatter per request: indices stay cumulative across
+        # multiple RAG tool calls in a turn, and reset between turns.
+        citation_registry = self.get_citation_registry()
+        citation_formatter = self.get_citation_formatter()
+
+        # Get tools via the async base-class method
+        tools = await self.get_tools(
+            thread_id=thread_id or "",
+            user=user,
+        )
 
         # Add RAG tools for each active memory link
         if self.rag_provider and thread_id:
-            rag_tools = await self.get_rag_tools(thread_id=thread_id)
+            rag_tools = await self.get_rag_tools(
+                thread_id=thread_id,
+                citation_registry=citation_registry,
+                citation_formatter=citation_formatter,
+                user=user,
+            )
             tools.extend(rag_tools)
 
         # Build tool agent with all tools
@@ -182,4 +202,6 @@ class PirateBasicAssistant(Assistant):
             pipeline=pipeline,
             generator=generator,
             storage_adapter=storage_adapter,
+            citation_registry=citation_registry,
+            suggestion_generator=self.get_suggestion_generator(),
         )

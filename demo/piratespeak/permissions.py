@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from django_ai_sdk.permissions import BasePermission, Operation
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
+
+
+class AllowAnonymousMemoryPermission(BasePermission):
+    """Permission class that allows anonymous users read-only access to public memories.
+
+    - Anonymous users: can view/list public memories and documents (read-only).
+    - Authenticated users: full access to their own memories + public memories.
+    - Manager operations (update/delete memory) require ownership with can_manage=True.
+    """
+
+    READ: frozenset[Operation] = frozenset(
+        {
+            Operation.VIEW_MEMORY,
+            Operation.VIEW_DOCUMENT,
+            Operation.LIST_DOCUMENTS,
+            Operation.LIST_THREAD_MEMORIES,
+            Operation.VIEW_FILE,
+            Operation.UPLOAD_FILE,
+            Operation.DELETE_FILE,
+            Operation.UPLOAD_DOCUMENT,
+            Operation.DELETE_DOCUMENT,
+        }
+    )
+    WRITE: frozenset[Operation] = frozenset(
+        {
+            Operation.UPLOAD_DOCUMENT,
+            Operation.DELETE_DOCUMENT,
+            Operation.LINK_MEMORY,
+            Operation.UNLINK_MEMORY,
+        }
+    )
+    MANAGER: frozenset[Operation] = frozenset(
+        {
+            Operation.UPDATE_MEMORY,
+            Operation.DELETE_MEMORY,
+        }
+    )
+
+    async def has_permission(
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
+        # Anonymous users can only read public memories
+        if user is None or not user.is_authenticated:
+            return operation in self.READ
+        return True
+
+    async def has_object_permission(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
+    ) -> bool:
+        # Objects without is_public (e.g. Thread) are treated as public in demo
+        is_public = getattr(obj, "is_public", True)
+
+        # Anonymous users can only read
+        if user is None or not user.is_authenticated:
+            return operation in self.READ and is_public
+
+        # Objects without owners (e.g. Thread) — allow read for authenticated
+        if not hasattr(obj, "owners"):
+            return operation in self.READ
+
+        # Check ownership for authenticated users
+        ownership = await obj.owners.filter(user=user).afirst()
+        if ownership is None:
+            # Not an owner — only allow read on public memories
+            if operation in self.READ and is_public:
+                return True
+            return False
+
+        # Owner: manager ops require can_manage=True
+        if operation in self.MANAGER:
+            return ownership.can_manage
+        return True

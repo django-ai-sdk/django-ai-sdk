@@ -36,7 +36,7 @@ class ErrorResponse(Schema):
     detail: str
 
 
-@router.get("/connections/", response=list[MCPConnectionOut])
+@router.get("/connections/", response=list[MCPConnectionOut], operation_id="list_connections")
 async def list_connections(request: HttpRequest) -> list[MCPConnectionOut]:
     """List all MCP servers with connection status."""
 
@@ -60,6 +60,7 @@ async def list_connections(request: HttpRequest) -> list[MCPConnectionOut]:
 @router.delete(
     "/connections/{server_name}/",
     response={200: dict[str, str], 401: dict[str, str], 404: dict[str, str]},
+    operation_id="disconnect",
 )
 async def disconnect(request: HttpRequest, server_name: str) -> tuple[int, dict[str, str]]:
     """Disconnect (revoke) an OAuth MCP connection."""
@@ -72,7 +73,9 @@ async def disconnect(request: HttpRequest, server_name: str) -> tuple[int, dict[
     return 200, {"disconnected": server_name}
 
 
-@router.post("/connections/{server_name}/test/", response={200: MCPTestOut})
+@router.post(
+    "/connections/{server_name}/test/", response={200: MCPTestOut}, operation_id="test_connection"
+)
 async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
     """Test connectivity to an MCP server."""
     if not request.user.is_authenticated:
