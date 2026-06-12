@@ -150,12 +150,6 @@ AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
-# Default memory file service handler
-AI_SDK_MEMORY_FILE_HANDLER = "django_ai_skd.files.services.DefaultMemoryFileHandler"
-
-# Default memory file service handler
-AI_SDK_MEMORY_CONTENT_HANDLER = "django_ai_skd.files.services.DefaultMemoryFileHandler"
-
 # Memory permission classes
 AI_SDK_MEMORY_PERMISSIONS = [
     "piratespeak.permissions.AllowAnonymousMemoryPermission",

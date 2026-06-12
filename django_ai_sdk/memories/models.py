@@ -123,10 +123,7 @@ class Entry(models.Model):
 
     def to_rag_document(self) -> RagDocument:
         """Convert to RagDocument for retrieval. Enriches with extraction data when present."""
-        from django_ai_sdk.memories.utils import get_prompt_metadata
-
         extraction = self.extraction
-        content = get_prompt_metadata(self.content, extraction) if extraction else self.content
         return RagDocument(
             id=str(self.id),
             content=content,

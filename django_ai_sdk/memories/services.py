@@ -19,7 +19,6 @@ from django_ai_sdk.memories.schemas import (
     MemoryOwnerOut,
     ThreadMemoryOut,
 )
-from django_ai_sdk.memories.utils import extract_document
 from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
@@ -301,24 +300,15 @@ class MemoryService:
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
 
-        # file service handles file processing
-        result = await FileService.process(file=file)
-
-        # get extension
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
-        content, ext = result
-
-        extraction = await extract_document(content)
 
         entry = await Entry.objects.acreate(
             memory=memory,
             name=file_name,
-            content=content,
-            data=extraction.model_dump() if extraction else {},
         )
 
         entry_doc = await EntryDocument.objects.acreate(
@@ -328,7 +318,6 @@ class MemoryService:
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
-            extracted=bool(extraction),
         )
 
         return MemoryService._entry_doc_to_out(entry_doc)
@@ -511,24 +500,15 @@ class MemoryService:
         # get assistant from thread
         assistant = await AssistantService.get_assistant(thread_id)
 
-        # file service handles file processing
-        result = await FileService.process(file=file, handler=assistant)
-
-        # get extension
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
         if result is None:
             return 400, {"detail": f"Unsupported or empty file: {file_name}"}
-        content, ext = result
-
-        extraction = await extract_document(content)
 
         entry = await Entry.objects.acreate(
             memory=memory,
             name=file_name,
-            content=content,
-            data=extraction.model_dump() if extraction else {},
         )
 
         entry_doc = await EntryDocument.objects.acreate(
@@ -538,7 +518,6 @@ class MemoryService:
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
-            extracted=bool(extraction),
         )
 
         return MemoryService._entry_doc_to_out(entry_doc)

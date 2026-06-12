@@ -170,7 +170,6 @@ class PirateBasicAssistant(Assistant):
         citation_registry = self.get_citation_registry()
         citation_formatter = self.get_citation_formatter()
 
-        # Get tools via the async base-class method
         tools = await self.get_tools(
             thread_id=thread_id or "",
             user=user,
