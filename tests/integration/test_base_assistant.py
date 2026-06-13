@@ -204,8 +204,7 @@ class TestStreamWriterIntegration:
 
         message_id = str(uuid.uuid4())
         stream_writer = StreamWriter(
-            adapter_type="test",
-            message_id=message_id,
+                        message_id=message_id,
             model="test-model",
             role="assistant",
             storage_callback=None,
@@ -222,8 +221,7 @@ class TestStreamWriterIntegration:
 
         # Should work with valid ID
         stream_writer = StreamWriter(
-            adapter_type="test",
-            message_id=str(uuid.uuid4()),
+                        message_id=str(uuid.uuid4()),
             model="test-model",
             role="assistant",
         )

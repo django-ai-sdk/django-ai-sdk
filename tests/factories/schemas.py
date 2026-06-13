@@ -48,7 +48,6 @@ class ThreadInfoFactory(ModelFactory[ThreadInfo]):
 class ChatMessageFactory(ModelFactory[ChatMessage]):
     role = "assistant"
     content = "Hello"
-    adapter_type = "openai"
     model = "gpt-4o-mini"
     finish_reason = "stop"
     tool_calls = []
