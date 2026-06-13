@@ -13,8 +13,7 @@ from django_ai_sdk.files import FilePipeline, TextFileProcessor
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-from django_ai_sdk.rags.config import QdrantStorageConfig
-from django_ai_sdk.rags.haystack import (
+from django_ai_sdk.rags import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
     ChromaDBQueryExpanderRAG,
@@ -22,7 +21,8 @@ from django_ai_sdk.rags.haystack import (
     QdrantBM25HybridRAG,
     QdrantBM25HybridRAGConfig,
 )
-from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
+from django_ai_sdk.rags.config import QdrantStorageConfig
+from django_ai_sdk.rags.provider import HaystackRAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator

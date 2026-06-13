@@ -145,8 +145,6 @@ AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 # Default asssitants
 AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.pirate_basic.PirateBasicAssistant",
-    "piratespeak.assistants.pirate_openai.PirateOpenAIAssistant",
-    "piratespeak.assistants.pirate_agent.PirateAgentAssistant",
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
