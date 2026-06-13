@@ -171,4 +171,3 @@ AI_SDK_MCP_SERVERS = {
 AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
 AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/mcp"
-AI_SDK_MCP_BACKEND = "django_ai_sdk.mcp.backends.haystack"
