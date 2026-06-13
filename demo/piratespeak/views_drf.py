@@ -199,12 +199,13 @@ class ThreadDetailAPIView(APIView):
             data = get_thread_history(thread_id, user=request.user)
 
             # Filter feedbacks to current user only
+            user_pk = str(request.user.pk) if request.user.is_authenticated else None
             for message in data.get("messages", []):
                 feedbacks = message.get("feedbacks", [])
                 user_feedback = None
                 if feedbacks:
                     user_feedback = next(
-                        (fb for fb in feedbacks if fb.get("user_id") == str(request.user.pk)),
+                        (fb for fb in feedbacks if fb.get("user_id") == user_pk),
                         None,
                     )
                 message["feedback"] = user_feedback

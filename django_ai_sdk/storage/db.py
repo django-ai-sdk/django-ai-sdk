@@ -280,6 +280,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         """Rate a message in this thread."""
         from django_ai_sdk.conversation.models import MessageFeedback
 
+        user = user if (user and user.is_authenticated) else None
         try:
             # Verify message exists and belongs to this thread
             await Message.objects.aget(id=message_id, thread_id=self.thread_id)
