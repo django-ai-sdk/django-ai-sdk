@@ -14,9 +14,9 @@ from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.rags.base import BaseHaystackRAGConfig, HaystackRAGBase
+from django_ai_sdk.rags.components import MultiQueryChromaRetriever
 from django_ai_sdk.rags.config import ChromaStorageConfig
-from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
-from django_ai_sdk.rags.haystack.components import MultiQueryChromaRetriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
 

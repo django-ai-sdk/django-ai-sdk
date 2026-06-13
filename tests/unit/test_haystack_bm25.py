@@ -6,7 +6,7 @@ Query expansion requires LLM, but document indexing does not.
 """
 
 import pytest
-from django_ai_sdk.rags.haystack.bm25 import BM25QueryExpanderRAG, BM25QueryExpanderRAGConfig
+from django_ai_sdk.rags.bm25 import BM25QueryExpanderRAG, BM25QueryExpanderRAGConfig
 from django_ai_sdk.rags.schemas import RagDocument
 
 

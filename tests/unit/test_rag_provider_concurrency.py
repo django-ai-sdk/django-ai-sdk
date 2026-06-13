@@ -15,8 +15,7 @@ call would complete synchronously and the test would pass trivially.
 import asyncio
 from unittest.mock import MagicMock
 
-from django_ai_sdk.rags import RAGProvider
-from django_ai_sdk.rags.haystack.provider import HaystackRAGProvider
+from django_ai_sdk.rags.provider import HaystackRAGProvider
 from django_ai_sdk.rags.schemas import RagDocument
 
 
@@ -90,29 +89,3 @@ class TestHaystackRAGProviderConcurrency:
         assert len(calls_b) == 1
 
 
-class TestRAGProviderConcurrency:
-    async def test_concurrent_cold_cache_warms_up_once(self):
-        """RAGProvider has the same guarantee as HaystackRAGProvider."""
-        provider = RAGProvider()
-        calls: list = []
-        rag = _make_rag()
-        assistant = _make_assistant(calls, rag)
-
-        r1, r2 = await asyncio.gather(
-            provider.get_rag_instance(assistant, "mem-1"),
-            provider.get_rag_instance(assistant, "mem-1"),
-        )
-
-        assert r1 is r2
-        assert len(calls) == 1
-
-    async def test_warm_cache_never_calls_warmup_again(self):
-        provider = RAGProvider()
-        calls: list = []
-        rag = _make_rag()
-        assistant = _make_assistant(calls, rag)
-
-        await provider.get_rag_instance(assistant, "mem-warm")
-        await provider.get_rag_instance(assistant, "mem-warm")
-
-        assert len(calls) == 1

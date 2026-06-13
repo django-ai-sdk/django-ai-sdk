@@ -1,306 +1,213 @@
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
-
-import bm25s
-from pydantic import BaseModel
+from django.conf import settings
+from haystack import Pipeline
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.components.query import QueryExpander
+from haystack.components.writers import DocumentWriter
+from haystack.core.super_component import SuperComponent
+from haystack.dataclasses import Document as HaystackDocument
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.tools import ComponentTool
+from haystack.utils import Secret
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.base import BaseRAGAdapter, RAGResult, RAGSource
+from django_ai_sdk.rags.base import BaseHaystackRAGConfig, HaystackRAGBase
+from django_ai_sdk.rags.components import MultiQueryBM25Retriever
 from django_ai_sdk.rags.schemas import RagDocument
-
-if TYPE_CHECKING:
-    from django_ai_sdk.rags.schemas import ToolSpec
+from django_ai_sdk.rags.utils import rag_document_to_haystack
 
 logger = get_logger(__name__)
 
 
-class BM25Config(BaseModel):
-    """
-    Configuration for BM25RAG.
+class BM25QueryExpanderRAGConfig(BaseHaystackRAGConfig):
+    """Configuration for BM25 Query Expander RAG."""
 
-    Attributes:
-        top_k: Number of documents to retrieve (default: 5)
-        k1: BM25 k1 parameter (default: 1.5) - term frequency saturation
-        b: BM25 b parameter (default: 0.75) - length normalization
-    """
-
-    top_k: int = 5
-    k1: float = 1.5
-    b: float = 0.75
+    pass
 
 
-class BM25RAG(BaseRAGAdapter):
-    """
-    BM25-based RAG implementation using bm25s library.
-
-    This is a lightweight RAG that uses pure BM25 keyword search without
-    embeddings or complex pipelines. It inherits from BaseRAGAdapter and
-    is managed by BaseRAGProvider.
-
-    Features:
-    - Fast keyword-based retrieval
-    - No GPU required
-    - Minimal dependencies (just bm25s)
-
-    Example:
-        from django_ai_sdk.rags import RagDocument
-
-        documents = [
-            RagDocument(id="1", content="Python is a programming language..."),
-            RagDocument(id="2", content="Django is a web framework...")
-        ]
-
-        rag = BM25RAG(
-            documents=documents,
-            config=BM25Config(top_k=5)
-        )
-
-        # Warm up (builds index)
-        rag.warmup()
-
-        # Retrieve
-        result = await rag.retrieve("What is Python?")
-        print(result.context)
-    """
-
-    documents: list[RagDocument]
-    _bm25: Any | None
-    _corpus_tokens: Any | None
-    _doc_id_to_index: dict[str, int]
+class BM25QueryExpanderRAG(HaystackRAGBase):
+    """RAG implementation using BM25 with optional query expansion."""
 
     def __init__(
         self,
         documents: list[RagDocument],
-        config: BM25Config | None = None,
+        config: BM25QueryExpanderRAGConfig | None = None,
     ) -> None:
-        """
-        Initialize BM25 RAG.
+        self.config = config or BM25QueryExpanderRAGConfig()
+        self.documents = documents
+        self._cached_document_store: InMemoryDocumentStore | None = None
+        self._is_warmed_up = False
+        logger.debug(f"BM25QueryExpanderRAG initialized with {len(documents)} documents")
 
-        Args:
-            documents: List of RagDocument objects
-            config: Configuration for retrieval parameters (defaults to BM25Config())
-        """
-        self.config: BM25Config = config or BM25Config()
+    def _convert_documents(self) -> list[HaystackDocument]:
+        """Convert RagDocuments to HaystackDocuments for internal use."""
+        return [rag_document_to_haystack(doc) for doc in self.documents]
 
-        self.documents = [
-            doc if isinstance(doc, RagDocument) else RagDocument.from_dict(doc) for doc in documents
-        ]
-        self._bm25 = None
-        self._corpus_tokens = None
-        self._doc_id_to_index = {}
-        logger.debug(f"BM25RAG initialized with {len(documents)} documents")
+    def _create_document_store(self) -> InMemoryDocumentStore:
+        """Create an in-memory document store."""
+        return InMemoryDocumentStore()
 
-    def _rebuild_index(self) -> None:
-        """Rebuild the BM25 index from self.documents."""
-        if not self.documents:
-            # No documents to index
-            self._bm25 = None
-            self._corpus_tokens = None
-            self._doc_id_to_index = {}
-            logger.debug("No documents to index, skipping BM25 index build")
-            return
-
-        corpus = [doc.content for doc in self.documents]
-        self._doc_id_to_index = {doc.id: i for i, doc in enumerate(self.documents)}
-
-        self._corpus_tokens = bm25s.tokenize(corpus)
-        self._bm25 = bm25s.BM25(k1=self.config.k1, b=self.config.b)
-        self._bm25.index(self._corpus_tokens)
-
-        logger.debug(f"BM25 index rebuilt with {len(self.documents)} documents")
-
-    def warmup(self) -> None:
-        """
-        Warm up by building the BM25 index.
-        This tokenizes all documents and builds the BM25 index.
-        It's an expensive operation that should be cached by the provider.
-        """
-        if self._is_warmed_up:
-            logger.debug("BM25RAG already warmed up, skipping")
-            return
-
-        logger.debug(f"Warming up BM25RAG with {len(self.documents)} documents")
-        self._rebuild_index()
-        self._is_warmed_up = True
-        logger.debug("BM25RAG warmup complete")
+    def _has_existing_index(self, document_store: InMemoryDocumentStore) -> bool:
+        """Check if document store already has indexed documents."""
+        return document_store.count_documents() > 0
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
-        """
-        Add documents to the BM25 index incrementally.
+        """Add documents to the existing BM25 index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot add documents")
+            return
 
-        Since bm25s doesn't support incremental adds, we rebuild the index
-        with all documents (existing + new).
-
-        Args:
-            documents: List of RagDocument objects to add.
-        """
-        logger.info(f"Adding {len(documents)} documents to BM25RAG")
-        self.documents.extend(documents)
-        self._rebuild_index()
-        logger.info(f"BM25RAG now has {len(self.documents)} documents")
+        haystack_docs = [rag_document_to_haystack(doc) for doc in documents]
+        self._write_documents(haystack_docs, self._cached_document_store)
+        logger.info(f"Added {len(documents)} documents to BM25 index")
 
     async def remove_documents(self, document_ids: list[str]) -> None:
-        """
-        Remove documents from the BM25 index incrementally.
+        """Remove documents from the BM25 index."""
+        if self._cached_document_store is None:
+            logger.warning("No document store available, cannot remove documents")
+            return
 
-        Since bm25s doesn't support incremental removes, we rebuild the index
-        without the removed documents.
+        existing = self._cached_document_store.filter_documents()
+        remaining = [d for d in existing if d.id not in document_ids]
+
+        self._cached_document_store.delete_documents(document_ids=[d.id for d in existing])
+        if remaining:
+            self._write_documents(remaining, self._cached_document_store)
+
+        logger.info(f"Removed {len(document_ids)} documents from BM25 index")
+
+    def _write_documents(
+        self, documents: list[HaystackDocument], document_store: InMemoryDocumentStore
+    ) -> None:
+        """Write documents to the store (no chunking for BM25)."""
+        writer = DocumentWriter(document_store)
+        writer.run(documents=documents)
+
+    def warmup(self, force_rebuild: bool = False) -> None:
+        """
+        Build or load indexed document store.
 
         Args:
-            document_ids: List of document IDs to remove.
+            force_rebuild: If True, clears existing index and rebuilds from scratch.
         """
-        removed = set(document_ids)
-        before_count = len(self.documents)
-        self.documents = [d for d in self.documents if d.id not in removed]
-        after_count = len(self.documents)
+        if self._is_warmed_up and not force_rebuild:
+            logger.debug("BM25QueryExpanderRAG already warmed up, skipping")
+            return
 
-        logger.info(f"Removing {before_count - after_count} documents from BM25RAG")
-        self._rebuild_index()
-        logger.info(f"BM25RAG now has {len(self.documents)} documents")
+        if force_rebuild:
+            logger.info("Force rebuild requested, resetting BM25 index")
+            self._is_warmed_up = False
+
+        logger.debug("Warming up BM25QueryExpanderRAG - building indexed document store")
+        logger.info(
+            f"[warmup] force_rebuild={force_rebuild}, source_documents={len(self.documents)}"
+        )
+
+        document_store = self._create_document_store()
+
+        if not force_rebuild and self._has_existing_index(document_store):
+            existing_count = document_store.count_documents()
+            self._cached_document_store = document_store
+            self._is_warmed_up = True
+            logger.info(f"Using existing BM25 index with {existing_count} documents")
+            return
+
+        haystack_docs = self._convert_documents()
+        logger.info(f"[warmup] Converted {len(haystack_docs)} HaystackDocuments")
+
+        logger.debug(f"Writing {len(haystack_docs)} documents to BM25 store")
+        self._write_documents(haystack_docs, document_store)
+
+        self._cached_document_store = document_store
+        self._is_warmed_up = True
+        indexed_count = document_store.count_documents()
+        logger.info(
+            f"BM25QueryExpanderRAG warmup complete: {len(self.documents)} source docs -> {indexed_count} docs indexed"
+        )
+
+    def build_pipeline(self) -> Pipeline:
+        """Build the RAG pipeline with BM25."""
+        logger.debug("Building BM25 RAG query pipeline")
+
+        if self._cached_document_store is not None:
+            document_store = self._cached_document_store
+        else:
+            document_store = self._create_document_store()
+
+            if not self._has_existing_index(document_store):
+                haystack_docs = self._convert_documents()
+                self._write_documents(haystack_docs, document_store)
+
+        expander_generator = OpenAIChatGenerator(
+            model=self.config.expander_model,
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
+        )
+
+        query_expander = QueryExpander(
+            chat_generator=expander_generator,
+            n_expansions=self.config.n_expansions,
+            prompt_template=self.config.expander_prompt,
+        )
+
+        retriever = MultiQueryBM25Retriever(
+            document_store=document_store,
+            top_k=self.config.top_k,
+        )
+
+        pipeline = Pipeline()
+        pipeline.add_component("expander", query_expander)
+        pipeline.add_component("retriever", retriever)
+
+        pipeline.connect("expander.queries", "retriever.queries")
+        logger.debug("BM25 RAG pipeline built successfully")
+        return pipeline
 
     def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
-        Fully refresh the index with a new set of documents.
+        Update the indexed documents in-place.
 
-        Replaces all documents and rebuilds the index.
-
-        Args:
-            documents: The new complete set of documents.
+        Replaces self.documents with the new list and re-indexes all of them
+        into the already-open document store.
         """
-        logger.info(f"Refreshing BM25RAG with {len(documents)} documents")
-        self.documents = [
-            doc if isinstance(doc, RagDocument) else RagDocument.from_dict(doc) for doc in documents
-        ]
-        self._rebuild_index()
-        logger.info(f"BM25RAG refresh complete: {len(documents)} documents")
+        self.documents = documents
+        logger.info(f"[refresh_documents] Refreshing BM25 index with {len(documents)} documents")
 
-    async def retrieve(self, query: str) -> RAGResult:
-        """
-        Retrieve relevant documents using BM25.
+        if self._cached_document_store is None:
+            self.warmup(force_rebuild=True)
+            return
 
-        Automatically calls warmup() if needed (checks needs_warmup property).
+        document_store = self._cached_document_store
 
-        Args:
-            query: Search query string
+        existing_docs = document_store.filter_documents()
+        if existing_docs:
+            document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
 
-        Returns:
-            RAGResult with documents, context, and sources
-        """
+        haystack_docs = self._convert_documents()
+        self._write_documents(haystack_docs, document_store)
 
-        # TODO: not sure if this is a good location to warmup
-        if self.needs_warmup:
-            self.warmup()
-
-        if not self._bm25:
-            raise RuntimeError("BM25 not initialized. Call warmup() first.")
-
-        logger.debug(f"Retrieving documents for query: {query[:50]}...")
-
-        # Tokenize query
-        query_tokens = bm25s.tokenize([query])
-
-        # Retrieve top-k documents (cap at number of documents available)
-        k = min(self.config.top_k, len(self.documents))
-        if k == 0:
-            return RAGResult(documents=[], context="", sources=[], query=query)
-
-        results, scores = self._bm25.retrieve(query_tokens, k=k)
-
-        # Build RAGResult
-        documents = []
-        sources = []
-
-        for i, idx in enumerate(results[0]):
-            idx = int(idx)
-            doc = self.documents[idx]
-            score = float(scores[0][i])
-
-            # Set score on document
-            doc.score = score
-
-            documents.append(doc.to_dict())
-            sources.append(RAGSource(id=doc.id, content=doc.content, metadata=doc.metadata))
-
-        logger.debug(f"Retrieved {len(documents)} documents")
-
-        # Create RAGResult
-        result = RAGResult(
-            documents=documents,
-            context="",
-            sources=sources,
-            query=query,
+        indexed_count = document_store.count_documents()
+        logger.info(
+            f"[refresh_documents] Done: {len(documents)} source docs -> {indexed_count} docs"
         )
 
-        # Format context
-        result.context = self.format_context(result)
+    def as_tool(self) -> ComponentTool:
+        """Return the RAG pipeline as a ComponentTool."""
+        if self.needs_warmup:
+            logger.debug("RAG needs warmup before creating tool, warming up now")
+            self.warmup()
 
-        return result
+        logger.debug("Creating BM25 RAG pipeline as ComponentTool")
+        pipeline = self.build_pipeline()
 
-    def as_tool(self) -> Callable:
-        """
-        Return BM25 RAG as a tool callable.
+        rag_super = SuperComponent(
+            pipeline=pipeline,
+            input_mapping={"query": ["expander.query"]},
+            output_mapping={"retriever.documents": "documents"},
+        )
 
-        Returns:
-            Callable that accepts query and returns documents.
-        """
-
-        async def search(query: str) -> dict:
-            result = await self.retrieve(query)
-            return {
-                "documents": [
-                    {"id": d["id"], "content": d["content"], "score": d.get("score", 0)}
-                    for d in result.documents
-                ]
-            }
-
-        # Create a function-like object with metadata
-        search.name = "bm25_search"
-        search.description = "Search documents using BM25 keyword retrieval"
-        return search
-
-    def get_tool(self, spec: "ToolSpec") -> Callable:
-        """
-        Get tool with custom specification.
-
-        Args:
-            spec: ToolSpec with name and description.
-
-        Returns:
-            Tool callable with customized name/description.
-        """
-        tool = self.as_tool()
-        tool.name = spec.name
-        tool.description = spec.description
-        return tool
-
-    # TODO: add self.config.context_prompt
-    # And we might want to pass this function from config as well
-    # That way SDK users can override the formatting logic
-    def format_context(self, result: RAGResult) -> str:
-        """
-        Format retrieval results as context string.
-
-        Includes BM25 scores for relevance ranking visibility.
-
-        Args:
-            result: RAGResult from retrieve()
-
-        Returns:
-            Formatted context string suitable for LLM injection
-        """
-
-        # TODO: we probably want to raise some Exception, like RetrievalError
-        # Because we might want stream different messages from the adapter.
-        if not result.documents:
-            return ""
-
-        parts = ["Relevant information from knowledge base:\n"]
-
-        for i, doc in enumerate(result.documents, 1):
-            content = doc.get("content", "")
-            score = doc.get("score", 0)
-
-            parts.append(f"\n[{i}] (relevance: {score:.2f})")
-            parts.append(f"{content}")
-
-        return "\n".join(parts)
+        logger.debug("BM25 RAG ComponentTool created successfully")
+        return ComponentTool(
+            component=rag_super,
+            name="bm25_rag_tool",
+            description="Retrieves relevant documents using BM25 keyword search.",
+        )

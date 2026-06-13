@@ -8,7 +8,7 @@ Document indexing uses local FastEmbed models.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from django_ai_sdk.rags.haystack.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
+from django_ai_sdk.rags.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.schemas import RagDocument
 from tenacity import wait_none
@@ -242,7 +242,7 @@ class TestQdrantFileLockRetry:
     def no_retry_wait(self):
         """Disable retry backoff sleeps so exhaustion tests run instantly."""
         with patch(
-            "django_ai_sdk.rags.haystack.qdrant_hybrid.wait_exponential",
+            "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
             return_value=wait_none(),
         ):
             yield
@@ -274,7 +274,7 @@ class TestQdrantFileLockRetry:
             return valid_store
 
         with patch(
-            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore",
             side_effect=mock_qdrant_store,
         ):
             rag.warmup()
@@ -292,7 +292,7 @@ class TestQdrantFileLockRetry:
             )
 
         with patch(
-            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore",
             side_effect=always_fail,
         ):
             with pytest.raises(RuntimeError, match="already accessed by another"):
@@ -304,7 +304,7 @@ class TestQdrantFileLockRetry:
     def test_non_lock_errors_propagate_immediately(self, rag):
         """Verify non-lock RuntimeErrors are not retried."""
         with patch(
-            "django_ai_sdk.rags.haystack.qdrant_hybrid.QdrantDocumentStore",
+            "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore",
             side_effect=RuntimeError("Something else went wrong"),
         ):
             with pytest.raises(RuntimeError, match="Something else went wrong"):

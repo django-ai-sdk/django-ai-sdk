@@ -1,6 +1,4 @@
 import asyncio
-from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
@@ -10,97 +8,104 @@ if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.citations import CitationFormatter, CitationRegistry
 
-
 logger = get_logger(__name__)
 
 
-class BaseRAGProvider(ABC):
+class HaystackRAGProvider:
     """
-    Abstract base class for RAG providers.
+    RAG provider for Haystack pipelines.
 
-    RAG providers handle:
-    - Warming up RAG (building indexes, loading embeddings)
-    - Getting RAG instances for document retrieval
-    - Converting RAG instances to tools (framework-specific)
-
-    This abstraction allows the Assistant class to be framework-agnostic.
-    Different AI frameworks (Haystack, OpenAI, LangChain) provide their own
-    RAGProvider implementations.
+    Handles warming up Haystack RAG implementations (building indexes),
+    caching RAG instances, and converting them to tools on demand.
 
     Usage:
         class MyAssistant(Assistant):
             rag_provider = HaystackRAGProvider()
 
-    Or dynamically:
-        assistant = MyAssistant()
-        assistant.rag_provider = HaystackRAGProvider()
+            async def get_rag_pipeline(self, memory_id=None):
+                # Return a HaystackRAGBase instance
+                return QdrantBM25HybridRAG(documents=docs)
     """
 
-    @abstractmethod
-    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
-        """
-        Warm up the RAG by building indexes and loading embeddings.
+    def __init__(self) -> None:
+        # Cache: key = "{class_name}_{memory_id}", value = RAG instance
+        self._cache: dict[str, Any] = {}
+        # Per-key locks prevent concurrent warmups for the same memory_id.
+        # Backends like Qdrant local hold an exclusive file lock during warmup;
+        # a second concurrent call for the same key would crash rather than wait.
+        # Using one asyncio.Lock per key keeps the fast path (warm cache) lock-free.
+        self._warmup_locks: dict[str, asyncio.Lock] = {}
 
-        This is an expensive operation that should be called before the first
-        request to pre-load data structures. The provider should cache the
-        warmed-up RAG for subsequent calls.
+    async def warmup(
+        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+    ) -> None:
+        """
+        Warm up the Haystack RAG by building indexes.
+
+        Gets or creates the RAG instance and caches the RAG.
 
         Args:
-            assistant: The assistant instance to warm up RAG for
+            assistant: The assistant instance
             memory_id: Optional memory ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
         """
+        cache_key = self._get_cache_key(assistant, memory_id)
+        logger.info(f"Warming up Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
-    @abstractmethod
+        # Get or create the RAG instance
+        await self._get_or_create_rag(assistant, memory_id, force_rebuild)
+        logger.info(f"Haystack RAG warmed up for {cache_key}")
+
     async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
         """
-        Get the RAG instance for retrieval.
+        Get the Haystack RAG instance.
 
-        Returns a framework-specific RAG instance that can be used for
-        document retrieval. For Haystack, this might be a RAG adapter
-        with a retrieve() method. For OpenAI, this might be a custom
-        retrieval implementation.
+        Returns the cached RAG instance which can be used with:
+        - rag.as_tool() to get ComponentTool
+        - rag.get_tool(spec) to get ComponentTool with custom spec
+        - rag.build_pipeline() for direct pipeline access
 
         Args:
             assistant: The assistant instance
             memory_id: Optional memory ID for document source
 
         Returns:
-            Framework-specific RAG instance, or None if no documents
+            HaystackRAGBase instance (e.g., QdrantBM25HybridRAG), or None
         """
+        return await self._get_or_create_rag(assistant, memory_id, False)
 
     def get_cached_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
-        """Return a previously-warmed RAG instance without creating a new one.
+        """Return the cached RAG instance without warming up or creating a new one.
 
-        Safe to call when a second connection would conflict (e.g. Qdrant's
-        exclusive local file lock). Returns None if no warmed instance exists.
-        Subclasses with a cache should override this.
+        Use instead of get_rag_instance() when a second connection would conflict
+        (e.g. Qdrant's exclusive local file lock). Returns None if not yet warmed.
         """
-        return None
+        cache_key = self._get_cache_key(assistant, memory_id)
+        return self._cache.get(cache_key)
 
-    async def get_tool(
-        self,
-        assistant: "Assistant",
-        memory_id: str | None = None,
-        *,
-        spec: Any = None,
-        citation_registry: "CitationRegistry | None" = None,
-        citation_formatter: "CitationFormatter | None" = None,
-    ) -> Any:
-        """Build a tool for this memory, optionally citation-wired.
+    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
+        """Build a ComponentTool from a Haystack RAG instance.
 
-        Returns None when no RAG is available for this memory.
+        Uses the RAG's spec-aware get_tool when a spec is given, otherwise
+        falls back to as_tool.
 
-        Providers that cannot attach citations (no bridge yet) fall back to a
-        no-op _attach_citations and simply emit no source events — callers
-        get a plain tool and a debug log line.
+        Args:
+            rag_instance: The RAG instance from get_rag_instance()
+            spec: Optional Haystack tool spec for custom names/descriptions
+
+        Returns:
+            ComponentTool ready for Haystack ToolAgent, or None
         """
-        rag = await self.get_rag_instance(assistant, memory_id)
-        if rag is None:
+        if rag_instance is None:
             return None
-        tool = await self.build_tool(rag, spec=spec)
-        if tool is not None and citation_registry is not None and citation_formatter is not None:
-            self._attach_citations(tool, citation_formatter, citation_registry)
-        return tool
+        if spec is not None and hasattr(rag_instance, "get_tool"):
+            return rag_instance.get_tool(spec)
+        if hasattr(rag_instance, "as_tool"):
+            return rag_instance.as_tool()
+        logger.warning(
+            "Cannot build ComponentTool: rag_instance has neither get_tool() nor as_tool()"
+        )
+        return None
 
     def _attach_citations(
         self,
@@ -108,39 +113,38 @@ class BaseRAGProvider(ABC):
         formatter: "CitationFormatter",
         registry: "CitationRegistry",
     ) -> None:
-        """Hook called by get_tool to attach citation wiring to a tool.
+        """Wire a Haystack ComponentTool via the haystack citation bridge."""
+        from django_ai_sdk.citations.haystack import attach_citations  # noqa: PLC0415
 
-        Default is a no-op + debug log. Override only when shipping a citation
-        bridge for your framework (see citations/README.md for the bridge
-        contract). Not intended to be called directly by consumers - go through
-        get_tool.
-        """
-        logger.debug(
-            "%s does not implement citation attachment; sources will not be emitted",
-            type(self).__name__,
-        )
+        attach_citations(tool, formatter, registry)
 
-    @abstractmethod
-    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
-        """
-        Build a tool from the RAG instance (framework-specific).
-
-        For Haystack, this might wrap the RAG in a ComponentTool.
-        For OpenAI, this might create a function tool for retrieval.
-        For other frameworks, this might be a no-op if RAG is handled differently.
-
-        Args:
-            rag_instance: The RAG instance from get_rag_instance()
-
-        Returns:
-            Tool object ready for use in the framework's pipeline/agent, or None
-        """
-
-    @abstractmethod
     def clear_cache(self) -> None:
-        """Clear the provider's internal cache."""
+        """Clear the RAG cache."""
+        self._cache.clear()
+        logger.debug("Haystack RAG cache cleared")
 
-    @abstractmethod
+    async def add_documents(
+        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+    ) -> None:
+        """Add documents to existing RAG instance."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        rag = self._cache.get(cache_key)
+
+        if rag is not None and hasattr(rag, "add_documents"):
+            await rag.add_documents(documents)
+            logger.info(f"Added {len(documents)} documents to {cache_key}")
+
+    async def remove_documents(
+        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+    ) -> None:
+        """Remove documents from existing RAG instance."""
+        cache_key = self._get_cache_key(assistant, memory_id)
+        rag = self._cache.get(cache_key)
+
+        if rag is not None and hasattr(rag, "remove_documents"):
+            await rag.remove_documents(document_ids)
+            logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
+
     async def reindex(
         self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
@@ -151,227 +155,84 @@ class BaseRAGProvider(ABC):
             assistant: The assistant instance
             memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index
-                          (clears persistent storage for backends that support it)
 
         Returns:
-            The reindexed RAG instance
-        """
-
-    @abstractmethod
-    async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
-    ) -> None:
-        """
-        Incrementally add documents to the RAG index.
-
-        Args:
-            assistant: The assistant instance
-            memory_id: Memory ID for the RAG instance
-            documents: List of RagDocuments to add
-        """
-
-    @abstractmethod
-    async def remove_documents(
-        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
-    ) -> None:
-        """
-        Incrementally remove documents from the RAG index.
-
-        Args:
-            assistant: The assistant instance
-            memory_id: Memory ID for the RAG instance
-            document_ids: List of document IDs to remove
-        """
-
-
-class RAGProvider(BaseRAGProvider):
-    """
-    RAG provider for custom/direct RAG implementations.
-
-    This provider handles RAG implementations that inherit from BaseRAGAdapter
-    and don't use Haystack pipelines. Examples: BM25RAG, custom vector stores, etc.
-
-    Key features:
-    - Caches BaseRAGAdapter instances directly (not wrapped in tools)
-    - Calls warmup() to build indexes (expensive, cached)
-    - build_tool() creates OpenAI-compatible function tools
-    - Works with OpenAIAdapter for context injection
-
-    Usage:
-        class MyAssistant(Assistant):
-            rag_provider = RAGProvider()
-
-            async def get_rag_pipeline(self, memory_id=None):
-                documents = await self.get_rag_documents(memory_id)
-                return BM25RAG(documents=documents)
-
-    Flow:
-        1. get_rag_instance() → Returns cached BM25RAG
-        2. rag.warmup() → Builds BM25 index (expensive, cached)
-        3. Adapter calls rag.retrieve(query) → Injects context
-        4. build_tool() → Creates OpenAI function (optional)
-
-    Comparison with HaystackRAGProvider:
-        - RAGProvider: For direct/custom RAG (BM25, etc.)
-        - HaystackRAGProvider: For Haystack pipeline RAG (QdrantBM25HybridRAG, etc.)
-    """
-
-    def __init__(self) -> None:
-        """Initialize provider with empty cache."""
-        self._cache: dict[str, Any] = {}
-        self._warmup_locks: dict[str, asyncio.Lock] = {}
-        logger.debug("RAGProvider initialized")
-
-    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
-        """
-        Warm up the RAG by building the search index.
-
-        Calls the RAG's warmup() method and caches the instance.
-        This is an expensive operation that should happen before first use.
-
-        Args:
-            assistant: The assistant instance to warm up
-            memory_id: Optional memory ID for document source
+            The reindexed RAG instance.
         """
         cache_key = self._get_cache_key(assistant, memory_id)
-        logger.info(f"Warming up Base RAG for {cache_key}")
-
-        # Get RAG from assistant
-        rag = await assistant.get_rag_pipeline(memory_id)
-
-        if rag is not None:
-            # Warm up the RAG (build index)
-            if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
-                if rag.needs_warmup:
-                    logger.debug(f"Building index for {cache_key}")
-                    rag.warmup()
-
-            # Cache the warmed-up RAG
-            self._cache[cache_key] = rag
-            logger.info(f"Base RAG warmed up and cached for {cache_key}")
-        else:
-            self._cache[cache_key] = None
-            logger.warning(f"No RAG available for {cache_key}")
-
-    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
-        """
-        Get the RAG instance (cached or newly created).
-
-        Returns the BaseRAGAdapter instance directly (not wrapped as a tool).
-        Uses double-checked locking so concurrent calls for the same key
-        serialize on warmup rather than racing to build the index twice.
-
-        Args:
-            assistant: The assistant instance
-            memory_id: Optional memory ID for document source
-
-        Returns:
-            BaseRAGAdapter instance (e.g., BM25RAG), or None
-        """
-        cache_key = self._get_cache_key(assistant, memory_id)
-
-        # Fast path.
-        if cache_key in self._cache:
-            logger.debug(f"Using cached Base RAG for {cache_key}")
-            return self._cache.get(cache_key)
-
-        # Slow path: serialize warmup per key.
-        lock = self._warmup_locks.setdefault(cache_key, asyncio.Lock())
-        async with lock:
-            if cache_key in self._cache:
-                logger.debug(f"Using cached Base RAG for {cache_key} (post-lock cache hit)")
-                return self._cache.get(cache_key)
-
-            logger.debug(f"Creating Base RAG for {cache_key}")
-            await self.warmup(assistant, memory_id)
-
-        return self._cache.get(cache_key)
-
-    async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Callable | None:
-        """
-        Build a tool from the RAG instance using RAG's as_tool() method.
-
-        The RAG instance (e.g., BM25RAG) should have as_tool() and get_tool() methods
-        to create OpenAI-compatible function tools.
-
-        Args:
-            rag_instance: The RAG instance from get_rag_instance()
-
-        Returns:
-            Callable with name/description attributes, or None if no RAG
-        """
-        if rag_instance is None:
-            return None
-
-        # Check if RAG has as_tool method
-        if not hasattr(rag_instance, "as_tool"):
-            logger.warning("RAG instance does not have as_tool() method")
-            return None
-
-        logger.debug("Building tool using RAG's as_tool() method")
-
-        # Use RAG's as_tool() method
-        tool = rag_instance.as_tool()
-        return tool
-
-    async def reindex(
-        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
-    ) -> Any:
-        """
-        Reindex the RAG by clearing cache and rebuilding.
-
-        Call this when documents have changed and you need to rebuild the index.
-
-        Args:
-            assistant: The assistant instance
-            memory_id: Optional memory ID for document source
-            force_rebuild: If True, forces a complete rebuild of the index.
-
-        Returns:
-            The reindexed RAG instance
-        """
-        cache_key = self._get_cache_key(assistant, memory_id)
-        logger.info(f"Reindexing Base RAG for {cache_key} (force_rebuild={force_rebuild})")
+        logger.info(f"Reindexing Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
         if cache_key in self._cache:
             del self._cache[cache_key]
-            logger.debug(f"Cleared cache for {cache_key}")
 
-        # Warm up again (rebuilds index and caches)
-        await self.warmup(assistant, memory_id)
+        # Warm up again (rebuilds indexes and caches)
+        await self.warmup(assistant, memory_id, force_rebuild)
 
         # Return the cached RAG
         result = self._cache.get(cache_key)
-        logger.info(f"Base RAG reindexed for {cache_key}")
+        logger.info(f"Haystack RAG reindexed for {cache_key}")
         return result
 
-    def clear_cache(self) -> None:
-        """Clear all cached RAG instances."""
-        cache_size = len(self._cache)
-        self._cache.clear()
-        logger.debug(f"Base RAG cache cleared ({cache_size} entries)")
-
-    async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
-    ) -> None:
-        """Add documents to RAG - fallback to reindex since BM25RAG doesn't support incremental."""
-        cache_key = self._get_cache_key(assistant, memory_id)
-        if cache_key in self._cache:
-            del self._cache[cache_key]
-        await self.warmup(assistant, memory_id)
-        logger.info(f"Reindexed (add) for {cache_key}")
-
-    async def remove_documents(
-        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
-    ) -> None:
-        """Remove documents from RAG - fallback to reindex since BM25RAG doesn't support incremental."""
-        cache_key = self._get_cache_key(assistant, memory_id)
-        if cache_key in self._cache:
-            del self._cache[cache_key]
-        await self.warmup(assistant, memory_id)
-        logger.info(f"Reindexed (remove) for {cache_key}")
-
+    # TODO: maybe we want to have some RagKey object
+    # that would support many key types (assistant, memory, etc)
     def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
         """Generate cache key for this assistant and memory."""
         return f"{assistant.__class__.__name__}_{memory_id or 'default'}"
+
+    async def _get_or_create_rag(
+        self,
+        assistant: "Assistant",
+        memory_id: str | None,
+        force_rebuild: bool = False,
+    ) -> Any:
+        """
+        Get cached RAG or create and cache it.
+
+        Uses double-checked locking to handle concurrent calls for the same
+        cache key safely:
+        - Fast path: warm cache is returned immediately without acquiring any lock.
+        - Slow path: a per-key asyncio.Lock serializes concurrent warmups so that
+          only one coroutine builds the index while others wait, then get the cached
+          result instead of repeating the expensive (and potentially exclusive-lock-
+          holding) warmup.
+
+        Args:
+            assistant: The assistant instance
+            memory_id: Optional memory ID for document source
+            force_rebuild: If True, forces a complete rebuild of the index
+        """
+        cache_key = self._get_cache_key(assistant, memory_id)
+
+        # Fast path: return immediately if already cached and no rebuild requested.
+        if cache_key in self._cache and not force_rebuild:
+            logger.debug(f"Using cached Haystack RAG for {cache_key}")
+            return self._cache[cache_key]
+
+        # Slow path: serialize warmup per key.
+        # setdefault is a single dict operation — no await between check and insert,
+        # so concurrent coroutines always resolve to the same Lock object for a key.
+        lock = self._warmup_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            # Re-check after acquiring the lock: a previous waiter may have already
+            # populated the cache while we were waiting.
+            if cache_key in self._cache and not force_rebuild:
+                logger.debug(f"Using cached Haystack RAG for {cache_key} (post-lock cache hit)")
+                return self._cache[cache_key]
+
+            logger.debug(f"Creating Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
+            rag = await assistant.get_rag_pipeline(memory_id)
+
+            if rag is not None:
+                if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
+                    if rag.needs_warmup or force_rebuild:
+                        logger.debug(
+                            f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})"
+                        )
+                        rag.warmup(force_rebuild)
+                self._cache[cache_key] = rag
+            else:
+                self._cache[cache_key] = None
+
+            logger.debug(f"Haystack RAG created and cached for {cache_key}")
+            return self._cache[cache_key]

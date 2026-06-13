@@ -1,84 +1,101 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from haystack import Pipeline
+from haystack.tools import ComponentTool
+from pydantic import BaseModel, Field
 
 from django_ai_sdk.logger import get_logger
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
-logger = get_logger(__name__)
+# TODO: move into prompts.py file, this should make maintenance easier.
+DEFAULT_EXPANDER_PROMPT = """
+You are a search query expansion assistant.
+
+Your task is to generate search queries based on the user's original query to improve search recall.
+
+The goal is to capture different ways users might phrase the same question, including the original query itself.
+
+RULES:
+1. Output exactly {{n_expansions}} queries, one per line
+2. The FIRST query MUST be the original query verbatim
+3. The remaining queries should focus on different aspects or use different terminology
+4. Use the SAME LANGUAGE as the original query
+5. Make queries natural and conversational
+
+Original query: {{query}}
+
+Generate {{n_expansions}} queries (FIRST must be the original query):
+"""
 
 
-class RAGSource(BaseModel):
-    """Generic source document for citations."""
-
-    id: str
-    content: str
-    metadata: dict[str, Any] = {}
-
-
-class RAGResult(BaseModel):
-    """Result from RAG retrieval."""
-
-    documents: list[dict[str, Any]]
-    context: str
-    sources: list[RAGSource]
-    query: str
-
-
-class RAGConfig(BaseModel):
-    """Configuration for RAG adapter."""
-
-    embedder_model: str = "intfloat/multilingual-e5-large-instruct"
-    top_k: int = 3
-    document_threshold: float = 0.7
-
-
-class BaseRAGAdapter(ABC):
+class BaseHaystackRAGConfig(BaseModel):
     """
-    Abstract base class for all RAG implementations (non-Haystack).
+    Base configuration for Haystack RAG implementations.
 
-    Provides a generic interface for retrieving documents and formatting
-    context for LLM injection. All custom/direct RAG implementations
-    should inherit from this class.
+    This provides common configuration options for all Haystack-based RAG
+    implementations, including query expansion settings.
 
-    Key methods:
-    - warmup(): Build search index (expensive, called once)
-    - retrieve(): Search documents (fast, called per query)
-    - format_context(): Format results for LLM
-    - as_tool(): Return tool for function calling
-    - get_tool(spec): Return tool with custom specification
-
-    Example:
-        class MyRAG(BaseRAGAdapter):
-            def warmup(self):
-                self._index = build_index(self.documents)
-                self._is_warmed_up = True
-
-            async def retrieve(self, query: str) -> RAGResult:
-                if self.needs_warmup:
-                    self.warmup()
-                results = self._index.search(query)
-                return RAGResult(...)
+    Attributes:
+        top_k: Maximum number of documents to retrieve per query
+        n_expansions: Number of query variations to generate (1 = no expansion)
+        expander_model: LLM model to use for query expansion
+        expander_prompt: Prompt template for query expansion
+        chunk_size: Chunk size for document splitting
+        chunk_overlap: Chunk overlap for document splitting
     """
+
+    top_k: int = Field(default=5, ge=1, description="Maximum documents to retrieve per query")
+    min_score: float | None = Field(
+        default=None,
+        description="Drop documents below this relevance score. None disables filtering.",
+    )
+    n_expansions: int = Field(
+        default=4,
+        ge=1,
+        description="Number of query variations to generate (1 = no expansion)",
+    )
+    expander_model: str = Field(
+        default="gpt-4o-mini",
+        description="LLM model to use for query expansion",
+    )
+    expander_prompt: str = Field(
+        default=DEFAULT_EXPANDER_PROMPT,
+        description="Prompt template for query expansion",
+    )
+    chunk_size: int = Field(
+        default=100,
+        ge=1,
+        description="Chunk size for document splitting",
+    )
+    chunk_overlap: int = Field(
+        default=50,
+        ge=0,
+        description="Chunk overlap for document splitting",
+    )
+
+
+class HaystackRAGBase(ABC):
+    """Abstract base class for Haystack RAG implementations."""
 
     _is_warmed_up: bool = False
+    config: BaseHaystackRAGConfig
 
     @abstractmethod
-    def warmup(self) -> None:
+    def warmup(self, force_rebuild: bool = False) -> None:
         """
         Warm up the RAG by building the indexed document store (expensive).
 
-        This should be called before the first retrieval, or after
-        documents are modified. The base implementation is a no-op,
-        subclasses should override with actual indexing logic.
+        After warmup, subsequent build_pipeline() calls will use the cached store.
 
-        Example:
-            if rag.needs_warmup:
-                rag.warmup()  # Expensive, do once
+        Args:
+            force_rebuild: If True, clears existing index and rebuilds from scratch.
+                          For persistent storage backends (like Qdrant), this will
+                          delete and recreate the entire index.
         """
         pass
 
@@ -88,100 +105,80 @@ class BaseRAGAdapter(ABC):
         return not self._is_warmed_up
 
     @abstractmethod
-    async def retrieve(self, query: str) -> RAGResult:
+    def build_pipeline(self) -> Pipeline:
         """
-        Retrieve relevant documents for a query.
-
-        Args:
-            query: The search query string.
+        Build and return the RAG pipeline (query side, cheap).
 
         Returns:
-            RAGResult with documents, formatted context, and sources.
-        """
-
-    def format_context(self, result: RAGResult) -> str:
-        """
-        Format RAG result as context string for LLM injection.
-
-        Args:
-            result: The RAG result to format.
-
-        Returns:
-            Formatted context string suitable for system message.
-        """
-        if not result.documents:
-            return ""
-
-        context_parts = ["Context from retrieved documents:\n"]
-        for i, doc in enumerate(result.documents, 1):
-            content = doc.get("content", "")
-            context_parts.append(f"\n--- Document {i} ---\n{content}")
-
-        return "\n".join(context_parts)
-
-    @abstractmethod
-    def as_tool(self) -> Callable:
-        """
-        Return the RAG as a tool callable for function calling.
-
-        Returns:
-            Callable that accepts query and returns documents.
+            A Haystack Pipeline configured for RAG.
         """
         pass
 
-    def get_tool(self, spec: "ToolSpec") -> Callable:
+    @abstractmethod
+    def as_tool(self) -> ComponentTool:
         """
-        Get tool with custom specification.
-
-        Args:
-            spec: ToolSpec with name and description.
+        Return the RAG pipeline wrapped as a ComponentTool.
 
         Returns:
-            Tool callable with customized name/description.
+            A ComponentTool wrapping the RAG pipeline.
         """
-        tool = self.as_tool()
-        tool.name = spec.name
-        tool.description = spec.description
-        return tool
+        pass
 
     async def add_documents(self, documents: list["RagDocument"]) -> None:
         """
-        Add documents incrementally (optional, override in subclass).
+        Add documents to an existing index (incremental update).
 
-        Default falls back to full warmup.
+        Subclasses should override this if they support incremental adds.
+        Default is a no-op (forces full reindex via warmup).
 
         Args:
             documents: List of RagDocument objects to add.
         """
-        logger.warning(f"{self.__class__.__name__} does not support incremental add, rebuilding")
-        self.documents.extend(documents)
-        if hasattr(self, "warmup"):
-            self.warmup()
+        logger.warning(
+            f"{self.__class__.__name__} does not support incremental add, use refresh_documents()"
+        )
 
     async def remove_documents(self, document_ids: list[str]) -> None:
         """
-        Remove documents incrementally (optional, override in subclass).
+        Remove documents from an existing index (incremental update).
 
-        Default falls back to filtering documents and full warmup.
+        Subclasses should override this if they support incremental removal.
+        Default is a no-op (forces full reindex via warmup).
 
         Args:
             document_ids: List of document IDs to remove.
         """
-        logger.warning(f"{self.__class__.__name__} does not support incremental remove, rebuilding")
-        removed = set(document_ids)
-        self.documents = [d for d in self.documents if d.id not in removed]
-        if hasattr(self, "warmup"):
-            self.warmup()
+        logger.warning(
+            f"{self.__class__.__name__} does not support incremental remove, use refresh_documents()"
+        )
 
     def refresh_documents(self, documents: list["RagDocument"]) -> None:
         """
         Fully refresh the index with a new set of documents.
 
-        Default calls warmup() which rebuilds the index from self.documents.
+        Replaces all documents in the index. Subclasses should override
+        this to perform an efficient in-place refresh without releasing
+        file locks (for persistent backends).
+
+        Default implementation calls warmup(force_rebuild=True).
 
         Args:
             documents: The new complete set of documents.
         """
+        logger.debug(f"Refreshing documents for {self.__class__.__name__}")
         self.documents = documents
-        if hasattr(self, "warmup"):
-            self.warmup()
+        self.warmup(force_rebuild=True)
+
+    async def get_chunk(self, chunk_id: str) -> str | None:
+        """Return the content of a specific chunk by its Haystack document ID.
+        Subclasses can override this if their store supports direct chunk lookup.
+        Returns None to signal the caller should fall back to full Entry content.
+        """
+        return None
+
+    def get_tool(self, spec: "ToolSpec") -> ComponentTool:
+        """Get tool with custom specification."""
+        tool = self.as_tool()
+        tool.name = spec.name
+        tool.description = spec.description
+        return tool

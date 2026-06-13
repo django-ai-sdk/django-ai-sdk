@@ -22,18 +22,6 @@ def event_loop():
 
 
 @pytest.fixture
-def mock_openai_client():
-    """Mock AsyncOpenAI client."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    client = MagicMock()
-    client.chat = MagicMock()
-    client.chat.completions = MagicMock()
-    client.chat.completions.create = AsyncMock()
-    return client
-
-
-@pytest.fixture
 def mock_storage_adapter():
     """Mock storage adapter."""
     from unittest.mock import AsyncMock, MagicMock

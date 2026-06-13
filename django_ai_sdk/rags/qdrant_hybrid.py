@@ -25,9 +25,9 @@ from tenacity import (
 )
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.rags.base import BaseHaystackRAGConfig, HaystackRAGBase
+from django_ai_sdk.rags.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.config import QdrantStorageConfig
-from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
-from django_ai_sdk.rags.haystack.components import MultiQueryQdrantHybridRetriever
 from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import rag_document_to_haystack
 

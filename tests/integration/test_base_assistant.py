@@ -30,17 +30,7 @@ class TestBaseAssistant:
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
-                """Implement required abstract method."""
-                from django_ai_sdk.adapters.openai import OpenAIAdapter
-                from unittest.mock import MagicMock
-
-                return OpenAIAdapter(
-                    client=MagicMock(),
-                    model=self.model,
-                    instructions=self.get_instructions(),
-                    store=True,
-                    storage_adapter=await self.get_storage_adapter(thread_id),
-                )
+                return MagicMock()
 
         return TestAssistant()
 
@@ -203,17 +193,7 @@ class TestStreamWriterIntegration:
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
-                """Implement required abstract method."""
-                from django_ai_sdk.adapters.openai import OpenAIAdapter
-                from unittest.mock import MagicMock
-
-                return OpenAIAdapter(
-                    client=MagicMock(),
-                    model=self.model,
-                    instructions=self.get_instructions(),
-                    store=True,
-                    storage_adapter=await self.get_storage_adapter(thread_id),
-                )
+                return MagicMock()
 
         return TestAssistant()
 
