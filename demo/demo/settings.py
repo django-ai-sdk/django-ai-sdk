@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import environ
+from django_ai_sdk.mcp.schemas import TokenMCPServer
 
 env = environ.Env(
     # set casting, default value
@@ -157,14 +158,25 @@ AI_SDK_MEMORY_CONTENT_HANDLER = "django_ai_skd.files.services.DefaultMemoryFileH
 
 # Memory permission classes
 AI_SDK_MEMORY_PERMISSIONS = [
-    "django_ai_sdk.permissions.MemoryDefaultPermission",
+    "piratespeak.permissions.AllowAnonymousMemoryPermission",
 ]
+
 
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-# MCP Server Configuration
-AI_SDK_MCP_SERVERS = {}
+AI_SDK_MCP_SERVERS = {
+    "linear": TokenMCPServer(
+        label="Linear",
+        url="https://mcp.linear.app/mcp",
+        token=env("LINEAR_API_KEY", default=None),
+        tools=["list_issues"],
+    )
+}
 
-# MCP Backend
+
+# MCP discovery configuration
+AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
+AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
+AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/mcp"
 AI_SDK_MCP_BACKEND = "django_ai_sdk.mcp.backends.haystack"

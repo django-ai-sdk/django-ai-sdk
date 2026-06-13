@@ -10,6 +10,7 @@ from django_ai_sdk.assistants.services import (
     get_assistant_info,
     list_assistants,
 )
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
@@ -33,6 +34,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+logger = get_logger(__name__)
+
 
 class ThreadListItemSerializer(serializers.Serializer):
     id = serializers.CharField()
@@ -47,9 +50,31 @@ class ThreadListResponseSerializer(serializers.Serializer):
     threads = ThreadListItemSerializer(many=True)
 
 
+class FeedbackResponseSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    user_id = serializers.CharField(allow_null=True)
+    rating = serializers.IntegerField()
+    feedback = serializers.CharField()
+    created_at = serializers.CharField(allow_null=True)
+
+
+class ThreadMessageSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    role = serializers.CharField()
+    parts = serializers.ListField(default=[])
+    adapter_type = serializers.CharField(default="")
+    finish_reason = serializers.CharField(allow_null=True, required=False)
+    tool_calls = serializers.ListField(default=[])
+    processing_time_ms = serializers.IntegerField(allow_null=True, required=False)
+    has_errors = serializers.BooleanField(default=False)
+    usage = serializers.DictField(allow_null=True, required=False)
+    feedback = FeedbackResponseSerializer(allow_null=True, required=False)
+    created_at = serializers.CharField(allow_null=True, required=False)
+
+
 class ThreadDetailSerializer(serializers.Serializer):
     thread = serializers.DictField()
-    messages = serializers.ListField()
+    messages = ThreadMessageSerializer(many=True)
 
 
 class ThreadFileMetaSerializer(serializers.Serializer):
@@ -61,18 +86,10 @@ class CreateThreadResponseSerializer(serializers.Serializer):
     thread_id = serializers.CharField(allow_null=True)
 
 
-class FeedbackResponseSerializer(serializers.Serializer):
-    id = serializers.CharField()
-    user_id = serializers.CharField(allow_null=True)
-    rating = serializers.IntegerField()
-    feedback = serializers.CharField()
-    created_at = serializers.CharField(allow_null=True)
-
-
 class MessageResponseSerializer(serializers.Serializer):
     id = serializers.CharField()
     is_deleted = serializers.BooleanField(allow_null=True)
-    feedbacks = FeedbackResponseSerializer(many=True, default=[])
+    feedback = FeedbackResponseSerializer(allow_null=True, required=False)
 
 
 class DeleteAllThreadsResponseSerializer(serializers.Serializer):
@@ -82,12 +99,40 @@ class DeleteAllThreadsResponseSerializer(serializers.Serializer):
 
 class AssistantInfoSerializer(serializers.Serializer):
     id = serializers.CharField()
+    name = serializers.CharField(allow_null=True)
+    model = serializers.CharField(allow_null=True)
+    class_name = serializers.CharField()
+    description = serializers.CharField(allow_null=True, required=False)
+    instructions = serializers.CharField(allow_null=True, required=False)
+    file_upload = serializers.BooleanField(default=False)
+
+
+class ListAssistantsItemSerializer(serializers.Serializer):
+    id = serializers.CharField()
     name = serializers.CharField()
     model = serializers.CharField()
 
 
 class ListAssistantsSerializer(serializers.Serializer):
-    assistants = AssistantInfoSerializer(many=True)
+    assistants = ListAssistantsItemSerializer(many=True)
+
+
+class ToolSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    description = serializers.CharField(allow_null=True, required=False)
+
+
+class MCPServerStatusSerializer(serializers.Serializer):
+    server_name = serializers.CharField()
+    label = serializers.CharField()
+    type = serializers.CharField()
+    status = serializers.CharField()
+    tool_names = serializers.ListField(child=serializers.CharField())
+
+
+class ToolsResponseSerializer(serializers.Serializer):
+    tools = ToolSerializer(many=True)
+    mcp = MCPServerStatusSerializer(many=True, default=[])
 
 
 class ReindexResponseSerializer(serializers.Serializer):
@@ -153,6 +198,19 @@ class ThreadDetailAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
         try:
             data = get_thread_history(thread_id, user=request.user)
+
+            # Filter feedbacks to current user only
+            for message in data.get("messages", []):
+                feedbacks = message.get("feedbacks", [])
+                user_feedback = None
+                if feedbacks:
+                    user_feedback = next(
+                        (fb for fb in feedbacks if fb.get("user_id") == str(request.user.pk)),
+                        None,
+                    )
+                message["feedback"] = user_feedback
+                del message["feedbacks"]
+
             return Response(ThreadDetailSerializer(data).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -218,22 +276,13 @@ class ThreadDeleteAllAPIView(APIView):
 
 class RateMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
-
         if "rating" not in request.data:  # type: ignore[operator]
             return Response({"message": "rating is required"}, status=400)
         rating = request.data.get("rating")  # type: ignore[union-attr]
         feedback_text = request.data.get("feedback", "")  # type: ignore[union-attr]
         try:
             rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)  # type: ignore[arg-type]
-
-            return Response(
-                MessageResponseSerializer(
-                    {
-                        "id": message_id,
-                        "is_deleted": False,
-                    }
-                ).data
-            )
+            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
         except ValueError as e:
@@ -244,14 +293,7 @@ class DeleteMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
         try:
             delete_message(thread_id, message_id, user=request.user)
-            return Response(
-                MessageResponseSerializer(
-                    {
-                        "id": message_id,
-                        "is_deleted": True,
-                    }
-                ).data
-            )
+            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": True}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
         except ValueError as e:
@@ -262,14 +304,7 @@ class RestoreMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
         try:
             restore_message(thread_id, message_id, user=request.user)
-            return Response(
-                MessageResponseSerializer(
-                    {
-                        "id": message_id,
-                        "is_deleted": False,
-                    }
-                ).data
-            )
+            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
         except ValueError as e:
@@ -288,12 +323,64 @@ class ListAssistantsAPIView(APIView):
 class AssistantInfoAPIView(APIView):
     def get(self, request: Request, assistant_id: str) -> Response:
         try:
+            assistant = AssistantService.from_registry(assistant_id)
             info = get_assistant_info(assistant_id, user=request.user)
-            return Response(AssistantInfoSerializer(info).data)
+            return Response(
+                AssistantInfoSerializer(
+                    {
+                        "id": info.id,
+                        "name": info.name,
+                        "model": info.model,
+                        "class_name": info.class_name,
+                        "description": info.description,
+                        "instructions": assistant.get_system_prompt(),
+                        "file_upload": info.file_upload,
+                    }
+                ).data
+            )
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+
+
+class AssistantToolsAPIView(APIView):
+    async def get(self, request: Request, assistant_id: str) -> Response:
+        try:
+            assistant = AssistantService.from_registry(assistant_id)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+
+        tools_data = []
+        try:
+            tool_objs = await assistant.get_tools()
+            tools_data = [
+                {
+                    "label": getattr(t, "label", None) or t.name.replace("_", " ").title(),
+                    "description": t.description or "",
+                }
+                for t in tool_objs
+            ]
+        except Exception:
+            logger.exception("Failed to build tools for assistant %s", assistant_id)
+
+        mcp_data = []
+        try:
+            mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
+            mcp_data = [
+                {
+                    "server_name": s.server_name,
+                    "label": s.label,
+                    "type": s.type,
+                    "status": s.status,
+                    "tool_names": s.tool_names,
+                }
+                for s in mcp_status
+            ]
+        except Exception:
+            logger.exception("Failed to load MCP status for assistant %s", assistant_id)
+
+        return Response(ToolsResponseSerializer({"tools": tools_data, "mcp": mcp_data}).data)
 
 
 class ReindexAssistantAPIView(APIView):
@@ -319,14 +406,7 @@ class ReindexAssistantAPIView(APIView):
             if memory_id:
                 message += f" for memory {memory_id}"
 
-            return Response(
-                ReindexResponseSerializer(
-                    {
-                        "success": True,
-                        "message": message,
-                    }
-                ).data
-            )
+            return Response(ReindexResponseSerializer({"success": True, "message": message}).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -363,6 +443,11 @@ urlpatterns = [
         "assistants/<str:assistant_id>/",
         AssistantInfoAPIView.as_view(),
         name="assistant-info",
+    ),
+    path(
+        "assistants/<str:assistant_id>/tools/",
+        AssistantToolsAPIView.as_view(),
+        name="assistant-tools",
     ),
     path(
         "assistants/<str:assistant_id>/reindex/",

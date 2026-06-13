@@ -6,6 +6,7 @@ from django.conf import settings
 from django_ai_sdk import Assistant
 from django_ai_sdk.adapters.openai import OpenAIStream
 from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.rags import (
     BM25RAG,
@@ -13,6 +14,7 @@ from django_ai_sdk.rags import (
     RagDocument,
     RAGProvider,
 )
+from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from openai import AsyncOpenAI
 
 if TYPE_CHECKING:
@@ -34,6 +36,9 @@ class PirateOpenAIAssistant(Assistant):
     # protocol = VercelProtocolHandler
     # storage_adapter = MemoryStorageAdapter
     rag_provider = RAGProvider()
+
+    citation_formatter_class = DefaultCitationFormatter
+    suggestion_generator = DefaultSuggestionGenerator
 
     def get_example_documents(self) -> list[RagDocument]:
         """
@@ -148,7 +153,7 @@ class PirateOpenAIAssistant(Assistant):
                 api_key=settings.OPENAI_API_KEY,
                 base_url=settings.OPENAI_API_URL,
             ),
-            instructions=self.get_instructions(),
+            instructions=self.get_system_prompt(),
             model=self.get_model(),
             store=True,
             storage_adapter=storage_adapter,
