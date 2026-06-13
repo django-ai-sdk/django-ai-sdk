@@ -210,4 +210,14 @@ class BM25QueryExpanderRAG(RAGBase):
             component=rag_super,
             name="bm25_rag_tool",
             description="Retrieves relevant documents using BM25 keyword search.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to retrieve relevant documents.",
+                    }
+                },
+                "required": ["query"],
+            },
         )

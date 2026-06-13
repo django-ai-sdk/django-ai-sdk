@@ -293,4 +293,14 @@ class ChromaDBQueryExpanderRAG(RAGBase):
             component=rag_super,
             name="rag_tool",
             description="Retrieves relevant documents for answering questions.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to retrieve relevant documents.",
+                    }
+                },
+                "required": ["query"],
+            },
         )

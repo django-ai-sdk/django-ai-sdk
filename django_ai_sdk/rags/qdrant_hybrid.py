@@ -342,13 +342,21 @@ class QdrantBM25HybridRAG(RAGBase):
 
         logger.debug("Qdrant Hybrid RAG ComponentTool created successfully")
 
-        tool = ComponentTool(
+        return ComponentTool(
             component=rag_super,
             name="hybrid_rag_tool",
             description="Retrieves relevant documents using hybrid search with query expansion.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to retrieve relevant documents.",
+                    }
+                },
+                "required": ["query"],
+            },
         )
-
-        return tool
 
     async def get_chunk(self, chunk_id: str) -> str | None:
         """Fetch a single chunk from the Qdrant store by its Haystack document ID.
