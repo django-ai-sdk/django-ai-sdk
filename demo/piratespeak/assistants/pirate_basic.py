@@ -33,6 +33,7 @@ from piratespeak.assistants.transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
 
 
@@ -143,7 +144,7 @@ class PirateBasicAssistant(Assistant):
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractBaseUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 

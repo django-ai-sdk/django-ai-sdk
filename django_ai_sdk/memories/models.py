@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.conf import settings
 from django.db import models
@@ -32,7 +33,7 @@ class Memory(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    def save(self, *args: object, **kwargs: object) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding:
             if not self.slug and self.name:
                 base_slug = slugify(self.name)

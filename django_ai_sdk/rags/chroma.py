@@ -36,7 +36,7 @@ class ChromaDBQueryExpanderRAGConfig(RAGConfig):
     storage: ChromaStorageConfig = Field(default_factory=ChromaStorageConfig)
 
 
-class ChromaDBQueryExpanderRAG(RAGBase):
+class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
     """RAG implementation using ChromaDB with query expansion."""
 
     def __init__(

@@ -5,14 +5,13 @@ import traceback
 import uuid
 from asyncio import Queue
 from collections.abc import AsyncGenerator, Callable
-from typing import TYPE_CHECKING, Any, TypeVar, Union, overload
+from typing import TYPE_CHECKING, Any, Union, overload
 
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
-from pydantic import BaseModel
 
-from django_ai_sdk.adapters.protocols import Runnable, Streamable
+from django_ai_sdk.adapters.protocols import T
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.citations import CitationRegistry, NumberedSource
 from django_ai_sdk.common import (
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
 
-T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
 
@@ -78,7 +76,7 @@ def parse_tool_output(obj: Any) -> Any:
     return str(obj)
 
 
-class Run(Runnable):
+class Run:
     """
     Runnable Haystack adapter.
     """
@@ -141,7 +139,7 @@ class Run(Runnable):
         return response["replies"][0].text
 
 
-class Stream(Runnable, Streamable):
+class Stream:
     """
     Adapter for Haystack pipelines that emits events.
     """
@@ -350,16 +348,16 @@ class Stream(Runnable, Streamable):
 
     async def stream(
         self,
-        input: list[ChatMessage],
+        messages: list[ChatMessage],
     ) -> AsyncGenerator[StreamEvent, None]:
-        logger.debug(f"Starting Haystack stream with {len(input)} input messages")
+        logger.debug(f"Starting Haystack stream with {len(messages)} input messages")
 
         # Convert messages
-        messages = self.get_messages(input)
+        haystack_messages = self.get_messages(messages)
 
         # Note: RAG is handled at pipeline level via get_rag_pipeline() in Assistant
         # The retriever is added to the pipeline before creating the adapter
-        logger.debug(f"Converted to {len(messages)} Haystack messages")
+        logger.debug(f"Converted to {len(haystack_messages)} Haystack messages")
 
         # Generate message ID
         message_id = str(uuid.uuid4())
@@ -454,10 +452,10 @@ class Stream(Runnable, Streamable):
                 logger.debug("Running Agent component directly with streaming_callback")
                 pipeline_task = loop.run_in_executor(
                     None,
-                    lambda: self._run_agent(self.agent_component, messages, streaming_callback),
+                    lambda: self._run_agent(self.agent_component, haystack_messages, streaming_callback),
                 )
             else:
-                pipeline_input = {"messages": messages}
+                pipeline_input = {"messages": haystack_messages}
                 logger.debug("Using default pipeline input format")
                 logger.debug("Starting pipeline execution in thread executor")
                 pipeline_task = loop.run_in_executor(
@@ -682,7 +680,7 @@ class Stream(Runnable, Streamable):
             if self.suggestion_generator and self.message_result:
                 try:
                     # Use only recent context for faster, cheaper suggestions
-                    recent_messages = input[-6:] if len(input) > 6 else input
+                    recent_messages = messages[-6:] if len(messages) > 6 else messages
                     suggestions = await self.suggestion_generator.generate(
                         messages=recent_messages,
                         response=self.message_result.content,

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from haystack import Pipeline
 from haystack.tools import ComponentTool
@@ -79,11 +79,14 @@ class RAGConfig(BaseModel):
     )
 
 
-class RAGBase(ABC):
+ConfigT = TypeVar("ConfigT", bound=RAGConfig)
+
+
+class RAGBase(ABC, Generic[ConfigT]):
     """Abstract base class for Haystack RAG implementations."""
 
     _is_warmed_up: bool = False
-    config: RAGConfig
+    config: ConfigT
 
     @abstractmethod
     def warmup(self, force_rebuild: bool = False) -> None:

@@ -207,7 +207,7 @@ class AssistantRegistry:
             raise RuntimeError("Registry not initialized. Call setup() in AppConfig.ready()")
         return self._instances.copy()
 
-    def list(self) -> dict[str, Assistant]:
+    def visible(self) -> dict[str, Assistant]:
         """Get only non-hidden assistant instances.
 
         Hidden assistants (e.g. internal task assistants) are excluded.

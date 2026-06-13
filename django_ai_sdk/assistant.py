@@ -122,7 +122,7 @@ class Assistant(ABC, AssistantInfoMixin):
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
 
-    # If True, hide from registry.list() (used for internal assistants)
+    # If True, hide from registry.visible() (used for internal assistants)
     hidden: bool = False
 
     # If Assistant should automatically warm up after initialization

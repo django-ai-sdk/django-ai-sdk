@@ -50,7 +50,7 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     storage: QdrantStorageConfig = Field(default_factory=QdrantStorageConfig)
 
 
-class QdrantBM25HybridRAG(RAGBase):
+class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
     """RAG implementation using Qdrant with Hybrid retrieval + Query Expansion."""
 
     def __init__(
@@ -190,7 +190,7 @@ class QdrantBM25HybridRAG(RAGBase):
                 should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
             )
 
-            self._cached_document_store.delete_by_filter(filters=filter_obj)  # type: ignore[arg-type]
+            self._cached_document_store.delete_by_filter(filters=filter_obj)  # type: ignore
             logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
         except Exception as e:
             logger.error(f"Failed to remove documents: {e}")

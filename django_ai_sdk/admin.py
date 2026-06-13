@@ -30,12 +30,11 @@ class MessageFeedbackAdmin(admin.ModelAdmin):
     readonly_fields = ("id", "message", "created_at")
     fields = ("id", "message", "user", "rating", "feedback", "created_at")
 
+    @admin.display(description="Feedback")
     def feedback_preview(self, obj: MessageFeedback) -> str:
         if len(obj.feedback) > 60:
             return obj.feedback[:60] + "..."
         return obj.feedback
-
-    feedback_preview.short_description = "Feedback"
 
 
 @admin.register(Thread)
