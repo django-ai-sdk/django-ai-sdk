@@ -28,6 +28,8 @@ class AllowAnonymousMemoryPermission(BasePermission):
             Operation.DELETE_FILE,
             Operation.UPLOAD_DOCUMENT,
             Operation.DELETE_DOCUMENT,
+            Operation.LINK_MEMORY,
+            Operation.UNLINK_MEMORY,
         }
     )
     WRITE: frozenset[Operation] = frozenset(
