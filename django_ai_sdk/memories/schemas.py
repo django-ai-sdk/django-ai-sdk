@@ -113,6 +113,7 @@ class DocumentOut(BaseModel):
     content: str
     extraction: DocumentExtraction | None = None
     file_name: str
+    data: dict = Field(default_factory=dict)
     file_size: int
     content_type: str
     file_extension: str

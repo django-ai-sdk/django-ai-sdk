@@ -64,7 +64,7 @@ class FilePipeline:
             data if isinstance(data, str)
             else json.dumps(data, default=str, ensure_ascii=False)
         )
-        if hasattr(data, "model_dump"):
+        if not isinstance(data, str) and hasattr(data, "model_dump"):
             structured = data.model_dump()
         elif isinstance(data, dict):
             structured = data
