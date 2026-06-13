@@ -11,19 +11,19 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class HaystackRAGProvider:
+class RAGProvider:
     """
-    RAG provider for Haystack pipelines.
+    RAG provider for RAG pipelines.
 
-    Handles warming up Haystack RAG implementations (building indexes),
+    Handles warming up RAG implementations (building indexes),
     caching RAG instances, and converting them to tools on demand.
 
     Usage:
         class MyAssistant(Assistant):
-            rag_provider = HaystackRAGProvider()
+            rag_provider = RAGProvider()
 
             async def get_rag_pipeline(self, memory_id=None):
-                # Return a HaystackRAGBase instance
+                # Return a RAGBase instance
                 return QdrantBM25HybridRAG(documents=docs)
     """
 
@@ -40,7 +40,7 @@ class HaystackRAGProvider:
         self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
     ) -> None:
         """
-        Warm up the Haystack RAG by building indexes.
+        Warm up the RAG by building indexes.
 
         Gets or creates the RAG instance and caches the RAG.
 
@@ -50,15 +50,15 @@ class HaystackRAGProvider:
             force_rebuild: If True, forces a complete rebuild of the index
         """
         cache_key = self._get_cache_key(assistant, memory_id)
-        logger.info(f"Warming up Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
+        logger.info(f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Get or create the RAG instance
         await self._get_or_create_rag(assistant, memory_id, force_rebuild)
-        logger.info(f"Haystack RAG warmed up for {cache_key}")
+        logger.info(f"RAG warmed up for {cache_key}")
 
     async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
         """
-        Get the Haystack RAG instance.
+        Get the RAG instance.
 
         Returns the cached RAG instance which can be used with:
         - rag.as_tool() to get ComponentTool
@@ -70,7 +70,7 @@ class HaystackRAGProvider:
             memory_id: Optional memory ID for document source
 
         Returns:
-            HaystackRAGBase instance (e.g., QdrantBM25HybridRAG), or None
+            RAGBase instance (e.g., QdrantBM25HybridRAG), or None
         """
         return await self._get_or_create_rag(assistant, memory_id, False)
 
@@ -83,18 +83,34 @@ class HaystackRAGProvider:
         cache_key = self._get_cache_key(assistant, memory_id)
         return self._cache.get(cache_key)
 
+    async def get_tool(
+        self,
+        assistant: "Assistant",
+        memory_id: str | None = None,
+        *,
+        spec: Any = None,
+        citation_registry: "CitationRegistry | None" = None,
+        citation_formatter: "CitationFormatter | None" = None,
+    ) -> Any:
+        """Get a ready-to-use ComponentTool for the given memory, with optional citations."""
+        rag_instance = await self.get_rag_instance(assistant, memory_id)
+        tool = await self.build_tool(rag_instance, spec=spec)
+        if tool is not None and citation_registry is not None and citation_formatter is not None:
+            self._attach_citations(tool, citation_formatter, citation_registry)
+        return tool
+
     async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
-        """Build a ComponentTool from a Haystack RAG instance.
+        """Build a ComponentTool from a RAG instance.
 
         Uses the RAG's spec-aware get_tool when a spec is given, otherwise
         falls back to as_tool.
 
         Args:
             rag_instance: The RAG instance from get_rag_instance()
-            spec: Optional Haystack tool spec for custom names/descriptions
+            spec: Optional tool spec for custom names/descriptions
 
         Returns:
-            ComponentTool ready for Haystack ToolAgent, or None
+            ComponentTool ready for ToolAgent, or None
         """
         if rag_instance is None:
             return None
@@ -113,15 +129,15 @@ class HaystackRAGProvider:
         formatter: "CitationFormatter",
         registry: "CitationRegistry",
     ) -> None:
-        """Wire a Haystack ComponentTool via the haystack citation bridge."""
-        from django_ai_sdk.citations.haystack import attach_citations  # noqa: PLC0415
+        """Wire a ComponentTool via the citation bridge."""
+        from django_ai_sdk.citations.utils import attach_citations  # noqa: PLC0415
 
         attach_citations(tool, formatter, registry)
 
     def clear_cache(self) -> None:
         """Clear the RAG cache."""
         self._cache.clear()
-        logger.debug("Haystack RAG cache cleared")
+        logger.debug("RAG cache cleared")
 
     async def add_documents(
         self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
@@ -160,7 +176,7 @@ class HaystackRAGProvider:
             The reindexed RAG instance.
         """
         cache_key = self._get_cache_key(assistant, memory_id)
-        logger.info(f"Reindexing Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
+        logger.info(f"Reindexing RAG for {cache_key} (force_rebuild={force_rebuild})")
 
         # Clear this entry from cache
         if cache_key in self._cache:
@@ -171,7 +187,7 @@ class HaystackRAGProvider:
 
         # Return the cached RAG
         result = self._cache.get(cache_key)
-        logger.info(f"Haystack RAG reindexed for {cache_key}")
+        logger.info(f"RAG reindexed for {cache_key}")
         return result
 
     # TODO: maybe we want to have some RagKey object
@@ -206,7 +222,7 @@ class HaystackRAGProvider:
 
         # Fast path: return immediately if already cached and no rebuild requested.
         if cache_key in self._cache and not force_rebuild:
-            logger.debug(f"Using cached Haystack RAG for {cache_key}")
+            logger.debug(f"Using cached RAG for {cache_key}")
             return self._cache[cache_key]
 
         # Slow path: serialize warmup per key.
@@ -217,10 +233,10 @@ class HaystackRAGProvider:
             # Re-check after acquiring the lock: a previous waiter may have already
             # populated the cache while we were waiting.
             if cache_key in self._cache and not force_rebuild:
-                logger.debug(f"Using cached Haystack RAG for {cache_key} (post-lock cache hit)")
+                logger.debug(f"Using cached RAG for {cache_key} (post-lock cache hit)")
                 return self._cache[cache_key]
 
-            logger.debug(f"Creating Haystack RAG for {cache_key} (force_rebuild={force_rebuild})")
+            logger.debug(f"Creating RAG for {cache_key} (force_rebuild={force_rebuild})")
             rag = await assistant.get_rag_pipeline(memory_id)
 
             if rag is not None:
@@ -234,5 +250,5 @@ class HaystackRAGProvider:
             else:
                 self._cache[cache_key] = None
 
-            logger.debug(f"Haystack RAG created and cached for {cache_key}")
+            logger.debug(f"RAG created and cached for {cache_key}")
             return self._cache[cache_key]

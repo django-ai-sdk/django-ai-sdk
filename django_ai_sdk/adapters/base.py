@@ -78,7 +78,7 @@ def parse_tool_output(obj: Any) -> Any:
     return str(obj)
 
 
-class HaystackRunnable(Runnable):
+class Run(Runnable):
     """
     Runnable Haystack adapter.
     """
@@ -100,11 +100,11 @@ class HaystackRunnable(Runnable):
         """Quick conversion."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted: list[HaystackChatMessage] = []
-        for role, content in conversation:
-            if role == "user":
-                converted.append(HaystackChatMessage.from_user(content))  # type: ignore[arg-type]
-            elif role == "assistant":
-                converted.append(HaystackChatMessage.from_assistant(content))  # type: ignore[arg-type]
+        for msg in conversation:
+            if msg.role == "user":
+                converted.append(HaystackChatMessage.from_user(msg.content))  # type: ignore[arg-type]
+            elif msg.role == "assistant":
+                converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
         return converted
 
     @overload
@@ -141,7 +141,7 @@ class HaystackRunnable(Runnable):
         return response["replies"][0].text
 
 
-class HaystackStream(Runnable, Streamable):
+class Stream(Runnable, Streamable):
     """
     Adapter for Haystack pipelines that emits events.
     """
@@ -369,7 +369,6 @@ class HaystackStream(Runnable, Streamable):
         stream_writer = None
         if self.store and self.storage_adapter:
             stream_writer = StreamWriter(
-                adapter_type="haystack",
                 message_id=message_id,
                 model="haystack-pipeline",
                 role="assistant",

@@ -1,36 +1,36 @@
 """
 Unit tests for RAG initialization and configuration.
 
-Tests verify HaystackRAGProvider structure and schemas
+Tests verify RAGProvider structure and schemas
 without requiring actual retrieval operations or database setup.
 """
 
 import pytest
 
 
-class TestHaystackRAGProviderStructure:
-    """Test HaystackRAGProvider initialization (no Haystack setup)."""
+class TestRAGProviderStructure:
+    """Test RAGProvider initialization (no Haystack setup)."""
 
-    def test_haystack_provider_has_required_methods(self):
-        """Verify HaystackRAGProvider implements expected methods."""
-        from django_ai_sdk.rags import HaystackRAGProvider
+    def test_provider_has_required_methods(self):
+        """Verify RAGProvider implements expected methods."""
+        from django_ai_sdk.rags import RAGProvider
 
         required = ["warmup", "get_rag_instance", "build_tool", "clear_cache", "reindex"]
         for method in required:
-            assert hasattr(HaystackRAGProvider, method), f"Missing method: {method}"
+            assert hasattr(RAGProvider, method), f"Missing method: {method}"
 
-    def test_haystack_provider_is_not_abstract(self):
-        """Verify HaystackRAGProvider can be instantiated."""
-        from django_ai_sdk.rags import HaystackRAGProvider
+    def test_provider_is_not_abstract(self):
+        """Verify RAGProvider can be instantiated."""
+        from django_ai_sdk.rags import RAGProvider
 
-        provider = HaystackRAGProvider()
+        provider = RAGProvider()
         assert provider is not None
 
-    def test_haystack_provider_initializes_with_empty_cache(self):
+    def test_provider_initializes_with_empty_cache(self):
         """Verify provider starts with empty cache."""
-        from django_ai_sdk.rags import HaystackRAGProvider
+        from django_ai_sdk.rags import RAGProvider
 
-        provider = HaystackRAGProvider()
+        provider = RAGProvider()
         assert provider._cache == {}
 
 
@@ -49,28 +49,28 @@ class TestAssistantRAGConfig:
 
         assert Assistant.rag_provider is None
 
-    def test_assistant_can_set_haystack_rag_provider(self):
-        """Verify HaystackRAGProvider can be set."""
+    def test_assistant_can_set_rag_provider(self):
+        """Verify RAGProvider can be set."""
         from django_ai_sdk import Assistant
-        from django_ai_sdk.rags import HaystackRAGProvider
+        from django_ai_sdk.rags import RAGProvider
 
         class TestAssistant(Assistant):
             name = "Test"
-            rag_provider = HaystackRAGProvider()
+            rag_provider = RAGProvider()
 
-        assert isinstance(TestAssistant.rag_provider, HaystackRAGProvider)
+        assert isinstance(TestAssistant.rag_provider, RAGProvider)
 
 
 class TestRAGExports:
     """Test RAG module exports."""
 
-    def test_haystack_exports_present(self):
-        """Verify Haystack exports available from top-level rags package."""
+    def test_exports_present(self):
+        """Verify exports available from top-level rags package."""
         from django_ai_sdk import rags
 
         expected = [
-            "HaystackRAGProvider",
-            "HaystackRAGBase",
+            "RAGProvider",
+            "RAGBase",
             "BM25QueryExpanderRAG",
             "BM25QueryExpanderRAGConfig",
             "ChromaDBQueryExpanderRAG",
@@ -80,7 +80,7 @@ class TestRAGExports:
             "RagDocument",
             "ToolSpec",
             "queryset_to_rag_documents",
-            "rag_document_to_haystack",
+            "to_document",
         ]
 
         for export in expected:

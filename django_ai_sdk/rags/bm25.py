@@ -10,21 +10,21 @@ from haystack.tools import ComponentTool
 from haystack.utils import Secret
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.base import BaseHaystackRAGConfig, HaystackRAGBase
+from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import MultiQueryBM25Retriever
 from django_ai_sdk.rags.schemas import RagDocument
-from django_ai_sdk.rags.utils import rag_document_to_haystack
+from django_ai_sdk.rags.utils import to_document
 
 logger = get_logger(__name__)
 
 
-class BM25QueryExpanderRAGConfig(BaseHaystackRAGConfig):
+class BM25QueryExpanderRAGConfig(RAGConfig):
     """Configuration for BM25 Query Expander RAG."""
 
     pass
 
 
-class BM25QueryExpanderRAG(HaystackRAGBase):
+class BM25QueryExpanderRAG(RAGBase):
     """RAG implementation using BM25 with optional query expansion."""
 
     def __init__(
@@ -40,7 +40,7 @@ class BM25QueryExpanderRAG(HaystackRAGBase):
 
     def _convert_documents(self) -> list[HaystackDocument]:
         """Convert RagDocuments to HaystackDocuments for internal use."""
-        return [rag_document_to_haystack(doc) for doc in self.documents]
+        return [to_document(doc) for doc in self.documents]
 
     def _create_document_store(self) -> InMemoryDocumentStore:
         """Create an in-memory document store."""
@@ -56,7 +56,7 @@ class BM25QueryExpanderRAG(HaystackRAGBase):
             logger.warning("No document store available, cannot add documents")
             return
 
-        haystack_docs = [rag_document_to_haystack(doc) for doc in documents]
+        haystack_docs = [to_document(doc) for doc in documents]
         self._write_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to BM25 index")
 

@@ -1,5 +1,5 @@
 """
-Concurrency tests for HaystackRAGProvider and RAGProvider.
+Concurrency tests for RAGProvider.
 
 Verifies that concurrent cold-cache calls for the same key serialize on
 warmup (double-checked locking) rather than racing - which would crash
@@ -15,7 +15,7 @@ call would complete synchronously and the test would pass trivially.
 import asyncio
 from unittest.mock import MagicMock
 
-from django_ai_sdk.rags.provider import HaystackRAGProvider
+from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.rags.schemas import RagDocument
 
 
@@ -40,10 +40,10 @@ def _make_rag() -> MagicMock:
     return rag
 
 
-class TestHaystackRAGProviderConcurrency:
+class TestRAGProviderConcurrency:
     async def test_concurrent_cold_cache_warms_up_once(self):
         """Two simultaneous cold-cache calls must trigger exactly one warmup."""
-        provider = HaystackRAGProvider()
+        provider = RAGProvider()
         calls: list = []
         rag = _make_rag()
         assistant = _make_assistant(calls, rag)
@@ -59,7 +59,7 @@ class TestHaystackRAGProviderConcurrency:
 
     async def test_warm_cache_never_calls_warmup_again(self):
         """After the cache is warm, subsequent calls skip warmup entirely."""
-        provider = HaystackRAGProvider()
+        provider = RAGProvider()
         calls: list = []
         rag = _make_rag()
         assistant = _make_assistant(calls, rag)
@@ -71,7 +71,7 @@ class TestHaystackRAGProviderConcurrency:
 
     async def test_different_keys_warm_up_independently(self):
         """Calls for different keys do not interfere with each other."""
-        provider = HaystackRAGProvider()
+        provider = RAGProvider()
         calls_a: list = []
         calls_b: list = []
         rag_a, rag_b = _make_rag(), _make_rag()

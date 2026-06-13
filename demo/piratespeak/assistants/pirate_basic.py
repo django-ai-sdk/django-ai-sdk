@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.haystack import HaystackStream
+from django_ai_sdk.adapters.base import Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
@@ -22,7 +22,7 @@ from django_ai_sdk.rags import (
     QdrantBM25HybridRAGConfig,
 )
 from django_ai_sdk.rags.config import QdrantStorageConfig
-from django_ai_sdk.rags.provider import HaystackRAGProvider
+from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
@@ -92,7 +92,7 @@ class PirateBasicAssistant(Assistant):
     ]
 
     # Use the new RAG provider pattern for Haystack
-    rag_provider = HaystackRAGProvider()
+    rag_provider = RAGProvider()
 
     tools: list = [get_today]
 
@@ -165,7 +165,7 @@ class PirateBasicAssistant(Assistant):
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | None = None,
-    ) -> HaystackStream:
+    ) -> Stream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
         # Build generator
@@ -211,7 +211,7 @@ class PirateBasicAssistant(Assistant):
 
         pipeline = tool_agent.pipeline()
 
-        return HaystackStream(
+        return Stream(
             pipeline=pipeline,
             generator=generator,
             storage_adapter=storage_adapter,

@@ -28,7 +28,7 @@ class TestHaystackToolErrorDetection:
 
     def test_parse_tool_output_includes_error_flag(self):
         """Verify parse_tool_output preserves the error flag in dict output."""
-        from django_ai_sdk.adapters.haystack import parse_tool_output
+        from django_ai_sdk.adapters.base import parse_tool_output
 
         failure = ToolCallResult(
             result="Connection refused",

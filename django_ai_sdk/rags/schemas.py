@@ -17,7 +17,7 @@ class RagDocument(BaseModel):
         extra = "allow"
 
     @classmethod
-    def from_haystack(cls, haystack_doc: Any) -> "RagDocument":
+    def from_document(cls, haystack_doc: Any) -> "RagDocument":
         """
         Create RagDocument from a Haystack Document.
 

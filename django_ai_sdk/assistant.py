@@ -128,7 +128,7 @@ class Assistant(ABC, AssistantInfoMixin):
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
 
-    # RAG provider: set to a HaystackRAGProvider instance to enable RAG, None disables RAG
+    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG
     rag_provider: Any = None
 
     # Maximum conversation history to send to LLM (None = unlimited)

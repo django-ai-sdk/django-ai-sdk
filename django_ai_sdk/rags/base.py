@@ -33,7 +33,7 @@ Generate {{n_expansions}} queries (FIRST must be the original query):
 """
 
 
-class BaseHaystackRAGConfig(BaseModel):
+class RAGConfig(BaseModel):
     """
     Base configuration for Haystack RAG implementations.
 
@@ -79,11 +79,11 @@ class BaseHaystackRAGConfig(BaseModel):
     )
 
 
-class HaystackRAGBase(ABC):
+class RAGBase(ABC):
     """Abstract base class for Haystack RAG implementations."""
 
     _is_warmed_up: bool = False
-    config: BaseHaystackRAGConfig
+    config: RAGConfig
 
     @abstractmethod
     def warmup(self, force_rebuild: bool = False) -> None:

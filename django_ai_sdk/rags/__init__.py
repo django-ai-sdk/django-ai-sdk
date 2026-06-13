@@ -1,4 +1,4 @@
-from django_ai_sdk.rags.base import HaystackRAGBase
+from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.bm25 import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
@@ -12,7 +12,7 @@ from django_ai_sdk.rags.components import (
     MultiQueryChromaRetriever,
     MultiQueryQdrantHybridRetriever,
 )
-from django_ai_sdk.rags.provider import HaystackRAGProvider
+from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.rags.qdrant_hybrid import (
     QdrantBM25HybridRAG,
     QdrantBM25HybridRAGConfig,
@@ -20,12 +20,13 @@ from django_ai_sdk.rags.qdrant_hybrid import (
 from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 from django_ai_sdk.rags.utils import (
     queryset_to_rag_documents,
-    rag_document_to_haystack,
+    to_document,
 )
 
 __all__ = [
-    "HaystackRAGBase",
-    "HaystackRAGProvider",
+    "RAGBase",
+    "RAGConfig",
+    "RAGProvider",
     "BM25QueryExpanderRAG",
     "BM25QueryExpanderRAGConfig",
     "ChromaDBQueryExpanderRAG",
@@ -38,5 +39,5 @@ __all__ = [
     "RagDocument",
     "ToolSpec",
     "queryset_to_rag_documents",
-    "rag_document_to_haystack",
+    "to_document",
 ]
