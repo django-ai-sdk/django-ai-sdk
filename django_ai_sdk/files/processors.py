@@ -14,9 +14,11 @@ type FileSource = str | Path | File | IO[bytes]
 class FileProcessor(Protocol):
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(self, file: FileSource) -> bool: ...
+    def is_valid(self, file: FileSource) -> bool:
+        pass
 
-    def run(self, file: FileSource) -> str | None: ...
+    def run(self, file: FileSource) -> str | None:
+        pass
 
 
 class BaseFileProcessor:
