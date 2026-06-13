@@ -1,8 +1,4 @@
-"""Bridge between the citation primitives and Haystack's `ComponentTool`.
-
-Kept separate from `formatter.py` and `registry.py` so the core primitives stay
-adapter-agnostic. Only this module imports Haystack.
-"""
+"""Bridge between the citation primitives and Haystack's `ComponentTool`."""
 
 from typing import Any
 
