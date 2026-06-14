@@ -15,7 +15,7 @@ def get_datetime() -> dict:
     }
 
 
-def get_today(**kwargs) -> Tool:
+def get_today(**kwargs: object) -> Tool:
     """Current date and time tool."""
     return Tool(
         name="get_today",

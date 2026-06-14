@@ -452,7 +452,9 @@ class Stream:
                 logger.debug("Running Agent component directly with streaming_callback")
                 pipeline_task = loop.run_in_executor(
                     None,
-                    lambda: self._run_agent(self.agent_component, haystack_messages, streaming_callback),
+                    lambda: self._run_agent(
+                        self.agent_component, haystack_messages, streaming_callback
+                    ),
                 )
             else:
                 pipeline_input = {"messages": haystack_messages}

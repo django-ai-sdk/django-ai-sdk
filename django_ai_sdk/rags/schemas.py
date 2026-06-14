@@ -37,6 +37,7 @@ class RagDocument(BaseModel):
             source=meta.get("source"),
         )
 
+
 class ToolSpec(BaseModel):
     """Specification for RAG tool presentation to LLM."""
 

@@ -17,7 +17,6 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
-from django_ai_sdk.files.pipeline import FilePipeline
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import Prompt
+    from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator

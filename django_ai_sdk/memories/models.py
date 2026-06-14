@@ -134,7 +134,9 @@ class Entry(models.Model):
             if extraction.keywords:
                 parts.append(f"Keywords: {', '.join(extraction.keywords)}")
             if extraction.entities:
-                parts.append(f"Named entities: {', '.join(f'{e.text} ({e.type})' for e in extraction.entities)}")
+                parts.append(
+                    f"Named entities: {', '.join(f'{e.text} ({e.type})' for e in extraction.entities)}"
+                )
             content = "\n\n".join(parts)
         else:
             content = self.content
