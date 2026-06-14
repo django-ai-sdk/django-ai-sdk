@@ -355,6 +355,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 else:
                     yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
         finally:
+            await protocol_stream.aclose()
             # Ensure any open blocks are closed if stream was interrupted
             cleanup_chunks = []
             reasoning_id = self.reasoning_id

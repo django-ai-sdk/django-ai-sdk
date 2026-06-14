@@ -7,6 +7,7 @@ from asyncio import Queue
 from collections.abc import AsyncGenerator, Callable
 from typing import TYPE_CHECKING, Any, Union, overload
 
+from django.conf import settings
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
@@ -414,6 +415,7 @@ class Stream:
                 if chunk.finish_reason == "stop":
                     logger.debug("Pipeline finished with reason: stop")
                     loop_ref.call_soon_threadsafe(event_ref.set)
+                    loop_ref.call_soon_threadsafe(queue_ref.put_nowait, ("finish", None))
 
                 # Capture usage from chunk metadata (when stream_options={"include_usage": True})
                 # This handles the final chunk with choices=[] and usage data
@@ -464,6 +466,14 @@ class Stream:
                     None, lambda: self.pipeline.run(pipeline_input)
                 )
 
+            # Ensure queue.get() is unblocked if pipeline errors or cancels
+            # without emitting a "stop" chunk (which normally sends the sentinel).
+            def _put_finish_sentinel(fut: asyncio.Future) -> None:  # type: ignore[type-arg]
+                if not pipeline_finished.is_set():
+                    loop.call_soon_threadsafe(queue.put_nowait, ("finish", None))
+
+            pipeline_task.add_done_callback(_put_finish_sentinel)
+
             # Yield tokens
             pipeline_result = None
             usage = None
@@ -489,11 +499,15 @@ class Stream:
                         return
                     break
                 try:
-                    item = await asyncio.wait_for(queue.get(), timeout=0.08)
+                    item = await queue.get()
 
                     # Handle tool events in real-time
                     if isinstance(item, tuple) and len(item) == 2:
                         event_type, payload = item
+
+                        if event_type == "finish":
+                            # Sentinel: pipeline signalled completion; exit token loop.
+                            break
 
                         if event_type == "tool_call":
                             # Tool call started - use ToolCallDelta attributes directly
@@ -564,9 +578,6 @@ class Stream:
 
                         yield TextChunkEvent(content=item)
 
-                except TimeoutError:
-                    # No token available yet, continue loop
-                    continue
                 except Exception as streaming_error:
                     logger.error(
                         f"Exception occurred in streaming loop: {type(streaming_error).__name__}: {streaming_error}"
@@ -683,12 +694,18 @@ class Stream:
                 try:
                     # Use only recent context for faster, cheaper suggestions
                     recent_messages = messages[-6:] if len(messages) > 6 else messages
-                    suggestions = await self.suggestion_generator.generate(
-                        messages=recent_messages,
-                        response=self.message_result.content,
+                    _suggestion_timeout = getattr(settings, "AI_SDK_SUGGESTION_TIMEOUT", 5.0)
+                    suggestions = await asyncio.wait_for(
+                        self.suggestion_generator.generate(
+                            messages=recent_messages,
+                            response=self.message_result.content,
+                        ),
+                        timeout=_suggestion_timeout,
                     )
                     if suggestions:
                         yield SuggestionEvent(suggestions=suggestions)
+                except TimeoutError:
+                    logger.warning("Suggestion generation timed out, skipping")
                 except Exception as e:
                     logger.error(f"Error generating suggestions: {e}", exc_info=True)
 
