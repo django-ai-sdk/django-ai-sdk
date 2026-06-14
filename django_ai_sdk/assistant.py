@@ -267,6 +267,10 @@ class Assistant(ABC, AssistantInfoMixin):
             if thread:
                 return adapter_class(thread_id)
 
+        # Thread not found in any registered adapter — fall back to this
+        # assistant's configured storage (always set in __init__).
+        return self.storage_adapter(thread_id)
+
     def get_file_pipeline(self, file: object) -> FilePipeline | None:
         """Return the first FilePipeline whose processor accepts file, or None."""
         for pipeline in self.file_pipelines:

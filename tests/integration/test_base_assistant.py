@@ -177,6 +177,22 @@ class TestBaseAssistant:
         assert chat_messages[1].role == "assistant"
 
 
+    @pytest.mark.asyncio
+    async def test_get_storage_adapter_falls_back_for_unknown_thread(self, assistant):
+        """get_storage_adapter() must return configured adapter for unknown threads."""
+        unknown_thread_id = str(uuid.uuid4())
+        # No thread created in any adapter — should fall back to storage_adapter
+        storage = await assistant.get_storage_adapter(unknown_thread_id)
+        assert storage is not None
+        assert storage.thread_id == unknown_thread_id
+
+    @pytest.mark.asyncio
+    async def test_get_storage_adapter_returns_none_for_none_thread_id(self, assistant):
+        """get_storage_adapter() must return None when thread_id is None."""
+        storage = await assistant.get_storage_adapter(None)
+        assert storage is None
+
+
 @pytest.mark.django_db
 class TestStreamWriterIntegration:
     """Test StreamWriter integration with BaseAssistant."""
