@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.base import Stream
+from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
@@ -140,6 +140,18 @@ class PirateBasicAssistant(Assistant):
     async def get_rag_pipeline(self, memory_id: str | None = None) -> QdrantBM25HybridRAG | None:
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
+
+    async def get_run_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Run:
+        generator = OpenAIChatGenerator(
+            model=self.get_model(),
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
+        )
+        return Run(generator=generator)
 
     async def get_pipeline_adapter(
         self,

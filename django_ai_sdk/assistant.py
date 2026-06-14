@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from django.conf import settings
 from pydantic import BaseModel
@@ -463,24 +463,13 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
-    @overload
-    async def run(
-        self, messages: list[ChatMessage], *, response_format: None = None
-    ) -> str | None: ...
-    @overload
-    async def run(
-        self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: None = None
-    ) -> str | None: ...
-    @overload
-    async def run(
-        self, messages: list[ChatMessage], system_prompt: Prompt, *, response_format: type[T]
-    ) -> T | None: ...
-
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | Prompt | None = None,
         response_format: type[T] | None = None,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> T | str | None:
         """Run LLM calls directly from adapter.
 
@@ -488,16 +477,29 @@ class Assistant(ABC, AssistantInfoMixin):
             messages: Conversation messages
             system_prompt: Optional system prompt override
             response_format: Optional Pydantic model for structured output
+            thread_id: Optional thread ID (forwarded to get_run_adapter)
+            user: Optional user (forwarded to get_run_adapter)
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
         """
-        adapter = await self.get_pipeline_adapter()
+        adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         return await adapter.run(
             messages=messages,
             system_prompt=system_prompt,
             response_format=response_format,
         )
+
+    async def get_run_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Any:
+        """Return a Run adapter for non-streaming tasks (title generation, etc.).
+
+        Must be implemented by subclasses that use Assistant.run() or title generation.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
     mcp_servers: list[str] = []
 
@@ -670,7 +672,9 @@ class Assistant(ABC, AssistantInfoMixin):
             if thread:
                 await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
             if self.title_generation and thread and not thread.title:
-                title = await generate_thread_title(assistant=self, messages=messages)
+                title = await generate_thread_title(
+                    assistant=self, messages=messages, thread_id=thread_id, user=user
+                )
                 await ThreadService.update_thread(thread_id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")

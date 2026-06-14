@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.base import Stream
+from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
@@ -134,7 +134,18 @@ class AgentSwarmAssistant(Assistant):
             function=get_datetime,
         )
 
-    # FIX typing
+    async def get_run_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Run:
+        generator = OpenAIChatGenerator(
+            model=self.get_model(),
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
+        )
+        return Run(generator=generator)
+
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,

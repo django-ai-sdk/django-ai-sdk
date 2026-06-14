@@ -320,13 +320,10 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "tool_calls": chat_message.tool_calls,
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
-                    "usage": chat_message.usage,
                     "feedbacks": chat_message.metadata.get("feedbacks", []),
                     "created_at": chat_message.created_at,
                 }
             )
-            logger.debug(f"Converting message {chat_message.id}: usage={chat_message.usage}")
-
         return result
 
     async def sse(
@@ -477,16 +474,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         self.text_started = False
                     # Default to "stop" if no finish_reason provided
                     finish_reason = end_event.finish_reason or "stop"
-                    logger.info(f"Message end: usage={end_event.usage}")
                     yield FinishPart(finishReason=finish_reason)
-                    # Emit usage as custom data event if available
-                    if end_event.usage:
-                        logger.info(f"Emitting data-usage event: {end_event.usage}")
-                        yield DataPart(type="data-usage", data=end_event.usage)
-                    else:
-                        logger.info(
-                            "No usage in message end event - data-usage event will NOT be emitted"
-                        )
 
                 case "stream_end":
                     yield DonePart()
