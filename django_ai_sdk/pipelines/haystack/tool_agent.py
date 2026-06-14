@@ -4,7 +4,7 @@ Haystack ToolAgent implementation.
 
 from typing import Any
 
-from haystack import Pipeline
+from haystack import AsyncPipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ class ToolAgent:
         self.generator = generator
         logger.debug(f"ToolAgent initialized with {len(config.tools)} tools")
 
-    def pipeline(self) -> Pipeline:
+    def pipeline(self) -> AsyncPipeline:
         """Build and return the fully connected pipeline."""
         logger.debug("Building ToolAgent pipeline")
 
@@ -47,7 +47,7 @@ class ToolAgent:
             exit_conditions=["text"],
         )
 
-        pipeline = Pipeline()
+        pipeline = AsyncPipeline()
         pipeline.add_component("agent", agent)
 
         logger.debug("ToolAgent pipeline built successfully")
