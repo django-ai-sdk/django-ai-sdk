@@ -1028,9 +1028,6 @@ async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) 
         return 500, Error(message=str(e))
 
 
-# Run history endpoints — declared BEFORE {workflow_id} to avoid route conflict
-
-
 @router.get(
     "/workflows/{workflow_id}/runs/",
     response={200: list[WorkflowRunOut], 500: Error},
