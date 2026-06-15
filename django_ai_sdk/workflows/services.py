@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.executor import WorkflowExecutor
 
@@ -10,6 +9,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
