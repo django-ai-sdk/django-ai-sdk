@@ -173,6 +173,11 @@ AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
     "get_today": "piratespeak.assistants.tools.get_today",
 }
 
+# Default Workflow actions
+AI_SDK_WORKFLOW_ACTIONS = {
+    "console_log": "piratespeak.actions.ConsoleLogAction",
+}
+
 # Default asssitants
 AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.pirate_basic.PirateBasicAssistant",

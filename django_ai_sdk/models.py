@@ -19,6 +19,9 @@ from .memories.models import (
     ThreadMemory,
 )
 
+# Workflows
+from .workflows.models import WorkflowSettings
+
 __all__ = [
     # Conversation models
     "Thread",
@@ -34,4 +37,6 @@ __all__ = [
     "AssistantGroup",
     "AssistantSettings",
     "AssistantUser",
+    # Workflows
+    "WorkflowSettings",
 ]

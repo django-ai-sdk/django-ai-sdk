@@ -17,6 +17,8 @@ from django_ai_sdk.storage.services import (
     aget_thread_history,
 )
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
+from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+from django_ai_sdk.workflows.models import WorkflowSettings
 from ninja import Router, Schema
 
 router = Router()
@@ -905,3 +907,182 @@ async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_i
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
+
+
+# ============================================================================
+# Workflows
+# ============================================================================
+
+
+class WorkflowRunRequest(Schema):
+    workflow: WorkflowDefinition
+    messages: list[dict] = []
+
+
+class WorkflowRunResponse(Schema):
+    outputs: dict
+
+
+class WorkflowActionItem(Schema):
+    key: str
+    description: str
+
+
+@router.post(
+    "/workflows/run/",
+    response={200: WorkflowRunResponse, 400: Error, 404: Error, 500: Error},
+    operation_id="run_workflow",
+)
+async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
+    try:
+        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+        from django_ai_sdk.views.schemas import Message
+
+        protocol = VercelProtocolHandler()
+        messages = [Message(**m) for m in payload.messages]
+        chat_messages = protocol.to_chat_messages(messages)
+
+        outputs = await WorkflowService.run(payload.workflow, chat_messages, user=request.user)
+        return WorkflowRunResponse(outputs=outputs)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/actions/",
+    response={200: list[WorkflowActionItem]},
+    operation_id="list_workflow_actions",
+)
+def list_workflow_actions(request: HttpRequest) -> list[WorkflowActionItem]:
+    return [WorkflowActionItem(**item) for item in WorkflowService.list_actions()]
+
+
+# Workflow CRUD schemas
+
+
+class WorkflowCreateRequest(Schema):
+    name: str
+    workflow: WorkflowDefinition
+
+
+class WorkflowUpdateRequest(Schema):
+    name: str | None = None
+    workflow: WorkflowDefinition | None = None
+    active: bool | None = None
+
+
+class WorkflowItem(Schema):
+    id: str
+    name: str
+    definition: dict
+    active: bool
+
+
+class WorkflowRunByIdRequest(Schema):
+    messages: list[dict] = []
+
+
+@router.get(
+    "/workflows/",
+    response={200: list[WorkflowItem]},
+    operation_id="list_workflows",
+)
+async def list_workflows(request: HttpRequest) -> Any:
+    records = await WorkflowService.list_workflows()
+    return [
+        WorkflowItem(id=str(r.id), name=r.name, definition=r.definition, active=r.active)
+        for r in records
+    ]
+
+
+@router.post(
+    "/workflows/",
+    response={201: WorkflowItem, 400: Error, 500: Error},
+    operation_id="create_workflow",
+)
+async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) -> Any:
+    try:
+        record = await WorkflowService.create(payload.name, payload.workflow, user=request.user)
+        return 201, WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/",
+    response={200: WorkflowItem, 404: Error},
+    operation_id="get_workflow",
+)
+async def get_workflow(request: HttpRequest, workflow_id: str) -> Any:
+    try:
+        record = await WorkflowService.get(workflow_id)
+        return WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+
+
+@router.patch(
+    "/workflows/{workflow_id}/",
+    response={200: WorkflowItem, 404: Error, 500: Error},
+    operation_id="update_workflow",
+)
+async def update_workflow(
+    request: HttpRequest, workflow_id: str, payload: WorkflowUpdateRequest
+) -> Any:
+    try:
+        record = await WorkflowService.update(
+            workflow_id,
+            name=payload.name,
+            workflow=payload.workflow,
+            active=payload.active,
+        )
+        return WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.delete(
+    "/workflows/{workflow_id}/",
+    response={204: None, 404: Error},
+    operation_id="delete_workflow",
+)
+async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
+    try:
+        await WorkflowService.get(workflow_id)  # raises DoesNotExist if missing
+        await WorkflowService.delete(workflow_id)
+        return 204, None
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+
+
+@router.post(
+    "/workflows/{workflow_id}/run/",
+    response={200: WorkflowRunResponse, 404: Error, 500: Error},
+    operation_id="run_workflow_by_id",
+)
+async def run_workflow_by_id(
+    request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
+) -> Any:
+    try:
+        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+        from django_ai_sdk.views.schemas import Message
+
+        protocol = VercelProtocolHandler()
+        messages = [Message(**m) for m in payload.messages]
+        chat_messages = protocol.to_chat_messages(messages)
+        outputs = await WorkflowService.run_by_id(workflow_id, chat_messages, user=request.user)
+        return WorkflowRunResponse(outputs=outputs)
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+    except Exception as e:
+        return 500, Error(message=str(e))
