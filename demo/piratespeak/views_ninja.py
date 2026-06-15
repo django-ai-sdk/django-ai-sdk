@@ -137,6 +137,11 @@ class MessageResponse(Schema):
     feedback: FeedbackResponse | None = None
 
 
+class RunResponse(Schema):
+    result: str | None = None
+    thread_id: str
+
+
 @router.get("/health/", response={200: HealthResponse}, operation_id="health_check")
 def health_check(request: HttpRequest) -> HealthResponse:
     return HealthResponse(status="ok", service="piratespeak")
@@ -225,6 +230,27 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
         return ThreadFileMeta(**data)
     except ValueError as e:
         return 404, Error(message=str(e))
+
+
+@router.post(
+    "/threads/{thread_id}/run/",
+    response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
+    operation_id="run_thread",
+)
+async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
+    try:
+        assistant = await AssistantService.get_assistant(thread_id, user=request.user)
+        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
+        result = await assistant.run(chat_messages, thread_id=thread_id, user=request.user)
+        return RunResponse(result=result, thread_id=thread_id)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except NotImplementedError as e:
+        return 501, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
 
 
 @router.post(
