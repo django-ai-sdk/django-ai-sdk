@@ -213,10 +213,14 @@ class MemoryService:
 
     @staticmethod
     async def get_assistant_memories(assistant_id: str) -> list[str]:
-        assistant = AssistantService.from_registry(assistant_id)
-        return [
-            str(m.id) async for m in Memory.objects.filter(slug__in=assistant.memories).distinct()
-        ]
+        try:
+            assistant = await AssistantService.get(assistant_id)
+        except ValueError:
+            return []
+        memories: list[str] = getattr(assistant, "memories", [])
+        if not memories:
+            return []
+        return [str(m.id) async for m in Memory.objects.filter(slug__in=memories).distinct()]
 
     @staticmethod
     async def link_memories(

@@ -233,6 +233,27 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
 
 
 @router.post(
+    "/assistants/{assistant_id}/run/",
+    response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
+    operation_id="run_assistant",
+)
+async def run_assistant(request: HttpRequest, assistant_id: str, payload: ChatRequest) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
+        result = await assistant.run(chat_messages, user=request.user)
+        return RunResponse(result=result, thread_id="")
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except NotImplementedError as e:
+        return 501, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.post(
     "/threads/{thread_id}/run/",
     response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
     operation_id="run_thread",
@@ -309,7 +330,7 @@ async def delete_all_threads(request: HttpRequest) -> Any:
 )
 async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
     try:
-        AssistantService.from_registry(payload.assistant_id)
+        await AssistantService.get(payload.assistant_id)
         thread = await ThreadService.get_thread(thread_id, user=request.user)
         if thread is None:
             return 404, Error(message="Thread not found")
@@ -400,7 +421,7 @@ async def list_assistants(request: HttpRequest) -> Any:
 )
 async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
         info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
         return AssistantInfoResponse(
             id=info.id,
@@ -424,7 +445,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
 )
 async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
     except ValueError as e:
         return 404, Error(message=str(e))
 
@@ -472,7 +493,7 @@ async def reindex_assistant(
     force_rebuild: bool = False,
 ) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
         result = await Assistant.reindex(assistant, memory_id, force_rebuild)
 
         if not result:

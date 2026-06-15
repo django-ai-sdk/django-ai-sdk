@@ -65,7 +65,7 @@ class TestThreadServiceCreateThread:
     ):
         mock_assistants_registry.get.return_value = None
 
-        with pytest.raises(ValueError, match="Assistant not found"):
+        with pytest.raises(ValueError, match="not found"):
             await ThreadService.create_thread(
                 assistant_id="nonexistent", user=mock_user
             )

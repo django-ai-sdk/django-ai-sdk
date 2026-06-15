@@ -196,6 +196,47 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
+            name="WebAssistantSettings",
+            fields=[
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                    ),
+                ),
+                ("name", models.CharField(max_length=255)),
+                ("slug", models.SlugField(max_length=100, unique=True)),
+                ("model", models.CharField(default="gpt-4o", max_length=100)),
+                ("system_prompt", models.TextField(blank=True, default="")),
+                ("base_class", models.CharField(blank=True, default="", max_length=255)),
+                ("tools", models.JSONField(blank=True, default=list)),
+                ("mcp_servers", models.JSONField(blank=True, default=list)),
+                ("suggestion_enabled", models.BooleanField(default=False)),
+                ("title_generation", models.BooleanField(default=True)),
+                ("max_history", models.PositiveIntegerField(blank=True, null=True)),
+                ("file_upload", models.BooleanField(default=False)),
+                ("active", models.BooleanField(db_index=True, default=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="web_assistants",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+            ],
+            options={
+                "verbose_name": "Web Assistant",
+                "verbose_name_plural": "Web Assistants",
+                "db_table": "django_ai_sdk_web_assistants",
+                "ordering": ["name"],
+            },
+        ),
+        migrations.CreateModel(
             name="MemoryOwner",
             fields=[
                 (

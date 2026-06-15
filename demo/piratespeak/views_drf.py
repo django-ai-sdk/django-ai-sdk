@@ -347,7 +347,7 @@ class AssistantInfoAPIView(APIView):
 class AssistantToolsAPIView(APIView):
     async def get(self, request: Request, assistant_id: str) -> Response:
         try:
-            assistant = AssistantService.from_registry(assistant_id)
+            assistant = await AssistantService.get(assistant_id)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -411,8 +411,30 @@ class ReindexAssistantAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
+class AssistantStatelessRunAPIView(APIView):
+    """Stateless run"""
+
+    async def post(self, request: Request, assistant_id: str) -> Response:
+        try:
+            serializer = ChatRequestSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+            assistant = await AssistantService.get(assistant_id)
+            chat_messages = assistant.protocol_handler.to_chat_messages(messages)
+            result = await assistant.run(chat_messages, user=request.user)
+            return Response({"result": result, "thread_id": None})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValidationError as e:
+            return Response({"message": str(e)}, status=400)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except NotImplementedError as e:
+            return Response({"message": str(e)}, status=501)
+
+
 class AssistantRunAPIView(APIView):
-    """Synchronous JSON endpoint wrapping Assistant.run() — no SSE, no streaming."""
+    """Synchronous JSON endpoint wrapping Assistant.run()"""
 
     async def post(self, request: Request, thread_id: str) -> Response:
         try:
@@ -477,6 +499,11 @@ urlpatterns = [
         "assistants/<str:assistant_id>/reindex/",
         ReindexAssistantAPIView.as_view(),
         name="assistant-reindex",
+    ),
+    path(
+        "assistants/<str:assistant_id>/run/",
+        AssistantStatelessRunAPIView.as_view(),
+        name="assistant-run",
     ),
     path("threads/", ThreadListAPIView.as_view(), name="thread-list"),
     path("threads/<str:thread_id>/", ThreadDetailAPIView.as_view(), name="thread-detail"),

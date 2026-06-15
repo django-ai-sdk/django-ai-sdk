@@ -159,8 +159,9 @@ class Assistant(ABC, AssistantInfoMixin):
         - Works together with @auto_register decorator
         """
         super().__init_subclass__(**kwargs)
-        # Don't register the base Assistant class itself
-        if cls.__name__ != "Assistant":
+        # Don't register the base Assistant class itself, or classes that
+        # manage their own registration (e.g. WebAssistant).
+        if cls.__name__ != "Assistant" and not getattr(cls, "_skip_auto_register", False):
             registry.register(cls)
 
     @classmethod

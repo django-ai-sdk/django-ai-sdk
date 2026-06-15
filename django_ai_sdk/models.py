@@ -12,6 +12,8 @@ from .memories.models import (
     ThreadMemory,
 )
 
+# Web Assistant
+from .web_assistant.models import WebAssistantSettings
 __all__ = [
     # Conversation models
     "Thread",
@@ -21,4 +23,6 @@ __all__ = [
     "EntryDocument",
     "Memory",
     "ThreadMemory",
+    # Web Assistant
+    "WebAssistantSettings",
 ]
