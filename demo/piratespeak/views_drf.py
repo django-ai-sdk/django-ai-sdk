@@ -602,6 +602,36 @@ class RuntimeAssistantDetailAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
+# ============================================================================
+# Workflows
+# ============================================================================
+
+
+class WorkflowRunAPIView(APIView):
+    async def post(self, request: Request) -> Response:
+        try:
+            from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+            from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+
+            workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
+            raw_messages = request.data.get("messages", [])
+            messages = [Message(**m) for m in raw_messages]
+            chat_messages = VercelProtocolHandler().to_chat_messages(messages)
+            outputs = await WorkflowService.run(workflow, chat_messages, user=request.user)
+            return Response({"outputs": outputs})
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowActionsAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        return Response(WorkflowService.list_actions())
+
+
 urlpatterns = [
     path("assistants/", ListAssistantsAPIView.as_view(), name="assistant-list"),
     path(
@@ -683,4 +713,6 @@ urlpatterns = [
         RuntimeAssistantDetailAPIView.as_view(),
         name="runtime-assistant-detail",
     ),
+    path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
+    path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
 ]
