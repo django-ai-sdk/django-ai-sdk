@@ -17,7 +17,7 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
-from django_ai_sdk.files.handlers import ContentHandler, FileHandler
+from django_ai_sdk.files.pipeline import FilePipeline
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
@@ -49,7 +49,7 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
-class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
+class Assistant(ABC, AssistantInfoMixin):
     """
     Base class for AI assistants in the Django AI SDK.
 
@@ -136,6 +136,11 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
 
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
+
+    # Declare one FilePipeline per supported file type.
+    # First pipeline whose processor accepts the uploaded file is used.
+    # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
+    file_pipelines: list[FilePipeline] = []
 
     # Enable automatic thread title generation based on chat messages
     title_generation: bool = True
@@ -261,6 +266,13 @@ class Assistant(ABC, AssistantInfoMixin, FileHandler, ContentHandler):
             thread = await adapter_class.get_thread(thread_id)
             if thread:
                 return adapter_class(thread_id)
+
+    def get_file_pipeline(self, file: object) -> FilePipeline | None:
+        """Return the first FilePipeline whose processor accepts file, or None."""
+        for pipeline in self.file_pipelines:
+            if pipeline.accepts(file):
+                return pipeline
+        return None
 
     def get_name(self) -> str:
         """Return the assistant's display name."""

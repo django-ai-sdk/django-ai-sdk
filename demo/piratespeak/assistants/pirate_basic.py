@@ -9,6 +9,7 @@ from django_ai_sdk.adapters.haystack import HaystackStream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
+from django_ai_sdk.files import FilePipeline, TextFileProcessor
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -27,6 +28,9 @@ from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
 from haystack.utils import Secret
+
+from piratespeak.assistants.extraction import PirateExtractionAssistant
+from piratespeak.assistants.transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -77,6 +81,15 @@ class PirateBasicAssistant(Assistant):
 
     # Enable file upload UI for this assistant
     file_upload = True
+
+    file_pipelines = [
+        FilePipeline(
+            TextFileProcessor(),
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAssistant()),
+            ],
+        ),
+    ]
 
     # Use the new RAG provider pattern for Haystack
     rag_provider = HaystackRAGProvider()
@@ -170,7 +183,7 @@ class PirateBasicAssistant(Assistant):
         citation_registry = self.get_citation_registry()
         citation_formatter = self.get_citation_formatter()
 
-        # Get tools via the async base-class method
+        # Get tools
         tools = await self.get_tools(
             thread_id=thread_id or "",
             user=user,

@@ -179,8 +179,8 @@ class TestPermissions:
             assistant_a = MagicMock(name="a", id="a")
             del assistant_a.permissions
             assistant_b = MagicMock(name="b", id="b", permissions=[AllowAll])
-            reg.all.return_value = {"a": assistant_a, "b": assistant_b}
-            reg.get.side_effect = lambda id: reg.all.return_value.get(id)
+            reg.list.return_value = {"a": assistant_a, "b": assistant_b}
+            reg.get.side_effect = lambda id: reg.list.return_value.get(id)
             with patch("django_ai_sdk.assistants.services.registry", reg):
                 summaries = await AssistantService.list_assistants(None)
                 assert len(summaries) == 1
@@ -382,8 +382,8 @@ class TestAssistantServicePermissions:
         )
         deny_assistant = MagicMock(name="deny", id="deny-id", permissions=[DenyAll])
 
-        reg.all.return_value = {"allow": allow_assistant, "deny": deny_assistant}
-        reg.get.side_effect = lambda id: reg.all.return_value.get(id)
+        reg.list.return_value = {"allow": allow_assistant, "deny": deny_assistant}
+        reg.get.side_effect = lambda id: reg.list.return_value.get(id)
 
         with patch("django_ai_sdk.assistants.services.registry", reg):
             summaries = await AssistantService.list_assistants(None)
