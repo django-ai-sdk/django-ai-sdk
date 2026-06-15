@@ -7,9 +7,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 from agents.agent import Agent
 from agents.items import ItemHelpers
 from agents.run import RunConfig, Runner
-from openai.types.chat import ChatCompletionMessageParam
-from pydantic import BaseModel
-
 from django_ai_sdk.adapters.protocols import Runnable, Streamable
 from django_ai_sdk.adapters.utils import merge_messages, normalize_usage
 from django_ai_sdk.common import (
@@ -31,11 +28,12 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
+from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from openai import AsyncOpenAI
-
     from django_ai_sdk.suggestions import SuggestionGenerator
+    from openai import AsyncOpenAI
 
 T = TypeVar("T", bound=BaseModel)
 

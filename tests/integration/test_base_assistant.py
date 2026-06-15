@@ -30,17 +30,7 @@ class TestBaseAssistant:
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
-                """Implement required abstract method."""
-                from django_ai_sdk.adapters.openai import OpenAIAdapter
-                from unittest.mock import MagicMock
-
-                return OpenAIAdapter(
-                    client=MagicMock(),
-                    model=self.model,
-                    instructions=self.get_instructions(),
-                    store=True,
-                    storage_adapter=await self.get_storage_adapter(thread_id),
-                )
+                return MagicMock()
 
         return TestAssistant()
 
@@ -203,17 +193,7 @@ class TestStreamWriterIntegration:
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
-                """Implement required abstract method."""
-                from django_ai_sdk.adapters.openai import OpenAIAdapter
-                from unittest.mock import MagicMock
-
-                return OpenAIAdapter(
-                    client=MagicMock(),
-                    model=self.model,
-                    instructions=self.get_instructions(),
-                    store=True,
-                    storage_adapter=await self.get_storage_adapter(thread_id),
-                )
+                return MagicMock()
 
         return TestAssistant()
 
@@ -224,8 +204,7 @@ class TestStreamWriterIntegration:
 
         message_id = str(uuid.uuid4())
         stream_writer = StreamWriter(
-            adapter_type="test",
-            message_id=message_id,
+                        message_id=message_id,
             model="test-model",
             role="assistant",
             storage_callback=None,
@@ -242,8 +221,7 @@ class TestStreamWriterIntegration:
 
         # Should work with valid ID
         stream_writer = StreamWriter(
-            adapter_type="test",
-            message_id=str(uuid.uuid4()),
+                        message_id=str(uuid.uuid4()),
             model="test-model",
             role="assistant",
         )

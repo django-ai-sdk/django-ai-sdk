@@ -103,7 +103,6 @@ class ThreadMessage(Schema):
     id: str
     role: str
     parts: list = []
-    adapter_type: str = ""
     finish_reason: str | None = None
     tool_calls: list = []
     processing_time_ms: int | None = None

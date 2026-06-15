@@ -1,7 +1,8 @@
 from django.conf import settings
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.openai import OpenAIRunnable
-from openai import AsyncOpenAI
+from django_ai_sdk.adapters.base import Run
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.utils import Secret
 
 
 class PirateExtractionAssistant(Assistant):
@@ -13,9 +14,10 @@ class PirateExtractionAssistant(Assistant):
 
     async def get_pipeline_adapter(
         self, thread_id: str | None = None, **kwargs: object
-    ) -> OpenAIRunnable:
-        client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_API_URL,
+    ) -> Run:
+        generator = OpenAIChatGenerator(
+            model=self.model,
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
         )
-        return OpenAIRunnable(client=client, model=self.model)
+        return Run(generator=generator, model=self.model)

@@ -32,7 +32,6 @@ class ChatMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
-    adapter_type: str = ""
     errors: list[str] = Field(default_factory=list)
     usage: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
@@ -87,7 +86,6 @@ class StreamWriter:
 
     def __init__(
         self,
-        adapter_type: str,
         message_id: str,
         model: str = "",
         role: Literal["system", "user", "assistant"] = "assistant",
@@ -96,7 +94,6 @@ class StreamWriter:
         self.message = ChatMessage(
             id=message_id,
             role=role,
-            adapter_type=adapter_type,
             model=model,
             started_at=time.time(),
         )
@@ -104,7 +101,7 @@ class StreamWriter:
         self.storage_callback = storage_callback
 
         logger.debug(
-            f"StreamWriter initialized: adapter={adapter_type}, model={model}, role={role}, storage={'enabled' if storage_callback else 'disabled'}"
+            f"StreamWriter initialized: model={model}, role={role}, storage={'enabled' if storage_callback else 'disabled'}"
         )
 
     def add_chunk(self, chunk: MessageChunk) -> ChatMessage:

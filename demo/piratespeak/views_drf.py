@@ -62,7 +62,6 @@ class ThreadMessageSerializer(serializers.Serializer):
     id = serializers.CharField()
     role = serializers.CharField()
     parts = serializers.ListField(default=[])
-    adapter_type = serializers.CharField(default="")
     finish_reason = serializers.CharField(allow_null=True, required=False)
     tool_calls = serializers.ListField(default=[])
     processing_time_ms = serializers.IntegerField(allow_null=True, required=False)

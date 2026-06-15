@@ -2,16 +2,9 @@
 Django AI SDK Adapters.
 """
 
-from django_ai_sdk.adapters.haystack import HaystackRunnable, HaystackStream
-from django_ai_sdk.adapters.openai import OpenAIAgentStream, OpenAIRunnable, OpenAIStream
-from django_ai_sdk.adapters.protocols import Runnable, Streamable
+from django_ai_sdk.adapters.base import Run, Stream
 
 __all__ = [
-    "HaystackRunnable",
-    "HaystackStream",
-    "OpenAIRunnable",
-    "OpenAIStream",
-    "OpenAIAgentStream",
-    "Runnable",
-    "Streamable",
+    "Run",
+    "Stream",
 ]

@@ -6,7 +6,7 @@ Document indexing works with local FastEmbed models.
 """
 
 import pytest
-from django_ai_sdk.rags.haystack.chroma import ChromaDBQueryExpanderRAG, ChromaDBQueryExpanderRAGConfig
+from django_ai_sdk.rags.chroma import ChromaDBQueryExpanderRAG, ChromaDBQueryExpanderRAGConfig
 from django_ai_sdk.rags.schemas import RagDocument
 
 

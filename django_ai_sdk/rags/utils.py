@@ -8,7 +8,7 @@ from django_ai_sdk.rags.schemas import RagDocument
 logger = get_logger(__name__)
 
 
-def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
+def to_document(doc: RagDocument) -> HaystackDocument:
     """
     Convert a RagDocument to a Haystack Document.
 
@@ -19,7 +19,7 @@ def rag_document_to_haystack(doc: RagDocument) -> HaystackDocument:
         Haystack Document
 
     Example:
-        haystack_doc = rag_document_to_haystack(rag_doc)
+        haystack_doc = to_document(rag_doc)
     """
     return HaystackDocument(
         id=doc.id,

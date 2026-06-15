@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.mcp.schemas import OAuthMCPServer, StaticMCPServer, TokenMCPServer
 
@@ -36,8 +34,6 @@ async def load_mcp_tools(
 ) -> list[Any]:
     """
     Load tool objects from all MCP servers in config.
-
-    Returns generic tool objects from the configured AI_SDK_MCP_BACKEND.
 
     Static and token servers are cached in-process with TTL.
     OAuth servers connect per-request using the user's stored token.
@@ -200,22 +196,18 @@ async def refresh_oauth_token(
     return token_obj
 
 
-def _backend_path() -> str:
-    path = getattr(settings, "AI_SDK_MCP_BACKEND", None)
-    if not path:
-        raise ImproperlyConfigured(
-            "AI_SDK_MCP_BACKEND is not set. "
-            "Add it to your settings, e.g.:\n"
-            "  AI_SDK_MCP_BACKEND = 'django_ai_sdk.mcp.backends.haystack'\n"
-            "Or implement a custom backend by implementing the MCPBackend protocol "
-            "from django_ai_sdk.mcp.backends."
-        )
-    return path
-
-
 async def _connect(url: str, token: str | None, tools: list[str] | None) -> list[Any]:
-    """Connect to an MCP server via the configured AI_SDK_MCP_BACKEND."""
-    backend = importlib.import_module(_backend_path())
-    result = await backend.connect(url, token, tools)
+    """Connect to an MCP server and return Haystack tool objects."""
+    from haystack.utils import Secret
+    from haystack_integrations.tools.mcp import MCPToolset, StreamableHttpServerInfo
+
+    def _get_toolset() -> MCPToolset:
+        server_info = StreamableHttpServerInfo(
+            url=url,
+            token=Secret.from_token(token) if token else None,
+        )
+        return MCPToolset(server_info=server_info, tool_names=tools, eager_connect=True)
+
+    result = list(await asyncio.to_thread(_get_toolset))
     logger.info("Loaded %d tool(s) from %s", len(result), url)
     return result

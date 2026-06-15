@@ -14,16 +14,16 @@ from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.rags.base import RAGBase, RAGConfig
+from django_ai_sdk.rags.components import MultiQueryChromaRetriever
 from django_ai_sdk.rags.config import ChromaStorageConfig
-from django_ai_sdk.rags.haystack.base import BaseHaystackRAGConfig, HaystackRAGBase
-from django_ai_sdk.rags.haystack.components import MultiQueryChromaRetriever
 from django_ai_sdk.rags.schemas import RagDocument
-from django_ai_sdk.rags.utils import rag_document_to_haystack
+from django_ai_sdk.rags.utils import to_document
 
 logger = get_logger(__name__)
 
 
-class ChromaDBQueryExpanderRAGConfig(BaseHaystackRAGConfig):
+class ChromaDBQueryExpanderRAGConfig(RAGConfig):
     """Configuration for ChromaDB Query Expander RAG."""
 
     embedder_model: str = Field(
@@ -36,7 +36,7 @@ class ChromaDBQueryExpanderRAGConfig(BaseHaystackRAGConfig):
     storage: ChromaStorageConfig = Field(default_factory=ChromaStorageConfig)
 
 
-class ChromaDBQueryExpanderRAG(HaystackRAGBase):
+class ChromaDBQueryExpanderRAG(RAGBase):
     """RAG implementation using ChromaDB with query expansion."""
 
     def __init__(
@@ -52,7 +52,7 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
 
     def _convert_documents(self) -> list[HaystackDocument]:
         """Convert RagDocuments to HaystackDocuments for internal use."""
-        return [rag_document_to_haystack(doc) for doc in self.documents]
+        return [to_document(doc) for doc in self.documents]
 
     def _create_document_store(self, recreate: bool = False) -> ChromaDocumentStore:
         """Create document store based on persistence configuration."""
@@ -81,7 +81,7 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
             logger.warning("No document store available, cannot add documents")
             return
 
-        haystack_docs = [rag_document_to_haystack(doc) for doc in documents]
+        haystack_docs = [to_document(doc) for doc in documents]
         self._index_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to Chroma index")
 
@@ -293,4 +293,14 @@ class ChromaDBQueryExpanderRAG(HaystackRAGBase):
             component=rag_super,
             name="rag_tool",
             description="Retrieves relevant documents for answering questions.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to retrieve relevant documents.",
+                    }
+                },
+                "required": ["query"],
+            },
         )

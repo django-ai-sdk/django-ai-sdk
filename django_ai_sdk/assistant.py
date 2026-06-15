@@ -455,7 +455,7 @@ class Assistant(ABC, AssistantInfoMixin):
             memory_id: Optional memory ID to use for document retrieval
 
         Returns:
-            BaseRAGAdapter instance, or None if RAG is not enabled
+            RAG adapter instance, or None if RAG is not enabled
         """
         return None
 

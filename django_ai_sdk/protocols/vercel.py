@@ -316,7 +316,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "id": chat_message.id,
                     "role": chat_message.role,
                     "parts": parts,
-                    "adapter_type": chat_message.adapter_type,
                     "finish_reason": chat_message.finish_reason,
                     "tool_calls": chat_message.tool_calls,
                     "processing_time_ms": chat_message.processing_time_ms,
