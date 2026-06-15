@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast
 
 from django.conf import settings
 from django.http import StreamingHttpResponse
@@ -33,11 +34,15 @@ async def stream_response(
         f"Stream response initiated: adapter={type(adapter).__name__ if not callable(adapter) else 'factory'}, messages={len(messages)}, protocol={type(protocol_handler).__name__}"
     )
 
-    adapter = adapter() if callable(adapter) else adapter
-    logger.debug(f"Adapter resolved: {type(adapter).__name__}")
+    if callable(adapter):
+        factory = cast("Callable[[], Streamable]", adapter)
+        resolved_adapter: Streamable = factory()
+    else:
+        resolved_adapter = adapter
+    logger.debug(f"Adapter resolved: {type(resolved_adapter).__name__}")
 
     logger.debug("Creating streaming response with SSE headers")
-    sse_stream = protocol_handler.sse(adapter, messages)
+    sse_stream = protocol_handler.sse(resolved_adapter, messages)
 
     # Build streaming HTTP response
     response = StreamingHttpResponse(  # type: ignore[arg-type]

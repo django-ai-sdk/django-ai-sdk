@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.base import Stream
+from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
@@ -26,36 +25,16 @@ from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.tools import Tool
 from haystack.utils import Secret
 
 from piratespeak.assistants.extraction import PirateExtractionAssistant
+from piratespeak.assistants.tools import get_memory_files, get_today
 from piratespeak.assistants.transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
-
-
-def get_datetime(**kwargs: object) -> dict:
-    """Get current time and date in Europe/Amsterdam timezone."""
-    tz = timezone.get_current_timezone()
-    nowtz = timezone.now().astimezone(tz)
-
-    return {
-        "today": nowtz.date().isoformat(),
-        "current_time": nowtz.timetz().isoformat(),
-    }
-
-
-def get_today(**kwargs: object) -> Tool:
-    """Current date and time tool."""
-    return Tool(
-        name="get_today",
-        parameters={},
-        description="Get current date and time",
-        function=get_datetime,
-    )
 
 
 @auto_register
@@ -94,7 +73,7 @@ class PirateBasicAssistant(Assistant):
     # Use the new RAG provider pattern for Haystack
     rag_provider = RAGProvider()
 
-    tools: list = [get_today]
+    tools: list = [get_today, get_memory_files]
     mcp_servers: list[str] = ["linear"]
 
     citation_formatter_class = DefaultCitationFormatter
@@ -162,10 +141,22 @@ class PirateBasicAssistant(Assistant):
         """Build RAG pipeline for document retrieval."""
         return await self.get_rag_pipeline_qdrant(memory_id)
 
+    async def get_run_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Run:
+        generator = OpenAIChatGenerator(
+            model=self.get_model(),
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
+        )
+        return Run(generator=generator)
+
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractBaseUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 

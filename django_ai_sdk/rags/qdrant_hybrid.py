@@ -1,7 +1,7 @@
 import os
 
 from django.conf import settings
-from haystack import Pipeline
+from haystack import AsyncPipeline, Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
@@ -50,7 +50,7 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     storage: QdrantStorageConfig = Field(default_factory=QdrantStorageConfig)
 
 
-class QdrantBM25HybridRAG(RAGBase):
+class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
     """RAG implementation using Qdrant with Hybrid retrieval + Query Expansion."""
 
     def __init__(
@@ -190,7 +190,7 @@ class QdrantBM25HybridRAG(RAGBase):
                 should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
             )
 
-            self._cached_document_store.delete_by_filter(filters=filter_obj)  # type: ignore[arg-type]
+            self._cached_document_store.delete_by_filter(filters=filter_obj)  # type: ignore
             logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
         except Exception as e:
             logger.error(f"Failed to remove documents: {e}")
@@ -250,7 +250,7 @@ class QdrantBM25HybridRAG(RAGBase):
             f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
         )
 
-    def build_pipeline(self) -> Pipeline:
+    def build_pipeline(self) -> AsyncPipeline:
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -274,7 +274,7 @@ class QdrantBM25HybridRAG(RAGBase):
             prompt_template=self.config.expander_prompt,
         )
 
-        query_pipeline = Pipeline()
+        query_pipeline = AsyncPipeline()
         query_pipeline.add_component("expander", query_expander)
         query_pipeline.add_component(
             "retriever",

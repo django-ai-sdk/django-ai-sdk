@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.conf import settings
 from django.db import models
@@ -32,7 +33,7 @@ class Memory(models.Model):
     def __str__(self) -> str:
         return self.name
 
-    def save(self, *args: object, **kwargs: object) -> None:
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding:
             if not self.slug and self.name:
                 base_slug = slugify(self.name)
@@ -133,7 +134,9 @@ class Entry(models.Model):
             if extraction.keywords:
                 parts.append(f"Keywords: {', '.join(extraction.keywords)}")
             if extraction.entities:
-                parts.append(f"Named entities: {', '.join(f'{e.text} ({e.type})' for e in extraction.entities)}")
+                parts.append(
+                    f"Named entities: {', '.join(f'{e.text} ({e.type})' for e in extraction.entities)}"
+                )
             content = "\n\n".join(parts)
         else:
             content = self.content

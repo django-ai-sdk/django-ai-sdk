@@ -33,7 +33,6 @@ class ChatMessage(BaseModel):
     model: str = ""
     finish_reason: str = ""
     errors: list[str] = Field(default_factory=list)
-    usage: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 
     # Timestamps & timing
@@ -163,7 +162,7 @@ class StreamWriter:
 
         return self.message
 
-    async def finalize(self, finish_reason: str = "", usage: dict | None = None) -> ChatMessage:
+    async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")
 
@@ -177,11 +176,6 @@ class StreamWriter:
                     f"Added pending tool call: {tool_call['name']} (ID: {tool_call['id']})"
                 )
         self._pending_tool_calls.clear()
-
-        # Set usage if provided
-        if usage:
-            self.message.usage = usage
-            logger.debug(f"Set usage on message: {usage}")
 
         # Finalize message
         self.message.finalize(finish_reason)

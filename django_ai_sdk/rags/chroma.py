@@ -1,5 +1,5 @@
 from django.conf import settings
-from haystack import Pipeline
+from haystack import AsyncPipeline, Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
@@ -36,7 +36,7 @@ class ChromaDBQueryExpanderRAGConfig(RAGConfig):
     storage: ChromaStorageConfig = Field(default_factory=ChromaStorageConfig)
 
 
-class ChromaDBQueryExpanderRAG(RAGBase):
+class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
     """RAG implementation using ChromaDB with query expansion."""
 
     def __init__(
@@ -203,7 +203,7 @@ class ChromaDBQueryExpanderRAG(RAGBase):
             f"ChromaDBQueryExpanderRAG warmup complete: {len(self.documents)} source docs -> {indexed_count} chunks indexed"
         )
 
-    def build_pipeline(self) -> Pipeline:
+    def build_pipeline(self) -> AsyncPipeline:
         """Build the RAG pipeline with ChromaDB and query expansion."""
         logger.debug("Building ChromaDB RAG query pipeline")
 
@@ -234,7 +234,7 @@ class ChromaDBQueryExpanderRAG(RAGBase):
             top_k=self.config.top_k,
         )
 
-        pipeline = Pipeline()
+        pipeline = AsyncPipeline()
         pipeline.add_component("expander", query_expander)
         pipeline.add_component("retriever", retriever)
 

@@ -12,7 +12,7 @@ test:
 	PYTHONPATH=demo uv run pytest tests -v
 
 typecheck:
-	uv run pyright
+	uv run ty check
 
 tag:
 	@read -p "Tag (e.g. v0.1.0rc1): " TAG; \

@@ -101,7 +101,6 @@ class MessageEndEvent(StreamEvent):
 
     event_type: Literal["message_end"] = "message_end"
     finish_reason: str | None = None
-    usage: dict | None = None
 
 
 class ErrorEvent(StreamEvent):

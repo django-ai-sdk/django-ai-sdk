@@ -109,5 +109,8 @@ class Command(BaseCommand):
 
         return 0 if failed == 0 else 1
 
-    def handle(self, *args: object, threshold: int, server: str | None, **options: object) -> int:
-        return asyncio.run(self.handle_async(threshold=threshold, server=server))
+    def handle(
+        self, *args: object, threshold: int, server: str | None, **options: object
+    ) -> str | None:
+        asyncio.run(self.handle_async(threshold=threshold, server=server))
+        return None

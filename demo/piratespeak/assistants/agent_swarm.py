@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Annotated
 from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Assistant
-from django_ai_sdk.adapters.base import Stream
+from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.permissions import IsAdminUser
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
-from haystack import Pipeline
+from haystack import AsyncPipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
@@ -20,6 +20,7 @@ from haystack.utils import Secret
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
 
 def pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
@@ -78,7 +79,7 @@ class AgentSwarmAssistant(Assistant):
     async def get_tools(
         self,
         thread_id: str = "",
-        user: AbstractBaseUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list:
         """Return Haystack-compatible tools for agent swarm."""
         return [
@@ -133,16 +134,27 @@ class AgentSwarmAssistant(Assistant):
             function=get_datetime,
         )
 
-    # FIX typing
+    async def get_run_adapter(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Run:
+        generator = OpenAIChatGenerator(
+            model=self.get_model(),
+            api_key=Secret.from_token(settings.OPENAI_API_KEY),
+            api_base_url=getattr(settings, "OPENAI_API_URL", None),
+        )
+        return Run(generator=generator)
+
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
-        user: AbstractBaseUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        pipeline = Pipeline()
+        pipeline = AsyncPipeline()
 
         # Create triage agent
         triage_agent = HaystackAgent(

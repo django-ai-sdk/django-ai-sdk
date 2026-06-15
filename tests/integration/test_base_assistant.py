@@ -177,6 +177,33 @@ class TestBaseAssistant:
         assert chat_messages[1].role == "assistant"
 
 
+    @pytest.mark.asyncio
+    async def test_get_storage_adapter_falls_back_for_unknown_thread(self, assistant):
+        """get_storage_adapter() must return configured adapter for unknown threads."""
+        unknown_thread_id = str(uuid.uuid4())
+        # No thread created in any adapter — should fall back to storage_adapter
+        storage = await assistant.get_storage_adapter(unknown_thread_id)
+        assert storage is not None
+        assert storage.thread_id == unknown_thread_id
+
+    @pytest.mark.asyncio
+    async def test_get_storage_adapter_returns_none_for_none_thread_id(self, assistant):
+        """get_storage_adapter() must return None when thread_id is None."""
+        storage = await assistant.get_storage_adapter(None)
+        assert storage is None
+
+    @pytest.mark.asyncio
+    async def test_stream_rejects_sync_pipeline(self):
+        """Stream.__init__ must raise TypeError if given a sync Pipeline."""
+        from haystack import Pipeline
+        from django_ai_sdk.adapters.base import Stream
+        from unittest.mock import MagicMock
+
+        sync_pipeline = Pipeline()
+        with pytest.raises(TypeError, match="AsyncPipeline"):
+            Stream(pipeline=sync_pipeline, generator=MagicMock())
+
+
 @pytest.mark.django_db
 class TestStreamWriterIntegration:
     """Test StreamWriter integration with BaseAssistant."""

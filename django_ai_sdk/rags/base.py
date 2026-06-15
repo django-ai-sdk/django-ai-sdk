@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from haystack import Pipeline
+from haystack import AsyncPipeline
 from haystack.tools import ComponentTool
 from pydantic import BaseModel, Field
 
@@ -79,11 +79,11 @@ class RAGConfig(BaseModel):
     )
 
 
-class RAGBase(ABC):
+class RAGBase[ConfigT: RAGConfig](ABC):
     """Abstract base class for Haystack RAG implementations."""
 
     _is_warmed_up: bool = False
-    config: RAGConfig
+    config: ConfigT
 
     @abstractmethod
     def warmup(self, force_rebuild: bool = False) -> None:
@@ -105,7 +105,7 @@ class RAGBase(ABC):
         return not self._is_warmed_up
 
     @abstractmethod
-    def build_pipeline(self) -> Pipeline:
+    def build_pipeline(self) -> AsyncPipeline:
         """
         Build and return the RAG pipeline (query side, cheap).
 

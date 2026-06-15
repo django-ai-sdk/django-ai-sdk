@@ -1,24 +1,6 @@
 from django_ai_sdk.common import ChatMessage
 
 
-def normalize_usage(usage_data: dict | None) -> dict | None:
-    """
-    Transform Haystack/OpenAI usage dict from snake_case to camelCase.
-
-    Input:  {"prompt_tokens": 15, "completion_tokens": 36, "total_tokens": 51}
-    Output: {"inputTokens": 15, "outputTokens": 36, "totalTokens": 51}
-
-    Returns None if usage_data is empty/None.
-    """
-    if not usage_data:
-        return None
-    return {
-        "inputTokens": usage_data.get("prompt_tokens", 0),
-        "outputTokens": usage_data.get("completion_tokens", 0),
-        "totalTokens": usage_data.get("total_tokens", 0),
-    }
-
-
 def merge_messages(
     messages: list[ChatMessage],
     roles: tuple[str, ...] = ("user", "assistant"),

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 from haystack import component
@@ -151,6 +152,18 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
             result = self.retrieve(query, k)
             results.append(result)
 
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        return {"documents": docs}
+
+    @component.output_types(documents=list[HaystackDocument])
+    async def run_async(
+        self, queries: list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        k = top_k if top_k is not None else self.top_k
+        results: list[dict[str, list[HaystackDocument]]] = []
+        for query in queries:
+            result = await asyncio.to_thread(self.retrieve, query, k)
+            results.append(result)
         docs = self.deduplicate_and_rank(results, k, self.min_score)
         return {"documents": docs}
 
@@ -313,5 +326,34 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
             results.append(result)
 
         # Deduplicate and rank using mixin
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        return {"documents": docs}
+
+    @component.output_types(documents=list[HaystackDocument])
+    async def run_async(
+        self, queries: str | list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        if isinstance(queries, str):
+            queries = [queries]
+        k = top_k if top_k is not None else self.top_k
+        if self._sparse_embedder is None:
+            await asyncio.to_thread(self.warm_up)
+        if self._sparse_embedder is None or self._dense_embedder is None:
+            raise ValueError("Embedders not initialized after warm_up()")
+        results: list[dict[str, list[HaystackDocument]]] = []
+        for query in queries:
+            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=query)
+            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=query)
+            retriever = QdrantHybridRetriever(
+                document_store=self.document_store,
+                score_threshold=self.min_score,
+            )
+            result = await asyncio.to_thread(
+                retriever.run,
+                query_sparse_embedding=sparse_result["sparse_embedding"],
+                query_embedding=dense_result["embedding"],
+                top_k=k,
+            )
+            results.append(result)
         docs = self.deduplicate_and_rank(results, k, self.min_score)
         return {"documents": docs}

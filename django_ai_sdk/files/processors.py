@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from io import BytesIO
 from pathlib import Path
 from typing import IO, ClassVar, Protocol
 
 import magic
 from django.core.files.base import File
-from django.core.files.uploadedfile import InMemoryUploadedFile, TemporaryUploadedFile
+from django.core.files.uploadedfile import TemporaryUploadedFile
 
 type FileSource = str | Path | File | IO[bytes]
 
@@ -26,10 +25,7 @@ class BaseFileProcessor:
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(
-        self,
-        file: str | Path | BytesIO | InMemoryUploadedFile | TemporaryUploadedFile,
-    ) -> bool:
+    def is_valid(self, file: FileSource) -> bool:
         if isinstance(file, (str, Path)):
             mime_type = magic.from_file(file, mime=True)
         elif isinstance(file, TemporaryUploadedFile):
@@ -39,7 +35,7 @@ class BaseFileProcessor:
             file.seek(0)
         return mime_type in self.ALLOWED_MIME_TYPES
 
-    def run(self, file: str | Path | File) -> str | None:
+    def run(self, file: FileSource) -> str | None:
         raise NotImplementedError
 
 
@@ -50,7 +46,7 @@ class TextFileProcessor(BaseFileProcessor):
         "text/x-markdown",
     )
 
-    def run(self, file: str | Path | File) -> str | None:
+    def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
@@ -69,7 +65,7 @@ class CSVFileProcessor(BaseFileProcessor):
         "text/plain",
     )
 
-    def run(self, file: str | Path | File) -> str | None:
+    def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
@@ -88,7 +84,7 @@ class JSONFileProcessor(BaseFileProcessor):
         "text/json",
     )
 
-    def run(self, file: str | Path | File) -> str | None:
+    def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
