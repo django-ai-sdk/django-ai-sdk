@@ -160,7 +160,7 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         super().__init_subclass__(**kwargs)
         # Don't register the base Assistant class itself, or classes that
-        # manage their own registration (e.g. WebAssistant).
+        # manage their own registration (e.g. RuntimeAssistant).
         if cls.__name__ != "Assistant" and not getattr(cls, "_skip_auto_register", False):
             registry.register(cls)
 

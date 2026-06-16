@@ -142,15 +142,16 @@ OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 # AI_SDK_DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-# Web assistant base classes available for DB-configured assistants
-AI_SDK_WEB_ASSISTANT_BASES = [
-    "piratespeak.assistants.web.DefaultWebAssistant",
+# Base classes available for runtime configured assistants
+AI_SDK_RUNTIME_ASSISTANT_BASES = [
+    "piratespeak.assistants.runtime.DefaultRuntimeAssistant",
 ]
 
-# Tools selectable in web assistant configuration (key → callable dotted path)
-AI_SDK_WEB_ASSISTANT_TOOLS = {
+# Tools selectable in runtime assistant configuration
+AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
     "get_today": "piratespeak.assistants.tools.get_today",
 }
+
 # Default asssitants
 AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.pirate_basic.PirateBasicAssistant",

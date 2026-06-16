@@ -1,4 +1,6 @@
 # Conversation models from chats app
+# Assistant Settings
+from .assistants.models import AssistantSettings
 from .conversation.models import (
     Message,
     Thread,
@@ -12,8 +14,6 @@ from .memories.models import (
     ThreadMemory,
 )
 
-# Web Assistant
-from .web_assistant.models import WebAssistantSettings
 __all__ = [
     # Conversation models
     "Thread",
@@ -23,6 +23,6 @@ __all__ = [
     "EntryDocument",
     "Memory",
     "ThreadMemory",
-    # Web Assistant
-    "WebAssistantSettings",
+    # Assistant Settings
+    "AssistantSettings",
 ]

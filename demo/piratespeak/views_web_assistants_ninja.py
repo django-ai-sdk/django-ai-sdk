@@ -3,20 +3,20 @@ from typing import Any
 from uuid import UUID
 
 from django.http import HttpRequest
-from django_ai_sdk.assistants.services import WebAssistantService
+from django_ai_sdk.assistants.services import AssistantSettingsService
 from ninja import Router, Schema
 from pydantic import ConfigDict
 
 router = Router()
 
 
-class WebAssistantOut(Schema):
+class AssistantSettingsOut(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     name: str
     slug: str
-    base_class: str
+    assistant: str
     model: str
     system_prompt: str
     tools: list[str]
@@ -30,10 +30,10 @@ class WebAssistantOut(Schema):
     updated_at: datetime
 
 
-class WebAssistantCreateIn(Schema):
+class AssistantSettingsCreateIn(Schema):
     name: str
     slug: str = ""
-    base_class: str = ""
+    assistant: str = ""
     model: str = "gpt-4o"
     system_prompt: str = ""
     tools: list[str] = []
@@ -44,9 +44,9 @@ class WebAssistantCreateIn(Schema):
     file_upload: bool = False
 
 
-class WebAssistantUpdateIn(Schema):
+class AssistantSettingsUpdateIn(Schema):
     name: str | None = None
-    base_class: str | None = None
+    assistant: str | None = None
     model: str | None = None
     system_prompt: str | None = None
     tools: list[str] | None = None
@@ -58,12 +58,12 @@ class WebAssistantUpdateIn(Schema):
     active: bool | None = None
 
 
-class WebAssistantBaseItem(Schema):
+class RuntimeAssistantBaseItem(Schema):
     path: str
     name: str
 
 
-class WebAssistantToolItem(Schema):
+class RuntimeAssistantToolItem(Schema):
     key: str
     path: str
 
@@ -74,45 +74,51 @@ class Error(Schema):
 
 @router.get(
     "/bases/",
-    response={200: list[WebAssistantBaseItem]},
-    operation_id="list_web_assistant_bases",
+    response={200: list[RuntimeAssistantBaseItem]},
+    operation_id="list_runtime_assistant_bases",
 )
-def list_web_assistant_bases(request: HttpRequest) -> list[WebAssistantBaseItem]:
-    from django_ai_sdk.web_assistant.config import get_web_assistant_bases
+def list_runtime_assistant_bases(request: HttpRequest) -> list[RuntimeAssistantBaseItem]:
+    from django_ai_sdk.assistants.config import get_runtime_assistant_bases
 
     return [
-        WebAssistantBaseItem(
+        RuntimeAssistantBaseItem(
             path=f"{cls.__module__}.{cls.__qualname__}",
             name=cls.__name__,
         )
-        for cls in get_web_assistant_bases()
+        for cls in get_runtime_assistant_bases()
     ]
 
 
 @router.get(
     "/tools/",
-    response={200: list[WebAssistantToolItem]},
-    operation_id="list_web_assistant_tools",
+    response={200: list[RuntimeAssistantToolItem]},
+    operation_id="list_runtime_assistant_tools",
 )
-def list_web_assistant_tools(request: HttpRequest) -> list[WebAssistantToolItem]:
-    from django_ai_sdk.web_assistant.config import get_tool_registry
+def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantToolItem]:
+    from django_ai_sdk.assistants.config import get_tool_registry
 
-    return [WebAssistantToolItem(key=key, path=path) for key, path in get_tool_registry().items()]
-
-
-@router.get("/", response={200: list[WebAssistantOut]}, operation_id="list_web_assistants")
-async def list_web_assistants(request: HttpRequest) -> Any:
-    return await WebAssistantService.all()
+    return [
+        RuntimeAssistantToolItem(key=key, path=path) for key, path in get_tool_registry().items()
+    ]
 
 
-@router.post("/", response={200: WebAssistantOut, 400: Error}, operation_id="create_web_assistant")
-async def create_web_assistant(request: HttpRequest, payload: WebAssistantCreateIn) -> Any:
+@router.get("/", response={200: list[AssistantSettingsOut]}, operation_id="list_assistant_settings")
+async def list_assistant_settings(request: HttpRequest) -> Any:
+    return await AssistantSettingsService.all()
+
+
+@router.post(
+    "/", response={200: AssistantSettingsOut, 400: Error}, operation_id="create_assistant_settings"
+)
+async def create_assistant_settings(
+    request: HttpRequest, payload: AssistantSettingsCreateIn
+) -> Any:
     try:
-        return await WebAssistantService.create(
+        return await AssistantSettingsService.create(
             {
                 "name": payload.name,
                 "slug": payload.slug,
-                "base_class": payload.base_class,
+                "assistant": payload.assistant,
                 "model": payload.model,
                 "system_prompt": payload.system_prompt,
                 "tools": payload.tools,
@@ -130,34 +136,34 @@ async def create_web_assistant(request: HttpRequest, payload: WebAssistantCreate
 
 @router.get(
     "/{assistant_id}/",
-    response={200: WebAssistantOut, 404: Error},
-    operation_id="get_web_assistant",
+    response={200: AssistantSettingsOut, 404: Error},
+    operation_id="get_assistant_settings",
 )
-async def get_web_assistant(request: HttpRequest, assistant_id: UUID) -> Any:
+async def get_assistant_settings(request: HttpRequest, assistant_id: UUID) -> Any:
     try:
-        return await WebAssistantService.get(str(assistant_id))
+        return await AssistantSettingsService.get(str(assistant_id))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
 @router.patch(
     "/{assistant_id}/",
-    response={200: WebAssistantOut, 404: Error, 400: Error},
-    operation_id="update_web_assistant",
+    response={200: AssistantSettingsOut, 404: Error, 400: Error},
+    operation_id="update_assistant_settings",
 )
-async def update_web_assistant(
-    request: HttpRequest, assistant_id: UUID, payload: WebAssistantUpdateIn
+async def update_assistant_settings(
+    request: HttpRequest, assistant_id: UUID, payload: AssistantSettingsUpdateIn
 ) -> Any:
     try:
         from typing import cast
 
-        from django_ai_sdk.assistants.services import WebAssistantUpdateData
+        from django_ai_sdk.assistants.services import AssistantUpdateData
 
         data = cast(
-            "WebAssistantUpdateData",
+            "AssistantUpdateData",
             {k: v for k, v in payload.model_dump().items() if v is not None},
         )
-        return await WebAssistantService.update(str(assistant_id), data)
+        return await AssistantSettingsService.update(str(assistant_id), data)
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -166,11 +172,11 @@ async def update_web_assistant(
 
 @router.delete(
     "/{assistant_id}/",
-    response={200: WebAssistantOut, 404: Error},
-    operation_id="delete_web_assistant",
+    response={200: AssistantSettingsOut, 404: Error},
+    operation_id="delete_assistant_settings",
 )
-async def delete_web_assistant(request: HttpRequest, assistant_id: UUID) -> Any:
+async def delete_assistant_settings(request: HttpRequest, assistant_id: UUID) -> Any:
     try:
-        return await WebAssistantService.delete(str(assistant_id))
+        return await AssistantSettingsService.delete(str(assistant_id))
     except ValueError as e:
         return 404, Error(message=str(e))

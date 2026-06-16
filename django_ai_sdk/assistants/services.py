@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.assistants.mixins import AssistantInfo
+    from django_ai_sdk.assistants.models import AssistantSettings
     from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
-    from django_ai_sdk.web_assistant.models import WebAssistantSettings
 
 
 class AssistantSummary(TypedDict):
@@ -36,10 +36,10 @@ class AssistantSummary(TypedDict):
     model: str | None
 
 
-class WebAssistantCreateData(TypedDict, total=False):
+class AssistantCreateData(TypedDict, total=False):
     name: Required[str]
     slug: str
-    base_class: str
+    assistant: str
     model: str
     system_prompt: str
     tools: list[str]
@@ -50,9 +50,9 @@ class WebAssistantCreateData(TypedDict, total=False):
     file_upload: bool
 
 
-class WebAssistantUpdateData(TypedDict, total=False):
+class AssistantUpdateData(TypedDict, total=False):
     name: str
-    base_class: str
+    assistant: str
     model: str
     system_prompt: str
     tools: list[str]
@@ -79,19 +79,19 @@ class AssistantService:
 
     @staticmethod
     async def get(assistant_id: str) -> Assistant:
-        """Resolve assistant from registry, falling back to WebAssistantSettings (async)."""
+        """Resolve assistant from registry, falling back to AssistantSettings (async)."""
         assistant = registry.get(assistant_id)
         if assistant is not None:
             return assistant
-        from django_ai_sdk.web_assistant.config import get_web_assistant_class
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
+        from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            config = await WebAssistantSettings.objects.aget(id=assistant_id, active=True)
-        except (WebAssistantSettings.DoesNotExist, ValidationError) as exc:
-            _logger.warning("WebAssistant lookup failed for %s: %r", assistant_id, exc)
+            config = await AssistantSettings.objects.aget(id=assistant_id, active=True)
+        except (AssistantSettings.DoesNotExist, ValidationError) as exc:
+            _logger.warning("RuntimeAssistant lookup failed for %s: %r", assistant_id, exc)
             raise ValueError(f"Assistant '{assistant_id}' not found")
-        return get_web_assistant_class(config.base_class)(config)
+        return get_runtime_assistant_class(config.assistant)(config)
 
     @staticmethod
     async def get_assistant(
@@ -99,7 +99,7 @@ class AssistantService:
     ) -> Assistant:
         """Find the thread and return its associated assistant.
 
-        Checks the registry first; falls back to WebAssistantSettings for
+        Checks the registry first; falls back to AssistantSettings for
         DB-configured assistants.
 
         Args:
@@ -123,15 +123,15 @@ class AssistantService:
         if assistant is not None:
             return assistant
 
-        from django_ai_sdk.web_assistant.config import get_web_assistant_class
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
+        from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            config = await WebAssistantSettings.objects.aget(id=assistant_id, active=True)
-        except (WebAssistantSettings.DoesNotExist, ValidationError) as exc:
-            _logger.warning("WebAssistant lookup failed for %s: %r", assistant_id, exc)
+            config = await AssistantSettings.objects.aget(id=assistant_id, active=True)
+        except (AssistantSettings.DoesNotExist, ValidationError) as exc:
+            _logger.warning("RuntimeAssistant lookup failed for %s: %r", assistant_id, exc)
             raise ValueError(f"Assistant '{assistant_id}' not found")
-        return get_web_assistant_class(config.base_class)(config)
+        return get_runtime_assistant_class(config.assistant)(config)
 
     @staticmethod
     async def list_assistants(
@@ -148,9 +148,9 @@ class AssistantService:
             except PermissionDenied:
                 continue
 
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+        from django_ai_sdk.assistants.models import AssistantSettings
 
-        async for config in WebAssistantSettings.objects.filter(active=True):
+        async for config in AssistantSettings.objects.filter(active=True):
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
 
         return result
@@ -241,35 +241,35 @@ get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
 get_mcp_server_status = async_to_sync(AssistantService.get_mcp_server_status)
 
 
-class WebAssistantService:
-    """CRUD service for WebAssistantSettings — shared between DRF and Ninja views."""
+class AssistantSettingsService:
+    """CRUD service for AssistantSettings — shared between DRF and Ninja views."""
 
     @staticmethod
     async def all() -> list[Any]:
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+        from django_ai_sdk.assistants.models import AssistantSettings
 
-        return [config async for config in WebAssistantSettings.objects.all().order_by("name")]
+        return [config async for config in AssistantSettings.objects.all().order_by("name")]
 
     @staticmethod
-    async def get(assistant_id: str) -> WebAssistantSettings:
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+    async def get(assistant_id: str) -> AssistantSettings:
+        from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            return await WebAssistantSettings.objects.aget(id=assistant_id)
-        except WebAssistantSettings.DoesNotExist:
-            raise ValueError(f"Web assistant '{assistant_id}' not found")
+            return await AssistantSettings.objects.aget(id=assistant_id)
+        except AssistantSettings.DoesNotExist:
+            raise ValueError(f"Assistant '{assistant_id}' not found")
 
     @staticmethod
     async def create(
-        data: WebAssistantCreateData,
+        data: AssistantCreateData,
         user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> WebAssistantSettings:
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+    ) -> AssistantSettings:
+        from django_ai_sdk.assistants.models import AssistantSettings
 
-        config = WebAssistantSettings(
+        config = AssistantSettings(
             name=data["name"],
             slug=data.get("slug", ""),
-            base_class=data.get("base_class", ""),
+            assistant=data.get("assistant", ""),
             model=data.get("model", "gpt-4o"),
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
@@ -278,7 +278,7 @@ class WebAssistantService:
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),
             file_upload=data.get("file_upload", False),
-            created_by=user if getattr(user, "is_authenticated", False) else None,
+            owner=user if getattr(user, "is_authenticated", False) else None,
         )
         await config.asave()
         return config
@@ -286,14 +286,14 @@ class WebAssistantService:
     @staticmethod
     async def update(
         assistant_id: str,
-        data: WebAssistantUpdateData,
-    ) -> WebAssistantSettings:
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+        data: AssistantUpdateData,
+    ) -> AssistantSettings:
+        from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            config = await WebAssistantSettings.objects.aget(id=assistant_id)
-        except WebAssistantSettings.DoesNotExist:
-            raise ValueError(f"Web assistant '{assistant_id}' not found")
+            config = await AssistantSettings.objects.aget(id=assistant_id)
+        except AssistantSettings.DoesNotExist:
+            raise ValueError(f"Assistant '{assistant_id}' not found")
 
         update_fields: list[str] = []
         for field, value in data.items():
@@ -307,13 +307,13 @@ class WebAssistantService:
         return config
 
     @staticmethod
-    async def delete(assistant_id: str) -> WebAssistantSettings:
-        from django_ai_sdk.web_assistant.models import WebAssistantSettings
+    async def delete(assistant_id: str) -> AssistantSettings:
+        from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            config = await WebAssistantSettings.objects.aget(id=assistant_id)
-        except WebAssistantSettings.DoesNotExist:
-            raise ValueError(f"Web assistant '{assistant_id}' not found")
+            config = await AssistantSettings.objects.aget(id=assistant_id)
+        except AssistantSettings.DoesNotExist:
+            raise ValueError(f"Assistant '{assistant_id}' not found")
 
         await config.adelete()
         return config

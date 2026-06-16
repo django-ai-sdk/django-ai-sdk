@@ -1,16 +1,16 @@
 from django.urls import path
-from django_ai_sdk.assistants.services import WebAssistantService
+from django_ai_sdk.assistants.services import AssistantSettingsService
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 
-class WebAssistantSerializer(serializers.Serializer):
+class AssistantSettingsSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     name = serializers.CharField()
     slug = serializers.SlugField()
-    base_class = serializers.CharField(allow_blank=True, default="")
+    assistant = serializers.CharField(allow_blank=True, default="")
     model = serializers.CharField()
     system_prompt = serializers.CharField(allow_blank=True)
     tools = serializers.ListField(child=serializers.CharField(), default=list)
@@ -24,10 +24,10 @@ class WebAssistantSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
-class WebAssistantCreateSerializer(serializers.Serializer):
+class AssistantSettingsCreateSerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.SlugField(default="")
-    base_class = serializers.CharField(allow_blank=True, default="")
+    assistant = serializers.CharField(allow_blank=True, default="")
     model = serializers.CharField(default="gpt-4o")
     system_prompt = serializers.CharField(allow_blank=True, default="")
     tools = serializers.ListField(child=serializers.CharField(), default=list)
@@ -38,9 +38,9 @@ class WebAssistantCreateSerializer(serializers.Serializer):
     file_upload = serializers.BooleanField(default=False)
 
 
-class WebAssistantUpdateSerializer(serializers.Serializer):
+class AssistantSettingsUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(required=False)
-    base_class = serializers.CharField(allow_blank=True, required=False)
+    assistant = serializers.CharField(allow_blank=True, required=False)
     model = serializers.CharField(required=False)
     system_prompt = serializers.CharField(allow_blank=True, required=False)
     tools = serializers.ListField(child=serializers.CharField(), required=False)
@@ -52,60 +52,60 @@ class WebAssistantUpdateSerializer(serializers.Serializer):
     active = serializers.BooleanField(required=False)
 
 
-class WebAssistantBasesAPIView(APIView):
+class RuntimeAssistantBasesAPIView(APIView):
     def get(self, request: Request) -> Response:
-        from django_ai_sdk.web_assistant.config import get_web_assistant_bases
+        from django_ai_sdk.assistants.config import get_runtime_assistant_bases
 
         data = [
             {"path": f"{cls.__module__}.{cls.__qualname__}", "name": cls.__name__}
-            for cls in get_web_assistant_bases()
+            for cls in get_runtime_assistant_bases()
         ]
         return Response(data)
 
 
-class WebAssistantToolsAPIView(APIView):
+class RuntimeAssistantToolsAPIView(APIView):
     def get(self, request: Request) -> Response:
-        from django_ai_sdk.web_assistant.config import get_tool_registry
+        from django_ai_sdk.assistants.config import get_tool_registry
 
         data = [{"key": k, "path": v} for k, v in get_tool_registry().items()]
         return Response(data)
 
 
-class WebAssistantListCreateAPIView(APIView):
+class AssistantSettingsListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
-        configs = await WebAssistantService.all()
-        return Response(WebAssistantSerializer(configs, many=True).data)
+        configs = await AssistantSettingsService.all()
+        return Response(AssistantSettingsSerializer(configs, many=True).data)
 
     async def post(self, request: Request) -> Response:
-        serializer = WebAssistantCreateSerializer(data=request.data)
+        serializer = AssistantSettingsCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            config = await WebAssistantService.create(
+            config = await AssistantSettingsService.create(
                 serializer.validated_data,  # type: ignore[arg-type]
                 user=request.user,
             )
-            return Response(WebAssistantSerializer(config).data, status=201)
+            return Response(AssistantSettingsSerializer(config).data, status=201)
         except Exception as e:
             return Response({"message": str(e)}, status=400)
 
 
-class WebAssistantDetailAPIView(APIView):
+class AssistantSettingsDetailAPIView(APIView):
     async def get(self, request: Request, assistant_id: str) -> Response:
         try:
-            config = await WebAssistantService.get(assistant_id)
-            return Response(WebAssistantSerializer(config).data)
+            config = await AssistantSettingsService.get(assistant_id)
+            return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
     async def patch(self, request: Request, assistant_id: str) -> Response:
-        serializer = WebAssistantUpdateSerializer(data=request.data)
+        serializer = AssistantSettingsUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            config = await WebAssistantService.update(
+            config = await AssistantSettingsService.update(
                 assistant_id,
                 serializer.validated_data,  # type: ignore[arg-type]
             )
-            return Response(WebAssistantSerializer(config).data)
+            return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
         except Exception as e:
@@ -113,19 +113,25 @@ class WebAssistantDetailAPIView(APIView):
 
     async def delete(self, request: Request, assistant_id: str) -> Response:
         try:
-            config = await WebAssistantService.delete(assistant_id)
-            return Response(WebAssistantSerializer(config).data)
+            config = await AssistantSettingsService.delete(assistant_id)
+            return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
 
 urlpatterns = [
-    path("web-assistants/bases/", WebAssistantBasesAPIView.as_view(), name="web-assistant-bases"),
-    path("web-assistants/tools/", WebAssistantToolsAPIView.as_view(), name="web-assistant-tools"),
-    path("web-assistants/", WebAssistantListCreateAPIView.as_view(), name="web-assistant-list"),
     path(
-        "web-assistants/<str:assistant_id>/",
-        WebAssistantDetailAPIView.as_view(),
-        name="web-assistant-detail",
+        "assistants/bases/", RuntimeAssistantBasesAPIView.as_view(), name="runtime-assistant-bases"
+    ),
+    path(
+        "assistants/tools/", RuntimeAssistantToolsAPIView.as_view(), name="runtime-assistant-tools"
+    ),
+    path(
+        "assistants/", AssistantSettingsListCreateAPIView.as_view(), name="assistant-settings-list"
+    ),
+    path(
+        "assistants/<str:assistant_id>/",
+        AssistantSettingsDetailAPIView.as_view(),
+        name="assistant-settings-detail",
     ),
 ]

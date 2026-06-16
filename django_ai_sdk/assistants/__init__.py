@@ -7,9 +7,11 @@ Provides:
 - AssistantInfo model for assistant metadata
 - AssistantInfoMixin for metadata functionality
 - @auto_register decorator for easy registration
+- RuntimeAssistant for configured assistants
+- AssistantSettings Django model (import from django_ai_sdk.assistants.models)
 
 Registration Methods:
-    1. Settings-based (recommended): Define AI_SDK_ASSISTANTS in settings.py
+    1. Settings-based: Define AI_SDK_ASSISTANTS in settings.py
        AI_SDK_ASSISTANTS = [
            "myapp.assistants.MyAssistant",
        ]
@@ -21,7 +23,7 @@ Registration Methods:
        class MyAssistant(Assistant):
            pass
 
-Both methods can be combined - a class will only be registered once.
+Both methods can be combined, a class will only be registered once.
 """
 
 from .mixins import AssistantInfo, AssistantInfoMixin

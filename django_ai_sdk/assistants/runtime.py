@@ -19,11 +19,11 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from .models import WebAssistantSettings
+    from .models import AssistantSettings
 
 
-class WebAssistant(Assistant):
-    """Assistant whose configuration is loaded from a WebAssistantSettings DB record.
+class RuntimeAssistant(Assistant):
+    """Assistant whose configuration is loaded from an AssistantSettings DB record.
 
     Constructed on demand by AssistantService — not registered in the class registry.
     Each instance reflects the live DB config at construction time.
@@ -34,7 +34,7 @@ class WebAssistant(Assistant):
     protocol = VercelProtocolHandler
     storage_adapter = DbStorageAdapter
 
-    def __init__(self, config: WebAssistantSettings) -> None:
+    def __init__(self, config: AssistantSettings) -> None:
         self._config = config
         self.name = config.name
         self.model = config.model
@@ -97,7 +97,7 @@ class WebAssistant(Assistant):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         result = await super().get_tools(thread_id=thread_id, user=user)
-        from django_ai_sdk.web_assistant.config import get_tool_registry
+        from django_ai_sdk.assistants.config import get_tool_registry
 
         tool_registry = get_tool_registry()
         for key in self._config.tools or []:
@@ -113,4 +113,4 @@ class WebAssistant(Assistant):
         return result
 
     def __repr__(self) -> str:
-        return f"<WebAssistant id={self.assistant_id!r} name={self.name!r}>"
+        return f"<RuntimeAssistant id={self.assistant_id!r} name={self.name!r}>"
