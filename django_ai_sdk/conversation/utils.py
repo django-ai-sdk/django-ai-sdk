@@ -28,6 +28,9 @@ def get_title_sanity_limit() -> int:
     return getattr(settings, "AI_SDK_TITLE_SANITY_LIMIT", TITLE_SANITY_LIMIT_DEFAULT)
 
 
+_MAX_TITLE_LENGTH = 60
+
+
 async def generate_thread_title(
     assistant: Assistant,
     messages: list[ChatMessage],
