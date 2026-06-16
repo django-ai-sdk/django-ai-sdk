@@ -119,10 +119,20 @@ class Run:
 
     @overload
     async def run(
-        self, messages: list[ChatMessage], *, response_format: None = None
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+        *,
+        response_format: None = None,
     ) -> str | None: ...
     @overload
-    async def run(self, messages: list[ChatMessage], *, response_format: type[T]) -> T | None: ...
+    async def run(
+        self,
+        messages: list[ChatMessage],
+        system_prompt: str | None = None,
+        *,
+        response_format: type[T],
+    ) -> T | None: ...
 
     async def run(
         self,

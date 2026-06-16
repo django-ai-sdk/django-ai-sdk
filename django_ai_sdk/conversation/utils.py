@@ -25,6 +25,7 @@ async def generate_thread_title(
         system_prompt=assistant.get_title_generation_prompt(),
         thread_id=thread_id,
         user=user,
+        response_format=None,
     )
     if title and len(title) > _MAX_TITLE_LENGTH:
         title = title[:_MAX_TITLE_LENGTH].rstrip() + "…"

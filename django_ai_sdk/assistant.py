@@ -120,8 +120,14 @@ class Assistant(ABC, AssistantInfoMixin):
 
     tools: list[str] = []
 
+    # ArtifactSchema subclasses to register as tools in stream pipelines.
+    artifacts: list[type[BaseModel]] = []
+
     protocol = None
     storage: type[BaseStorageAdapter] | None = None
+
+    # Set to an ArtifactSchema subclass to enable structured output for run() calls.
+    response_format: type[BaseModel] | None = None
 
     # If True, hide from registry.visible() (used for internal assistants)
     hidden: bool = False
@@ -352,6 +358,17 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.append(items)
         return result
 
+    async def get_artifact_tools(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Any]:
+        """Build artifact submission tools from the class-level `artifacts` list."""
+        return [
+            artifact_cls.as_tool(thread_id=thread_id, user=user)
+            for artifact_cls in getattr(self.__class__, "artifacts", [])
+        ]
+
     async def get_rag_tools(
         self,
         thread_id: str,
@@ -477,11 +494,13 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    _UNSET: Any = object()
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | Prompt | None = None,
-        response_format: type[T] | None = None,
+        response_format: type[T] | None = _UNSET,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> T | str | None:
@@ -490,18 +509,21 @@ class Assistant(ABC, AssistantInfoMixin):
         Args:
             messages: Conversation messages
             system_prompt: Optional system prompt override
-            response_format: Optional Pydantic model for structured output
+            response_format: Optional Pydantic model for structured output. Pass None
+                explicitly to disable structured output even if the assistant has a
+                default response_format set.
             thread_id: Optional thread ID (forwarded to get_run_adapter)
             user: Optional user (forwarded to get_run_adapter)
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
         """
+        resolved = self.response_format if response_format is self._UNSET else response_format
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         return await adapter.run(
             messages=messages,
             system_prompt=system_prompt if system_prompt is not None else self.get_system_prompt(),
-            response_format=response_format,
+            response_format=resolved,
         )
 
     async def get_run_adapter(

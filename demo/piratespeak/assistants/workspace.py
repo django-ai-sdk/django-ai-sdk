@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import (
+    ApprovalCardArtifact,
+    Assistant,
+    DataTableArtifact,
+    OptionListArtifact,
+    QuestionFlowArtifact,
+)
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
 from django_ai_sdk.common import prompt
@@ -31,6 +37,11 @@ class WorkspaceAssistant(Assistant):
         - Be direct and professional.
         - Format output with markdown when it aids readability.
         - Do not fabricate facts; say so when you don't know something.
+        When you have gathered enough information to summarise the workspace context,
+        call artifact_data_table_artifact() with columns for "Topic", "Summary", and
+        "Action" and one row per key item.
+        IMPORTANT: after the tool call succeeds (returns artifact_id), reply with ONE
+        sentence that briefly describes what the data shows — do NOT repeat the data as text or markdown.
     """)
 
     protocol = VercelProtocolHandler
@@ -38,6 +49,12 @@ class WorkspaceAssistant(Assistant):
     max_history = 20
 
     tools: list = [get_today]
+    artifacts: list = [
+        DataTableArtifact,
+        OptionListArtifact,
+        QuestionFlowArtifact,
+        ApprovalCardArtifact,
+    ]
 
     def _build_generator(self) -> OpenAIChatGenerator:
         return OpenAIChatGenerator(
@@ -58,16 +75,18 @@ class WorkspaceAssistant(Assistant):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
+
         generator = self._build_generator()
         storage_adapter = await self.get_storage_adapter(thread_id)
 
         tools = await self.get_tools(thread_id=thread_id or "", user=user)
+        artifact_tools = await self.get_artifact_tools(thread_id=thread_id or "", user=user)
 
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
                 model=self.get_model(),
                 system_prompt=self.get_system_prompt(),
-                tools=tools,
+                tools=[*tools, *artifact_tools],
             ),
             generator=generator,
         )
