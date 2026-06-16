@@ -10,6 +10,9 @@ if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
 
 
+_MAX_TITLE_LENGTH = 60
+
+
 async def generate_thread_title(
     assistant: "Assistant",
     messages: list[ChatMessage],
@@ -17,9 +20,12 @@ async def generate_thread_title(
     user: "AbstractBaseUser | AnonymousUser | None" = None,
 ) -> str | None:
     """Extract a thread title from the user message(s)."""
-    return await assistant.run(
+    title = await assistant.run(
         messages=messages,
         system_prompt=TITLE_GENERATION_PROMPT,
         thread_id=thread_id,
         user=user,
     )
+    if title and len(title) > _MAX_TITLE_LENGTH:
+        title = title[:_MAX_TITLE_LENGTH].rstrip() + "…"
+    return title

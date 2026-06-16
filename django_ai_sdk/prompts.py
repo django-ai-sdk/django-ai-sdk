@@ -17,6 +17,7 @@ TITLE_GENERATION_PROMPT: Prompt = prompt("""\
     - Return ONLY the title. No preamble, no explanation, no commentary.
     - No markdown, no quotes, no backticks, no code fences.
     - A single line of plain text.
+    - Maximum 60 characters including the emoji.
 
     ### Examples:
     - 📉 Stock Market Trends
