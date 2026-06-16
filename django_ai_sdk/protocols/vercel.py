@@ -447,9 +447,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_output":
                     tool_output_event = cast("ToolOutputEvent", event)
+                    raw = tool_output_event.tool_output
+                    # Haystack wraps the tool return value in {result, origin, error}.
+                    # Unwrap so the frontend receives the actual tool return value.
+                    output = raw.get("result", raw) if isinstance(raw, dict) else raw
+                    if not isinstance(output, dict):
+                        output = {"result": output}
                     yield ToolOutputAvailablePart(
                         tool_call_id=tool_output_event.tool_call_id,
-                        output=tool_output_event.tool_output,
+                        output=output,
                     )
 
                 case "data":

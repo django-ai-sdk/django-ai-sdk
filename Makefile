@@ -5,6 +5,11 @@ setup:
 	uv run lefthook install
 
 lint:
+	make format
+	make typecheck
+	make test
+
+format:
 	uv run ruff check --fix
 	uv run ruff format .
 

@@ -196,9 +196,9 @@ class DbStorageAdapter(BaseStorageAdapter):
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
 
-        # Get all messages for this thread
         messages_list = []
-        async for msg in thread.messages.filter(is_deleted=False).order_by("created_at"):
+        qs = thread.messages.filter(is_deleted=False).order_by("created_at")
+        async for msg in qs:
             messages_list.append(msg)
 
         # Batch-fetch all feedbacks for these messages
@@ -218,7 +218,6 @@ class DbStorageAdapter(BaseStorageAdapter):
                     }
                 )
 
-        # Convert to ChatMessages with feedbacks in metadata
         messages = []
         for msg in messages_list:
             chat_message = msg.to_chat_message()
