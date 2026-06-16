@@ -109,13 +109,8 @@ class StreamWriter:
 
     def add_chunk(self, chunk: MessageChunk) -> ChatMessage:
         """Process a chunk and update message."""
-        logger.debug(
-            f"Processing chunk: type={chunk.type}, content_length={len(str(chunk.content))}"
-        )
-
         if chunk.type == "text":
             self.message.content += chunk.content
-            logger.debug(f"Added text chunk, total content length now: {len(self.message.content)}")
 
         elif chunk.type == "reasoning":
             # Initialize reasoning field if first chunk
