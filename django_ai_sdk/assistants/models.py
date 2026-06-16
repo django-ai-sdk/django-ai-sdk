@@ -33,7 +33,7 @@ class AssistantSettings(models.Model):
 
     class Meta:
         app_label = "django_ai_sdk"
-        db_table = "django_ai_sdk_web_assistants"
+        db_table = "django_ai_sdk_runtime_assistants"
         ordering = ["name"]
         verbose_name = "Assistant Settings"
         verbose_name_plural = "Assistant Settings"
