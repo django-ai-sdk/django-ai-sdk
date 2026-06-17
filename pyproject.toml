@@ -64,6 +64,7 @@ dev = [
   "django-stubs>=6.0.5",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
+  "httpx>=0.28.0",
   "pytest>=9.0.3",
   "pytest-asyncio>=1.4.0",
   "pytest-django>=4.12.0",
