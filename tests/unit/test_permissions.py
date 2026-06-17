@@ -10,6 +10,7 @@ from django.test.utils import override_settings
 
 
 
+@pytest.mark.django_db
 @pytest.mark.asyncio
 class TestPermissions:
     """Direct unit tests for the permission system classes."""
@@ -368,6 +369,7 @@ class TestMemoryDefaultPermission:
                 )
 
 
+@pytest.mark.django_db
 @pytest.mark.asyncio
 class TestAssistantServicePermissions:
     """Permission checks in AssistantService (list_assistants, get_assistant_info)."""

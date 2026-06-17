@@ -1,3 +1,6 @@
+# Assistant Settings
+from .assistants.models import AssistantSettings
+
 # Conversation models from chats app
 from .conversation.models import (
     Message,
@@ -21,4 +24,6 @@ __all__ = [
     "EntryDocument",
     "Memory",
     "ThreadMemory",
+    # Assistant Settings
+    "AssistantSettings",
 ]

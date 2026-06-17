@@ -7,6 +7,7 @@ from django.views import View
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import (
     AssistantService,
+    AssistantSettingsService,
     get_assistant_info,
     list_assistants,
 )
@@ -347,7 +348,7 @@ class AssistantInfoAPIView(APIView):
 class AssistantToolsAPIView(APIView):
     async def get(self, request: Request, assistant_id: str) -> Response:
         try:
-            assistant = AssistantService.from_registry(assistant_id)
+            assistant = await AssistantService.get(assistant_id)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
@@ -411,6 +412,52 @@ class ReindexAssistantAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
+class AssistantStatelessRunAPIView(APIView):
+    """Stateless run"""
+
+    async def post(self, request: Request, assistant_id: str) -> Response:
+        try:
+            serializer = ChatRequestSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+            assistant = await AssistantService.get(assistant_id)
+            chat_messages = assistant.protocol_handler.to_chat_messages(messages)
+            result = await assistant.run(chat_messages, user=request.user)
+            return Response({"result": result, "thread_id": None})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValidationError as e:
+            return Response({"message": str(e)}, status=400)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except NotImplementedError as e:
+            return Response({"message": str(e)}, status=501)
+
+
+class AssistantRunAPIView(APIView):
+    """Synchronous JSON endpoint wrapping Assistant.run()"""
+
+    async def post(self, request: Request, thread_id: str) -> Response:
+        try:
+            serializer = ChatRequestSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+            assistant = await AssistantService.get_assistant(thread_id, user=request.user)
+            chat_messages = assistant.protocol_handler.to_chat_messages(messages)
+            result = await assistant.run(chat_messages, thread_id=thread_id, user=request.user)
+            return Response({"result": result, "thread_id": thread_id})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValidationError as e:
+            return Response({"message": str(e)}, status=400)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except NotImplementedError as e:
+            return Response({"message": str(e)}, status=501)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
 class AssistantAPIView(View):
     async def post(self, request: HttpRequest, thread_id: str) -> StreamingHttpResponse:
         try:
@@ -437,6 +484,124 @@ class AssistantAPIView(View):
         )
 
 
+# ============================================================================
+# Runtime Assistants (DB-configured)
+# ============================================================================
+
+
+class AssistantSettingsSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField()
+    slug = serializers.SlugField()
+    assistant = serializers.CharField(allow_blank=True, default="")
+    model = serializers.CharField()
+    system_prompt = serializers.CharField(allow_blank=True)
+    tools = serializers.ListField(child=serializers.CharField(), default=list)
+    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    suggestion_enabled = serializers.BooleanField(default=False)
+    title_generation = serializers.BooleanField(default=True)
+    max_history = serializers.IntegerField(allow_null=True, required=False)
+    file_upload = serializers.BooleanField(default=False)
+    active = serializers.BooleanField(default=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class AssistantSettingsCreateSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    slug = serializers.SlugField(default="")
+    assistant = serializers.CharField(allow_blank=True, default="")
+    model = serializers.CharField(default="gpt-4o")
+    system_prompt = serializers.CharField(allow_blank=True, default="")
+    tools = serializers.ListField(child=serializers.CharField(), default=list)
+    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    suggestion_enabled = serializers.BooleanField(default=False)
+    title_generation = serializers.BooleanField(default=True)
+    max_history = serializers.IntegerField(allow_null=True, required=False)
+    file_upload = serializers.BooleanField(default=False)
+
+
+class AssistantSettingsUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False)
+    assistant = serializers.CharField(allow_blank=True, required=False)
+    model = serializers.CharField(required=False)
+    system_prompt = serializers.CharField(allow_blank=True, required=False)
+    tools = serializers.ListField(child=serializers.CharField(), required=False)
+    mcp_servers = serializers.ListField(child=serializers.CharField(), required=False)
+    suggestion_enabled = serializers.BooleanField(required=False)
+    title_generation = serializers.BooleanField(required=False)
+    max_history = serializers.IntegerField(allow_null=True, required=False)
+    file_upload = serializers.BooleanField(required=False)
+    active = serializers.BooleanField(required=False)
+
+
+class RuntimeAssistantBasesAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django_ai_sdk.assistants.config import get_runtime_assistant_bases
+
+        data = [
+            {"path": f"{cls.__module__}.{cls.__qualname__}", "name": cls.__name__}
+            for cls in get_runtime_assistant_bases()
+        ]
+        return Response(data)
+
+
+class RuntimeAssistantToolsAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django_ai_sdk.assistants.config import get_tool_registry
+
+        data = [{"key": k, "path": v} for k, v in get_tool_registry().items()]
+        return Response(data)
+
+
+class RuntimeAssistantListCreateAPIView(APIView):
+    async def get(self, request: Request) -> Response:
+        configs = await AssistantSettingsService.all()
+        return Response(AssistantSettingsSerializer(configs, many=True).data)
+
+    async def post(self, request: Request) -> Response:
+        serializer = AssistantSettingsCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            config = await AssistantSettingsService.create(
+                serializer.validated_data,  # type: ignore[arg-type]
+                user=request.user,
+            )
+            return Response(AssistantSettingsSerializer(config).data, status=201)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+
+class RuntimeAssistantDetailAPIView(APIView):
+    async def get(self, request: Request, runtime_id: str) -> Response:
+        try:
+            config = await AssistantSettingsService.get(runtime_id)
+            return Response(AssistantSettingsSerializer(config).data)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+
+    async def patch(self, request: Request, runtime_id: str) -> Response:
+        serializer = AssistantSettingsUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            config = await AssistantSettingsService.update(
+                runtime_id,
+                serializer.validated_data,  # type: ignore[arg-type]
+            )
+            return Response(AssistantSettingsSerializer(config).data)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+    async def delete(self, request: Request, runtime_id: str) -> Response:
+        try:
+            config = await AssistantSettingsService.delete(runtime_id)
+            return Response(AssistantSettingsSerializer(config).data)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+
+
 urlpatterns = [
     path("assistants/", ListAssistantsAPIView.as_view(), name="assistant-list"),
     path(
@@ -454,6 +619,11 @@ urlpatterns = [
         ReindexAssistantAPIView.as_view(),
         name="assistant-reindex",
     ),
+    path(
+        "assistants/<str:assistant_id>/run/",
+        AssistantStatelessRunAPIView.as_view(),
+        name="assistant-run",
+    ),
     path("threads/", ThreadListAPIView.as_view(), name="thread-list"),
     path("threads/<str:thread_id>/", ThreadDetailAPIView.as_view(), name="thread-detail"),
     path(
@@ -467,6 +637,11 @@ urlpatterns = [
         "threads/<str:thread_id>/message/",
         AssistantAPIView.as_view(),
         name="thread-message",
+    ),
+    path(
+        "threads/<str:thread_id>/run/",
+        AssistantRunAPIView.as_view(),
+        name="thread-run",
     ),
     path(
         "threads/delete-all/",
@@ -487,5 +662,25 @@ urlpatterns = [
         "threads/<str:thread_id>/messages/<str:message_id>/restore/",
         RestoreMessageAPIView.as_view(),
         name="message-restore",
+    ),
+    path(
+        "assistants/runtimes/bases/",
+        RuntimeAssistantBasesAPIView.as_view(),
+        name="runtime-assistant-bases",
+    ),
+    path(
+        "assistants/runtimes/tools/",
+        RuntimeAssistantToolsAPIView.as_view(),
+        name="runtime-assistant-tools",
+    ),
+    path(
+        "assistants/runtimes/",
+        RuntimeAssistantListCreateAPIView.as_view(),
+        name="runtime-assistant-list",
+    ),
+    path(
+        "assistants/runtimes/<str:runtime_id>/",
+        RuntimeAssistantDetailAPIView.as_view(),
+        name="runtime-assistant-detail",
     ),
 ]

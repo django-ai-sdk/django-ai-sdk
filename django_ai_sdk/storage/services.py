@@ -36,7 +36,7 @@ async def _get_thread(thread_id: str) -> ThreadInfo | None:
 
 async def _get_storage(thread_info: ThreadInfo) -> Any:
     """Get a storage adapter instance for a thread without permission checks."""
-    assistant = AssistantService.from_registry(thread_info.assistant_id)
+    assistant = await AssistantService.get(thread_info.assistant_id)
     storage_class = ThreadService.get_storage(assistant)
     return storage_class(thread_info.id)
 
@@ -48,7 +48,7 @@ async def _check_object_permission(
 ) -> None:
     """Object-level permission using the thread's owning assistant's permission classes."""
     try:
-        assistant = AssistantService.from_registry(obj.assistant_id)
+        assistant = await AssistantService.get(obj.assistant_id)
     except ValueError:
         assistant = None
 
@@ -110,11 +110,9 @@ class ThreadService:
         Raises:
             PermissionDenied: If user has no CREATE_THREAD permission
         """
-        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.assistants.services import AssistantService
 
-        assistant = registry.get(assistant_id)
-        if not assistant:
-            raise ValueError(f"Assistant not found: {assistant_id}")
+        assistant = await AssistantService.get(assistant_id)
 
         await _check_permission(user, Operation.CREATE_THREAD, assistant)
 

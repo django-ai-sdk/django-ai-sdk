@@ -1,8 +1,10 @@
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.assistants.services import AssistantService, AssistantSettingsService
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -14,6 +16,7 @@ from django_ai_sdk.storage.services import (
 )
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from ninja import Router, Schema
+from pydantic import ConfigDict
 
 router = Router()
 logger = get_logger(__name__)
@@ -137,6 +140,11 @@ class MessageResponse(Schema):
     feedback: FeedbackResponse | None = None
 
 
+class RunResponse(Schema):
+    result: str | None = None
+    thread_id: str
+
+
 @router.get("/health/", response={200: HealthResponse}, operation_id="health_check")
 def health_check(request: HttpRequest) -> HealthResponse:
     return HealthResponse(status="ok", service="piratespeak")
@@ -228,6 +236,48 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
 
 
 @router.post(
+    "/assistants/{assistant_id}/run/",
+    response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
+    operation_id="run_assistant",
+)
+async def run_assistant(request: HttpRequest, assistant_id: str, payload: ChatRequest) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
+        result = await assistant.run(chat_messages, user=request.user)
+        return RunResponse(result=result, thread_id="")
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except NotImplementedError as e:
+        return 501, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.post(
+    "/threads/{thread_id}/run/",
+    response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
+    operation_id="run_thread",
+)
+async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
+    try:
+        assistant = await AssistantService.get_assistant(thread_id, user=request.user)
+        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
+        result = await assistant.run(chat_messages, thread_id=thread_id, user=request.user)
+        return RunResponse(result=result, thread_id=thread_id)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except NotImplementedError as e:
+        return 501, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.post(
     "/threads/{thread_id}/",
     response={403: Error, 404: Error, 500: Error},
     operation_id="add_message_to_thread",
@@ -283,7 +333,7 @@ async def delete_all_threads(request: HttpRequest) -> Any:
 )
 async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
     try:
-        AssistantService.from_registry(payload.assistant_id)
+        await AssistantService.get(payload.assistant_id)
         thread = await ThreadService.get_thread(thread_id, user=request.user)
         if thread is None:
             return 404, Error(message="Thread not found")
@@ -374,7 +424,7 @@ async def list_assistants(request: HttpRequest) -> Any:
 )
 async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
         info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
         return AssistantInfoResponse(
             id=info.id,
@@ -398,7 +448,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
 )
 async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
     except ValueError as e:
         return 404, Error(message=str(e))
 
@@ -446,7 +496,7 @@ async def reindex_assistant(
     force_rebuild: bool = False,
 ) -> Any:
     try:
-        assistant = AssistantService.from_registry(assistant_id)
+        assistant = await AssistantService.get(assistant_id)
         result = await Assistant.reindex(assistant, memory_id, force_rebuild)
 
         if not result:
@@ -462,3 +512,180 @@ async def reindex_assistant(
         return 404, Error(message=str(e))
     except Exception as e:
         return 500, Error(message=str(e))
+
+
+# ============================================================================
+# Runtime Assistants (DB-configured)
+# ============================================================================
+
+
+class AssistantSettingsOut(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    slug: str
+    assistant: str
+    model: str
+    system_prompt: str
+    tools: list[str]
+    mcp_servers: list[str]
+    suggestion_enabled: bool
+    title_generation: bool
+    max_history: int | None
+    file_upload: bool
+    active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantSettingsCreateIn(Schema):
+    name: str
+    slug: str = ""
+    assistant: str = ""
+    model: str = "gpt-4o"
+    system_prompt: str = ""
+    tools: list[str] = []
+    mcp_servers: list[str] = []
+    suggestion_enabled: bool = False
+    title_generation: bool = True
+    max_history: int | None = None
+    file_upload: bool = False
+
+
+class AssistantSettingsUpdateIn(Schema):
+    name: str | None = None
+    assistant: str | None = None
+    model: str | None = None
+    system_prompt: str | None = None
+    tools: list[str] | None = None
+    mcp_servers: list[str] | None = None
+    suggestion_enabled: bool | None = None
+    title_generation: bool | None = None
+    max_history: int | None = None
+    file_upload: bool | None = None
+    active: bool | None = None
+
+
+class RuntimeAssistantBaseItem(Schema):
+    path: str
+    name: str
+
+
+class RuntimeAssistantToolItem(Schema):
+    key: str
+    path: str
+
+
+@router.get(
+    "/assistants/runtimes/bases/",
+    response={200: list[RuntimeAssistantBaseItem]},
+    operation_id="list_runtime_assistant_bases",
+)
+def list_runtime_assistant_bases(request: HttpRequest) -> list[RuntimeAssistantBaseItem]:
+    from django_ai_sdk.assistants.config import get_runtime_assistant_bases
+
+    return [
+        RuntimeAssistantBaseItem(
+            path=f"{cls.__module__}.{cls.__qualname__}",
+            name=cls.__name__,
+        )
+        for cls in get_runtime_assistant_bases()
+    ]
+
+
+@router.get(
+    "/assistants/runtimes/tools/",
+    response={200: list[RuntimeAssistantToolItem]},
+    operation_id="list_runtime_assistant_tools",
+)
+def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantToolItem]:
+    from django_ai_sdk.assistants.config import get_tool_registry
+
+    return [
+        RuntimeAssistantToolItem(key=key, path=path) for key, path in get_tool_registry().items()
+    ]
+
+
+@router.get(
+    "/assistants/runtimes/",
+    response={200: list[AssistantSettingsOut]},
+    operation_id="list_runtime_assistants",
+)
+async def list_runtime_assistants(request: HttpRequest) -> Any:
+    return await AssistantSettingsService.all()
+
+
+@router.post(
+    "/assistants/runtimes/",
+    response={200: AssistantSettingsOut, 400: Error},
+    operation_id="create_runtime_assistant",
+)
+async def create_runtime_assistant(request: HttpRequest, payload: AssistantSettingsCreateIn) -> Any:
+    try:
+        return await AssistantSettingsService.create(
+            {
+                "name": payload.name,
+                "slug": payload.slug,
+                "assistant": payload.assistant,
+                "model": payload.model,
+                "system_prompt": payload.system_prompt,
+                "tools": payload.tools,
+                "mcp_servers": payload.mcp_servers,
+                "suggestion_enabled": payload.suggestion_enabled,
+                "title_generation": payload.title_generation,
+                "max_history": payload.max_history,
+                "file_upload": payload.file_upload,
+            },
+            user=request.user,
+        )
+    except Exception as e:
+        return 400, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/runtimes/{runtime_id}/",
+    response={200: AssistantSettingsOut, 404: Error},
+    operation_id="get_runtime_assistant",
+)
+async def get_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
+    try:
+        return await AssistantSettingsService.get(str(runtime_id))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.patch(
+    "/assistants/runtimes/{runtime_id}/",
+    response={200: AssistantSettingsOut, 404: Error, 400: Error},
+    operation_id="update_runtime_assistant",
+)
+async def update_runtime_assistant(
+    request: HttpRequest, runtime_id: UUID, payload: AssistantSettingsUpdateIn
+) -> Any:
+    try:
+        from typing import cast
+
+        from django_ai_sdk.assistants.services import AssistantUpdateData
+
+        data = cast(
+            "AssistantUpdateData",
+            {k: v for k, v in payload.model_dump().items() if v is not None},
+        )
+        return await AssistantSettingsService.update(str(runtime_id), data)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 400, Error(message=str(e))
+
+
+@router.delete(
+    "/assistants/runtimes/{runtime_id}/",
+    response={200: AssistantSettingsOut, 404: Error},
+    operation_id="delete_runtime_assistant",
+)
+async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
+    try:
+        return await AssistantSettingsService.delete(str(runtime_id))
+    except ValueError as e:
+        return 404, Error(message=str(e))
