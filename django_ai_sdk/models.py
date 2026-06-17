@@ -1,6 +1,7 @@
-# Conversation models from chats app
 # Assistant Settings
 from .assistants.models import AssistantSettings
+
+# Conversation models from chats app
 from .conversation.models import (
     Message,
     Thread,
