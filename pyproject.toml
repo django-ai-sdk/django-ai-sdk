@@ -61,10 +61,11 @@ restframework = ["djangorestframework>=3.17.1"]
 files = ["python-docx>=1.2.0", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 [dependency-groups]
 dev = [
-  "django-ninja>=1.6.2", # demo app only — the SDK's own HTTP surfaces are plain Django
+  "django-ninja>=1.6.2",
   "django-stubs>=6.0.7",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
+  "httpx>=0.28.0",
   "pytest>=9.1.1",
   "pytest-asyncio>=1.4.0",
   "pytest-django>=4.12.0",
