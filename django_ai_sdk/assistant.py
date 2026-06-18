@@ -549,7 +549,7 @@ class Assistant(ABC, AssistantInfoMixin):
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         return await adapter.run(
             messages=messages,
-            system_prompt=system_prompt,
+            system_prompt=system_prompt if system_prompt is not None else self.get_system_prompt(),
             response_format=response_format,
         )
 

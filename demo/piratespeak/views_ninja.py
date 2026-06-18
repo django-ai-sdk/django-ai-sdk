@@ -408,121 +408,6 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
         return 404, Error(message=str(e))
 
 
-@router.get(
-    "/assistants/",
-    response={200: AssistantsListResponse, 403: Error, 500: Error},
-    operation_id="list_assistants",
-)
-async def list_assistants(request: HttpRequest) -> Any:
-    try:
-        items = await AssistantService.list_assistants(user=request.user)
-        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except Exception as e:
-        return 500, Error(message=str(e))
-
-
-@router.get(
-    "/assistants/{assistant_id}/",
-    response={200: AssistantInfoResponse, 403: Error, 404: Error},
-    operation_id="get_assistant_info",
-)
-async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
-        return AssistantInfoResponse(
-            id=info.id,
-            name=info.name,
-            model=info.model,
-            class_name=info.class_name,
-            description=info.description,
-            instructions=assistant.get_system_prompt(),
-            file_upload=info.file_upload,
-            rag=info.rag,
-        )
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-
-@router.get(
-    "/assistants/{assistant_id}/tools/",
-    response={200: ToolsResponse, 404: Error},
-    operation_id="get_assistant_tools",
-)
-async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-    tools_data = []
-    try:
-        tool_objs = await assistant.get_tools()
-        tools_data = [
-            Tool(
-                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
-                description=t.description or "",
-            )
-            for t in tool_objs
-        ]
-    except Exception:
-        logger.exception("Failed to build tools for assistant %s", assistant_id)
-
-    integrations_data = []
-    try:
-        integration_status = await AssistantService.get_integration_status(
-            assistant, user=request.user
-        )
-        integrations_data = [
-            IntegrationStatusOut(
-                server_name=s.server_name,
-                label=s.label,
-                type=s.type,
-                status=s.status,
-                tool_names=s.tool_names,
-            )
-            for s in integration_status
-        ]
-    except Exception:
-        logger.exception("Failed to load integration status for assistant %s", assistant_id)
-
-    return ToolsResponse(tools=tools_data, integrations=integrations_data)
-
-
-@router.post(
-    "/assistants/{assistant_id}/reindex/",
-    response={200: Success, 404: Error, 500: Error},
-    operation_id="reindex_assistant",
-)
-async def reindex_assistant(
-    request: HttpRequest,
-    assistant_id: str,
-    memory_id: str | None = None,
-    force_rebuild: bool = False,
-) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
-
-        if not result:
-            return Success(success=False, message="No RAG provider configured for this assistant")
-
-        rebuild_msg = " (force rebuild)" if force_rebuild else ""
-        message = "RAG pipeline reindexed successfully" + rebuild_msg
-        if memory_id:
-            message += f" for memory {memory_id}"
-
-        return Success(success=True, message=message)
-    except ValueError as e:
-        return 404, Error(message=str(e))
-    except Exception as e:
-        return 500, Error(message=str(e))
-
-
 # ============================================================================
 # Runtime Assistants (DB-configured)
 # ============================================================================
@@ -907,6 +792,121 @@ async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_i
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/",
+    response={200: AssistantsListResponse, 403: Error, 500: Error},
+    operation_id="list_assistants",
+)
+async def list_assistants(request: HttpRequest) -> Any:
+    try:
+        items = await AssistantService.list_assistants(user=request.user)
+        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/{assistant_id}/",
+    response={200: AssistantInfoResponse, 403: Error, 404: Error},
+    operation_id="get_assistant_info",
+)
+async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
+        return AssistantInfoResponse(
+            id=info.id,
+            name=info.name,
+            model=info.model,
+            class_name=info.class_name,
+            description=info.description,
+            instructions=assistant.get_system_prompt(),
+            file_upload=info.file_upload,
+            rag=info.rag,
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/{assistant_id}/tools/",
+    response={200: ToolsResponse, 404: Error},
+    operation_id="get_assistant_tools",
+)
+async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+    tools_data = []
+    try:
+        tool_objs = await assistant.get_tools()
+        tools_data = [
+            Tool(
+                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
+                description=t.description or "",
+            )
+            for t in tool_objs
+        ]
+    except Exception:
+        logger.exception("Failed to build tools for assistant %s", assistant_id)
+
+    integrations_data = []
+    try:
+        integration_status = await AssistantService.get_integration_status(
+            assistant, user=request.user
+        )
+        integrations_data = [
+            IntegrationStatusOut(
+                server_name=s.server_name,
+                label=s.label,
+                type=s.type,
+                status=s.status,
+                tool_names=s.tool_names,
+            )
+            for s in integration_status
+        ]
+    except Exception:
+        logger.exception("Failed to load integration status for assistant %s", assistant_id)
+
+    return ToolsResponse(tools=tools_data, integrations=integrations_data)
+
+
+@router.post(
+    "/assistants/{assistant_id}/reindex/",
+    response={200: Success, 404: Error, 500: Error},
+    operation_id="reindex_assistant",
+)
+async def reindex_assistant(
+    request: HttpRequest,
+    assistant_id: str,
+    memory_id: str | None = None,
+    force_rebuild: bool = False,
+) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
+
+        if not result:
+            return Success(success=False, message="No RAG provider configured for this assistant")
+
+        rebuild_msg = " (force rebuild)" if force_rebuild else ""
+        message = "RAG pipeline reindexed successfully" + rebuild_msg
+        if memory_id:
+            message += f" for memory {memory_id}"
+
+        return Success(success=True, message=message)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
 
 
 # ============================================================================
