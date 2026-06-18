@@ -719,14 +719,7 @@ class WorkflowActionItem(Schema):
 )
 async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
     try:
-        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-        from django_ai_sdk.views.schemas import Message
-
-        protocol = VercelProtocolHandler()
-        messages = [Message(**m) for m in payload.messages]
-        chat_messages = protocol.to_chat_messages(messages)
-
-        outputs = await WorkflowService.run(payload.workflow, chat_messages, user=request.user)
+        outputs = await WorkflowService.run(payload.workflow, payload.messages, user=request.user)
         return WorkflowRunResponse(outputs=outputs)
     except ValueError as e:
         return 404, Error(message=str(e))
@@ -858,13 +851,7 @@ async def run_workflow_by_id(
     request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
 ) -> Any:
     try:
-        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-        from django_ai_sdk.views.schemas import Message
-
-        protocol = VercelProtocolHandler()
-        messages = [Message(**m) for m in payload.messages]
-        chat_messages = protocol.to_chat_messages(messages)
-        outputs = await WorkflowService.run_by_id(workflow_id, chat_messages, user=request.user)
+        outputs = await WorkflowService.run_by_id(workflow_id, payload.messages, user=request.user)
         return WorkflowRunResponse(outputs=outputs)
     except WorkflowSettings.DoesNotExist:
         return 404, Error(message="Workflow not found")

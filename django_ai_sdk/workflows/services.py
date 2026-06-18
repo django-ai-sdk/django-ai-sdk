@@ -13,21 +13,27 @@ if TYPE_CHECKING:
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
+def _parse_messages(raw: list[dict]) -> list[ChatMessage]:
+    from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+    from django_ai_sdk.views.schemas import Message
+
+    return VercelProtocolHandler().to_chat_messages([Message(**m) for m in raw])
+
+
 class WorkflowService:
     @staticmethod
     async def run(
         workflow: WorkflowDefinition,
-        messages: list[ChatMessage],
+        messages: list[dict],
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> dict[str, Any]:
-        """Execute workflow steps then actions. Returns all step outputs."""
-        return await WorkflowExecutor().run(workflow, messages, user=user)
+        return await WorkflowExecutor().run(workflow, _parse_messages(messages), user=user)
 
     @staticmethod
     async def run_by_id(
         workflow_id: str,
-        messages: list[ChatMessage],
+        messages: list[dict],
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> dict[str, Any]:
@@ -35,7 +41,7 @@ class WorkflowService:
 
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
         workflow = record.to_workflow_definition()
-        return await WorkflowExecutor().run(workflow, messages, user=user)
+        return await WorkflowExecutor().run(workflow, _parse_messages(messages), user=user)
 
     @staticmethod
     def list_actions() -> list[dict[str, str]]:
