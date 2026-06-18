@@ -800,20 +800,120 @@ class AssistantGroupDetailAPIView(APIView):
 # ============================================================================
 
 
+class WorkflowSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField()
+    definition = serializers.DictField()
+    active = serializers.BooleanField(default=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class WorkflowCreateSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    workflow = serializers.DictField()
+
+
+class WorkflowUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False)
+    workflow = serializers.DictField(required=False)
+    active = serializers.BooleanField(required=False)
+
+
+class WorkflowListCreateAPIView(APIView):
+    async def get(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        records = await WorkflowService.list_workflows()
+        return Response(WorkflowSerializer(records, many=True).data)
+
+    async def post(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+
+        serializer = WorkflowCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            workflow = WorkflowDefinition.model_validate(serializer.validated_data["workflow"])
+            record = await WorkflowService.create(
+                serializer.validated_data["name"], workflow, user=request.user
+            )
+            return Response(WorkflowSerializer(record).data, status=201)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+
+class WorkflowDetailAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        try:
+            record = await WorkflowService.get(workflow_id)
+            return Response(WorkflowSerializer(record).data)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+
+    async def patch(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        serializer = WorkflowUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            workflow_data = serializer.validated_data.get("workflow")
+            workflow = WorkflowDefinition.model_validate(workflow_data) if workflow_data else None
+            record = await WorkflowService.update(
+                workflow_id,
+                name=serializer.validated_data.get("name"),
+                workflow=workflow,
+                active=serializer.validated_data.get("active"),
+            )
+            return Response(WorkflowSerializer(record).data)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+    async def delete(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        try:
+            await WorkflowService.get(workflow_id)
+            await WorkflowService.delete(workflow_id)
+            return Response(status=204)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+
+
 class WorkflowRunAPIView(APIView):
     async def post(self, request: Request) -> Response:
         try:
-            from django_ai_sdk.protocols.vercel import VercelProtocolHandler
             from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 
             workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
-            raw_messages = request.data.get("messages", [])
-            messages = [Message(**m) for m in raw_messages]
-            chat_messages = VercelProtocolHandler().to_chat_messages(messages)
-            outputs = await WorkflowService.run(workflow, chat_messages, user=request.user)
+            outputs = await WorkflowService.run(
+                workflow, request.data.get("messages", []), user=request.user
+            )
             return Response({"outputs": outputs})
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunByIdAPIView(APIView):
+    async def post(self, request: Request, workflow_id: str) -> Response:
+        try:
+            from django_ai_sdk.workflows import WorkflowService
+            from django_ai_sdk.workflows.models import WorkflowSettings
+
+            outputs = await WorkflowService.run_by_id(
+                workflow_id, request.data.get("messages", []), user=request.user
+            )
+            return Response({"outputs": outputs})
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
         except Exception as e:
             return Response({"message": str(e)}, status=500)
 
@@ -926,6 +1026,13 @@ urlpatterns = [
         AssistantGroupDetailAPIView.as_view(),
         name="runtime-assistant-group-detail",
     ),
+    path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
     path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
     path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
+    path("workflows/<str:workflow_id>/", WorkflowDetailAPIView.as_view(), name="workflow-detail"),
+    path(
+        "workflows/<str:workflow_id>/run/",
+        WorkflowRunByIdAPIView.as_view(),
+        name="workflow-run-by-id",
+    ),
 ]
