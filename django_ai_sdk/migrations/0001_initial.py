@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import uuid
+
 import django.db.models.deletion
 import django.utils.timezone
 from django.conf import settings

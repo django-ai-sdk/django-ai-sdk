@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from asgiref.sync import async_to_sync
 from django.utils import timezone
-from django_tasks import task
 from pydantic import BaseModel, Field, create_model
 
 from django_ai_sdk.assistants.services import AssistantService
@@ -13,11 +11,13 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
-from django_ai_sdk.workflows.schemas import WorkflowDefinition
+from django_ai_sdk.workflows.tasks import execute_workflow
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+
+    from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 _logger = get_logger(__name__)
 
@@ -29,26 +29,6 @@ _TYPE_MAP: dict[str, type] = {
 }
 
 
-
-
-# ---------------------------------------------------------------------------
-# Background task
-# ---------------------------------------------------------------------------
-
-
-@task(queue_name="default")
-def execute_workflow(run_id: str) -> None:
-    """Sync task"""
-    async_to_sync(_execute_async)(run_id)
-
-
-async def _execute_async(run_id: str) -> None:
-    run = await WorkflowRun.objects.aget(id=run_id)
-    workflow = WorkflowDefinition.model_validate(run.workflow_definition)
-    messages = [ChatMessage(**m) for m in run.input_messages]
-    await WorkflowExecutor().run(workflow, messages, workflow_run=run)
-
-
 # ---------------------------------------------------------------------------
 # Executor
 # ---------------------------------------------------------------------------
@@ -58,6 +38,7 @@ class WorkflowExecutor:
     @staticmethod
     async def enqueue(run: WorkflowRun) -> None:
         """Schedule a WorkflowRun as a background task."""
+
         task = await execute_workflow.aenqueue(str(run.id))
         await WorkflowRun.objects.filter(id=run.id).aupdate(task_id=task.id)
 
