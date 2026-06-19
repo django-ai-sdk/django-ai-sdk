@@ -1,28 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from datetime import datetime  # noqa: TC003
 
 from django_tasks import default_task_backend
-
-if TYPE_CHECKING:
-    from datetime import datetime
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class TaskError:
+class TaskError(BaseModel):
     type: str
     traceback: str
 
 
-@dataclass
-class TaskStatus:
+class TaskStatus(BaseModel):
     id: str
     status: str
     enqueued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
-    errors: list[TaskError] = field(default_factory=list)
+    errors: list[TaskError] = Field(default_factory=list)
 
 
 async def aget_task_status(task_id: str) -> TaskStatus:
