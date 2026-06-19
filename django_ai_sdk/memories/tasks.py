@@ -11,10 +11,10 @@ def process_document_upload(
     assistant_id: str | None = None,
 ) -> None:
     """Sync task entry point for background file pipeline processing."""
-    async_to_sync(_process_async)(entry_doc_id, memory_id, assistant_id)
+    async_to_sync(run_file_pipeline)(entry_doc_id, memory_id, assistant_id)
 
 
-async def _process_async(
+async def run_file_pipeline(
     entry_doc_id: str,
     memory_id: str,
     assistant_id: str | None,

@@ -33,7 +33,7 @@ def _mock_task_result(task_id: str = "task-abc"):
 
 
 # ---------------------------------------------------------------------------
-# _process_async
+# run_file_pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -46,7 +46,7 @@ class TestProcessAsync:
 
     async def test_success_creates_entry_and_marks_completed(self):
         from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
-        from django_ai_sdk.memories.tasks import _process_async
+        from django_ai_sdk.memories.tasks import run_file_pipeline
 
         memory = await Memory.objects.acreate(name="task-success")
         entry_doc = await _make_entry_doc(memory)
@@ -62,7 +62,7 @@ class TestProcessAsync:
             "django_ai_sdk.files.common.get_default_file_pipeline",
             return_value=mock_pipeline,
         ):
-            await _process_async(str(entry_doc.id), str(memory.id), None)
+            await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.COMPLETED
@@ -75,7 +75,7 @@ class TestProcessAsync:
 
     async def test_pipeline_returns_none_marks_failed(self):
         from django_ai_sdk.memories.models import EntryDocument, Memory
-        from django_ai_sdk.memories.tasks import _process_async
+        from django_ai_sdk.memories.tasks import run_file_pipeline
 
         memory = await Memory.objects.acreate(name="task-none")
         entry_doc = await _make_entry_doc(memory)
@@ -87,7 +87,7 @@ class TestProcessAsync:
             "django_ai_sdk.files.common.get_default_file_pipeline",
             return_value=mock_pipeline,
         ):
-            await _process_async(str(entry_doc.id), str(memory.id), None)
+            await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED
@@ -96,7 +96,7 @@ class TestProcessAsync:
 
     async def test_pipeline_raises_marks_failed_and_reraises(self):
         from django_ai_sdk.memories.models import EntryDocument, Memory
-        from django_ai_sdk.memories.tasks import _process_async
+        from django_ai_sdk.memories.tasks import run_file_pipeline
 
         memory = await Memory.objects.acreate(name="task-raise")
         entry_doc = await _make_entry_doc(memory)
@@ -109,7 +109,7 @@ class TestProcessAsync:
             return_value=mock_pipeline,
         ):
             with pytest.raises(RuntimeError, match="OCR failed"):
-                await _process_async(str(entry_doc.id), str(memory.id), None)
+                await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED
@@ -118,7 +118,7 @@ class TestProcessAsync:
     async def test_sets_processing_status_before_running_pipeline(self):
         """EntryDocument flips to PROCESSING before pipeline starts."""
         from django_ai_sdk.memories.models import EntryDocument, Memory
-        from django_ai_sdk.memories.tasks import _process_async
+        from django_ai_sdk.memories.tasks import run_file_pipeline
 
         memory = await Memory.objects.acreate(name="task-ordering")
         entry_doc = await _make_entry_doc(memory)
@@ -140,13 +140,13 @@ class TestProcessAsync:
             "django_ai_sdk.files.common.get_default_file_pipeline",
             return_value=mock_pipeline,
         ):
-            await _process_async(str(entry_doc.id), str(memory.id), None)
+            await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
         assert statuses_seen[0] == EntryDocument.ProcessingStatus.PROCESSING
 
     async def test_uses_assistant_pipeline_when_assistant_id_given(self):
         from django_ai_sdk.memories.models import EntryDocument, Memory
-        from django_ai_sdk.memories.tasks import _process_async
+        from django_ai_sdk.memories.tasks import run_file_pipeline
 
         memory = await Memory.objects.acreate(name="task-assistant")
         entry_doc = await _make_entry_doc(memory)
@@ -165,7 +165,7 @@ class TestProcessAsync:
             "django_ai_sdk.assistants.services.AssistantService.get",
             new=AsyncMock(return_value=mock_assistant),
         ):
-            await _process_async(str(entry_doc.id), str(memory.id), "asst-123")
+            await run_file_pipeline(str(entry_doc.id), str(memory.id), "asst-123")
 
         mock_assistant.get_file_pipeline.assert_called_once()
         mock_custom_pipeline.run.assert_called_once()
