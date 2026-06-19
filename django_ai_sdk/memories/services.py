@@ -6,19 +6,23 @@ from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import Count
 from django.utils.module_loading import import_string
 
+from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
-from django_ai_sdk.files.common import get_default_file_pipeline
 from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryOwner, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
+    DocumentStatusOut,
+    DocumentUploadResponse,
     MemoryOut,
     MemoryOwnerOut,
     ThreadMemoryOut,
 )
+from django_ai_sdk.memories.tasks import process_document_upload
 from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
@@ -26,6 +30,7 @@ from django_ai_sdk.permissions import (
     check_permissions,
     get_default_permissions,
 )
+from django_ai_sdk.tasks import aget_task_status
 
 if TYPE_CHECKING:
     from typing import Any
@@ -136,8 +141,6 @@ class MemoryService:
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOwnerOut:
         """Add a user as owner of a memory."""
-        from django.contrib.auth import get_user_model
-
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         UserModel = get_user_model()
@@ -299,38 +302,31 @@ class MemoryService:
     @staticmethod
     async def upload_document(
         memory_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> DocumentOut | tuple[int, dict]:
-        """Upload a file to a memory."""
+    ) -> DocumentUploadResponse:
+        """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
-        pipeline = get_default_file_pipeline(file)
-        result = await pipeline.run(file)
-
-        if result is None:
-            return 400, {"detail": f"Unsupported or empty file: {file_name}"}
-
-        entry = await Entry.objects.acreate(
-            memory=memory,
-            name=file_name,
-            content=result.content,
-            data=result.data,
-        )
-
         entry_doc = await EntryDocument.objects.acreate(
-            entry=entry,
+            entry=None,
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
-            extracted=bool(result.data),
+            processing_status=EntryDocument.ProcessingStatus.PENDING,
         )
 
-        return MemoryService._entry_doc_to_out(entry_doc)
+        task_result = await process_document_upload.aenqueue(str(entry_doc.id), memory_id)
+        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(
+            task_id=task_result.id,
+            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
+        )
+
+        return DocumentUploadResponse(id=str(entry_doc.id), status="processing")
 
     @staticmethod
     async def list_documents(
@@ -501,42 +497,37 @@ class MemoryService:
     @staticmethod
     async def upload_thread_file(
         thread_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None = None
-    ) -> DocumentOut | tuple[int, dict]:
-        """Upload a file to a thread. Auto-creates a hidden memory on first upload."""
+    ) -> DocumentUploadResponse:
+        """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
         await _check_object_permission(user, Operation.UPLOAD_FILE, thread)
         memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
 
-        # get assistant from thread
-        assistant = await AssistantService.get_assistant(thread_id)
+        # assistant_id is stored in thread.metadata by ThreadService.create_thread
+        assistant_id = thread.metadata.get("assistant_id") or None
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
 
-        pipeline = assistant.get_file_pipeline(file) or get_default_file_pipeline(file)
-        result = await pipeline.run(file, assistant=assistant)
-
-        if result is None:
-            return 400, {"detail": f"Unsupported or empty file: {file_name}"}
-
-        entry = await Entry.objects.acreate(
-            memory=memory,
-            name=file_name,
-            content=result.content,
-            data=result.data,
-        )
-
         entry_doc = await EntryDocument.objects.acreate(
-            entry=entry,
+            entry=None,
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
-            extracted=bool(result.data),
+            processing_status=EntryDocument.ProcessingStatus.PENDING,
         )
 
-        return MemoryService._entry_doc_to_out(entry_doc)
+        task_result = await process_document_upload.aenqueue(
+            str(entry_doc.id), str(memory.id), assistant_id
+        )
+        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(
+            task_id=task_result.id,
+            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
+        )
+
+        return DocumentUploadResponse(id=str(entry_doc.id), status="processing")
 
     @staticmethod
     async def list_thread_files(
@@ -573,6 +564,25 @@ class MemoryService:
         await entry.adelete()
 
     @staticmethod
+    async def get_document_status(
+        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> DocumentStatusOut:
+        """Return processing status for document."""
+        entry_doc = await EntryDocument.objects.aget(id=doc_id)
+        task_status = None
+        if entry_doc.task_id:
+            try:
+                task_status = await aget_task_status(entry_doc.task_id)
+            except Exception:
+                pass
+        return DocumentStatusOut(
+            id=str(entry_doc.id),
+            status=entry_doc.processing_status,
+            error=entry_doc.processing_error,
+            task=task_status,
+        )
+
+    @staticmethod
     async def get_chunk_content(
         entry_id: str, chunk_id: str | None, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> str | None:
@@ -585,8 +595,6 @@ class MemoryService:
         avoid opening a second connection on backends with exclusive file locks (Qdrant).
         Falls back to entry.content when no warmed RAG is available for this memory.
         """
-        from django_ai_sdk.assistants.registry import registry
-
         try:
             entry = await Entry.objects.aget(id=entry_id)
         except Entry.DoesNotExist:
@@ -658,6 +666,7 @@ get_or_create_thread_file_memory = async_to_sync(MemoryService.get_or_create_thr
 upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
+get_document_status = async_to_sync(MemoryService.get_document_status)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
 list_owners = async_to_sync(MemoryService.list_owners)
 add_owner = async_to_sync(MemoryService.add_owner)

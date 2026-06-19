@@ -3,6 +3,8 @@ from django_ai_sdk.memories.schemas import (
     AddMemoryOwnerIn,
     BulkConnectMemoriesIn,
     DocumentOut,
+    DocumentStatusOut,
+    DocumentUploadResponse,
     MemoryIn,
     MemoryOut,
     MemoryOwnerOut,
@@ -84,16 +86,30 @@ async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None
 
 @router.post(
     "/{memory_id}/documents",
-    response={200: DocumentOut, 400: dict, 403: dict},
+    response={202: DocumentUploadResponse, 400: dict, 403: dict},
     operation_id="upload_document",
 )
 async def upload_document(
     request: HttpRequest,
     memory_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> DocumentOut | tuple[int, dict]:
+) -> tuple[int, DocumentUploadResponse | dict]:
     try:
-        return await MemoryService.upload_document(memory_id, file, user=request.user)
+        return 202, await MemoryService.upload_document(memory_id, file, user=request.user)
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.get(
+    "/{memory_id}/documents/{doc_id}/status",
+    response={200: DocumentStatusOut, 403: dict},
+    operation_id="get_document_status",
+)
+async def get_document_status(
+    request: HttpRequest, memory_id: str, doc_id: str
+) -> DocumentStatusOut | tuple[int, dict]:
+    try:
+        return await MemoryService.get_document_status(doc_id, user=request.user)
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -199,15 +215,26 @@ async def bulk_connect_memories(
 
 @router.post(
     "/thread/{thread_id}/files",
-    response={200: DocumentOut, 400: dict},
+    response={202: DocumentUploadResponse, 400: dict},
     operation_id="upload_thread_file",
 )
 async def upload_thread_file(
     request: HttpRequest,
     thread_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> DocumentOut | tuple[int, dict]:
-    return await MemoryService.upload_thread_file(thread_id, file)
+) -> tuple[int, DocumentUploadResponse]:
+    return 202, await MemoryService.upload_thread_file(thread_id, file, user=request.user)
+
+
+@router.get(
+    "/thread/{thread_id}/files/{doc_id}/status",
+    response={200: DocumentStatusOut},
+    operation_id="get_thread_file_status",
+)
+async def get_thread_file_status(
+    request: HttpRequest, thread_id: str, doc_id: str
+) -> DocumentStatusOut:
+    return await MemoryService.get_document_status(doc_id, user=request.user)
 
 
 @router.get(
