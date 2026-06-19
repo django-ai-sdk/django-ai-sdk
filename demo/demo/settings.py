@@ -196,3 +196,13 @@ AI_SDK_MCP_SERVERS = {
 AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
 AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/mcp"
+
+
+# Allowed upload filetypes
+AI_SDK_ALLOWED_FILES = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "text/json",
+}
