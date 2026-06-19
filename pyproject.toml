@@ -24,8 +24,8 @@ classifiers = [
 keywords = ["django", "ai", "assistant", "rag", "llm", "streaming", "sse"]
 dependencies = [
   "daphne>=4.2.2",
-  "django>=5.2.6,<6.1",
-  "django-environ>=0.13.0",
+  "django>=6.0.6,<6.1",
+  "django-environ>=0.14.0",
   "django-ninja>=1.6.2",
   "django-tasks>=0.12.0",
   "django-tasks-db>=0.12.0",
@@ -51,27 +51,27 @@ all = ["django-ai-sdk[haystack,restframework,mcp]"]
 haystack = [
   "chroma-haystack>=4.3.0",
   "fastembed-haystack>=2.3.0",
-  "haystack-ai>=2.30.0",
-  "huggingface-hub>=1.17.0",
+  "haystack-ai>=2.30.2",
+  "huggingface-hub>=1.20.1",
   "qdrant-haystack>=10.3.0",
-  "sentence-transformers>=5.5.1",
+  "sentence-transformers>=5.6.0",
 ]
-mcp = ["mcp>=1.27.2", "mcp-haystack>=1.3.0"]
+mcp = ["mcp>=1.28.0", "mcp-haystack>=1.3.0"]
 restframework = ["djangorestframework>=3.17.1"]
 [dependency-groups]
 dev = [
   "django-stubs>=6.0.5",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
-  "pytest>=9.0.3",
+  "pytest>=9.1.1",
   "pytest-asyncio>=1.4.0",
   "pytest-django>=4.12.0",
   "pytest-mock>=3.15.1",
-  "ruff>=0.15.15",
+  "ruff>=0.15.18",
   "lefthook>=2.1.9",
   "django-watchfiles>=1.4.0",
   "polyfactory>=3.3.0",
-  "ty>=0.0.49",
+  "ty>=0.0.51",
 ]
 
 [tool.pytest.ini_options]
