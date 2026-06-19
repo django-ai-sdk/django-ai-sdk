@@ -37,7 +37,10 @@ class FilePipeline:
         file_processor: FileProcessor,
         transforms: list[BaseTransform] | None = None,
     ) -> None:
-        self.file_processor = file_processor
+        # SAFEGUARD: Accept both a class and an instance
+        self.file_processor = (
+            file_processor() if isinstance(file_processor, type) else file_processor
+        )
         self.transforms: list[BaseTransform] = transforms or []
 
     def accepts(self, file: Any) -> bool:
@@ -45,9 +48,6 @@ class FilePipeline:
 
     async def run(self, file: Any, *, assistant: Assistant | None = None) -> PipelineResult | None:
         """Run processor then all transforms in sequence.
-
-        Calls accepts() first — returns None for unsupported file types.
-        Passes assistant to transforms that need LLM access.
         Processor runs in a thread to avoid blocking the event loop.
         """
         if not self.accepts(file):
