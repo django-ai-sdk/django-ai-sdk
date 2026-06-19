@@ -45,6 +45,8 @@ INSTALLED_APPS = [
     # third-party
     "django_watchfiles",
     "rest_framework",
+    "django_tasks",
+    "django_tasks_db",
     "django_ai_sdk",
     # local
     "piratespeak",
@@ -81,6 +83,19 @@ TEMPLATES = [
 # ASGI application
 ASGI_APPLICATION = "demo.asgi.application"
 
+
+# Background tasks
+# Dev: ImmediateBackend runs tasks inline (no worker needed).
+# Prod (DEBUG=False): DatabaseBackend — run `python manage.py db_worker`.
+TASKS = {
+    "default": {
+        "BACKEND": (
+            "django_tasks.backends.immediate.ImmediateBackend"
+            if DEBUG
+            else "django_tasks_db.DatabaseBackend"
+        ),
+    }
+}
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
