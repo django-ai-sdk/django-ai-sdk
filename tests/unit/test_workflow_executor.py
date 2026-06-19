@@ -50,6 +50,7 @@ def executor():
 
 
 @pytest.mark.asyncio
+@pytest.mark.django_db
 class TestWorkflowExecutorSteps:
     async def test_single_step_returns_output(self, executor):
         assistant = make_assistant("hello")
@@ -57,7 +58,7 @@ class TestWorkflowExecutorSteps:
         workflow = make_workflow(step)
 
         with patch("django_ai_sdk.workflows.executor.AssistantService.get", AsyncMock(return_value=assistant)):
-            outputs = await executor.run(workflow, [])
+            outputs, _ = await executor.run(workflow, [])
 
         assert outputs == {"result": "hello"}
 
@@ -72,7 +73,7 @@ class TestWorkflowExecutorSteps:
             "django_ai_sdk.workflows.executor.AssistantService.get",
             AsyncMock(side_effect=[a1, a2]),
         ):
-            outputs = await executor.run(workflow, [])
+            outputs, _ = await executor.run(workflow, [])
 
         assert outputs["step1"] == "first"
         assert outputs["step2"] == "second"
@@ -113,7 +114,7 @@ class TestWorkflowExecutorSteps:
 
         with capture_logs() as records:
             with patch("django_ai_sdk.workflows.executor.AssistantService.get", AsyncMock(return_value=assistant)):
-                outputs = await executor.run(workflow, [])
+                outputs, _ = await executor.run(workflow, [])
 
         assert outputs["result"] == "ok"
         assert any("missing_key" in r for r in records)
@@ -136,7 +137,7 @@ class TestWorkflowExecutorSteps:
 
     async def test_empty_steps_returns_empty_outputs(self, executor):
         workflow = make_workflow()
-        outputs = await executor.run(workflow, [])
+        outputs, _ = await executor.run(workflow, [])
         assert outputs == {}
 
 
@@ -146,6 +147,7 @@ class TestWorkflowExecutorSteps:
 
 
 @pytest.mark.asyncio
+@pytest.mark.django_db
 class TestWorkflowExecutorStructuredOutput:
     async def test_output_fields_calls_with_response_format(self, executor):
         from pydantic import BaseModel
@@ -165,7 +167,7 @@ class TestWorkflowExecutorStructuredOutput:
         )
 
         with patch("django_ai_sdk.workflows.executor.AssistantService.get", AsyncMock(return_value=assistant)):
-            outputs = await executor.run(workflow, [])
+            outputs, _ = await executor.run(workflow, [])
 
         assert outputs["classification"] == {"label": "sports"}
         _, kwargs = assistant.run.call_args
@@ -182,7 +184,7 @@ class TestWorkflowExecutorStructuredOutput:
         )
 
         with patch("django_ai_sdk.workflows.executor.AssistantService.get", AsyncMock(return_value=assistant)):
-            outputs = await executor.run(workflow, [])
+            outputs, _ = await executor.run(workflow, [])
 
         assert outputs["result"] == {}
 
@@ -193,6 +195,7 @@ class TestWorkflowExecutorStructuredOutput:
 
 
 @pytest.mark.asyncio
+@pytest.mark.django_db
 class TestWorkflowExecutorActions:
     async def test_action_called_with_full_outputs_when_no_input_key(self, executor):
         assistant = make_assistant("data")
@@ -254,7 +257,7 @@ class TestWorkflowExecutorActions:
                 patch("django_ai_sdk.workflows.executor.AssistantService.get", AsyncMock(return_value=assistant)),
                 patch("django_ai_sdk.workflows.executor.get_action_registry", return_value={}),
             ):
-                outputs = await executor.run(workflow, [])
+                outputs, _ = await executor.run(workflow, [])
 
         assert outputs["result"] == "data"
         assert any("nonexistent" in r for r in records)

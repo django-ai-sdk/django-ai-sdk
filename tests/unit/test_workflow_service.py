@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 
+from django_ai_sdk.workflows.executor import WorkflowExecutor
 from django_ai_sdk.workflows.schemas import WorkflowDefinition, WorkflowStep
 from django_ai_sdk.workflows.services import WorkflowService
 
@@ -104,20 +105,15 @@ class TestWorkflowServiceCRUD:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestWorkflowServiceRunById:
-    async def test_run_by_id_executes_workflow(self, mock_user):
+    async def test_run_by_id_enqueues_task(self, mock_user):
         definition = make_definition()
         record = await WorkflowService.create("WF", definition, user=mock_user)
 
-        mock_assistant = MagicMock()
-        mock_assistant.run = AsyncMock(return_value="done")
+        with patch.object(WorkflowExecutor, "enqueue", AsyncMock()):
+            run = await WorkflowService.run_by_id(str(record.id), [], user=mock_user)
 
-        with patch(
-            "django_ai_sdk.workflows.executor.AssistantService.get",
-            AsyncMock(return_value=mock_assistant),
-        ):
-            outputs = await WorkflowService.run_by_id(str(record.id), [], user=mock_user)
-
-        assert outputs == {"result": "done"}
+        assert run.status == "pending"
+        assert str(run.workflow_id) == str(record.id)
 
     async def test_run_by_id_raises_for_inactive(self, mock_user):
         from django_ai_sdk.workflows.models import WorkflowSettings
