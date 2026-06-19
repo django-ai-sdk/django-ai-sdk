@@ -1,25 +1,23 @@
 import sys
 from typing import TYPE_CHECKING
 
+from django.conf import settings
 from loguru import logger
 
 if TYPE_CHECKING:
     from loguru import Logger
 
-
 logger.remove()
 
-# Add console handler
-logger.add(
-    sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG",
-    colorize=True,
-)
 
-# Add file handler
-# I added this also for code agents, they can track the app,
-# without the need for a restart.
+if getattr(settings, "AI_SDK_ENABLE_LOGS", False):
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level="DEBUG",
+        colorize=True,
+    )
+
 logger.add(
     "logs/django_ai_sdk.log",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",

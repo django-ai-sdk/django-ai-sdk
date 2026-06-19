@@ -9,6 +9,7 @@ from django_ai_sdk.memories.services import (
     disconnect_memory_from_thread,
     get_chunk_content,
     get_document,
+    get_document_status,
     get_memory,
     link_memory_to_thread,
     list_documents,
@@ -99,6 +100,18 @@ class SourceContentSerializer(serializers.Serializer):
     content = serializers.CharField()
 
 
+class DocumentUploadResponseSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    status = serializers.CharField()
+
+
+class DocumentStatusOutSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    status = serializers.CharField()
+    error = serializers.CharField()
+    task = serializers.DictField(allow_null=True, required=False)
+
+
 class MemoryListCreateAPIView(APIView):
     def get(self, request: Request) -> Response:
         try:
@@ -172,9 +185,7 @@ class DocumentListCreateAPIView(APIView):
             result = upload_document(memory_id, uploaded_file, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
-        if isinstance(result, tuple):
-            return Response(result[1], status=result[0])
-        return Response(DocumentOutSerializer(result).data)
+        return Response(DocumentUploadResponseSerializer(result).data, status=202)
 
 
 class DocumentDetailAPIView(APIView):
@@ -267,16 +278,20 @@ class ThreadFileListCreateAPIView(APIView):
         uploaded_file = request.FILES.get("file")  # type: ignore[union-attr]
         if not uploaded_file:
             return Response({"detail": "file is required"}, status=400)
-        result = upload_thread_file(thread_id, uploaded_file)
-        if isinstance(result, tuple):
-            return Response(result[1], status=result[0])
-        return Response(DocumentOutSerializer(result).data)
+        result = upload_thread_file(thread_id, uploaded_file, user=request.user)
+        return Response(DocumentUploadResponseSerializer(result).data, status=202)
 
 
 class ThreadFileDetailAPIView(APIView):
     def delete(self, request: Request, thread_id: str, doc_id: str) -> Response:
         delete_thread_file(thread_id, doc_id)
         return Response(status=204)
+
+
+class DocumentStatusAPIView(APIView):
+    def get(self, request: Request, doc_id: str) -> Response:
+        status = get_document_status(doc_id, user=request.user)
+        return Response(DocumentStatusOutSerializer(status).data)
 
 
 class MemoryOwnerListCreateAPIView(APIView):
@@ -398,5 +413,10 @@ urlpatterns = [
         "memories/source/<str:entry_id>/<str:chunk_id>/",
         SourceContentAPIView.as_view(),
         name="memory-source-content",
+    ),
+    path(
+        "memories/documents/<str:doc_id>/status/",
+        DocumentStatusAPIView.as_view(),
+        name="document-status",
     ),
 ]

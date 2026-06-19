@@ -1,18 +1,8 @@
-"""
-TODO:
-I moved these data schema out of the package and embedded them here for now.
-We still use a light version, the package has better extraction handling as well,
-but I need to finalize this.
-
-Also check the PyPi account we are going to release from: there are now two versions,
-The one for Caren will be separated and then the one for public release, both
-need to be in sync.
-
-"""
-
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+from django_ai_sdk.tasks import TaskStatus
 
 # Data schema
 
@@ -136,6 +126,22 @@ class BulkConnectMemoriesIn(BaseModel):
     """Schema for bulk connecting memories to a thread."""
 
     memory_ids: list[str]
+
+
+class DocumentUploadResponse(BaseModel):
+    """Schema to return after upload"""
+
+    id: str
+    status: str
+
+
+class DocumentStatusOut(BaseModel):
+    """Processing status for an uploaded document."""
+
+    id: str
+    status: str
+    error: str = ""
+    task: TaskStatus | None = None
 
 
 class ToggleMemoryActiveIn(BaseModel):
