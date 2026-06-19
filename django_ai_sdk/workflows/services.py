@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.executor import WorkflowExecutor
 
@@ -9,39 +10,59 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
-def _parse_messages(raw: list[dict]) -> list[ChatMessage]:
-    from django_ai_sdk.protocols.vercel import VercelProtocolHandler
-    from django_ai_sdk.views.schemas import Message
-
-    return VercelProtocolHandler().to_chat_messages([Message(**m) for m in raw])
+def _user_id(user: AbstractBaseUser | AnonymousUser | None) -> Any:
+    return user.pk if user and not getattr(user, "is_anonymous", True) else None
 
 
 class WorkflowService:
     @staticmethod
     async def run(
         workflow: WorkflowDefinition,
-        messages: list[dict],
+        messages: list[ChatMessage],
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> dict[str, Any]:
-        return await WorkflowExecutor().run(workflow, _parse_messages(messages), user=user)
+    ) -> WorkflowRun:
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        run = await WorkflowRun.objects.acreate(
+            workflow=None,
+            workflow_definition=workflow.model_dump(),
+            status=WorkflowRun.Status.PENDING,
+            input_messages=[m.model_dump() for m in messages],
+            user_id=_user_id(user),
+        )
+        await WorkflowExecutor.enqueue(run)
+        return run
 
     @staticmethod
     async def run_by_id(
         workflow_id: str,
-        messages: list[dict],
+        messages: list[ChatMessage],
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> dict[str, Any]:
-        from django_ai_sdk.workflows.models import WorkflowSettings
+        run_id: str | None = None,
+    ) -> WorkflowRun:
+        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
 
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
         workflow = record.to_workflow_definition()
-        return await WorkflowExecutor().run(workflow, _parse_messages(messages), user=user)
+
+        if run_id:
+            run = await WorkflowRun.objects.aget(id=run_id, workflow_id=workflow_id)
+        else:
+            run = await WorkflowRun.objects.acreate(
+                workflow=record,
+                workflow_definition=workflow.model_dump(),
+                status=WorkflowRun.Status.PENDING,
+                input_messages=[m.model_dump() for m in messages],
+                user_id=_user_id(user),
+            )
+        await WorkflowExecutor.enqueue(run)
+        return run
 
     @staticmethod
     def list_actions() -> list[dict[str, str]]:
@@ -64,7 +85,7 @@ class WorkflowService:
         record = WorkflowSettings(
             name=name,
             definition=workflow.model_dump(),
-            created_by_id=user.pk if user and not getattr(user, "is_anonymous", True) else None,
+            created_by_id=_user_id(user),
         )
         await record.asave()
         return record
@@ -109,3 +130,23 @@ class WorkflowService:
         if active_only:
             qs = qs.filter(active=True)
         return [r async for r in qs]
+
+    # --- Run history ---
+
+    @staticmethod
+    async def list_runs(
+        workflow_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Any]:
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        qs = WorkflowRun.objects.filter(workflow_id=workflow_id).order_by("-created_at")
+        return [r async for r in qs[offset : offset + limit]]
+
+    @staticmethod
+    async def get_run(run_id: str) -> Any:
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        return await WorkflowRun.objects.prefetch_related("steps").aget(id=run_id)
