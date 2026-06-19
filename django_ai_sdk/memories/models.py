@@ -158,6 +158,12 @@ class EntryDocument(models.Model):
     Stored in a separate table — only joined when file metadata is actually needed.
     """
 
+    class ProcessingStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     entry = models.OneToOneField(
         Entry,
@@ -172,6 +178,14 @@ class EntryDocument(models.Model):
     content_type = models.CharField(max_length=100, blank=True, default="")
     file_extension = models.CharField(max_length=20, blank=True, default="")
     extracted = models.BooleanField(default=False)
+    processing_status = models.CharField(
+        max_length=20,
+        choices=ProcessingStatus.choices,
+        default=ProcessingStatus.PENDING,
+        db_index=True,
+    )
+    task_id = models.CharField(max_length=64, null=True, blank=True)
+    processing_error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
