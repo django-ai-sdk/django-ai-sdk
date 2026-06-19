@@ -16,7 +16,7 @@ typecheck:
 
 tag:
 	@read -p "Tag (e.g. v0.1.0rc1): " TAG; \
-	git tag -a $$TAG -m "Release $$TAG" && git push origin $$TAG
+	git tag -a $$TAG -m "Release $$TAG"
 
 build:
 	uv build
