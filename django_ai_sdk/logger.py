@@ -1,7 +1,7 @@
-import os
 import sys
 from typing import TYPE_CHECKING
 
+from django.conf import settings
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -9,7 +9,8 @@ if TYPE_CHECKING:
 
 logger.remove()
 
-if not os.getenv("AI_SDK_QUIET"):
+
+if getattr(settings, "AI_SDK_ENABLE_LOGS", False):
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
