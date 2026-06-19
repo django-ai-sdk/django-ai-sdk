@@ -7,6 +7,7 @@ from uuid import UUID
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -916,11 +917,12 @@ async def reindex_assistant(
 
 class WorkflowRunRequest(Schema):
     workflow: WorkflowDefinition
-    messages: list[dict] = []
+    messages: list[ChatMessage] = []
 
 
 class WorkflowRunResponse(Schema):
-    outputs: dict
+    run_id: str
+    status: str
 
 
 class WorkflowActionItem(Schema):
@@ -928,17 +930,42 @@ class WorkflowActionItem(Schema):
     description: str
 
 
+class WorkflowRunStepOut(Schema):
+    id: str
+    sequence: int
+    step_name: str
+    output_key: str
+    output: dict | None = None
+    status: str
+    error: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class WorkflowRunOut(Schema):
+    id: str
+    workflow_id: str | None = None
+    status: str
+    outputs: dict | None = None
+    error: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class WorkflowRunDetailOut(WorkflowRunOut):
+    steps: list[WorkflowRunStepOut] = []
+
+
 @router.post(
     "/workflows/run/",
-    response={200: WorkflowRunResponse, 400: Error, 404: Error, 500: Error},
+    response={202: WorkflowRunResponse, 400: Error, 500: Error},
     operation_id="run_workflow",
 )
 async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
     try:
-        outputs = await WorkflowService.run(payload.workflow, payload.messages, user=request.user)
-        return WorkflowRunResponse(outputs=outputs)
-    except ValueError as e:
-        return 404, Error(message=str(e))
+        run = await WorkflowService.run(payload.workflow, payload.messages, user=request.user)
+        return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
     except Exception as e:
         return 500, Error(message=str(e))
 
@@ -974,7 +1001,8 @@ class WorkflowItem(Schema):
 
 
 class WorkflowRunByIdRequest(Schema):
-    messages: list[dict] = []
+    messages: list[ChatMessage] = []
+    run_id: str | None = None
 
 
 @router.get(
@@ -1001,6 +1029,75 @@ async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) 
         return 201, WorkflowItem(
             id=str(record.id), name=record.name, definition=record.definition, active=record.active
         )
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+# Run history endpoints — declared BEFORE {workflow_id} to avoid route conflict
+
+
+@router.get(
+    "/workflows/{workflow_id}/runs/",
+    response={200: list[WorkflowRunOut], 500: Error},
+    operation_id="list_workflow_runs",
+)
+async def list_workflow_runs(request: HttpRequest, workflow_id: str) -> Any:
+    try:
+        runs = await WorkflowService.list_runs(workflow_id)
+        return [
+            WorkflowRunOut(
+                id=str(r.id),
+                workflow_id=str(r.workflow_id) if r.workflow_id else None,
+                status=r.status,
+                outputs=r.outputs,
+                error=r.error,
+                created_at=r.created_at.isoformat(),
+                started_at=r.started_at.isoformat() if r.started_at else None,
+                completed_at=r.completed_at.isoformat() if r.completed_at else None,
+            )
+            for r in runs
+        ]
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/runs/{run_id}/",
+    response={200: WorkflowRunDetailOut, 404: Error, 500: Error},
+    operation_id="get_workflow_run",
+)
+async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) -> Any:
+    from django_ai_sdk.workflows.models import WorkflowRun
+
+    try:
+        run = await WorkflowService.get_run(run_id)
+        steps = [
+            WorkflowRunStepOut(
+                id=str(s.id),
+                sequence=s.sequence,
+                step_name=s.step_name,
+                output_key=s.output_key,
+                output=s.output if isinstance(s.output, dict) else None,
+                status=s.status,
+                error=s.error,
+                started_at=s.started_at.isoformat() if s.started_at else None,
+                completed_at=s.completed_at.isoformat() if s.completed_at else None,
+            )
+            async for s in run.steps.all()
+        ]
+        return WorkflowRunDetailOut(
+            id=str(run.id),
+            workflow_id=str(run.workflow_id) if run.workflow_id else None,
+            status=run.status,
+            outputs=run.outputs,
+            error=run.error,
+            created_at=run.created_at.isoformat(),
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            completed_at=run.completed_at.isoformat() if run.completed_at else None,
+            steps=steps,
+        )
+    except WorkflowRun.DoesNotExist:
+        return 404, Error(message="Run not found")
     except Exception as e:
         return 500, Error(message=str(e))
 
@@ -1051,7 +1148,7 @@ async def update_workflow(
 )
 async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
     try:
-        await WorkflowService.get(workflow_id)  # raises DoesNotExist if missing
+        await WorkflowService.get(workflow_id)
         await WorkflowService.delete(workflow_id)
         return 204, None
     except WorkflowSettings.DoesNotExist:
@@ -1060,15 +1157,17 @@ async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
 
 @router.post(
     "/workflows/{workflow_id}/run/",
-    response={200: WorkflowRunResponse, 404: Error, 500: Error},
+    response={202: WorkflowRunResponse, 404: Error, 500: Error},
     operation_id="run_workflow_by_id",
 )
 async def run_workflow_by_id(
     request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
 ) -> Any:
     try:
-        outputs = await WorkflowService.run_by_id(workflow_id, payload.messages, user=request.user)
-        return WorkflowRunResponse(outputs=outputs)
+        run = await WorkflowService.run_by_id(
+            workflow_id, payload.messages, user=request.user, run_id=payload.run_id
+        )
+        return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
     except WorkflowSettings.DoesNotExist:
         return 404, Error(message="Workflow not found")
     except Exception as e:

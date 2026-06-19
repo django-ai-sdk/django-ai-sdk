@@ -21,6 +21,7 @@ from django_ai_sdk.assistants.services import (
     remove_assistant_user,
     update_assistant_user,
 )
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.permissions import PermissionDenied
@@ -886,18 +887,45 @@ class WorkflowDetailAPIView(APIView):
             return Response({"message": "Workflow not found"}, status=404)
 
 
+class WorkflowRunStepSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    sequence = serializers.IntegerField()
+    step_name = serializers.CharField()
+    output_key = serializers.CharField()
+    output = serializers.DictField(allow_null=True, required=False)
+    status = serializers.CharField()
+    error = serializers.CharField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class WorkflowRunSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    workflow_id = serializers.UUIDField(allow_null=True)
+    status = serializers.CharField()
+    outputs = serializers.DictField(allow_null=True, required=False)
+    error = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class WorkflowRunDetailSerializer(WorkflowRunSerializer):
+    steps = WorkflowRunStepSerializer(many=True, source="steps.all")
+
+
 class WorkflowRunAPIView(APIView):
     async def post(self, request: Request) -> Response:
         try:
             from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 
             workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
-            outputs = await WorkflowService.run(
-                workflow, request.data.get("messages", []), user=request.user
+            run = await WorkflowService.run(
+                workflow,
+                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                user=request.user,
             )
-            return Response({"outputs": outputs})
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+            return Response({"run_id": str(run.id), "status": run.status}, status=202)
         except Exception as e:
             return Response({"message": str(e)}, status=500)
 
@@ -908,12 +936,41 @@ class WorkflowRunByIdAPIView(APIView):
             from django_ai_sdk.workflows import WorkflowService
             from django_ai_sdk.workflows.models import WorkflowSettings
 
-            outputs = await WorkflowService.run_by_id(
-                workflow_id, request.data.get("messages", []), user=request.user
+            run_id = request.data.get("run_id")
+            run = await WorkflowService.run_by_id(
+                workflow_id,
+                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                user=request.user,
+                run_id=run_id,
             )
-            return Response({"outputs": outputs})
+            return Response({"run_id": str(run.id), "status": run.status}, status=202)
         except WorkflowSettings.DoesNotExist:
             return Response({"message": "Workflow not found"}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunListAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        try:
+            runs = await WorkflowService.list_runs(workflow_id)
+            return Response(WorkflowRunSerializer(runs, many=True).data)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunDetailAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str, run_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        try:
+            run = await WorkflowService.get_run(run_id)
+            return Response(WorkflowRunDetailSerializer(run).data)
+        except WorkflowRun.DoesNotExist:
+            return Response({"message": "Run not found"}, status=404)
         except Exception as e:
             return Response({"message": str(e)}, status=500)
 
@@ -1029,6 +1086,16 @@ urlpatterns = [
     path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
     path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
     path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
+    path(
+        "workflows/<str:workflow_id>/runs/",
+        WorkflowRunListAPIView.as_view(),
+        name="workflow-run-list",
+    ),
+    path(
+        "workflows/<str:workflow_id>/runs/<str:run_id>/",
+        WorkflowRunDetailAPIView.as_view(),
+        name="workflow-run-detail",
+    ),
     path("workflows/<str:workflow_id>/", WorkflowDetailAPIView.as_view(), name="workflow-detail"),
     path(
         "workflows/<str:workflow_id>/run/",
