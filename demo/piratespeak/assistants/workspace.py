@@ -8,7 +8,10 @@ from django_ai_sdk import (
     Assistant,
     DataTableArtifact,
     OptionListArtifact,
+    PlanArtifact,
+    ProgressTrackerArtifact,
     QuestionFlowArtifact,
+    TerminalArtifact,
 )
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
@@ -50,10 +53,13 @@ class WorkspaceAssistant(Assistant):
 
     tools: list = [get_today]
     artifacts: list = [
+        ApprovalCardArtifact,
         DataTableArtifact,
         OptionListArtifact,
+        PlanArtifact,
+        ProgressTrackerArtifact,
         QuestionFlowArtifact,
-        ApprovalCardArtifact,
+        TerminalArtifact,
     ]
 
     def _build_generator(self) -> OpenAIChatGenerator:

@@ -9,7 +9,10 @@ from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,
     DataTableArtifact,
     OptionListArtifact,
+    PlanArtifact,
+    ProgressTrackerArtifact,
     QuestionFlowArtifact,
+    TerminalArtifact,
 )
 from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage
@@ -41,6 +44,9 @@ __all__ = [
     "OptionListArtifact",
     "DataTableArtifact",
     "ApprovalCardArtifact",
+    "PlanArtifact",
+    "ProgressTrackerArtifact",
+    "TerminalArtifact",
     "Assistant",
     "ChatMessage",
     "StreamChunk",
