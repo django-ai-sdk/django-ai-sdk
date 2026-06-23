@@ -7,12 +7,21 @@ from __future__ import annotations
 from django_ai_sdk.artifacts import ArtifactSchema, ArtifactType
 from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,
+    ChainOfThoughtArtifact,
+    CodeBlockArtifact,
+    ConfirmationArtifact,
     DataTableArtifact,
+    ImageArtifact,
     OptionListArtifact,
     PlanArtifact,
     ProgressTrackerArtifact,
     QuestionFlowArtifact,
+    SchemaDisplayArtifact,
+    SnippetArtifact,
+    StackTraceArtifact,
+    TaskArtifact,
     TerminalArtifact,
+    TestResultsArtifact,
 )
 from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage
@@ -47,6 +56,15 @@ __all__ = [
     "PlanArtifact",
     "ProgressTrackerArtifact",
     "TerminalArtifact",
+    "ConfirmationArtifact",
+    "ChainOfThoughtArtifact",
+    "CodeBlockArtifact",
+    "SnippetArtifact",
+    "StackTraceArtifact",
+    "SchemaDisplayArtifact",
+    "TestResultsArtifact",
+    "TaskArtifact",
+    "ImageArtifact",
     "Assistant",
     "ChatMessage",
     "StreamChunk",
