@@ -28,6 +28,15 @@ class ArtifactType(StrEnum):
     PLAN = "plan"
     PROGRESS_TRACKER = "progress_tracker"
     TERMINAL = "terminal"
+    CONFIRMATION = "confirmation"
+    CHAIN_OF_THOUGHT = "chain_of_thought"
+    CODE_BLOCK = "code_block"
+    SNIPPET = "snippet"
+    STACK_TRACE = "stack_trace"
+    SCHEMA_DISPLAY = "schema_display"
+    TEST_RESULTS = "test_results"
+    IMAGE = "image"
+    TASK = "task"
 
 
 class ArtifactSchema(BaseModel):
@@ -309,3 +318,273 @@ class TerminalArtifact(ArtifactSchema):
         Call it after executing a shell command to show its result.
     """)
     data: TerminalData
+
+
+# ── Confirmation ──────────────────────────────────────────────────────────────
+
+
+class ConfirmationData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    message: str
+    detail: str | None = None
+
+
+class ConfirmationArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.CONFIRMATION
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_confirmation_artifact() to ask the user to confirm an action before proceeding.
+        Provide a unique `id` slug (e.g. 'confirm-delete'), a `message` describing what will happen,
+        and an optional `detail` for additional context.
+        Use this for lightweight yes/no prompts; for complex approvals with metadata use ApprovalCard.
+    """)
+    data: ConfirmationData
+
+
+# ── ChainOfThought ────────────────────────────────────────────────────────────
+
+
+class ChainOfThoughtStep(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    label: str
+    description: str | None = None
+    status: Literal["complete", "active", "pending"] | None = None
+
+
+class ChainOfThoughtData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    steps: list[ChainOfThoughtStep]
+
+
+class ChainOfThoughtArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.CHAIN_OF_THOUGHT
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_chain_of_thought_artifact() to surface your reasoning steps to the user.
+        Provide a unique `id` slug (e.g. 'analysis-steps').
+        Each step needs a unique `id`, a `label` (short title),
+        optional `description` (expanded detail), and optional `status`:
+        'pending' — not yet reached, 'active' — currently being processed, 'complete' — done.
+        Call it to make multi-step reasoning visible and inspectable.
+    """)
+    data: ChainOfThoughtData
+
+
+# ── CodeBlock ─────────────────────────────────────────────────────────────────
+
+
+class CodeBlockData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    code: str
+    language: str
+    filename: str | None = None
+    showLineNumbers: bool | None = None
+
+
+class CodeBlockArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.CODE_BLOCK
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_code_block_artifact() to display a syntax-highlighted code sample.
+        Provide a unique `id` slug (e.g. 'example-handler'), the full `code` string,
+        the `language` identifier (e.g. 'python', 'typescript', 'bash'),
+        optional `filename` shown in the header, and optional `showLineNumbers` boolean.
+        Call it when presenting a self-contained code example that benefits from
+        syntax highlighting and a copy button.
+    """)
+    data: CodeBlockData
+
+
+# ── Snippet ───────────────────────────────────────────────────────────────────
+
+
+class SnippetData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    code: str
+    label: str | None = None
+
+
+class SnippetArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.SNIPPET
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_snippet_artifact() to present a short inline copyable string
+        such as a token, command, URL, or key.
+        Provide a unique `id` slug (e.g. 'api-key'), the `code` string to copy,
+        and an optional `label` displayed as a prefix badge.
+        For multi-line or syntax-highlighted code use CodeBlock instead.
+    """)
+    data: SnippetData
+
+
+# ── StackTrace ────────────────────────────────────────────────────────────────
+
+
+class StackTraceData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    trace: str
+    open: bool | None = None
+
+
+class StackTraceArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.STACK_TRACE
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_stack_trace_artifact() to display a parsed exception stack trace.
+        Provide a unique `id` slug (e.g. 'runtime-error'), the full `trace` string
+        (the component auto-parses error type, message, and frames),
+        and optional `open` boolean to expand the frame list by default.
+        Call it when showing an error or exception that the user needs to inspect.
+    """)
+    data: StackTraceData
+
+
+# ── SchemaDisplay ─────────────────────────────────────────────────────────────
+
+
+class SchemaParameter(BaseModel):
+    name: str
+    type: str
+    required: bool | None = None
+    description: str | None = None
+    location: Literal["path", "query", "header", "cookie"] | None = None
+
+
+class SchemaProperty(BaseModel):
+    name: str
+    type: str
+    required: bool | None = None
+    description: str | None = None
+    example: str | None = None
+    properties: list[SchemaProperty] | None = None
+
+
+SchemaProperty.model_rebuild()
+
+
+class SchemaDisplayData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+    path: str
+    description: str | None = None
+    parameters: list[SchemaParameter] | None = None
+    requestBody: list[SchemaProperty] | None = None
+    responseBody: list[SchemaProperty] | None = None
+
+
+class SchemaDisplayArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.SCHEMA_DISPLAY
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_schema_display_artifact() to render an API endpoint specification.
+        Provide a unique `id` slug (e.g. 'create-user-endpoint'),
+        the HTTP `method` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), the `path` string,
+        optional `description` of the endpoint,
+        optional `parameters` list (each with `name`, `type`, optional `required`,
+        `description`, `location` — path/query/header/cookie),
+        optional `requestBody` and `responseBody` as lists of SchemaProperty
+        (each with `name`, `type`, optional `required`, `description`, `example`,
+        and nested `properties`).
+        Call it when documenting or explaining an API endpoint.
+    """)
+    data: SchemaDisplayData
+
+
+# ── TestResults ───────────────────────────────────────────────────────────────
+
+
+class TestCase(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str
+    status: Literal["passed", "failed", "skipped"]
+    duration: float | None = None
+    errorMessage: str | None = None
+    errorStack: str | None = None
+
+
+class TestSuite(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str
+    status: Literal["passed", "failed", "skipped"]
+    tests: list[TestCase]
+    passed: int | None = None
+    failed: int | None = None
+    skipped: int | None = None
+
+
+class TestResultsSummary(BaseModel):
+    passed: int
+    failed: int
+    skipped: int
+    total: int
+    duration: float | None = None
+
+
+class TestResultsData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    suites: list[TestSuite]
+    summary: TestResultsSummary | None = None
+
+
+class TestResultsArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.TEST_RESULTS
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_test_results_artifact() to display structured test run output.
+        Provide a unique `id` slug (e.g. 'unit-tests-run').
+        Each suite needs a unique `id`, `name`, overall `status`
+        ('passed'/'failed'/'skipped'), and a list of `tests`.
+        Each test needs `id`, `name`, `status`, optional `duration` (seconds),
+        and on failure: `errorMessage` and optional `errorStack`.
+        Optionally set suite `passed`/`failed`/`skipped` counts and a top-level
+        `summary` with totals and optional `duration`.
+        Call it after running a test suite to show results.
+    """)
+    data: TestResultsData
+
+
+# ── Task ─────────────────────────────────────────────────────────────────────
+
+
+class TaskItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    text: str
+    files: list[str] | None = None
+
+
+class TaskData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str
+    items: list[TaskItem]
+    defaultOpen: bool | None = None
+
+
+class TaskArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.TASK
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_task_artifact() to show a collapsible task group with a list of work items.
+        Provide a unique `id` slug (e.g. 'search-files'), a `title` shown in the header,
+        and `items` — each with a unique `id`, a `text` description,
+        and optional `files` list of filename strings displayed as inline chips.
+        Set `defaultOpen` to false to render collapsed initially (default open).
+        Use this for agent sub-tasks, search results, or file operations
+        where the detail can be collapsed after review.
+    """)
+    data: TaskData
+
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+
+
+class ImageData(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    url: str
+    alt: str | None = None
+    mimeType: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+class ImageArtifact(ArtifactSchema):
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.IMAGE
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_image_artifact() to display a generated or retrieved image.
+        Provide a unique `id` slug (e.g. 'generated-chart'), the image `url`,
+        optional `alt` text for accessibility, optional `mimeType` (e.g. 'image/png'),
+        and optional `width`/`height` in pixels.
+        Call it when presenting an image result to the user.
+    """)
+    data: ImageData

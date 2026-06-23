@@ -6,12 +6,21 @@ from django.conf import settings
 from django_ai_sdk import (
     ApprovalCardArtifact,
     Assistant,
+    ChainOfThoughtArtifact,
+    CodeBlockArtifact,
+    ConfirmationArtifact,
     DataTableArtifact,
+    ImageArtifact,
     OptionListArtifact,
     PlanArtifact,
     ProgressTrackerArtifact,
     QuestionFlowArtifact,
+    SchemaDisplayArtifact,
+    SnippetArtifact,
+    StackTraceArtifact,
+    TaskArtifact,
     TerminalArtifact,
+    TestResultsArtifact,
 )
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistants import auto_register
@@ -54,12 +63,21 @@ class WorkspaceAssistant(Assistant):
     tools: list = [get_today]
     artifacts: list = [
         ApprovalCardArtifact,
+        ChainOfThoughtArtifact,
+        CodeBlockArtifact,
+        ConfirmationArtifact,
         DataTableArtifact,
+        ImageArtifact,
         OptionListArtifact,
         PlanArtifact,
         ProgressTrackerArtifact,
         QuestionFlowArtifact,
+        SchemaDisplayArtifact,
+        SnippetArtifact,
+        StackTraceArtifact,
+        TaskArtifact,
         TerminalArtifact,
+        TestResultsArtifact,
     ]
 
     def _build_generator(self) -> OpenAIChatGenerator:
