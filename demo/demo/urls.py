@@ -17,13 +17,15 @@ Including another URLconf
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from allauth.headless.internal.sessionkit import authenticate_by_x_session_token
 from django.contrib import admin
 from django.core.exceptions import ObjectDoesNotExist
 from django.urls import include, path
 from django_ai_sdk.permissions import PermissionDenied
 from ninja import NinjaAPI
+from ninja.security import APIKeyHeader
 
 from piratespeak.views_integrations_ninja import router as integrations_router
 from piratespeak.views_memories_ninja import router as memories_router
@@ -33,8 +35,23 @@ if TYPE_CHECKING:
     from django.http import HttpRequest, HttpResponse
 
 
+class XSessionTokenAuth(APIKeyHeader):
+    param_name = "X-Session-Token"
+
+    def authenticate(self, request: HttpRequest, key: str | None) -> Any:
+        if not key:
+            return None
+        result = authenticate_by_x_session_token(key)
+        if result:
+            request.user = result[0]
+            return result[0]
+        return None
+
+
+x_session_token_auth = XSessionTokenAuth()
+
 # Create the main API instance
-api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
+api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0", auth=x_session_token_auth)
 
 api.add_router("/", piratespeak_router)
 api.add_router("/memories", memories_router)
@@ -65,6 +82,8 @@ def _on_value_error(request: HttpRequest, exc: ValueError) -> HttpResponse:
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("accounts/", include("allauth.urls")),
+    path("_allauth/", include("allauth.headless.urls")),
     path("api/", api.urls),
     path("api/v2/", include("piratespeak.views_drf")),
     path("api/v2/", include("piratespeak.views_memories_drf")),
