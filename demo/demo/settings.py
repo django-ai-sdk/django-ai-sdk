@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
 from django_ai_sdk.mcp.schemas import TokenMCPServer
 
 env = environ.Env(
@@ -44,7 +45,13 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # auth
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
+    "allauth.usersessions",
     # third-party
+    "corsheaders",
     "django_watchfiles",
     "rest_framework",
     "django_tasks",
@@ -62,6 +69,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # auth
+    "allauth.account.middleware.AccountMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = "demo.urls"
@@ -80,7 +90,6 @@ TEMPLATES = [
         },
     },
 ]
-
 
 # ASGI application
 ASGI_APPLICATION = "demo.asgi.application"
@@ -128,6 +137,40 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Authentication
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+HEADLESS_ONLY = True
+
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": "http://localhost:3000/verify-email/{key}",
+    "account_reset_password_from_key": "http://localhost:3000/password/reset/key/{key}",
+    "account_signup": "http://localhost:3000/signup",
+}
+
+# Accounts
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_LOGIN_METHODS = {"email"}
+
+
+# CORS
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-session-token",
+    "x-email-verification-key",
+    "x-password-reset-key",
+)
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -206,6 +249,15 @@ AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
 AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/mcp"
 
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "allauth.headless.contrib.rest_framework.authentication.XSessionTokenAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
 
 # Allowed upload filetypes
 AI_SDK_ALLOWED_FILES = {
