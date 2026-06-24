@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import AssistantService
@@ -1164,3 +1166,49 @@ async def run_workflow_by_id(
         return 404, Error(message="Workflow not found")
     except Exception as e:
         return 500, Error(message=str(e))
+
+
+class UserSchema(Schema):
+    id: Any
+    first_name: str
+    last_name: str
+
+
+class UserDetailSchema(Schema):
+    id: Any
+    first_name: str
+    last_name: str
+    email: str
+
+
+class UserUpdateSchema(Schema):
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+@router.get("/users/", response=list[UserSchema], operation_id="list_users")
+def list_users(request: HttpRequest, q: str = "", limit: int = 10) -> Any:
+    User = get_user_model()
+    qs = User.objects.order_by("first_name", "last_name")
+    if q.strip():
+        qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q))
+    return list(qs.values("id", "first_name", "last_name")[: min(limit, 100)])
+
+
+@router.get("/users/me/", response=UserDetailSchema, operation_id="get_me")
+def get_me(request: HttpRequest) -> Any:
+    User = get_user_model()
+    return User.objects.get(pk=request.user.pk)
+
+
+@router.patch("/users/me/", response=UserDetailSchema, operation_id="update_me")
+def update_me(request: HttpRequest, payload: UserUpdateSchema) -> Any:
+    User = get_user_model()
+    user = User.objects.get(pk=request.user.pk)
+    update_fields = []
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(user, field, value)
+        update_fields.append(field)
+    if update_fields:
+        user.save(update_fields=update_fields)
+    return user

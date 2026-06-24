@@ -3,7 +3,11 @@ from __future__ import annotations
 
 # Conversation models from chats app
 from .artifacts.models import Artifact
-from .assistants.models import AssistantGroup, AssistantSettings, AssistantUser
+from .assistants.models import (
+    AssistantGroup,
+    AssistantSettings,
+    AssistantUser,
+)
 from .conversation.models import (
     Message,
     Thread,
