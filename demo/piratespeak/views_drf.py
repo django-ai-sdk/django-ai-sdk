@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from django.contrib.auth import get_user_model
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
@@ -982,6 +983,84 @@ class WorkflowActionsAPIView(APIView):
         return Response(WorkflowService.list_actions())
 
 
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+
+class UserSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+
+
+class UserListAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        User = get_user_model()
+        qs = User.objects.order_by("first_name", "last_name")
+        q = request.query_params.get("q", "").strip()
+        if q:
+            from django.db.models import Q
+
+            qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q))
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+        serializer = UserSerializer(qs.values("id", "first_name", "last_name")[:limit], many=True)
+        return Response(serializer.data)
+
+
+class UserDetailSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    email = serializers.EmailField()
+
+
+class UserUpdateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False)
+    last_name = serializers.CharField(required=False)
+
+
+class UserSessionSerializer(serializers.Serializer):
+    session_key = serializers.CharField()
+    ip = serializers.CharField()
+    user_agent = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    last_seen_at = serializers.DateTimeField()
+
+
+class UserDetailAPIView(APIView):
+    def get(self, request: Request, user_id: str) -> Response:
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        return Response(UserDetailSerializer(user).data)
+
+    def patch(self, request: Request, user_id: str) -> Response:
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        serializer = UserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        update_fields = []
+        for field, value in serializer.validated_data.items():
+            setattr(user, field, value)
+            update_fields.append(field)
+        if update_fields:
+            user.save(update_fields=update_fields)
+        return Response(UserDetailSerializer(user).data)
+
+
+class UserSessionListAPIView(APIView):
+    def get(self, request: Request, user_id: str) -> Response:
+        from allauth.usersessions.models import UserSession
+
+        sessions = UserSession.objects.filter(user_id=user_id).order_by("-last_seen_at")
+        return Response(UserSessionSerializer(sessions, many=True).data)
+
+
 urlpatterns = [
     path("assistants/", ListAssistantsAPIView.as_view(), name="assistant-list"),
     path(
@@ -1102,4 +1181,7 @@ urlpatterns = [
         WorkflowRunByIdAPIView.as_view(),
         name="workflow-run-by-id",
     ),
+    path("users/", UserListAPIView.as_view(), name="user-list"),
+    path("users/<str:user_id>/", UserDetailAPIView.as_view(), name="user-detail"),
+    path("users/<str:user_id>/sessions/", UserSessionListAPIView.as_view(), name="user-sessions"),
 ]
