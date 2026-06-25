@@ -135,12 +135,17 @@ class ThreadService(PermissionsMixin):
     async def threads(
         cls,
         user: UserType,
+        *,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
 
         Args:
             user: Optional user for filtering thread ownership
+            limit: Maximum threads to return (default 100)
+            offset: Number of threads to skip
 
         Returns:
             List of ThreadInfo from all storage types
@@ -160,7 +165,7 @@ class ThreadService(PermissionsMixin):
         all_threads.sort(key=lambda t: t.updated_at, reverse=True)
 
         logger.debug(f"Total threads: {len(all_threads)}")
-        return all_threads
+        return all_threads[offset : offset + limit]
 
     @classmethod
     async def update_thread(

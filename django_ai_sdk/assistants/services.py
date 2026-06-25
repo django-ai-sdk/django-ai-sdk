@@ -159,6 +159,9 @@ class AssistantService(PermissionsMixin):
     async def list_assistants(
         cls,
         user: UserType,
+        *,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[AssistantSummary]:
         """Return all assistants the user is allowed to view (registry + DB-backed)."""
         result: list[AssistantSummary] = []
@@ -189,7 +192,7 @@ class AssistantService(PermissionsMixin):
                 continue
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
 
-        return result
+        return result[offset : offset + limit]
 
     @classmethod
     async def get_assistant_info(cls, assistant_id: str, user: UserType) -> AssistantInfo:

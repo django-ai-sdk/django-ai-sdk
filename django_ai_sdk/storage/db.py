@@ -106,7 +106,11 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def list_threads(
-        cls, user: AbstractBaseUser | AnonymousUser | None = None
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[ThreadInfo]:
         """List all threads from database."""
         queryset = Thread.objects.all()
@@ -117,6 +121,11 @@ class DbStorageAdapter(BaseStorageAdapter):
         queryset = queryset.annotate(
             msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
         ).order_by("-updated_at")
+
+        if limit is not None:
+            queryset = queryset[offset : offset + limit]
+        elif offset:
+            queryset = queryset[offset:]
 
         threads = []
         async for thread in queryset:

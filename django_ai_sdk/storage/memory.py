@@ -116,11 +116,19 @@ class MemoryStore:
         return cls.threads.get(thread_id)
 
     @classmethod
-    def list_threads(cls, user_id: str | None = None) -> list[MemoryThread]:
+    def list_threads(
+        cls,
+        user_id: str | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[MemoryThread]:
         """List all threads, optionally filtered by user."""
         threads = list(cls.threads.values())
         if user_id:
             threads = [t for t in threads if t.user_id == user_id]
+        if offset or limit is not None:
+            threads = threads[offset : (offset + limit) if limit is not None else None]
         return threads
 
     @classmethod
@@ -318,11 +326,15 @@ class MemoryStorageAdapter(BaseStorageAdapter):
 
     @classmethod
     async def list_threads(
-        cls, user: AbstractBaseUser | AnonymousUser | None = None
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[ThreadInfo]:
         """List all threads in memory."""
         user_id = str(user.pk) if user and user.is_authenticated else None
-        threads = MemoryStore.list_threads(user_id)
+        threads = MemoryStore.list_threads(user_id, limit=limit, offset=offset)
         result = []
         for thread in threads:
             messages = MemoryStore.get_messages(thread.id, include_deleted=False)

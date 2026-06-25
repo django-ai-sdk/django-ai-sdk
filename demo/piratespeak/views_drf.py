@@ -172,7 +172,9 @@ class ChatRequestSerializer(serializers.Serializer):
 
 class ThreadListAPIView(APIView):
     def get(self, request: Request) -> Response:
-        threads = list_threads(user=request.user)
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
+        threads = list_threads(user=request.user, limit=limit, offset=offset)
         items = [
             {
                 "id": t.id,
@@ -328,8 +330,10 @@ class RestoreMessageAPIView(APIView):
 
 class ListAssistantsAPIView(APIView):
     def get(self, request: Request) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            items = list_assistants(user=request.user)
+            items = list_assistants(user=request.user, limit=limit, offset=offset)
             return Response(ListAssistantsSerializer({"assistants": items}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -827,7 +831,9 @@ class WorkflowListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
         from django_ai_sdk.workflows import WorkflowService
 
-        records = await WorkflowService.list_workflows()
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
+        records = await WorkflowService.list_workflows(limit=limit, offset=offset)
         return Response(WorkflowSerializer(records, many=True).data)
 
     async def post(self, request: Request) -> Response:
@@ -956,8 +962,10 @@ class WorkflowRunListAPIView(APIView):
     async def get(self, request: Request, workflow_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowService
 
+        limit = int(request.query_params.get("limit", 50))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            runs = await WorkflowService.list_runs(workflow_id)
+            runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
             return Response(WorkflowRunSerializer(runs, many=True).data)
         except Exception as e:
             return Response({"message": str(e)}, status=500)

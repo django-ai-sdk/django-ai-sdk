@@ -123,13 +123,15 @@ class WorkflowService:
         return await WorkflowSettings.objects.aget(id=workflow_id)
 
     @staticmethod
-    async def list_workflows(*, active_only: bool = True) -> list[Any]:
+    async def list_workflows(
+        *, active_only: bool = True, limit: int = 100, offset: int = 0
+    ) -> list[Any]:
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         qs = WorkflowSettings.objects.all()
         if active_only:
             qs = qs.filter(active=True)
-        return [r async for r in qs]
+        return [r async for r in qs[offset : offset + limit]]
 
     # --- Run history ---
 
