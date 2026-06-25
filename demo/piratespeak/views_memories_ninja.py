@@ -46,9 +46,11 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | 
 
 
 @router.get("", response={200: list[MemoryOut], 403: dict}, operation_id="list_memories")
-async def list_memories(request: HttpRequest) -> list[MemoryOut] | tuple[int, dict]:
+async def list_memories(
+    request: HttpRequest, limit: int = 100, offset: int = 0
+) -> list[MemoryOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_memories(user=request.user)
+        return await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -124,10 +126,12 @@ async def get_document_status(
     operation_id="list_documents",
 )
 async def list_documents(
-    request: HttpRequest, memory_id: str
+    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
 ) -> list[DocumentOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_documents(memory_id, user=request.user)
+        return await MemoryService.list_documents(
+            memory_id, user=request.user, limit=limit, offset=offset
+        )
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -193,10 +197,12 @@ async def unlink_thread(
     operation_id="list_thread_memories",
 )
 async def list_thread_memories(
-    request: HttpRequest, thread_id: str
+    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
 ) -> list[ThreadMemoryOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_thread_memories(thread_id, user=request.user)
+        return await MemoryService.list_thread_memories(
+            thread_id, user=request.user, limit=limit, offset=offset
+        )
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -247,8 +253,12 @@ async def get_thread_file_status(
 @router.get(
     "/thread/{thread_id}/files", response=list[DocumentOut], operation_id="list_thread_files"
 )
-async def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
-    return await MemoryService.list_thread_files(thread_id, user=request.user)
+async def list_thread_files(
+    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
+) -> list[DocumentOut]:
+    return await MemoryService.list_thread_files(
+        thread_id, user=request.user, limit=limit, offset=offset
+    )
 
 
 @router.delete(
@@ -296,10 +306,12 @@ async def disconnect_memory_from_thread(
     operation_id="list_memory_users",
 )
 async def list_memory_users(
-    request: HttpRequest, memory_id: str
+    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
 ) -> list[MemoryUserOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_memory_users(memory_id, user=request.user)
+        return await MemoryService.list_memory_users(
+            memory_id, user=request.user, limit=limit, offset=offset
+        )
     except ValueError as e:
         return 404, {"detail": str(e)}
     except PermissionDenied as e:

@@ -129,8 +129,10 @@ class DocumentStatusOutSerializer(serializers.Serializer):
 
 class MemoryListCreateAPIView(APIView):
     def get(self, request: Request) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            memories = list_memories(user=request.user)
+            memories = list_memories(user=request.user, limit=limit, offset=offset)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         return Response(MemoryOutSerializer(memories, many=True).data)
@@ -196,8 +198,10 @@ class DocumentListCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request: Request, memory_id: str) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            documents = list_documents(memory_id, user=request.user)
+            documents = list_documents(memory_id, user=request.user, limit=limit, offset=offset)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         return Response(DocumentOutSerializer(documents, many=True).data)
@@ -249,8 +253,12 @@ class LinkMemoryThreadAPIView(APIView):
 
 class ThreadMemoryListAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            memories = list_thread_memories(thread_id, user=request.user)
+            memories = list_thread_memories(
+                thread_id, user=request.user, limit=limit, offset=offset
+            )
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         return Response(ThreadMemoryOutSerializer(memories, many=True).data)
@@ -298,7 +306,9 @@ class ThreadFileListCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request: Request, thread_id: str) -> Response:
-        files = list_thread_files(thread_id, user=request.user)
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
+        files = list_thread_files(thread_id, user=request.user, limit=limit, offset=offset)
         return Response(DocumentOutSerializer(files, many=True).data)
 
     def post(self, request: Request, thread_id: str) -> Response:
@@ -326,8 +336,10 @@ class DocumentStatusAPIView(APIView):
 
 class MemoryUserListCreateAPIView(APIView):
     def get(self, request: Request, memory_id: str) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            users = list_memory_users(memory_id, user=request.user)
+            users = list_memory_users(memory_id, user=request.user, limit=limit, offset=offset)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:

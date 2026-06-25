@@ -156,13 +156,19 @@ class BaseStorageAdapter(ABC):
     @classmethod
     @abstractmethod
     async def list_threads(
-        cls, user: AbstractBaseUser | AnonymousUser | None = None
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[ThreadInfo]:
         """
         List all threads in this storage.
 
         Args:
             user: Optional filter by user
+            limit: Maximum number of threads to return (None = no limit)
+            offset: Number of threads to skip
 
         Returns:
             List of ThreadInfo objects

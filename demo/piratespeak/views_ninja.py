@@ -161,9 +161,9 @@ def health_check(request: HttpRequest) -> HealthResponse:
 @router.get(
     "/threads/", response={200: ThreadListResponse, 500: Error}, operation_id="list_threads"
 )
-async def list_threads(request: HttpRequest) -> Any:
+async def list_threads(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
     try:
-        all_threads = await ThreadService.threads(user=request.user)
+        all_threads = await ThreadService.threads(user=request.user, limit=limit, offset=offset)
         items = [
             ThreadListItem(
                 id=t.id,
@@ -802,9 +802,11 @@ async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_i
     response={200: AssistantsListResponse, 403: Error, 500: Error},
     operation_id="list_assistants",
 )
-async def list_assistants(request: HttpRequest) -> Any:
+async def list_assistants(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
     try:
-        items = await AssistantService.list_assistants(user=request.user)
+        items = await AssistantService.list_assistants(
+            user=request.user, limit=limit, offset=offset
+        )
         return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
     except PermissionDenied as e:
         return 403, Error(message=str(e))
@@ -1012,8 +1014,8 @@ class WorkflowRunByIdRequest(Schema):
     response={200: list[WorkflowItem]},
     operation_id="list_workflows",
 )
-async def list_workflows(request: HttpRequest) -> Any:
-    records = await WorkflowService.list_workflows()
+async def list_workflows(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+    records = await WorkflowService.list_workflows(limit=limit, offset=offset)
     return [
         WorkflowItem(id=str(r.id), name=r.name, definition=r.definition, active=r.active)
         for r in records
@@ -1040,9 +1042,11 @@ async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) 
     response={200: list[WorkflowRunOut], 500: Error},
     operation_id="list_workflow_runs",
 )
-async def list_workflow_runs(request: HttpRequest, workflow_id: str) -> Any:
+async def list_workflow_runs(
+    request: HttpRequest, workflow_id: str, limit: int = 50, offset: int = 0
+) -> Any:
     try:
-        runs = await WorkflowService.list_runs(workflow_id)
+        runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
         return [
             WorkflowRunOut(
                 id=str(r.id),
@@ -1171,109 +1175,6 @@ async def run_workflow_by_id(
         return 404, Error(message="Workflow not found")
     except Exception as e:
         return 500, Error(message=str(e))
-
-
-class AssistantOwnerSchema(Schema):
-    user_id: str
-    first_name: str
-    last_name: str
-    can_manage: bool
-
-
-class AssistantOwnerAddSchema(Schema):
-    user_id: str
-    can_manage: bool = False
-
-
-class AssistantOwnerUpdateSchema(Schema):
-    can_manage: bool
-
-
-@router.get(
-    "/assistants/runtimes/{runtime_id}/owners/",
-    response={200: list[AssistantOwnerSchema], 404: Error},
-    operation_id="list_assistant_owners",
-)
-async def list_assistant_owners(request: HttpRequest, runtime_id: str) -> Any:
-    try:
-        owners = await AssistantOwnerService.list(runtime_id)
-        return 200, [
-            {
-                "user_id": str(o.user_id),
-                "first_name": o.user.first_name,
-                "last_name": o.user.last_name,
-                "can_manage": o.can_manage,
-            }
-            for o in owners
-        ]
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-
-@router.post(
-    "/assistants/runtimes/{runtime_id}/owners/",
-    response={201: AssistantOwnerSchema, 403: Error, 404: Error},
-    operation_id="add_assistant_owner",
-)
-async def add_assistant_owner(
-    request: HttpRequest, runtime_id: str, payload: AssistantOwnerAddSchema
-) -> Any:
-    try:
-        from django_ai_sdk.assistants.models import AssistantSettingsOwner
-
-        owner = await AssistantOwnerService.add(
-            runtime_id, payload.user_id, payload.can_manage, user=request.user
-        )
-        owner = await AssistantSettingsOwner.objects.select_related("user").aget(pk=owner.pk)
-        return 201, {
-            "user_id": str(owner.user_id),
-            "first_name": owner.user.first_name,
-            "last_name": owner.user.last_name,
-            "can_manage": owner.can_manage,
-        }
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-
-@router.patch(
-    "/assistants/runtimes/{runtime_id}/owners/{user_id}/",
-    response={200: AssistantOwnerSchema, 403: Error, 404: Error},
-    operation_id="update_assistant_owner",
-)
-async def update_assistant_owner(
-    request: HttpRequest, runtime_id: str, user_id: str, payload: AssistantOwnerUpdateSchema
-) -> Any:
-    try:
-        owner = await AssistantOwnerService.update(
-            runtime_id, user_id, payload.can_manage, user=request.user
-        )
-        return 200, {
-            "user_id": str(owner.user_id),
-            "first_name": owner.user.first_name,
-            "last_name": owner.user.last_name,
-            "can_manage": owner.can_manage,
-        }
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-
-@router.delete(
-    "/assistants/runtimes/{runtime_id}/owners/{user_id}/",
-    response={204: None, 403: Error, 404: Error},
-    operation_id="remove_assistant_owner",
-)
-async def remove_assistant_owner(request: HttpRequest, runtime_id: str, user_id: str) -> Any:
-    try:
-        await AssistantOwnerService.remove(runtime_id, user_id, user=request.user)
-        return 204, None
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except ValueError as e:
-        return 404, Error(message=str(e))
 
 
 class UserSchema(Schema):
