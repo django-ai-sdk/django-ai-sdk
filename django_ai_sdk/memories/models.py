@@ -52,9 +52,10 @@ class Memory(models.Model):
                 self.slug = slug
         super().save(*args, **kwargs)
 
-    async def get_tool_spec(self) -> ToolSpec:
+    async def get_tool_spec(self, doc_count: int | None = None) -> ToolSpec:
         """Generate ToolSpec for this memory."""
-        doc_count = await Entry.objects.filter(memory_id=self.id).acount()
+        if doc_count is None:
+            doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
             name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
