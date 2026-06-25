@@ -28,6 +28,7 @@ class AssistantSettings(models.Model):
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
     active = models.BooleanField(default=True, db_index=True)
+    is_public = models.BooleanField(default=False)
 
     # Reverse relation type hints
     assistant_users: models.Manager[AssistantUser]
@@ -73,6 +74,7 @@ class AssistantUser(models.Model):
         on_delete=models.CASCADE,
         related_name="assistants",
     )
+    user_id: int  # Django FK attrib — no query needed
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

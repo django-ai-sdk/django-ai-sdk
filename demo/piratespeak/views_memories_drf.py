@@ -39,11 +39,17 @@ if TYPE_CHECKING:
     from rest_framework.request import Request
 
 
+class OwnerInSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
 class MemoryInSerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.CharField(required=False, default="")
     description = serializers.CharField(required=False, default="")
     is_public = serializers.BooleanField(required=False, default=True)
+    owners = OwnerInSerializer(many=True, required=False, default=list)
 
 
 class MemoryOutSerializer(serializers.Serializer):
@@ -142,6 +148,11 @@ class MemoryListCreateAPIView(APIView):
             )
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
+        for owner in serializer.validated_data.get("owners") or []:  # type: ignore[union-attr]
+            try:
+                add_owner(str(memory.id), owner["user_id"], owner["can_manage"], user=request.user)
+            except Exception:
+                pass
         return Response(MemoryOutSerializer(memory).data)
 
 
@@ -166,6 +177,11 @@ class MemoryDetailAPIView(APIView):
             )
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
+        for owner in serializer.validated_data.get("owners") or []:  # type: ignore[union-attr]
+            try:
+                add_owner(memory_id, owner["user_id"], owner["can_manage"], user=request.user)
+            except Exception:
+                pass
         return Response(MemoryOutSerializer(memory).data)
 
     def delete(self, request: Request, memory_id: str) -> Response:
