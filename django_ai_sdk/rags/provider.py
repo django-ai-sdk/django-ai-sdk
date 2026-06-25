@@ -117,9 +117,9 @@ class RAGProvider:
         if rag_instance is None:
             return None
         if spec is not None and hasattr(rag_instance, "get_tool"):
-            return rag_instance.get_tool(spec)
+            return await rag_instance.get_tool(spec)
         if hasattr(rag_instance, "as_tool"):
-            return rag_instance.as_tool()
+            return await rag_instance.as_tool()
         logger.warning(
             "Cannot build ComponentTool: rag_instance has neither get_tool() nor as_tool()"
         )
@@ -247,7 +247,7 @@ class RAGProvider:
                         logger.debug(
                             f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})"
                         )
-                        rag.warmup(force_rebuild)
+                        await rag.warmup(force_rebuild)
                 self._cache[cache_key] = rag
             else:
                 self._cache[cache_key] = None
