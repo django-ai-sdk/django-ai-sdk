@@ -89,7 +89,7 @@ class BM25QueryExpanderRAG(RAGBase):
         writer = DocumentWriter(document_store)
         writer.run(documents=documents)
 
-    def warmup(self, force_rebuild: bool = False) -> None:
+    async def warmup(self, force_rebuild: bool = False) -> None:
         """
         Build or load indexed document store.
 
@@ -131,7 +131,7 @@ class BM25QueryExpanderRAG(RAGBase):
             f"BM25QueryExpanderRAG warmup complete: {len(self.documents)} source docs -> {indexed_count} docs indexed"
         )
 
-    def build_pipeline(self) -> AsyncPipeline:
+    async def build_pipeline(self) -> AsyncPipeline:
         """Build the RAG pipeline with BM25."""
         logger.debug("Building BM25 RAG query pipeline")
 
@@ -169,7 +169,7 @@ class BM25QueryExpanderRAG(RAGBase):
         logger.debug("BM25 RAG pipeline built successfully")
         return pipeline
 
-    def refresh_documents(self, documents: list[RagDocument]) -> None:
+    async def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
         Update the indexed documents in-place.
 
@@ -180,7 +180,7 @@ class BM25QueryExpanderRAG(RAGBase):
         logger.info(f"[refresh_documents] Refreshing BM25 index with {len(documents)} documents")
 
         if self._cached_document_store is None:
-            self.warmup(force_rebuild=True)
+            await self.warmup(force_rebuild=True)
             return
 
         document_store = self._cached_document_store
@@ -197,14 +197,14 @@ class BM25QueryExpanderRAG(RAGBase):
             f"[refresh_documents] Done: {len(documents)} source docs -> {indexed_count} docs"
         )
 
-    def as_tool(self) -> ComponentTool:
+    async def as_tool(self) -> ComponentTool:
         """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
             logger.debug("RAG needs warmup before creating tool, warming up now")
-            self.warmup()
+            await self.warmup()
 
         logger.debug("Creating BM25 RAG pipeline as ComponentTool")
-        pipeline = self.build_pipeline()
+        pipeline = await self.build_pipeline()
 
         rag_super = SuperComponent(
             pipeline=pipeline,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import TYPE_CHECKING
 
@@ -133,10 +134,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             return
 
         haystack_docs = [to_document(doc) for doc in documents]
-        self._index_documents(haystack_docs, self._cached_document_store)
+        await self._index_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to Qdrant index")
 
-    def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
+    async def _index_documents(self, documents: list, document_store: QdrantDocumentStore) -> None:
         """Index documents with chunking and embedding."""
 
         # Add original doc_id to metadata so we can delete by it later
@@ -179,7 +180,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         indexing_pipeline.connect("sparse_doc_embedder", "dense_doc_embedder")
         indexing_pipeline.connect("dense_doc_embedder", "writer")
 
-        indexing_pipeline.run({"documents": documents})
+        # Run sync pipeline in thread pool so embeddings don't block the event loop
+        await asyncio.to_thread(indexing_pipeline.run, {"documents": documents})
 
     async def remove_documents(self, document_ids: list[str]) -> None:
         """Remove documents from the Qdrant index."""
@@ -201,7 +203,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         except Exception as e:
             logger.error(f"Failed to remove documents: {e}")
 
-    def warmup(self, force_rebuild: bool = False) -> None:
+    async def warmup(self, force_rebuild: bool = False) -> None:
         """
         Build or load indexed document store.
 
@@ -247,7 +249,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         logger.debug(
             f"Writing {len(haystack_docs)} documents to Qdrant with chunking (size={self.config.chunk_size}, overlap={self.config.chunk_overlap})"
         )
-        self._index_documents(haystack_docs, document_store)
+        await self._index_documents(haystack_docs, document_store)
 
         indexed_count = document_store.count_documents()
         self._cached_document_store = document_store
@@ -256,7 +258,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
         )
 
-    def build_pipeline(self) -> AsyncPipeline:
+    async def build_pipeline(self) -> AsyncPipeline:
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -266,7 +268,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
             if not self._has_existing_index(document_store):
                 haystack_docs = self._convert_documents()
-                self._index_documents(haystack_docs, document_store)
+                await self._index_documents(haystack_docs, document_store)
 
         expander_generator = OpenAIChatGenerator(
             model=self.config.expander_model,
@@ -298,7 +300,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         logger.debug("Qdrant Hybrid RAG pipeline built")
         return query_pipeline
 
-    def refresh_documents(self, documents: list[RagDocument]) -> None:
+    async def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
         Update the indexed documents without releasing the Qdrant file lock.
 
@@ -312,7 +314,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         if self._cached_document_store is None:
             # Not yet warmed up — do a full warmup with force_rebuild
-            self.warmup(force_rebuild=True)
+            await self.warmup(force_rebuild=True)
             return
 
         document_store = self._cached_document_store
@@ -324,21 +326,21 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         # Convert and index using shared helper
         haystack_docs = self._convert_documents()
-        self._index_documents(haystack_docs, document_store)
+        await self._index_documents(haystack_docs, document_store)
 
         indexed_count = document_store.count_documents()
         logger.info(
             f"[refresh_documents] Done: {len(documents)} source docs → {indexed_count} chunks"
         )
 
-    def as_tool(self) -> ComponentTool:
+    async def as_tool(self) -> ComponentTool:
         """Return the RAG pipeline as a ComponentTool."""
         if self.needs_warmup:
             logger.debug("RAG needs warmup before creating tool, warming up now")
-            self.warmup()
+            await self.warmup()
 
         logger.debug("Creating Qdrant Hybrid RAG pipeline as ComponentTool")
-        pipeline = self.build_pipeline()
+        pipeline = await self.build_pipeline()
 
         rag_super = SuperComponent(
             pipeline=pipeline,

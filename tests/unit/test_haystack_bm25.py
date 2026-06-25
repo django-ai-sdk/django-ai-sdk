@@ -38,35 +38,38 @@ class TestHaystackBM25Init:
 class TestHaystackBM25Warmup:
     """Test Haystack BM25 warmup (document indexing)."""
 
-    def test_warmup_creates_store(self):
+    @pytest.mark.asyncio
+    async def test_warmup_creates_store(self):
         """Test that warmup creates the document store."""
         docs = [RagDocument(id=f"doc-{i}", content=f"Content {i}") for i in range(3)]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         assert rag._is_warmed_up
         assert rag._cached_document_store is not None
         assert rag._cached_document_store.count_documents() == 3
 
-    def test_warmup_skip_if_already_warmed(self):
+    @pytest.mark.asyncio
+    async def test_warmup_skip_if_already_warmed(self):
         """Test that warmup skips if already warmed up."""
         docs = [RagDocument(id="1", content="test")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
         assert rag._is_warmed_up
 
         # Store the current count
         count_before = rag._cached_document_store.count_documents()
 
         # Second warmup should skip (is_warmed_up remains True)
-        rag.warmup()
+        await rag.warmup()
         assert rag._is_warmed_up
         assert rag._cached_document_store.count_documents() == count_before
 
-    def test_warmup_with_empty_documents(self):
+    @pytest.mark.asyncio
+    async def test_warmup_with_empty_documents(self):
         """Test warmup with no documents."""
         rag = BM25QueryExpanderRAG(documents=[])
-        rag.warmup()
+        await rag.warmup()
 
         assert rag._is_warmed_up
         assert rag._cached_document_store is not None
@@ -80,7 +83,7 @@ class TestHaystackBM25AddDocuments:
         """Test adding new documents to existing index."""
         docs = [RagDocument(id="1", content="Original")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         new_docs = [RagDocument(id="2", content="New content")]
         await rag.add_documents(new_docs)
@@ -92,7 +95,7 @@ class TestHaystackBM25AddDocuments:
         """Test adding multiple documents at once."""
         docs = [RagDocument(id="1", content="Original")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         new_docs = [
             RagDocument(id="2", content="Second"),
@@ -107,7 +110,7 @@ class TestHaystackBM25AddDocuments:
         """Test adding documents when not warmed up."""
         docs = [RagDocument(id="1", content="Original")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()  # Warmup first!
+        await rag.warmup()  # Warmup first!
 
         new_docs = [RagDocument(id="2", content="New")]
         await rag.add_documents(new_docs)
@@ -127,7 +130,7 @@ class TestHaystackBM25RemoveDocuments:
             RagDocument(id="2", content="Remove"),
         ]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         await rag.remove_documents(["2"])
 
@@ -138,7 +141,7 @@ class TestHaystackBM25RemoveDocuments:
         """Test removing non-existent document (no error)."""
         docs = [RagDocument(id="1", content="Only")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         await rag.remove_documents(["nonexistent"])  # Should not raise
 
@@ -153,7 +156,7 @@ class TestHaystackBM25RemoveDocuments:
             RagDocument(id="3", content="Third"),
         ]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         await rag.remove_documents(["1", "3"])
 
@@ -163,27 +166,29 @@ class TestHaystackBM25RemoveDocuments:
 class TestHaystackBM25RefreshDocuments:
     """Test refreshing all documents."""
 
-    def test_refresh_documents(self):
+    @pytest.mark.asyncio
+    async def test_refresh_documents(self):
         """Test refreshing with completely new documents."""
         docs = [RagDocument(id="old", content="old")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         new_docs = [RagDocument(id="new", content="new")]
-        rag.refresh_documents(new_docs)
+        await rag.refresh_documents(new_docs)
 
         assert rag._cached_document_store.count_documents() == 1
 
-    def test_refresh_updates_in_place(self):
+    @pytest.mark.asyncio
+    async def test_refresh_updates_in_place(self):
         """Test that refresh reuses the cached store."""
         docs = [RagDocument(id="old", content="old")]
         rag = BM25QueryExpanderRAG(documents=docs)
-        rag.warmup()
+        await rag.warmup()
 
         old_store = rag._cached_document_store
 
         new_docs = [RagDocument(id="new", content="new")]
-        rag.refresh_documents(new_docs)
+        await rag.refresh_documents(new_docs)
 
         # Should reuse the same store instance
         assert rag._cached_document_store is old_store

@@ -13,7 +13,7 @@ call would complete synchronously and the test would pass trivially.
 """
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.rags.schemas import RagDocument
@@ -36,7 +36,7 @@ def _make_assistant(call_counter: list, rag: object) -> MagicMock:
 def _make_rag() -> MagicMock:
     rag = MagicMock()
     rag.needs_warmup = True
-    rag.warmup = MagicMock()
+    rag.warmup = AsyncMock()
     return rag
 
 
