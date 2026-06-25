@@ -244,10 +244,10 @@ class Assistant(ABC, AssistantInfoMixin):
         )
 
         if self.warmup_on_init and self.rag_provider is not None:
-            # Warmup RAG provider on init
-            # TODO: delegate this to background task and check status.
-            # for now this won't block the main thread, but it can become very slow.
-            asyncio.get_event_loop().run_until_complete(self.rag_provider.warmup(self, None))
+            try:
+                asyncio.get_running_loop().create_task(self.rag_provider.warmup(self, None))
+            except RuntimeError:
+                pass  # No running loop (e.g. management command) — warmup skipped
 
     async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
         """
