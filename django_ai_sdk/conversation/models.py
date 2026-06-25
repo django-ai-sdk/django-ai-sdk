@@ -51,6 +51,11 @@ class Thread(models.Model):
     class Meta:
         db_table = "django_ai_sdk_threads"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["user"]),
+            models.Index(fields=["-updated_at"]),
+            models.Index(fields=["-created_at"]),
+        ]
 
     def __str__(self) -> str:
         return self.title or f"Thread {self.id}"
@@ -98,6 +103,8 @@ class Message(models.Model):
         ordering = ["created_at"]
         indexes = [
             models.Index(fields=["thread", "created_at"]),
+            models.Index(fields=["is_deleted"]),
+            models.Index(fields=["thread", "created_at", "is_deleted"]),
         ]
 
     def __str__(self) -> str:
