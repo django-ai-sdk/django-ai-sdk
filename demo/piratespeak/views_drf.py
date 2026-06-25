@@ -531,6 +531,11 @@ class AssistantSettingsSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
+class AssistantOwnerInSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
 class AssistantSettingsCreateSerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.SlugField(default="")
@@ -545,6 +550,7 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(default=False)
+    owners = AssistantOwnerInSerializer(many=True, required=False, default=list)
 
 
 class AssistantSettingsUpdateSerializer(serializers.Serializer):
@@ -561,6 +567,7 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(required=False)
     active = serializers.BooleanField(required=False)
+    owners = AssistantOwnerInSerializer(many=True, required=False)
 
 
 class RuntimeAssistantBasesAPIView(APIView):
