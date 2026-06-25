@@ -186,6 +186,9 @@ class Assistant(ABC, AssistantInfoMixin):
     # Enable automatic thread title generation based on chat messages
     title_generation: bool = True
 
+    # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories)
+    rag_document_limit: int = 10_000
+
     # Citation formatter used to render retrieved documents for the LLM.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
 
@@ -484,10 +487,9 @@ class Assistant(ABC, AssistantInfoMixin):
         # implementation details.
         from django_ai_sdk.memories.models import Entry
 
+        fields = ("id", "content", "data", "name", "memory_id")
         if memory_id:
-            return Entry.objects.filter(memory_id=memory_id)
-        # No memory scope → retrieve nothing. Returning every Entry in the system
-        # would leak content across memories; callers always pass a memory_id.
+            return Entry.objects.filter(memory_id=memory_id).only(*fields).order_by("-updated_at")
         return Entry.objects.none()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:

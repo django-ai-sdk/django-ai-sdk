@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
@@ -29,9 +30,13 @@ class RAGProvider:
                 return QdrantBM25HybridRAG(documents=docs)
     """
 
+    _MAX_CACHE_SIZE: int = 100
+
     def __init__(self) -> None:
-        # Cache: key = "{class_name}_{memory_id}", value = RAG instance
-        self._cache: dict[str, Any] = {}
+        # LRU cache: key = "{class_name}_{memory_id}", value = RAG instance.
+        # OrderedDict.move_to_end() on hit keeps recently-used entries at the back;
+        # popitem(last=False) evicts the LRU entry when the cap is reached.
+        self._cache: OrderedDict[str, Any] = OrderedDict()
         # Per-key locks prevent concurrent warmups for the same memory_id.
         # Backends like Qdrant local hold an exclusive file lock during warmup;
         # a second concurrent call for the same key would crash rather than wait.
@@ -225,6 +230,7 @@ class RAGProvider:
         # Fast path: return immediately if already cached and no rebuild requested.
         if cache_key in self._cache and not force_rebuild:
             logger.debug(f"Using cached RAG for {cache_key}")
+            self._cache.move_to_end(cache_key)  # mark as recently used
             return self._cache[cache_key]
 
         # Slow path: serialize warmup per key.
@@ -236,6 +242,7 @@ class RAGProvider:
             # populated the cache while we were waiting.
             if cache_key in self._cache and not force_rebuild:
                 logger.debug(f"Using cached RAG for {cache_key} (post-lock cache hit)")
+                self._cache.move_to_end(cache_key)  # mark as recently used
                 return self._cache[cache_key]
 
             logger.debug(f"Creating RAG for {cache_key} (force_rebuild={force_rebuild})")
@@ -251,6 +258,12 @@ class RAGProvider:
                 self._cache[cache_key] = rag
             else:
                 self._cache[cache_key] = None
+
+            # Evict LRU entries when over the cap; clean up their locks too
+            while len(self._cache) > self._MAX_CACHE_SIZE:
+                evicted_key, _ = self._cache.popitem(last=False)
+                self._warmup_locks.pop(evicted_key, None)
+                logger.debug(f"Evicted LRU RAG cache entry: {evicted_key}")
 
             logger.debug(f"RAG created and cached for {cache_key}")
             return self._cache[cache_key]
