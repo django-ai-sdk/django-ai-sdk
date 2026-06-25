@@ -172,6 +172,15 @@ class EntryDocument(models.Model):
         null=True,
         blank=True,
     )
+    # Direct link to the owning Memory, set at upload time. Lets in-flight and
+    # failed documents (which have no Entry yet) still be listed by memory.
+    memory = models.ForeignKey(
+        Memory,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        null=True,
+        blank=True,
+    )
     file = models.FileField(upload_to="memories/documents/")
     file_name = models.CharField(max_length=255, blank=True, default="")
     file_size = models.PositiveIntegerField(default=0)

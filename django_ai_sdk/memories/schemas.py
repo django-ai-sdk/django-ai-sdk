@@ -96,7 +96,13 @@ class DocumentIn(BaseModel):
 
 
 class DocumentOut(BaseModel):
-    """Schema for document output."""
+    """Schema for document output.
+
+    `id` is the EntryDocument id (stable across the upload → processing →
+    completed/failed lifecycle). `status` reflects EntryDocument.processing_status
+    and `error` carries any processing failure message. `content`/`extraction` are
+    only populated once processing has produced an Entry.
+    """
 
     id: str
     file: str
@@ -107,6 +113,8 @@ class DocumentOut(BaseModel):
     file_size: int
     content_type: str
     file_extension: str
+    status: str
+    error: str = ""
     created_at: str
     updated_at: str
 

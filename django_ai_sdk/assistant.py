@@ -362,13 +362,29 @@ class Assistant(ABC, AssistantInfoMixin):
             return []
 
         from django_ai_sdk.memories.models import ThreadMemory  # noqa: PLC0415
+        from django_ai_sdk.memories.services import can_read_memory  # noqa: PLC0415
 
         tools: list[Any] = []
-        memory_links = ThreadMemory.objects.filter(thread_id=thread_id, active=True).select_related(
-            "memory"
+        memory_links = (
+            ThreadMemory.objects.filter(thread_id=thread_id, active=True)
+            .select_related("memory")
+            .prefetch_related("memory__owners")
         )
 
         async for link in memory_links:
+            if link.memory is None:
+                # Stale link pointing at a deleted memory — skip silently.
+                continue
+            # Per-user retrieval gate: only retrieve from memories the user can
+            # read (staff / owner / public per AI_SDK_MEMORY_PERMISSIONS).
+            # Private, non-owned memories are excluded so the assistant still
+            # answers from whatever the user *can* read.
+            if not await can_read_memory(user, link.memory):
+                logger.debug(
+                    "Memory '{}' skipped for RAG — user lacks read access",
+                    link.memory.name,
+                )
+                continue
             spec = await link.memory.get_tool_spec()
             tool = await self.rag_provider.get_tool(
                 self,
@@ -409,7 +425,9 @@ class Assistant(ABC, AssistantInfoMixin):
 
         if memory_id:
             return Entry.objects.filter(memory_id=memory_id)
-        return Entry.objects.all()
+        # No memory scope → retrieve nothing. Returning every Entry in the system
+        # would leak content across memories; callers always pass a memory_id.
+        return Entry.objects.none()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:
         """

@@ -107,6 +107,27 @@ class IsAdminUser(BasePermission):
         )
 
 
+class IsInAllowedGroups(BasePermission):
+    """Allow only authenticated users belonging to one of the given auth groups.
+
+    Parameterized: instantiate with the allowed group names, e.g.
+    ``IsInAllowedGroups(groups=["Sales"])``. An empty list allows any authenticated
+    user (no restriction).
+    """
+
+    def __init__(self, groups: list[str] | None = None) -> None:
+        self.groups = list(groups or [])
+
+    async def has_permission(
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
+        if user is None or not bool(user.is_authenticated):
+            return False
+        if not self.groups:
+            return True
+        return await user.groups.filter(name__in=self.groups).aexists()
+
+
 class IsOwner(BasePermission):
     async def has_object_permission(
         self,
@@ -181,36 +202,93 @@ class MemoryDefaultPermission(BasePermission):
 
 
 @lru_cache(maxsize=1)
-def get_default_permissions() -> list[type[BasePermission]]:
-    """Resolve default permission classes from settings, falling back to AllowAll."""
+def _cached_default_permissions() -> tuple[type[BasePermission], ...]:
     paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
     if not paths:
-        return [AllowAll]
-    return [import_string(p) for p in paths]
+        return (AllowAll,)
+    return tuple(import_string(p) for p in paths)
+
+
+def get_default_permissions() -> list[type[BasePermission]]:
+    """Resolve default permission classes from settings, falling back to AllowAll."""
+    return list(_cached_default_permissions())
+
+
+@lru_cache(maxsize=1)
+def get_runtime_permission_registry() -> dict[str, str]:
+    """Return AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS mapping of key → dotted path.
+
+    Used by runtime (DB-configured) assistants to resolve their stored flat
+    access-level keys (e.g. "authenticated") back into permission classes.
+    """
+    return dict(getattr(settings, "AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS", {}))
+
+
+def resolve_permission_keys(
+    keys: list[str] | None,
+) -> list[type[BasePermission]]:
+    """Resolve a list of registry keys to permission classes.
+
+    Raises ``ValueError`` if *any* key is absent from
+    ``AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS``.  A partial miss (e.g. a typo
+    alongside a valid key) is as dangerous as a total miss because the intended
+    restriction is silently absent — so all-or-nothing resolution is enforced.
+
+    Pass an empty list (or ``None``) to get an empty list back without error;
+    the caller is then responsible for applying a safe default.
+    """
+    registry = get_runtime_permission_registry()
+    resolved: list[type[BasePermission]] = []
+    unknown: list[str] = []
+    for key in keys or []:
+        path = registry.get(key)
+        if path:
+            resolved.append(import_string(path))
+        else:
+            unknown.append(key)
+    if unknown:
+        raise ValueError(
+            f"Unknown permission key(s) {unknown!r}. "
+            "Check AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS in your settings."
+        )
+    return resolved
+
+
+def ensure_permission_instance(
+    perm: type[BasePermission] | BasePermission,
+) -> BasePermission:
+    """Normalise a permission class *or* instance to an instance.
+
+    Callers may store bare classes (e.g. ``[IsAuthenticated]``) or pre-built
+    instances (e.g. ``[IsInAllowedGroups(groups=["eng"])]``).  Both forms are
+    accepted throughout the permission-checking API; this helper enforces a
+    consistent runtime type.
+    """
+    return perm() if isinstance(perm, type) else perm
 
 
 async def check_permissions(
     user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
-    permissions: list[type[BasePermission]],
+    permissions: list[type[BasePermission] | BasePermission],
     **kwargs: Any,
 ) -> None:
     for perm_class in permissions:
-        perm = perm_class()
+        perm = ensure_permission_instance(perm_class)
         if not await perm.has_permission(user, operation, **kwargs):
-            raise PermissionDenied(f"{perm_class.__name__}: {operation.value} not permitted")
+            raise PermissionDenied(f"{type(perm).__name__}: {operation.value} not permitted")
 
 
 async def check_object_permissions(
     user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
     obj: Any,
-    permissions: list[type[BasePermission]],
+    permissions: list[type[BasePermission] | BasePermission],
     **kwargs: Any,
 ) -> None:
     for perm_class in permissions:
-        perm = perm_class()
+        perm = ensure_permission_instance(perm_class)
         if not await perm.has_object_permission(user, operation, obj, **kwargs):
             raise PermissionDenied(
-                f"{perm_class.__name__}: {operation.value} not permitted for this object"
+                f"{type(perm).__name__}: {operation.value} not permitted for this object"
             )

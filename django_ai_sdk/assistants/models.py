@@ -16,6 +16,12 @@ class AssistantSettings(models.Model):
     assistant = models.CharField(max_length=255, blank=True, default="")
     tools = models.JSONField(default=list, blank=True)
     mcp_servers = models.JSONField(default=list, blank=True)
+    # Knowledge bases linked to threads created with this assistant (Memory slugs).
+    memories = models.JSONField(default=list, blank=True)
+    # Flat access-level permission keys (resolved via AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS).
+    permissions = models.JSONField(default=list, blank=True)
+    # Optional access restriction to specific auth Group names (empty = no restriction).
+    allowed_groups = models.JSONField(default=list, blank=True)
     suggestion_enabled = models.BooleanField(default=False)
     title_generation = models.BooleanField(default=True)
     max_history = models.PositiveIntegerField(null=True, blank=True)

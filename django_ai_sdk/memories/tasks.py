@@ -23,8 +23,13 @@ async def run_file_pipeline(
     from django_ai_sdk.files.common import get_default_file_pipeline
     from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
 
-    entry_doc = await EntryDocument.objects.aget(id=entry_doc_id)
-    memory = await Memory.objects.aget(id=memory_id)
+    # The document may have been deleted (user cancelled an in-flight upload) or
+    # its memory removed before the worker picked up the task — treat as a no-op.
+    try:
+        entry_doc = await EntryDocument.objects.aget(id=entry_doc_id)
+        memory = await Memory.objects.aget(id=memory_id)
+    except (EntryDocument.DoesNotExist, Memory.DoesNotExist):
+        return
 
     entry_doc.processing_status = EntryDocument.ProcessingStatus.PROCESSING
     await entry_doc.asave(update_fields=["processing_status", "updated_at"])

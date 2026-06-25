@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.assistants.registry import registry
@@ -26,6 +26,7 @@ from django_ai_sdk.memories.tasks import process_document_upload
 from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
+    PermissionDenied,
     check_object_permissions,
     check_permissions,
     get_default_permissions,
@@ -41,12 +42,16 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=1)
-def _get_memory_permissions() -> list[type[BasePermission]]:
-    """Resolve permission classes from settings (cached)."""
+def _cached_memory_permissions() -> tuple[type[BasePermission], ...]:
     paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
     if not paths:
-        return get_default_permissions()
-    return [import_string(p) for p in paths]
+        return tuple(get_default_permissions())
+    return tuple(import_string(p) for p in paths)
+
+
+def _get_memory_permissions() -> list[type[BasePermission]]:
+    """Resolve permission classes from settings (cached)."""
+    return list(_cached_memory_permissions())
 
 
 async def _check_permission(
@@ -63,6 +68,21 @@ async def _check_object_permission(
     permissions = _get_memory_permissions()
     await check_permissions(user, operation, permissions)
     await check_object_permissions(user, operation, obj, permissions)
+
+
+async def can_read_memory(user: AbstractBaseUser | AnonymousUser | None, memory: Any) -> bool:
+    """Whether ``user`` passes the configured memory READ rule for ``memory``.
+
+    Boolean (non-raising) form of the ``VIEW_MEMORY`` object-permission check,
+    routed through ``AI_SDK_MEMORY_PERMISSIONS``. This is the single gate shared
+    by per-user RAG filtering, the memory-aware LLM tools and the source-content
+    endpoint, so retrieval and direct access can never diverge.
+    """
+    try:
+        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
+    except PermissionDenied:
+        return False
+    return True
 
 
 class MemoryService:
@@ -192,14 +212,26 @@ class MemoryService:
     async def list_memories(
         *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[MemoryOut]:
-        """List all visible memories."""
+        """List memories visible to the requesting user.
+
+        Staff see all non-hidden memories. Authenticated users see non-hidden
+        memories that are public or that they own. Anonymous users see only
+        public non-hidden memories.
+        """
         await _check_permission(user, Operation.VIEW_MEMORY)
 
-        memories = (
-            Memory.objects.filter(is_hidden=False)
-            .annotate(document_count=Count("entries"))
-            .order_by("-created_at")
-        )
+        base = Memory.objects.filter(is_hidden=False)
+        is_authenticated = user is not None and getattr(user, "is_authenticated", False)
+        is_staff = is_authenticated and getattr(user, "is_staff", False)
+
+        if is_staff:
+            qs = base
+        elif is_authenticated:
+            qs = base.filter(Q(is_public=True) | Q(owners__user=user)).distinct()
+        else:
+            qs = base.filter(is_public=True)
+
+        memories = qs.annotate(document_count=Count("entries")).order_by("-created_at")
         return [
             MemoryOut(
                 id=str(memory.id),
@@ -227,17 +259,40 @@ class MemoryService:
 
     @staticmethod
     async def link_memories(
-        assistant_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+        assistant_id: str,
+        thread_id: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        for memory_id in await MemoryService.get_assistant_memories(assistant_id):
-            await MemoryService.link_memory_to_thread(memory_id, thread_id, user=user)
+        """Link an assistant's configured memories to a thread (system action).
+
+        This is NOT gated on ``user``: the assistant's memories are curated by
+        whoever built the assistant, and the user already passed assistant access
+        to reach here. Whether each linked memory is actually *readable* by this
+        user is enforced later, per-request, by the retrieval filter
+        (``Assistant.get_rag_tools``) and the memory-aware tools — so a private
+        memory the user cannot read is simply never retrieved or listed for them,
+        rather than blocking thread creation with a permission error.
+        """
+        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
+        for memory_id in memory_ids:
+            await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory_id=memory_id)
 
     @staticmethod
     async def unlink_memories(
-        assistant_id: str, thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+        assistant_id: str,
+        thread_id: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        for memory_id in await MemoryService.get_assistant_memories(assistant_id):
-            await MemoryService.unlink_memory_from_thread(memory_id, thread_id, user=user)
+        """Unlink an assistant's configured memories from a thread (system action).
+
+        Counterpart to :meth:`link_memories`; ungated for the same reason.
+        """
+        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
+        if not memory_ids:
+            return
+        await ThreadMemory.objects.filter(thread_id=thread_id, memory_id__in=memory_ids).adelete()
 
     @staticmethod
     async def get_memory(
@@ -312,6 +367,7 @@ class MemoryService:
 
         entry_doc = await EntryDocument.objects.acreate(
             entry=None,
+            memory=memory,
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
@@ -321,7 +377,10 @@ class MemoryService:
         )
 
         task_result = await process_document_upload.aenqueue(str(entry_doc.id), memory_id)
-        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(
+        await EntryDocument.objects.filter(
+            id=entry_doc.id,
+            processing_status=EntryDocument.ProcessingStatus.PENDING,
+        ).aupdate(
             task_id=task_result.id,
             processing_status=EntryDocument.ProcessingStatus.PROCESSING,
         )
@@ -332,11 +391,11 @@ class MemoryService:
     async def list_documents(
         memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[DocumentOut]:
-        """List all file-backed documents in a memory."""
+        """List all file-backed documents in a memory (all processing statuses)."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.LIST_DOCUMENTS, memory)
         entry_docs = (
-            EntryDocument.objects.filter(entry__memory_id=memory_id)
+            EntryDocument.objects.filter(memory_id=memory_id)
             .select_related("entry")
             .order_by("-created_at")
         )
@@ -346,11 +405,11 @@ class MemoryService:
     async def get_document(
         memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> DocumentOut:
-        """Get a single document from a memory."""
+        """Get a single document from a memory by its EntryDocument id."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.VIEW_DOCUMENT, memory)
         entry_doc = await EntryDocument.objects.select_related("entry").aget(
-            entry_id=doc_id, entry__memory_id=memory_id
+            id=doc_id, memory_id=memory_id
         )
         return MemoryService._entry_doc_to_out(entry_doc)
 
@@ -358,11 +417,20 @@ class MemoryService:
     async def delete_document(
         memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
-        """Delete a document (and its entry) from a memory."""
+        """Delete a document from a memory by its EntryDocument id.
+
+        Works for in-flight docs (no Entry yet). When an Entry exists, deleting it
+        cascades to the EntryDocument and triggers RAG cleanup via the delete signal.
+        """
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.DELETE_DOCUMENT, memory)
-        entry = await Entry.objects.aget(id=doc_id, memory_id=memory_id)
-        await entry.adelete()
+        entry_doc = await EntryDocument.objects.select_related("entry").aget(
+            id=doc_id, memory_id=memory_id
+        )
+        if entry_doc.entry_id:
+            await entry_doc.entry.adelete()
+        else:
+            await entry_doc.adelete()
 
     # ============================================================================
     # Thread-Memory linking
@@ -404,7 +472,11 @@ class MemoryService:
 
         memories = []
         async for tm in thread_memories_query:
-            await _check_object_permission(user, Operation.LIST_THREAD_MEMORIES, tm.memory)
+            # Skip memories this user cannot read instead of raising: a thread may
+            # carry assistant-linked private memories the user has no access to —
+            # they must not surface in the list, but must not break it either.
+            if not await can_read_memory(user, tm.memory):
+                continue
             memories.append(
                 ThreadMemoryOut(
                     id=str(tm.memory.id),
@@ -511,6 +583,7 @@ class MemoryService:
 
         entry_doc = await EntryDocument.objects.acreate(
             entry=None,
+            memory=memory,
             file=file,
             file_name=file_name,
             file_size=file.size or 0,
@@ -522,7 +595,10 @@ class MemoryService:
         task_result = await process_document_upload.aenqueue(
             str(entry_doc.id), str(memory.id), assistant_id
         )
-        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(
+        await EntryDocument.objects.filter(
+            id=entry_doc.id,
+            processing_status=EntryDocument.ProcessingStatus.PENDING,
+        ).aupdate(
             task_id=task_result.id,
             processing_status=EntryDocument.ProcessingStatus.PROCESSING,
         )
@@ -545,7 +621,7 @@ class MemoryService:
             return []
 
         entry_docs = (
-            EntryDocument.objects.filter(entry__memory_id=thread.file_memory_id)
+            EntryDocument.objects.filter(memory_id=thread.file_memory_id)
             .select_related("entry")
             .order_by("-created_at")
         )
@@ -555,20 +631,37 @@ class MemoryService:
     async def delete_thread_file(
         thread_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> None:
-        """Delete a file from a thread."""
+        """Delete a file from a thread by its EntryDocument id.
+
+        Works for in-flight docs (no Entry yet), so a slow/stuck upload can be
+        cancelled to unblock a deferred send.
+        """
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
         await _check_object_permission(user, Operation.DELETE_FILE, thread)
         if not thread.file_memory_id:
             return
-        entry = await Entry.objects.aget(id=doc_id, memory_id=thread.file_memory_id)
-        await entry.adelete()
+        entry_doc = await EntryDocument.objects.select_related("entry").aget(
+            id=doc_id, memory_id=thread.file_memory_id
+        )
+        if entry_doc.entry_id:
+            await entry_doc.entry.adelete()
+        else:
+            await entry_doc.adelete()
 
     @staticmethod
     async def get_document_status(
         doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> DocumentStatusOut:
-        """Return processing status for document."""
-        entry_doc = await EntryDocument.objects.aget(id=doc_id)
+        """Return processing status for a document.
+
+        Requires ``VIEW_DOCUMENT`` on the document's owning memory.  Documents
+        whose ``memory`` is ``None`` (legacy rows predating migration 0002) are
+        accessible without a permission check to preserve backward compatibility
+        — they carry no content, only a status string.
+        """
+        entry_doc = await EntryDocument.objects.select_related("memory").aget(id=doc_id)
+        if entry_doc.memory_id is not None:
+            await _check_object_permission(user, Operation.VIEW_DOCUMENT, entry_doc.memory)
         task_status = None
         if entry_doc.task_id:
             try:
@@ -580,6 +673,71 @@ class MemoryService:
             status=entry_doc.processing_status,
             error=entry_doc.processing_error,
             task=task_status,
+        )
+
+    @staticmethod
+    async def retry_document(
+        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> DocumentStatusOut:
+        """Re-enqueue processing for a failed or stuck document.
+
+        Only documents in ``FAILED`` or ``PENDING`` status may be retried.
+        ``PROCESSING`` documents are skipped (the worker is still active) and
+        ``COMPLETED`` documents are skipped (re-processing would create duplicate
+        index entries).
+
+        Recovers ``assistant_id`` from the owning thread (for thread-file
+        memories) so the assistant's file pipeline (e.g. OCR) is used again,
+        not just the default text pipeline.
+        """
+        _RETRYABLE = {
+            EntryDocument.ProcessingStatus.FAILED,
+            EntryDocument.ProcessingStatus.PENDING,
+        }
+
+        entry_doc = await EntryDocument.objects.select_related("memory").aget(id=doc_id)
+        memory = entry_doc.memory
+        if memory is None:
+            raise ValueError("Document has no associated memory")
+
+        if entry_doc.processing_status not in _RETRYABLE:
+            raise ValueError(
+                f"Document cannot be retried in status {entry_doc.processing_status!r}. "
+                f"Only {sorted(s.value for s in _RETRYABLE)} are retryable."
+            )
+
+        assistant_id = None
+        thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
+        if thread is not None:
+            await _check_object_permission(user, Operation.UPLOAD_FILE, thread)
+            assistant_id = thread.metadata.get("assistant_id") or None
+        else:
+            await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
+
+        entry_doc.processing_status = EntryDocument.ProcessingStatus.PENDING
+        entry_doc.processing_error = ""
+        await entry_doc.asave(update_fields=["processing_status", "processing_error", "updated_at"])
+
+        task_result = await process_document_upload.aenqueue(
+            str(entry_doc.id), str(memory.id), assistant_id
+        )
+        await EntryDocument.objects.filter(
+            id=entry_doc.id,
+            processing_status=EntryDocument.ProcessingStatus.PENDING,
+        ).aupdate(
+            task_id=task_result.id,
+            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
+        )
+        # Re-read to return the actual persisted state — the conditional aupdate above
+        # may have been skipped if the worker already advanced past PENDING.
+        await entry_doc.arefresh_from_db(
+            fields=["processing_status", "processing_error", "task_id"]
+        )
+        return DocumentStatusOut(
+            id=str(entry_doc.id),
+            status=entry_doc.processing_status,
+            error=entry_doc.processing_error,
+            task=None,
         )
 
     @staticmethod
@@ -625,17 +783,22 @@ class MemoryService:
 
     @staticmethod
     def _entry_doc_to_out(entry_doc: EntryDocument) -> DocumentOut:
+        # `entry` is None until processing produces one (in-flight / failed docs).
+        # The document id is always the EntryDocument id so it's stable across the
+        # whole lifecycle.
         entry = entry_doc.entry
         return DocumentOut(
-            id=str(entry.id),
+            id=str(entry_doc.id),
             file=entry_doc.file.url if entry_doc.file else "",
-            content=entry.content,
-            extraction=entry.extraction,
+            content=entry.content if entry else "",
+            extraction=entry.extraction if entry else None,
             file_name=entry_doc.file_name,
-            data=entry.data or {},
+            data=(entry.data or {}) if entry else {},
             file_size=entry_doc.file_size,
             content_type=entry_doc.content_type,
             file_extension=entry_doc.file_extension,
+            status=entry_doc.processing_status,
+            error=entry_doc.processing_error,
             created_at=entry_doc.created_at.isoformat(),
             updated_at=entry_doc.updated_at.isoformat(),
         )
@@ -667,6 +830,7 @@ upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_document_status = async_to_sync(MemoryService.get_document_status)
+retry_document = async_to_sync(MemoryService.retry_document)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
 list_owners = async_to_sync(MemoryService.list_owners)
 add_owner = async_to_sync(MemoryService.add_owner)

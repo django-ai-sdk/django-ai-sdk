@@ -167,6 +167,15 @@ AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
     "get_today": "piratespeak.assistants.tools.get_today",
 }
 
+# Flat permission levels available in the runtime assistant builder.
+# Key is stored on AssistantSettings.permissions; value resolves to a permission class.
+# An empty permissions list on an AssistantSettings row defaults to IsAuthenticated.
+AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS = {
+    "authenticated": "django_ai_sdk.permissions.IsAuthenticated",
+    "staff": "django_ai_sdk.permissions.IsAdminUser",
+    "disabled": "django_ai_sdk.permissions.DenyAll",
+}
+
 # Default asssitants
 AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.pirate_basic.PirateBasicAssistant",
