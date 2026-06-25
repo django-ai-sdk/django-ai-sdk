@@ -576,6 +576,7 @@ class MemoryService(PermissionsMixin):
         thread_memories = (
             ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
             .select_related("memory")
+            .prefetch_related("memory__owners")
             .annotate(document_count=Count("memory__entries"))
         )
 

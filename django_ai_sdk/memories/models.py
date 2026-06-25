@@ -67,9 +67,10 @@ class Memory(models.Model):
         slug = re.sub(r"[^a-z0-9]+", "_", self.name.lower()).strip("_")[:20].strip("_")
         return f"search_{slug}" if slug else f"search_memory_{str(self.id).replace('-', '')[:8]}"
 
-    async def get_tool_spec(self) -> ToolSpec:
+    async def get_tool_spec(self, doc_count: int | None = None) -> ToolSpec:
         """Generate ToolSpec for this memory."""
-        doc_count = await Entry.objects.filter(memory_id=self.id).acount()
+        if doc_count is None:
+            doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
             name=self.tool_name,
