@@ -96,22 +96,21 @@ class ArtifactSchema(BaseModel):
 
 
 class QuestionFlowOption(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
-    description: str | None = None
-    disabled: bool | None = None
+    value: str
 
 
 class QuestionFlowStep(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
-    title: str
+    question: str
     description: str | None = None
-    options: list[QuestionFlowOption]
+    options: list[QuestionFlowOption] = Field(default_factory=list)
     selectionMode: Literal["single", "multi"] | None = None
 
 
 class QuestionFlowData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str
     steps: list[QuestionFlowStep]
 
 
@@ -135,12 +134,13 @@ class QuestionFlowArtifact(ArtifactSchema):
 class OptionListOption(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
-    description: str | None = None
+    description: str = ""
     disabled: bool | None = None
 
 
 class OptionListData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    title: str
     options: list[OptionListOption]
     selectionMode: Literal["multi", "single"] | None = None
     minSelections: int | None = None
@@ -188,7 +188,7 @@ class DataTableArtifact(ArtifactSchema):
 
 
 class ApprovalCardMetadataItem(BaseModel):
-    key: str
+    label: str
     value: str
 
 
@@ -197,7 +197,7 @@ class ApprovalCardData(BaseModel):
     title: str
     description: str | None = None
     icon: str | None = None
-    metadata: list[ApprovalCardMetadataItem] | None = None
+    metadata: list[ApprovalCardMetadataItem] = Field(default_factory=list)
     variant: Literal["default", "destructive"] | None = None
     confirmLabel: str | None = None
     cancelLabel: str | None = None
