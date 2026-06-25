@@ -33,6 +33,10 @@ class Memory(models.Model):
 
     class Meta:
         db_table = "django_ai_sdk_memories"
+        indexes = [
+            models.Index(fields=["is_hidden"]),
+            models.Index(fields=["is_public"]),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -271,6 +275,9 @@ class ThreadMemory(models.Model):
         app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_thread_memories"
         unique_together = [["thread", "memory"]]
+        indexes = [
+            models.Index(fields=["thread", "active"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.thread} - {self.memory}"
