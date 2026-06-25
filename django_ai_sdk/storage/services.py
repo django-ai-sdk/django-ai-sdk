@@ -463,21 +463,16 @@ async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, 
         raise ValueError("Thread not found")
     await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
 
-    # FIX: additional query, but we have not yet added it to info
-    from django_ai_sdk.conversation.models import Thread
-    from django_ai_sdk.memories.models import Entry
+    from django_ai_sdk.memories.models import Entry  # noqa: PLC0415
 
-    file_memory_id = await (
-        Thread.objects.filter(id=thread_id).values_list("file_memory_id", flat=True).afirst()
-    )
-    file_memory_id_str = str(file_memory_id) if file_memory_id else None
+    file_memory_id = thread.file_memory_id
     file_count = (
-        await Entry.objects.filter(memory_id=file_memory_id).acount() if file_memory_id_str else 0
+        await Entry.objects.filter(memory_id=file_memory_id).acount() if file_memory_id else 0
     )
 
     return {
         "file_count": file_count,
-        "file_memory_id": file_memory_id_str,
+        "file_memory_id": file_memory_id,
     }
 
 
