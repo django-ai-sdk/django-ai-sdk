@@ -73,6 +73,8 @@ class MemoryStore:
     Singleton in-memory store for threads and messages.
     """
 
+    MAX_THREADS: ClassVar[int] = 1000
+
     threads: ClassVar[dict[str, MemoryThread]] = {}
     messages: ClassVar[dict[str, list[MemoryMessage]]] = {}
 
@@ -101,6 +103,11 @@ class MemoryStore:
         )
         cls.threads[thread_id] = thread
         cls.messages.setdefault(thread_id, [])
+        # Evict oldest thread when over the cap
+        while len(cls.threads) > cls.MAX_THREADS:
+            oldest = next(iter(cls.threads))
+            del cls.threads[oldest]
+            cls.messages.pop(oldest, None)
         return thread
 
     @classmethod
