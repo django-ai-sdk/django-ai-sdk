@@ -16,7 +16,7 @@ class FileProcessor(Protocol):
     def is_valid(self, file: FileSource) -> bool:
         pass
 
-    def run(self, file: FileSource) -> str | None:
+    async def run(self, file: FileSource) -> str | None:
         pass
 
 
@@ -35,7 +35,7 @@ class BaseFileProcessor:
             file.seek(0)
         return mime_type in self.ALLOWED_MIME_TYPES
 
-    def run(self, file: FileSource) -> str | None:
+    async def run(self, file: FileSource) -> str | None:
         raise NotImplementedError
 
 
@@ -46,7 +46,7 @@ class TextFileProcessor(BaseFileProcessor):
         "text/x-markdown",
     )
 
-    def run(self, file: FileSource) -> str | None:
+    async def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
@@ -65,7 +65,7 @@ class CSVFileProcessor(BaseFileProcessor):
         "text/plain",
     )
 
-    def run(self, file: FileSource) -> str | None:
+    async def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
@@ -84,7 +84,7 @@ class JSONFileProcessor(BaseFileProcessor):
         "text/json",
     )
 
-    def run(self, file: FileSource) -> str | None:
+    async def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
             with open(file, encoding="utf-8") as f:
                 return f.read()
