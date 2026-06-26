@@ -102,6 +102,8 @@ class StreamWriter:
         )
         self._pending_tool_calls = {}  # Track multiple tool calls by ID
         self.storage_callback = storage_callback
+        self._content_chunks: list[str] = []
+        self._reasoning_chunks: list[str] = []
 
         logger.debug(
             f"StreamWriter initialized: model={model}, role={role}, storage={'enabled' if storage_callback else 'disabled'}"
@@ -110,15 +112,12 @@ class StreamWriter:
     def add_chunk(self, chunk: MessageChunk) -> ChatMessage:
         """Process a chunk and update message."""
         if chunk.type == "text":
-            self.message.content += chunk.content
+            self._content_chunks.append(chunk.content)
 
         elif chunk.type == "reasoning":
-            # Initialize reasoning field if first chunk
-            if self.message.reasoning is None:
-                self.message.reasoning = ""
-            self.message.reasoning += chunk.content
+            self._reasoning_chunks.append(chunk.content)
             logger.debug(
-                f"Added reasoning chunk, total reasoning length now: {len(self.message.reasoning or '')}"
+                f"Added reasoning chunk, total reasoning length now: {sum(len(c) for c in self._reasoning_chunks)}"
             )
 
         elif chunk.type == "tool_call_start":
@@ -164,6 +163,12 @@ class StreamWriter:
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")
+
+        # Join string chunks
+        if self._content_chunks:
+            self.message.content = "".join(self._content_chunks)
+        if self._reasoning_chunks:
+            self.message.reasoning = "".join(self._reasoning_chunks)
 
         # Add any remaining pending tool calls (in casse tool_output never came)
         pending_tools_count = len(self._pending_tool_calls)
