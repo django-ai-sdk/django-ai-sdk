@@ -53,7 +53,7 @@ class FilePipeline:
         if not self.accepts(file):
             return None
 
-        data: Any = await asyncio.to_thread(self.file_processor.run, file)
+        data: Any = await self.file_processor.run(file)
         if data is None:
             return None
 
