@@ -45,8 +45,8 @@ class AssistantCreateData(TypedDict, total=False):
     tools: list[str]
     mcp_servers: list[str]
     memories: list[str]
-    permissions: list[str]
-    allowed_groups: list[str]
+    users: list[str]
+    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -61,8 +61,8 @@ class AssistantUpdateData(TypedDict, total=False):
     tools: list[str]
     mcp_servers: list[str]
     memories: list[str]
-    permissions: list[str]
-    allowed_groups: list[str]
+    users: list[str]
+    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -164,8 +164,7 @@ class AssistantService:
                 assistant = get_runtime_assistant_class(config.assistant)(config)
             except Exception:
                 _logger.exception(
-                    "Skipping assistant %r (id=%s): failed to instantiate — "
-                    "check AI_SDK_RUNTIME_ASSISTANT_PERMISSIONS config",
+                    "Skipping assistant %r (id=%s): failed to instantiate",
                     config.name,
                     config.id,
                 )
@@ -299,8 +298,8 @@ class AssistantSettingsService:
             tools=data.get("tools", []),
             mcp_servers=data.get("mcp_servers", []),
             memories=data.get("memories", []),
-            permissions=data.get("permissions", []),
-            allowed_groups=data.get("allowed_groups", []),
+            users=data.get("users", []),
+            groups=data.get("groups", []),
             suggestion_enabled=data.get("suggestion_enabled", False),
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),

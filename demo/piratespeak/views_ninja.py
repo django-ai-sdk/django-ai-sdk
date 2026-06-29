@@ -531,8 +531,8 @@ class AssistantSettingsOut(Schema):
     tools: list[str]
     mcp_servers: list[str]
     memories: list[str]
-    permissions: list[str]
-    allowed_groups: list[str]
+    users: list[str]
+    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -551,8 +551,8 @@ class AssistantSettingsCreateIn(Schema):
     tools: list[str] = []
     mcp_servers: list[str] = []
     memories: list[str] = []
-    permissions: list[str] = []
-    allowed_groups: list[str] = []
+    users: list[str] = []
+    groups: list[str] = []
     suggestion_enabled: bool = False
     title_generation: bool = True
     max_history: int | None = None
@@ -567,8 +567,8 @@ class AssistantSettingsUpdateIn(Schema):
     tools: list[str] | None = None
     mcp_servers: list[str] | None = None
     memories: list[str] | None = None
-    permissions: list[str] | None = None
-    allowed_groups: list[str] | None = None
+    users: list[str] | None = None
+    groups: list[str] | None = None
     suggestion_enabled: bool | None = None
     title_generation: bool | None = None
     max_history: int | None = None
@@ -642,8 +642,8 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "tools": payload.tools,
                 "mcp_servers": payload.mcp_servers,
                 "memories": payload.memories,
-                "permissions": payload.permissions,
-                "allowed_groups": payload.allowed_groups,
+                "users": payload.users,
+                "groups": payload.groups,
                 "suggestion_enabled": payload.suggestion_enabled,
                 "title_generation": payload.title_generation,
                 "max_history": payload.max_history,

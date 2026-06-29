@@ -10,11 +10,6 @@ from haystack.utils import Secret
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import prompt
-from django_ai_sdk.permissions import (
-    IsAuthenticated,
-    IsInAllowedGroups,
-    resolve_permission_keys,
-)
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
@@ -30,7 +25,7 @@ if TYPE_CHECKING:
 class RuntimeAssistant(Assistant):
     """Assistant whose configuration is loaded from an AssistantSettings DB record.
 
-    Constructed on demand by AssistantService — not registered in the class registry.
+    Constructed on demand by AssistantService, not registered in the class registry.
     Each instance reflects the live DB config at construction time.
     """
 
@@ -51,14 +46,7 @@ class RuntimeAssistant(Assistant):
         self.file_upload = config.file_upload
         if config.suggestion_enabled:
             self.suggestion_generator = DefaultSuggestionGenerator
-        # Resolve stored flat access-level keys + optional group restriction.
-        # Default to IsAuthenticated (not AllowAll) when nothing is configured.
-        # resolve_permission_keys raises ValueError on any unknown key, so a
-        # misconfigured row surfaces immediately rather than silently opening access.
-        perms: list[Any] = resolve_permission_keys(list(config.permissions or []))
-        if config.allowed_groups:
-            perms.append(IsInAllowedGroups(groups=list(config.allowed_groups)))
-        self.permissions = perms or [IsAuthenticated]
+
         super().__init__()
 
     @property
