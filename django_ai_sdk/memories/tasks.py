@@ -37,11 +37,11 @@ async def run_file_pipeline(
     try:
         if assistant_id:
             assistant = await AssistantService.get(assistant_id)
-            pipeline = assistant.get_file_pipeline(entry_doc.file) or get_default_file_pipeline(
+            pipeline = await assistant.get_file_pipeline(
                 entry_doc.file
-            )
+            ) or await get_default_file_pipeline(entry_doc.file)
         else:
-            pipeline = get_default_file_pipeline(entry_doc.file)
+            pipeline = await get_default_file_pipeline(entry_doc.file)
 
         result = await pipeline.run(entry_doc.file)
 

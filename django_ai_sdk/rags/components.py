@@ -8,7 +8,6 @@ from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseTextEmbedder,
     FastembedTextEmbedder,
 )
-from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRetriever
 from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetriever
 
 from django_ai_sdk.logger import get_logger
@@ -191,13 +190,23 @@ class MultiQueryChromaRetriever(BaseMultiQueryRetriever):
     ) -> None:
         super().__init__(document_store, top_k)
 
-        self._retriever = ChromaQueryTextRetriever(
-            document_store=document_store,
-            top_k=top_k,
-        )
+        try:
+            from haystack_integrations.components.retrievers.chroma import (  # noqa: PLC0415
+                ChromaQueryTextRetriever,
+            )
+
+            self._retriever = ChromaQueryTextRetriever(
+                document_store=document_store,
+                top_k=top_k,
+            )
+        except RuntimeError as e:
+            logger.warning("ChromaDB unavailable, MultiQueryChromaRetriever disabled: %s", e)
+            self._retriever = None
 
     def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
         """Retrieve documents for a single query using ChromaDB."""
+        if self._retriever is None:
+            raise RuntimeError("ChromaDB unavailable on this system.")
         return self._retriever.run(query=query, top_k=top_k)
 
 

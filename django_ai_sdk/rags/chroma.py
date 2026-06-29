@@ -10,7 +10,6 @@ from haystack.document_stores.types import DuplicatePolicy
 from haystack.tools import ComponentTool
 from haystack.utils import Secret
 from haystack_integrations.components.embedders.fastembed import FastembedDocumentEmbedder
-from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
 from django_ai_sdk.logger import get_logger
@@ -21,6 +20,15 @@ from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import to_document
 
 logger = get_logger(__name__)
+
+try:
+    from haystack_integrations.document_stores.chroma import ChromaDocumentStore  # noqa: PLC0415
+
+    _CHROMA_AVAILABLE = True
+except RuntimeError as _chroma_err:
+    logger.warning("ChromaDB unavailable, ChromaDBQueryExpanderRAG disabled: %s", _chroma_err)
+    ChromaDocumentStore = None  # type: ignore[assignment,misc]
+    _CHROMA_AVAILABLE = False
 
 
 class ChromaDBQueryExpanderRAGConfig(RAGConfig):
@@ -44,6 +52,8 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         documents: list[RagDocument],
         config: ChromaDBQueryExpanderRAGConfig | None = None,
     ) -> None:
+        if not _CHROMA_AVAILABLE:
+            raise RuntimeError("ChromaDB unavailable on this system.")
         self.config: ChromaDBQueryExpanderRAGConfig = config or ChromaDBQueryExpanderRAGConfig()
         self.documents = documents
         self._cached_document_store = None
