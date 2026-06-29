@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import mimetypes
 from functools import lru_cache
 from pathlib import Path
 from typing import IO, ClassVar, Protocol
 
-import filetype
+import aiofiles
+import puremagic
 from django.conf import settings
 from django.core.files.base import File
 
@@ -27,25 +27,50 @@ def get_file_name(file: FileSource) -> str | None:
     return None
 
 
-def get_mime_type(file: FileSource) -> str | None:
+async def read_aio_bytes(
+    file: FileSource,
+) -> bytes | None:
+    if hasattr(file, "path"):
+        async with aiofiles.open(file.path, mode="rb") as f:
+            return await f.read()
+
+    elif isinstance(file, (str, Path)):
+        async with aiofiles.open(file, mode="rb") as f:
+            return await f.read()
+
+    return None
+
+
+async def read_aio_text(
+    file: FileSource,
+    encoding: str | None = None,
+) -> str | None:
+    if hasattr(file, "path"):
+        async with aiofiles.open(file.path, encoding=encoding) as f:
+            return await f.read()
+
+    elif isinstance(file, (str, Path)):
+        async with aiofiles.open(file, encoding=encoding) as f:
+            return await f.read()
+
+    return None
+
+
+async def get_mime_type(file: FileSource) -> str | None:
+    stream = await read_aio_bytes(file)
+
+    if stream is not None:
+        try:
+            return puremagic.from_string(stream, mime=True)
+        except puremagic.PureError:
+            pass
+
     name = get_file_name(file)
-
-    # check for user defined types
     if name:
-        ext = Path(name).suffix.lower()
+        extension = puremagic.ext_from_filename(name)
         allowed_files = get_allowed_files()
-        if ext in allowed_files:
-            return allowed_files[ext]
-
-    # check for magic bytes
-    mime_type = filetype.guess_mime(file)
-    if mime_type:
-        return mime_type
-
-    # check with std mimetypes package
-    if name:
-        mime, _ = mimetypes.guess_type(name)
-        return mime
+        if extension in allowed_files:
+            return allowed_files[extension]
 
     return None
 
@@ -53,7 +78,7 @@ def get_mime_type(file: FileSource) -> str | None:
 class FileProcessor(Protocol):
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(self, file: FileSource) -> bool:
+    async def is_valid(self, file: FileSource) -> bool:
         pass
 
     async def run(self, file: FileSource) -> str | None:
@@ -65,9 +90,8 @@ class BaseFileProcessor:
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(self, file: FileSource) -> bool:
-
-        mime_type = get_mime_type(file)
+    async def is_valid(self, file: FileSource) -> bool:
+        mime_type = await get_mime_type(file)
         return mime_type in self.ALLOWED_MIME_TYPES
 
     async def run(self, file: FileSource) -> str | None:
@@ -82,17 +106,10 @@ class TextFileProcessor(BaseFileProcessor):
     )
 
     async def run(self, file: FileSource) -> str | None:
-        if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content
+        return await read_aio_text(file, encoding="utf-8")
 
 
-class CSVFileProcessor(BaseFileProcessor):
+class CSVFileProcessor(TextFileProcessor):
     """Returns raw CSV string. Use CSVParseTransform to convert to list[dict]."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
@@ -100,31 +117,11 @@ class CSVFileProcessor(BaseFileProcessor):
         "text/plain",
     )
 
-    async def run(self, file: FileSource) -> str | None:
-        if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content
 
-
-class JSONFileProcessor(BaseFileProcessor):
+class JSONFileProcessor(TextFileProcessor):
     """Returns raw JSON string. Use JSONParseTransform to convert to dict/list."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/json",
         "text/json",
     )
-
-    async def run(self, file: FileSource) -> str | None:
-        if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content
