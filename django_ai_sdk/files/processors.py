@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 from functools import lru_cache
 from pathlib import Path
 from typing import IO, ClassVar, Protocol
 
+import aiofiles
 import filetype
 from django.conf import settings
 from django.core.files.base import File
@@ -53,7 +55,7 @@ def get_mime_type(file: FileSource) -> str | None:
 class FileProcessor(Protocol):
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(self, file: FileSource) -> bool:
+    async def is_valid(self, file: FileSource) -> bool:
         pass
 
     async def run(self, file: FileSource) -> str | None:
@@ -65,7 +67,7 @@ class BaseFileProcessor:
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
 
-    def is_valid(self, file: FileSource) -> bool:
+    async def is_valid(self, file: FileSource) -> bool:
 
         mime_type = get_mime_type(file)
         return mime_type in self.ALLOWED_MIME_TYPES
@@ -83,16 +85,16 @@ class TextFileProcessor(BaseFileProcessor):
 
     async def run(self, file: FileSource) -> str | None:
         if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
+            async with aiofiles.open(file, encoding="utf-8") as f:
+                return await f.read()
+        await asyncio.to_thread(file.seek, 0)
+        content = await asyncio.to_thread(file.read)
         if isinstance(content, bytes):
             content = content.decode("utf-8")
         return content
 
 
-class CSVFileProcessor(BaseFileProcessor):
+class CSVFileProcessor(TextFileProcessor):
     """Returns raw CSV string. Use CSVParseTransform to convert to list[dict]."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
@@ -100,31 +102,11 @@ class CSVFileProcessor(BaseFileProcessor):
         "text/plain",
     )
 
-    async def run(self, file: FileSource) -> str | None:
-        if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content
 
-
-class JSONFileProcessor(BaseFileProcessor):
+class JSONFileProcessor(TextFileProcessor):
     """Returns raw JSON string. Use JSONParseTransform to convert to dict/list."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/json",
         "text/json",
     )
-
-    async def run(self, file: FileSource) -> str | None:
-        if isinstance(file, (str, Path)):
-            with open(file, encoding="utf-8") as f:
-                return f.read()
-        file.seek(0)
-        content = file.read()
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-        return content

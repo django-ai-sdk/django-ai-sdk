@@ -43,14 +43,14 @@ class FilePipeline:
         )
         self.transforms: list[BaseTransform] = transforms or []
 
-    def accepts(self, file: Any) -> bool:
-        return self.file_processor.is_valid(file)
+    async def accepts(self, file: Any) -> bool:
+        return await self.file_processor.is_valid(file)
 
     async def run(self, file: Any, *, assistant: Assistant | None = None) -> PipelineResult | None:
         """Run processor then all transforms in sequence.
         Processor runs in a thread to avoid blocking the event loop.
         """
-        if not self.accepts(file):
+        if not await self.accepts(file):
             return None
 
         data: Any = await self.file_processor.run(file)

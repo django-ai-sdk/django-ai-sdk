@@ -272,10 +272,10 @@ class Assistant(ABC, AssistantInfoMixin):
         # assistant's configured storage (always set in __init__).
         return self.storage_adapter(thread_id)
 
-    def get_file_pipeline(self, file: object) -> FilePipeline | None:
+    async def get_file_pipeline(self, file: object) -> FilePipeline | None:
         """Return the first FilePipeline whose processor accepts file, or None."""
         for pipeline in self.file_pipelines:
-            if pipeline.accepts(file):
+            if await pipeline.accepts(file):
                 return pipeline
         return None
 

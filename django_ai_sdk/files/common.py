@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.files.pipeline import FilePipeline
 
 
-def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
+async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
     """Return a default FilePipeline for uploads without assistant context.
 
     Configurable via AI_SDK_MEMORY_FILE_PIPELINE setting:
@@ -29,6 +29,6 @@ def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
         paths = [setting] if isinstance(setting, str) else setting
         for path in paths:
             pipeline = import_string(path)()
-            if file is None or pipeline.accepts(file):
+            if file is None or await pipeline.accepts(file):
                 return pipeline
     return FilePipeline(TextFileProcessor())
