@@ -22,7 +22,7 @@ class AssistantSettings(models.Model):
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
     active = models.BooleanField(default=True, db_index=True)
-    owner = models.ForeignKey(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,

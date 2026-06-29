@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from factory.django import DjangoModelFactory
 from factory.declarations import Trait, SubFactory
 from factory.faker import Faker
-from django_ai_sdk.memories.models import Memory, MemoryOwner
+from django_ai_sdk.memories.models import Memory, MemoryUser
 
 
 class AsyncFactoryMixin:
@@ -41,9 +41,9 @@ class MemoryFactory(AsyncFactoryMixin, DjangoModelFactory):
         private = Trait(is_public=False)
 
 
-class MemoryOwnerFactory(AsyncFactoryMixin, DjangoModelFactory):
+class MemoryUserFactory(AsyncFactoryMixin, DjangoModelFactory):
     class Meta:
-        model = MemoryOwner
+        model = MemoryUser
 
     user = SubFactory(UserFactory)
     memory = SubFactory(MemoryFactory)

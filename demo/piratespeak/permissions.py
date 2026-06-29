@@ -69,19 +69,19 @@ class AllowAnonymousMemoryPermission(BasePermission):
         if user is None or not user.is_authenticated:
             return operation in self.READ and is_public
 
-        # Objects without owners (e.g. Thread) — allow read for authenticated
-        if not hasattr(obj, "owners"):
+        # Objects without memory_users (e.g. Thread), allow read for authenticated
+        if not hasattr(obj, "memory_users"):
             return operation in self.READ
 
-        # Check ownership for authenticated users
-        ownership = await obj.owners.filter(user=user).afirst()
+        # Check memory user permissions for authenticated users
+        ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
-            # Not an owner — only allow read on public memories
+            # Not a memory user — only allow read on public memories
             if operation in self.READ and is_public:
                 return True
             return False
 
-        # Owner: manager ops require can_manage=True
+        # Memory user: manager ops require can_manage=True
         if operation in self.MANAGER:
             return ownership.can_manage
         return True

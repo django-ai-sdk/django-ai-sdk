@@ -368,7 +368,7 @@ class Assistant(ABC, AssistantInfoMixin):
         memory_links = (
             ThreadMemory.objects.filter(thread_id=thread_id, active=True)
             .select_related("memory")
-            .prefetch_related("memory__owners")
+            .prefetch_related("memory__memory_users")
         )
 
         async for link in memory_links:

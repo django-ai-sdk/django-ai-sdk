@@ -195,17 +195,17 @@ class TestPermissions:
 class TestMemoryDefaultPermission:
     """Tests for MemoryDefaultPermission three-tier access model."""
 
-    async def _make_owner(self, user, can_manage=False):
-        """Helper to create a memory owner."""
-        from django_ai_sdk.memories.models import MemoryOwner
+    async def _make_memory_user(self, user, can_manage=False):
+        """Helper to create a memory user."""
+        from django_ai_sdk.memories.models import MemoryUser
 
         # Need real Memory object with is_public
         from django_ai_sdk.memories.models import Memory
 
         memory = Memory(name="Test", is_public=False)
         await memory.asave()
-        owner = MemoryOwner(user=user, memory=memory, can_manage=can_manage)
-        await owner.asave()
+        memory_user = MemoryUser(user=user, memory=memory, can_manage=can_manage)
+        await memory_user.asave()
         return memory
 
     async def _make_public_memory(self):
@@ -231,7 +231,7 @@ class TestMemoryDefaultPermission:
         from tests.factories.db import UserFactory
 
         manager = await UserFactory.acreate()
-        memory = await self._make_owner(manager, can_manage=True)
+        memory = await self._make_memory_user(manager, can_manage=True)
 
         for op in Operation:
             await check_object_permissions(
@@ -248,7 +248,7 @@ class TestMemoryDefaultPermission:
         from tests.factories.db import UserFactory
 
         contributor = await UserFactory.acreate()
-        memory = await self._make_owner(contributor, can_manage=False)
+        memory = await self._make_memory_user(contributor, can_manage=False)
 
         for op in MemoryDefaultPermission.MANAGER:
             with pytest.raises(PermissionDenied):
@@ -265,7 +265,7 @@ class TestMemoryDefaultPermission:
         from tests.factories.db import UserFactory
 
         contributor = await UserFactory.acreate()
-        memory = await self._make_owner(contributor, can_manage=False)
+        memory = await self._make_memory_user(contributor, can_manage=False)
 
         allowed_ops = MemoryDefaultPermission.READ | MemoryDefaultPermission.WRITE
         for op in allowed_ops:

@@ -13,13 +13,13 @@ from django.utils.module_loading import import_string
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
-from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryOwner, ThreadMemory
+from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryUser, ThreadMemory
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
     DocumentStatusOut,
     DocumentUploadResponse,
     MemoryOut,
-    MemoryOwnerOut,
+    MemoryUserOut,
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.tasks import process_document_upload
@@ -116,7 +116,7 @@ class MemoryService:
             is_public=is_public,
         )
         if user and user.is_authenticated:
-            await MemoryOwner.objects.acreate(
+            await MemoryUser.objects.acreate(
                 memory=memory,
                 user=user,
                 can_manage=True,
@@ -133,77 +133,77 @@ class MemoryService:
         )
 
     # ============================================================================
-    # Memory Owner Management
+    # Memory User Management
     # ============================================================================
 
     @staticmethod
-    async def list_owners(
+    async def list_users(
         memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> list[MemoryOwnerOut]:
-        """List all owners of a memory."""
+    ) -> list[MemoryUserOut]:
+        """List all users of a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
         return [
-            MemoryOwnerOut(
+            MemoryUserOut(
                 user_id=str(o.user_id),
                 can_manage=o.can_manage,
                 created_at=o.created_at.isoformat(),
             )
-            async for o in memory.owners.all().select_related("user")
+            async for o in memory.memory_users.all().select_related("user")
         ]
 
     @staticmethod
-    async def add_owner(
+    async def add_user(
         memory_id: str,
         user_id: str,
         can_manage: bool = False,
         *,
         user: AbstractBaseUser | AnonymousUser | None,
-    ) -> MemoryOwnerOut:
-        """Add a user as owner of a memory."""
+    ) -> MemoryUserOut:
+        """Add a user to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         UserModel = get_user_model()
-        owner_user = await UserModel.objects.aget(id=user_id)
-        ownership, _created = await MemoryOwner.objects.aupdate_or_create(
+        target_user = await UserModel.objects.aget(id=user_id)
+        ownership, _created = await MemoryUser.objects.aupdate_or_create(
             memory=memory,
-            user=owner_user,
+            user=target_user,
             defaults={"can_manage": can_manage},
         )
-        return MemoryOwnerOut(
+        return MemoryUserOut(
             user_id=str(ownership.user_id),
             can_manage=ownership.can_manage,
             created_at=ownership.created_at.isoformat(),
         )
 
     @staticmethod
-    async def update_owner(
+    async def update_user(
         memory_id: str,
         user_id: str,
         can_manage: bool,
         *,
         user: AbstractBaseUser | AnonymousUser | None,
-    ) -> MemoryOwnerOut:
-        """Update an owner's can_manage flag."""
+    ) -> MemoryUserOut:
+        """Update a user's can_manage flag."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
-        ownership = await memory.owners.select_related("user").aget(user_id=user_id)
+        ownership = await memory.memory_users.select_related("user").aget(user_id=user_id)
         ownership.can_manage = can_manage
         await ownership.asave(update_fields=["can_manage"])
-        return MemoryOwnerOut(
+        return MemoryUserOut(
             user_id=str(ownership.user_id),
             can_manage=ownership.can_manage,
             created_at=ownership.created_at.isoformat(),
         )
 
     @staticmethod
-    async def remove_owner(
+    async def remove_user(
         memory_id: str, user_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
-        """Remove an owner from a memory."""
+        """Remove a user from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
-        ownership = await memory.owners.aget(user_id=user_id)
+        ownership = await memory.memory_users.aget(user_id=user_id)
         await ownership.adelete()
 
     # ============================================================================
@@ -227,7 +227,7 @@ class MemoryService:
         if is_staff:
             qs = base
         elif is_authenticated:
-            qs = base.filter(Q(is_public=True) | Q(owners__user=user)).distinct()
+            qs = base.filter(Q(is_public=True) | Q(memory_users__user=user)).distinct()
         else:
             qs = base.filter(is_public=True)
 
@@ -832,7 +832,7 @@ delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_document_status = async_to_sync(MemoryService.get_document_status)
 retry_document = async_to_sync(MemoryService.retry_document)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
-list_owners = async_to_sync(MemoryService.list_owners)
-add_owner = async_to_sync(MemoryService.add_owner)
-update_owner = async_to_sync(MemoryService.update_owner)
-remove_owner = async_to_sync(MemoryService.remove_owner)
+list_users = async_to_sync(MemoryService.list_users)
+add_user = async_to_sync(MemoryService.add_user)
+update_user = async_to_sync(MemoryService.update_user)
+remove_user = async_to_sync(MemoryService.remove_user)

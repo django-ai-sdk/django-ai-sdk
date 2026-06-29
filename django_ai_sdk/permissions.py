@@ -187,7 +187,7 @@ class MemoryDefaultPermission(BasePermission):
         if user is None or not bool(user.is_authenticated):
             return False
 
-        ownership = await obj.owners.filter(user=user).afirst()
+        ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
             if operation in self.READ and obj.is_public:
                 return True

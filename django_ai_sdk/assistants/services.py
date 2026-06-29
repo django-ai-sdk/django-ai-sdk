@@ -304,7 +304,7 @@ class AssistantSettingsService:
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),
             file_upload=data.get("file_upload", False),
-            owner=user if getattr(user, "is_authenticated", False) else None,
+            user=user if getattr(user, "is_authenticated", False) else None,
         )
         await config.asave()
         return config
