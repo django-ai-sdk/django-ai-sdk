@@ -362,7 +362,8 @@ class Assistant(ABC, AssistantInfoMixin):
             return []
 
         from django_ai_sdk.memories.models import ThreadMemory  # noqa: PLC0415
-        from django_ai_sdk.memories.services import can_read_memory  # noqa: PLC0415
+        from django_ai_sdk.memories.services import _check_object_permission  # noqa: PLC0415
+        from django_ai_sdk.permissions import Operation  # noqa: PLC0415
 
         tools: list[Any] = []
         memory_links = (
@@ -379,7 +380,9 @@ class Assistant(ABC, AssistantInfoMixin):
             # read (staff / owner / public per AI_SDK_MEMORY_PERMISSIONS).
             # Private, non-owned memories are excluded so the assistant still
             # answers from whatever the user *can* read.
-            if not await can_read_memory(user, link.memory):
+            if not await _check_object_permission(
+                user, Operation.VIEW_MEMORY, link.memory, raise_on_deny=False
+            ):
                 logger.debug(
                     "Memory '{}' skipped for RAG — user lacks read access",
                     link.memory.name,

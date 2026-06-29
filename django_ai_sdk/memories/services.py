@@ -26,7 +26,6 @@ from django_ai_sdk.memories.tasks import process_document_upload
 from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
-    PermissionDenied,
     check_object_permissions,
     check_permissions,
     get_default_permissions,
@@ -42,16 +41,11 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=1)
-def _cached_memory_permissions() -> tuple[type[BasePermission], ...]:
+def _get_memory_permissions() -> tuple[type[BasePermission], ...]:
     paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
     if not paths:
-        return tuple(get_default_permissions())
-    return tuple(import_string(p) for p in paths)
-
-
-def _get_memory_permissions() -> list[type[BasePermission]]:
-    """Resolve permission classes from settings (cached)."""
-    return list(_cached_memory_permissions())
+        return get_default_permissions()
+    return [import_string(p) for p in paths]
 
 
 async def _check_permission(
@@ -62,27 +56,25 @@ async def _check_permission(
 
 
 async def _check_object_permission(
-    user: AbstractBaseUser | AnonymousUser | None, operation: Operation, obj: Any
-) -> None:
-    """Object permission check for memory operations."""
-    permissions = _get_memory_permissions()
-    await check_permissions(user, operation, permissions)
-    await check_object_permissions(user, operation, obj, permissions)
+    user: AbstractBaseUser | AnonymousUser | None,
+    operation: Operation,
+    obj: Any,
+    *,
+    raise_on_deny: bool = True,
+) -> bool:
+    """Object permission check for memory operations.
 
-
-async def can_read_memory(user: AbstractBaseUser | AnonymousUser | None, memory: Any) -> bool:
-    """Whether ``user`` passes the configured memory READ rule for ``memory``.
-
-    Boolean (non-raising) form of the ``VIEW_MEMORY`` object-permission check,
-    routed through ``AI_SDK_MEMORY_PERMISSIONS``. This is the single gate shared
-    by per-user RAG filtering, the memory-aware LLM tools and the source-content
-    endpoint, so retrieval and direct access can never diverge.
+    When *raise_on_deny* is ``True`` (default), raises
+    :class:`~django_ai_sdk.permissions.PermissionDenied` on denial.
+    When ``False``, returns ``False`` instead.
     """
-    try:
-        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
-    except PermissionDenied:
+    permissions = _get_memory_permissions()
+    ok = await check_permissions(user, operation, permissions, raise_on_deny=raise_on_deny)
+    if not ok:
         return False
-    return True
+    return await check_object_permissions(
+        user, operation, obj, permissions, raise_on_deny=raise_on_deny
+    )
 
 
 class MemoryService:
@@ -475,7 +467,9 @@ class MemoryService:
             # Skip memories this user cannot read instead of raising: a thread may
             # carry assistant-linked private memories the user has no access to —
             # they must not surface in the list, but must not break it either.
-            if not await can_read_memory(user, tm.memory):
+            if not await _check_object_permission(
+                user, Operation.VIEW_MEMORY, tm.memory, raise_on_deny=False
+            ):
                 continue
             memories.append(
                 ThreadMemoryOut(

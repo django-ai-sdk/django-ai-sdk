@@ -222,25 +222,35 @@ def ensure_permission_instance(
 async def check_permissions(
     user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
-    permissions: list[type[BasePermission] | BasePermission],
+    permissions: list[type[BasePermission]],
+    *,
+    raise_on_deny: bool = True,
     **kwargs: Any,
-) -> None:
+) -> bool:
     for perm_class in permissions:
         perm = ensure_permission_instance(perm_class)
         if not await perm.has_permission(user, operation, **kwargs):
-            raise PermissionDenied(f"{type(perm).__name__}: {operation.value} not permitted")
+            if raise_on_deny:
+                raise PermissionDenied(f"{type(perm).__name__}: {operation.value} not permitted")
+            return False
+    return True
 
 
 async def check_object_permissions(
     user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
     obj: Any,
-    permissions: list[type[BasePermission] | BasePermission],
+    permissions: list[type[BasePermission]],
+    *,
+    raise_on_deny: bool = True,
     **kwargs: Any,
-) -> None:
+) -> bool:
     for perm_class in permissions:
         perm = ensure_permission_instance(perm_class)
         if not await perm.has_object_permission(user, operation, obj, **kwargs):
-            raise PermissionDenied(
-                f"{type(perm).__name__}: {operation.value} not permitted for this object"
-            )
+            if raise_on_deny:
+                raise PermissionDenied(
+                    f"{type(perm).__name__}: {operation.value} not permitted for this object"
+                )
+            return False
+    return True
