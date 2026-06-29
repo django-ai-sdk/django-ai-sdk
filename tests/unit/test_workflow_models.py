@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from django_ai_sdk.workflows.schemas import (
-    FieldType,
     StepField,
     WorkflowAction,
     WorkflowDefinition,

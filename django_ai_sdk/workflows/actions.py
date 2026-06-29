@@ -11,7 +11,8 @@ from django.utils.module_loading import import_string
 class BaseAction(Protocol):
     description: str
 
-    async def execute(self, payload: Any) -> None: ...
+    async def execute(self, payload: Any) -> None:
+        pass
 
 
 @lru_cache(maxsize=1)

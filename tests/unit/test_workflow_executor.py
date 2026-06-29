@@ -2,7 +2,6 @@
 Unit tests for WorkflowExecutor — step sequencing, context injection, actions.
 """
 
-import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
