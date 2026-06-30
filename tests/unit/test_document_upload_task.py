@@ -159,7 +159,7 @@ class TestProcessAsync:
         mock_custom_pipeline.run = AsyncMock(return_value=mock_result)
 
         mock_assistant = MagicMock()
-        mock_assistant.get_file_pipeline = MagicMock(return_value=mock_custom_pipeline)
+        mock_assistant.get_file_pipeline = AsyncMock(return_value=mock_custom_pipeline)
 
         with patch(
             "django_ai_sdk.assistants.services.AssistantService.get",
