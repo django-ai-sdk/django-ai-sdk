@@ -158,8 +158,7 @@ class AssistantService:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         async for config in AssistantSettings.objects.filter(active=True):
-            # Resolve the runtime instance so its (DB-derived) permissions gate
-            # visibility, mirroring how registry assistants are filtered above.
+            # Resolve the runtime instance, it is used to for permission checking.
             try:
                 assistant = get_runtime_assistant_class(config.assistant)(config)
             except Exception:
@@ -169,9 +168,9 @@ class AssistantService:
                     config.id,
                 )
                 continue
-            perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
+            permissions: list = getattr(assistant, "permissions", get_default_permissions())
             try:
-                await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
+                await check_permissions(user, Operation.VIEW_ASSISTANT, permissions)
             except PermissionDenied:
                 continue
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
