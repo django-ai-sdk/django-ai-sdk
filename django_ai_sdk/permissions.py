@@ -200,6 +200,7 @@ class MemoryDefaultPermission(BasePermission):
 
 @lru_cache(maxsize=1)
 def get_default_permissions() -> list[type[BasePermission]]:
+    """Resolve default permission classes from settings, falling back to AllowAll."""
     paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
     if not paths:
         return [AllowAll]
