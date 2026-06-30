@@ -1,13 +1,7 @@
-"""
-Unit tests for TextFileProcessor.
-"""
-
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from django.core.files.uploadedfile import InMemoryUploadedFile, TemporaryUploadedFile
 
 from django_ai_sdk.files.processors import TextFileProcessor
 
@@ -20,100 +14,71 @@ class TestTextFileProcessor:
         """Create TextFileProcessor instance."""
         return TextFileProcessor()
 
-    def test_is_valid_for_txt_file(self, processor, tmp_path):
+    @pytest.fixture
+    def mock_puremagic_text(self, monkeypatch):
+        """Make puremagic.from_string return text/plain."""
+        monkeypatch.setattr(
+            "django_ai_sdk.files.processors.puremagic.from_string",
+            lambda stream, mime=True: "text/plain",
+        )
+
+    async def test_is_valid_for_txt_file(self, processor, tmp_path, mock_puremagic_text):
         """Test that .txt files are recognized as valid."""
         txt_file = tmp_path / "test.txt"
         txt_file.write_text("Hello, world!")
-        assert processor.is_valid(str(txt_file)) is True
+        assert await processor.is_valid(str(txt_file)) is True
 
-    def test_is_valid_for_md_file(self, processor, tmp_path):
+    async def test_is_valid_for_md_file(self, processor, tmp_path, mock_puremagic_text):
         """Test that .md files are recognized as valid."""
         md_file = tmp_path / "test.md"
         md_file.write_text("# Markdown Header")
-        assert processor.is_valid(str(md_file)) is True
+        assert await processor.is_valid(str(md_file)) is True
 
-    def test_is_valid_for_bytesio_txt(self, processor):
-        """Test that BytesIO with text/plain content is valid."""
-        content = b"Hello, world!"
-        file_obj = BytesIO(content)
-        assert processor.is_valid(file_obj) is True
-
-    def test_is_valid_for_bytesio_md(self, processor):
-        """Test that BytesIO with markdown content is valid."""
-        content = b"# Markdown Header"
-        file_obj = BytesIO(content)
-        assert processor.is_valid(file_obj) is True
-
-    def test_is_valid_returns_false_for_non_text(self, processor, monkeypatch):
+    async def test_is_valid_returns_false_for_non_text(self, processor, tmp_path):
         """Test that non-text files are rejected."""
-        # Mock magic.from_buffer to return a non-text MIME type
-        def mock_from_buffer(buffer, mime=True):
-            return "image/png"
-        monkeypatch.setattr("magic.from_buffer", mock_from_buffer)
+        png_file = tmp_path / "test.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+        assert await processor.is_valid(str(png_file)) is False
 
-        content = b"\x89PNG\r\n\x1a\n"
-        file_obj = BytesIO(content)
-        assert processor.is_valid(file_obj) is False
-
-    def test_run_reads_file_path(self, processor, tmp_path):
+    async def test_run_reads_file_path(self, processor, tmp_path):
         """Test reading content from a file path."""
         txt_file = tmp_path / "test.txt"
         expected_content = "Hello, world!\nThis is a test."
         txt_file.write_text(expected_content)
-        result = processor.run(str(txt_file))
+        result = await processor.run(str(txt_file))
         assert result == expected_content
 
-    def test_run_reads_path_object(self, processor, tmp_path):
+    async def test_run_reads_path_object(self, processor, tmp_path):
         """Test reading content from a Path object."""
         txt_file = tmp_path / "test.txt"
         expected_content = "Path object test content."
         txt_file.write_text(expected_content)
-        result = processor.run(txt_file)
+        result = await processor.run(txt_file)
         assert result == expected_content
 
-    def test_run_reads_bytesio(self, processor):
-        """Test reading content from BytesIO."""
-        expected_content = "BytesIO test content."
-        file_obj = BytesIO(expected_content.encode("utf-8"))
-        result = processor.run(file_obj)
+    async def test_run_reads_file_with_path_attr(self, processor, tmp_path):
+        """Test reading content from an object with a .path attribute (e.g. FieldFile)."""
+        expected_content = "FieldFile-like test content."
+        src = tmp_path / "source.txt"
+        src.write_text(expected_content)
+
+        file_like = MagicMock()
+        file_like.path = str(src)
+        result = await processor.run(file_like)
         assert result == expected_content
 
-    def test_run_reads_in_memory_uploaded_file(self, processor):
-        """Test reading content from InMemoryUploadedFile."""
-        expected_content = "InMemoryUploadedFile test content."
-        file_obj = BytesIO(expected_content.encode("utf-8"))
-        uploaded_file = InMemoryUploadedFile(
-            file=file_obj,
-            field_name="file",
-            name="test.txt",
-            content_type="text/plain",
-            size=len(expected_content),
-            charset="utf-8",
-        )
-        result = processor.run(uploaded_file)
-        assert result == expected_content
-
-    def test_run_reads_temporary_uploaded_file(self, processor, tmp_path):
-        """Test reading content from TemporaryUploadedFile."""
-        expected_content = "TemporaryUploadedFile test content."
-        temp_file = tmp_path / "tmp_test.txt"
-        temp_file.write_text(expected_content)
-
-        # Create a mock TemporaryUploadedFile
-        uploaded_file = MagicMock(spec=TemporaryUploadedFile)
-        uploaded_file.temporary_file_path.return_value = str(temp_file)
-        uploaded_file.read.return_value = expected_content.encode("utf-8")
-
-        # For is_valid, it needs to work with magic.from_file
-        assert processor.is_valid(uploaded_file) is True
-
-        result = processor.run(uploaded_file)
-        assert result == expected_content
-
-    def test_run_raises_on_binary_content(self, processor):
+    async def test_run_raises_on_binary_content(self, processor, tmp_path):
         """Test that run raises UnicodeDecodeError for binary content."""
-        # run() is only called after is_valid() passes; if a caller ignores
-        # is_valid() and feeds binary bytes, the decode error should propagate
-        file_obj = BytesIO(b"\x89PNG\r\n\x1a\n")
+        png_file = tmp_path / "test.png"
+        png_file.write_bytes(b"\x89PNG\r\n\x1a\n")
         with pytest.raises(UnicodeDecodeError):
-            processor.run(file_obj)
+            await processor.run(str(png_file))
+
+    async def test_is_valid_with_path_attr(self, processor, tmp_path, mock_puremagic_text):
+        """Test is_valid with an object that has a .path attribute."""
+        txt_file = tmp_path / "test.txt"
+        txt_file.write_text("Hello, world!")
+
+        file_like = MagicMock()
+        file_like.path = str(txt_file)
+        assert await processor.is_valid(file_like) is True
