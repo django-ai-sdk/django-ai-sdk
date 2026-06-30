@@ -286,13 +286,13 @@ async def disconnect_memory_from_thread(
 @router.get(
     "/{memory_id}/users/",
     response={200: list[MemoryUserOut], 403: dict, 404: dict},
-    operation_id="list_users",
+    operation_id="list_memory_users",
 )
-async def list_users(
+async def list_memory_users(
     request: HttpRequest, memory_id: str
 ) -> list[MemoryUserOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_users(memory_id, user=request.user)
+        return await MemoryService.list_memory_users(memory_id, user=request.user)
     except ValueError as e:
         return 404, {"detail": str(e)}
     except PermissionDenied as e:
@@ -302,13 +302,13 @@ async def list_users(
 @router.post(
     "/{memory_id}/users/",
     response={200: MemoryUserOut, 403: dict, 404: dict},
-    operation_id="add_user",
+    operation_id="add_memory_user",
 )
-async def add_user(
+async def add_memory_user(
     request: HttpRequest, memory_id: str, payload: AddMemoryUserIn
 ) -> MemoryUserOut | tuple[int, dict]:
     try:
-        return await MemoryService.add_user(
+        return await MemoryService.add_memory_user(
             memory_id, payload.user_id, payload.can_manage, user=request.user
         )
     except ValueError as e:
@@ -320,13 +320,13 @@ async def add_user(
 @router.patch(
     "/{memory_id}/users/{user_id}/",
     response={200: MemoryUserOut, 403: dict, 404: dict},
-    operation_id="update_user",
+    operation_id="update_memory_user",
 )
-async def update_user(
+async def update_memory_user(
     request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryUserIn
 ) -> MemoryUserOut | tuple[int, dict]:
     try:
-        return await MemoryService.update_user(
+        return await MemoryService.update_memory_user(
             memory_id, user_id, payload.can_manage, user=request.user
         )
     except ValueError as e:
@@ -338,13 +338,13 @@ async def update_user(
 @router.delete(
     "/{memory_id}/users/{user_id}/",
     response={204: None, 403: dict, 404: dict},
-    operation_id="remove_user",
+    operation_id="remove_memory_user",
 )
-async def remove_user(
+async def remove_memory_user(
     request: HttpRequest, memory_id: str, user_id: str
 ) -> tuple[int, None | dict]:
     try:
-        await MemoryService.remove_user(memory_id, user_id, user=request.user)
+        await MemoryService.remove_memory_user(memory_id, user_id, user=request.user)
         return 204, None
     except ValueError as e:
         return 404, {"detail": str(e)}

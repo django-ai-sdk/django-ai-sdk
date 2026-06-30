@@ -1,6 +1,6 @@
 from django.urls import path
 from django_ai_sdk.memories.services import (
-    add_user,
+    add_memory_user,
     bulk_connect_memories,
     create_memory,
     delete_document,
@@ -14,14 +14,14 @@ from django_ai_sdk.memories.services import (
     link_memory_to_thread,
     list_documents,
     list_memories,
+    list_memory_users,
     list_thread_files,
     list_thread_memories,
-    list_users,
-    remove_user,
+    remove_memory_user,
     toggle_memory_active,
     unlink_memory_from_thread,
     update_memory,
-    update_user,
+    update_memory_user,
     upload_document,
     upload_thread_file,
 )
@@ -297,7 +297,7 @@ class DocumentStatusAPIView(APIView):
 class MemoryUserListCreateAPIView(APIView):
     def get(self, request: Request, memory_id: str) -> Response:
         try:
-            users = list_users(memory_id, user=request.user)
+            users = list_memory_users(memory_id, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:
@@ -308,7 +308,7 @@ class MemoryUserListCreateAPIView(APIView):
         serializer = AddMemoryUserInSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            user = add_user(
+            user = add_memory_user(
                 memory_id,
                 serializer.validated_data["user_id"],  # type: ignore[index, optional-subscript]
                 serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
@@ -334,7 +334,7 @@ class MemoryUserDetailAPIView(APIView):
         serializer = UpdateMemoryUserInSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            user = update_user(
+            user = update_memory_user(
                 memory_id,
                 user_id,
                 serializer.validated_data["can_manage"],  # type: ignore[index, optional-subscript]
@@ -348,7 +348,7 @@ class MemoryUserDetailAPIView(APIView):
 
     def delete(self, request: Request, memory_id: str, user_id: str) -> Response:
         try:
-            remove_user(memory_id, user_id, user=request.user)
+            remove_memory_user(memory_id, user_id, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:

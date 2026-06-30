@@ -129,7 +129,7 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def list_users(
+    async def list_memory_users(
         memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[MemoryUserOut]:
         """List all users of a memory."""
@@ -145,7 +145,7 @@ class MemoryService:
         ]
 
     @staticmethod
-    async def add_user(
+    async def add_memory_user(
         memory_id: str,
         user_id: str,
         can_manage: bool = False,
@@ -169,14 +169,14 @@ class MemoryService:
         )
 
     @staticmethod
-    async def update_user(
+    async def update_memory_user(
         memory_id: str,
         user_id: str,
         can_manage: bool,
         *,
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryUserOut:
-        """Update a user's can_manage flag."""
+        """Update a memory user's can_manage flag."""
         memory = await Memory.objects.aget(id=memory_id)
         await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
         ownership = await memory.memory_users.select_related("user").aget(user_id=user_id)
@@ -189,7 +189,7 @@ class MemoryService:
         )
 
     @staticmethod
-    async def remove_user(
+    async def remove_memory_user(
         memory_id: str, user_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         """Remove a user from a memory."""
@@ -884,7 +884,7 @@ delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_document_status = async_to_sync(MemoryService.get_document_status)
 retry_document = async_to_sync(MemoryService.retry_document)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
-list_users = async_to_sync(MemoryService.list_users)
-add_user = async_to_sync(MemoryService.add_user)
-update_user = async_to_sync(MemoryService.update_user)
-remove_user = async_to_sync(MemoryService.remove_user)
+list_memory_users = async_to_sync(MemoryService.list_memory_users)
+add_memory_user = async_to_sync(MemoryService.add_memory_user)
+update_memory_user = async_to_sync(MemoryService.update_memory_user)
+remove_memory_user = async_to_sync(MemoryService.remove_memory_user)
