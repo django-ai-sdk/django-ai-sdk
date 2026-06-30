@@ -155,14 +155,14 @@ class MemoryDefaultPermission(BasePermission):
             Operation.VIEW_DOCUMENT,
             Operation.LIST_DOCUMENTS,
             Operation.LIST_THREAD_MEMORIES,
+            Operation.LINK_MEMORY,
+            Operation.UNLINK_MEMORY,
         }
     )
     WRITE: frozenset[Operation] = frozenset(
         {
             Operation.UPLOAD_DOCUMENT,
             Operation.DELETE_DOCUMENT,
-            Operation.LINK_MEMORY,
-            Operation.UNLINK_MEMORY,
         }
     )
     MANAGER: frozenset[Operation] = frozenset(

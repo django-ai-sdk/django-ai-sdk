@@ -7,6 +7,7 @@ from django_ai_sdk.permissions import BasePermission, Operation
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from django_ai_sdk.memories.models import Memory
 
 
 class AllowAnonymousMemoryPermission(BasePermission):
@@ -36,8 +37,6 @@ class AllowAnonymousMemoryPermission(BasePermission):
         {
             Operation.UPLOAD_DOCUMENT,
             Operation.DELETE_DOCUMENT,
-            Operation.LINK_MEMORY,
-            Operation.UNLINK_MEMORY,
         }
     )
     MANAGER: frozenset[Operation] = frozenset(
@@ -59,25 +58,18 @@ class AllowAnonymousMemoryPermission(BasePermission):
         self,
         user: AbstractBaseUser | AnonymousUser | None,
         operation: Operation,
-        obj: Any,
+        obj: Memory,
         **kwargs: Any,
     ) -> bool:
-        # Objects without is_public (e.g. Thread) are treated as public in demo
-        is_public = getattr(obj, "is_public", True)
-
-        # Anonymous users can only read
+        # Anonymous users can only read public memories
         if user is None or not user.is_authenticated:
-            return operation in self.READ and is_public
-
-        # Objects without memory_users (e.g. Thread), allow read for authenticated
-        if not hasattr(obj, "memory_users"):
-            return operation in self.READ
+            return operation in self.READ and obj.is_public
 
         # Check memory user permissions for authenticated users
         ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
             # Not a memory user — only allow read on public memories
-            if operation in self.READ and is_public:
+            if operation in self.READ and obj.is_public:
                 return True
             return False
 
