@@ -361,9 +361,9 @@ class Assistant(ABC, AssistantInfoMixin):
         if not self.rag_provider or not thread_id:
             return []
 
-        from django_ai_sdk.memories.models import ThreadMemory  # noqa: PLC0415
-        from django_ai_sdk.memories.services import _check_object_permission  # noqa: PLC0415
-        from django_ai_sdk.permissions import Operation  # noqa: PLC0415
+        from django_ai_sdk.memories.models import ThreadMemory
+        from django_ai_sdk.memories.services import _check_object_permission
+        from django_ai_sdk.permissions import Operation
 
         tools: list[Any] = []
         memory_links = (

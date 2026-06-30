@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=1)
-def _get_memory_permissions() -> tuple[type[BasePermission], ...]:
+def _get_memory_permissions() -> list[type[BasePermission]]:
     paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
     if not paths:
         return get_default_permissions()
