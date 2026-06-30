@@ -11,6 +11,7 @@ from django.utils.module_loading import import_string
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from django.db.models import QuerySet
 
     from django_ai_sdk.memories.models import Memory
 
@@ -69,6 +70,22 @@ class BasePermission(ABC):
         **kwargs: Any,
     ) -> bool:
         return True
+
+    def get_queryset_perms(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        queryset: QuerySet,
+    ) -> QuerySet | None:
+        """Filter *queryset* to items this class grants *operation* for *user*.
+
+        Implement this to let list endpoints apply your permission rules at the
+        database level instead of post-filtering every row.
+
+        Return the filtered ``QuerySet``, ``queryset.none()`` to deny all items,
+        or ``None`` to skip this class (no opinion on queryset filtering).
+        """
+        return None
 
 
 class AllowAll(BasePermission):
