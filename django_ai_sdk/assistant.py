@@ -361,37 +361,19 @@ class Assistant(ABC, AssistantInfoMixin):
         if not self.rag_provider or not thread_id:
             return []
 
-        from django_ai_sdk.memories.models import ThreadMemory
-        from django_ai_sdk.memories.services import _check_object_permission
-        from django_ai_sdk.permissions import Operation
+        from django_ai_sdk.memories.services import MemoryService
 
         tools: list[Any] = []
-        memory_links = (
-            ThreadMemory.objects.filter(thread_id=thread_id, active=True)
-            .select_related("memory")
-            .prefetch_related("memory__memory_users")
+        memories = await MemoryService.get_thread_memories(
+            thread_id,
+            user=user,
         )
 
-        async for link in memory_links:
-            if link.memory is None:
-                # Stale link pointing at a deleted memory — skip silently.
-                continue
-            # Per-user retrieval gate: only retrieve from memories the user can
-            # read (staff / owner / public per AI_SDK_MEMORY_PERMISSIONS).
-            # Private, non-owned memories are excluded so the assistant still
-            # answers from whatever the user *can* read.
-            if not await _check_object_permission(
-                user, Operation.VIEW_MEMORY, link.memory, raise_on_deny=False
-            ):
-                logger.debug(
-                    "Memory '{}' skipped for RAG — user lacks read access",
-                    link.memory.name,
-                )
-                continue
-            spec = await link.memory.get_tool_spec()
+        for memory in memories:
+            spec = await memory.get_tool_spec()
             tool = await self.rag_provider.get_tool(
                 self,
-                str(link.memory.id),
+                str(memory.id),
                 spec=spec,
                 citation_registry=citation_registry,
                 citation_formatter=citation_formatter,
@@ -399,7 +381,7 @@ class Assistant(ABC, AssistantInfoMixin):
             if tool is None:
                 logger.warning(
                     "Memory '{}' has 0 documents — no RAG tool created",
-                    link.memory.name,
+                    memory.name,
                 )
                 continue
             tools.append(tool)

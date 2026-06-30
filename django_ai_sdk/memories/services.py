@@ -256,18 +256,19 @@ class MemoryService:
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        """Link an assistant's configured memories to a thread (system action).
+        """Link an assistant's configured memories to a thread.
 
-        This is NOT gated on ``user``: the assistant's memories are curated by
-        whoever built the assistant, and the user already passed assistant access
-        to reach here. Whether each linked memory is actually *readable* by this
-        user is enforced later, per-request, by the retrieval filter
-        (``Assistant.get_rag_tools``) and the memory-aware tools — so a private
-        memory the user cannot read is simply never retrieved or listed for them,
-        rather than blocking thread creation with a permission error.
+        Skips memories the user doesn't have ``LINK_MEMORY`` permission for,
+        consistent with the per-request retrieval filter, a private memory
+        the user cannot read is simply not linked, rather than blocking by raise.
         """
         memory_ids = await MemoryService.get_assistant_memories(assistant_id)
         for memory_id in memory_ids:
+            memory = await Memory.objects.aget(id=memory_id)
+            if not await _check_object_permission(
+                user, Operation.LINK_MEMORY, memory, raise_on_deny=False
+            ):
+                continue
             await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory_id=memory_id)
 
     @staticmethod
@@ -277,14 +278,23 @@ class MemoryService:
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        """Unlink an assistant's configured memories from a thread (system action).
+        """Unlink an assistant's configured memories from a thread.
 
-        Counterpart to :meth:`link_memories`; ungated for the same reason.
+        Only unlinks memories the user has ``UNLINK_MEMORY`` permission for.
         """
         memory_ids = await MemoryService.get_assistant_memories(assistant_id)
         if not memory_ids:
             return
-        await ThreadMemory.objects.filter(thread_id=thread_id, memory_id__in=memory_ids).adelete()
+        for memory_id in memory_ids:
+            memory = await Memory.objects.aget(id=memory_id)
+            if not await _check_object_permission(
+                user, Operation.UNLINK_MEMORY, memory, raise_on_deny=False
+            ):
+                continue
+            await ThreadMemory.objects.filter(
+                thread_id=thread_id,
+                memory_id=memory_id,
+            ).adelete()
 
     @staticmethod
     async def get_memory(
@@ -483,6 +493,31 @@ class MemoryService:
             )
 
         return memories
+
+    @staticmethod
+    async def get_thread_memories(
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
+    ) -> list[Memory]:
+        """Return active Memory objects for a thread that ``user`` can read.
+
+        Filters out memories the user lacks ``VIEW_MEMORY`` access to (silent
+        skip), so the caller never sees unreadable memories.
+        """
+        query = (
+            ThreadMemory.objects.filter(thread_id=thread_id, active=True)
+            .select_related("memory")
+            .prefetch_related("memory__memory_users")
+        )
+        result: list[Memory] = []
+        async for tm in query:
+            if tm.memory is None:
+                continue
+            if not await _check_object_permission(
+                user, Operation.VIEW_MEMORY, tm.memory, raise_on_deny=False
+            ):
+                continue
+            result.append(tm.memory)
+        return result
 
     @staticmethod
     async def bulk_connect_memories(

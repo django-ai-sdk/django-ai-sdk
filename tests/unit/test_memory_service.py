@@ -179,6 +179,67 @@ class TestMemoryServicePermissions:
 
         await mem.adelete()
 
+    async def test_link_memories_skips_when_user_cannot_read(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
+
+        memory_user = await self._get_user()
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-link", is_public=False
+        )
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
+
+        with (
+            mock_assistant_memories([mem.slug]),
+            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
+        ):
+            await MemoryService.link_memories(
+                "test-asst", str(thread.id), user=None
+            )
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert not linked
+
+        await mem.adelete()
+
+    async def test_unlink_memories_skips_when_user_cannot_read(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
+
+        memory_user = await self._get_user()
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-unlink", is_public=False
+        )
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with (
+            mock_assistant_memories([mem.slug]),
+            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
+        ):
+            await MemoryService.unlink_memories(
+                "test-asst", str(thread.id), user=None
+            )
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert linked
+
+        await mem.adelete()
+
     async def test_unlink_memories_unlinks_assistant_memories(self):
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
