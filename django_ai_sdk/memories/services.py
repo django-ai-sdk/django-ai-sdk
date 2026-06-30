@@ -250,6 +250,28 @@ class MemoryService:
         return [str(m.id) async for m in Memory.objects.filter(slug__in=memories).distinct()]
 
     @staticmethod
+    async def get_assistant_memories_for_user(
+        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[Memory]:
+        """Return the assistant's configured memories the user can ``VIEW_MEMORY``.
+
+        Filters out memories the user doesn't have permission to see, so the
+        caller never receives unreadable memories.
+        """
+        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
+        if not memory_ids:
+            return []
+        result: list[Memory] = []
+        for memory_id in memory_ids:
+            memory = await Memory.objects.aget(id=memory_id)
+            if not await _check_object_permission(
+                user, Operation.VIEW_MEMORY, memory, raise_on_deny=False
+            ):
+                continue
+            result.append(memory)
+        return result
+
+    @staticmethod
     async def link_memories(
         assistant_id: str,
         thread_id: str,
@@ -851,6 +873,7 @@ unlink_memories = async_to_sync(MemoryService.unlink_memories)
 link_memory_to_thread = async_to_sync(MemoryService.link_memory_to_thread)
 unlink_memory_from_thread = async_to_sync(MemoryService.unlink_memory_from_thread)
 list_thread_memories = async_to_sync(MemoryService.list_thread_memories)
+get_thread_memories = async_to_sync(MemoryService.get_thread_memories)
 bulk_connect_memories = async_to_sync(MemoryService.bulk_connect_memories)
 toggle_memory_active = async_to_sync(MemoryService.toggle_memory_active)
 disconnect_memory_from_thread = async_to_sync(MemoryService.disconnect_memory_from_thread)
