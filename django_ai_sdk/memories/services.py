@@ -488,17 +488,16 @@ class MemoryService:
         thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
-        thread_memories_query = (
+        thread_memories = (
             ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
             .select_related("memory")
             .annotate(document_count=Count("memory__entries"))
         )
 
         memories = []
-        async for tm in thread_memories_query:
+        async for tm in thread_memories:
             # Skip memories this user cannot read instead of raising: a thread may
-            # carry assistant-linked private memories the user has no access to —
-            # they must not surface in the list, but must not break it either.
+            # carry assistant-linked private memories the user has no access to.
             if not await _check_object_permission(
                 user, Operation.VIEW_MEMORY, tm.memory, raise_on_deny=False
             ):
