@@ -11,7 +11,7 @@ class AssistantSettings(models.Model):
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
     name = models.CharField(max_length=255)
     slug = models.SlugField(unique=True, max_length=100)
-    model = models.CharField(max_length=100, default="gpt-4o")
+    model = models.CharField(max_length=255)
     system_prompt = models.TextField(blank=True, default="")
     assistant = models.CharField(max_length=255, blank=True, default="")
     tools = models.JSONField(default=list, blank=True)
@@ -30,10 +30,9 @@ class AssistantSettings(models.Model):
         related_name="assistant_settings",
     )
 
-    # Optional access restriction to specific users
-    users = models.JSONField(default=list, blank=True)
-    # Optional access restriction to specific groups
-    groups = models.JSONField(default=list, blank=True)
+    # Reverse relation type hints
+    assistant_users: models.Manager["AssistantUser"]
+    assistant_groups: models.Manager["AssistantGroup"]
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -64,3 +63,53 @@ class AssistantSettings(models.Model):
             using=using,
             update_fields=update_fields,
         )
+
+
+class AssistantUser(models.Model):
+    assistant = models.ForeignKey(
+        AssistantSettings, on_delete=models.CASCADE, related_name="assistant_users"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="assistants",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    assistant_id: int
+    user_id: int
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_runtime_assistant_users"
+        unique_together = [["assistant", "user"]]
+
+    def __str__(self) -> str:
+        return f"{self.user} - {self.assistant.name}"
+
+
+class AssistantGroup(models.Model):
+    assistant = models.ForeignKey(
+        AssistantSettings,
+        on_delete=models.CASCADE,
+        related_name="assistant_groups",
+    )
+    group = models.ForeignKey(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        related_name="assistant_group_links",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    assistant_id: int
+    group_id: int
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_runtime_assistant_groups"
+        unique_together = [["assistant", "group"]]
+
+    def __str__(self) -> str:
+        return f"{self.group} - {self.assistant.name}"

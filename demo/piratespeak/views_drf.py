@@ -8,8 +8,15 @@ from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import (
     AssistantService,
     AssistantSettingsService,
+    add_assistant_group,
+    add_assistant_user,
     get_assistant_info,
+    list_assistant_groups,
+    list_assistant_users,
     list_assistants,
+    remove_assistant_group,
+    remove_assistant_user,
+    update_assistant_user,
 )
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
@@ -489,6 +496,16 @@ class AssistantAPIView(View):
 # ============================================================================
 
 
+class AssistantUserInSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class AssistantGroupInSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    can_manage = serializers.BooleanField(default=False)
+
+
 class AssistantSettingsSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     name = serializers.CharField()
@@ -515,6 +532,8 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     system_prompt = serializers.CharField(allow_blank=True, default="")
     tools = serializers.ListField(child=serializers.CharField(), default=list)
     mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    users = AssistantUserInSerializer(many=True, required=False)
+    groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(default=False)
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
@@ -528,6 +547,8 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     system_prompt = serializers.CharField(allow_blank=True, required=False)
     tools = serializers.ListField(child=serializers.CharField(), required=False)
     mcp_servers = serializers.ListField(child=serializers.CharField(), required=False)
+    users = AssistantUserInSerializer(many=True, required=False)
+    groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(required=False)
     title_generation = serializers.BooleanField(required=False)
     max_history = serializers.IntegerField(allow_null=True, required=False)
@@ -562,14 +583,30 @@ class RuntimeAssistantListCreateAPIView(APIView):
     async def post(self, request: Request) -> Response:
         serializer = AssistantSettingsCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        skip_keys = {"users", "groups"}
+        data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
             config = await AssistantSettingsService.create(
-                serializer.validated_data,  # type: ignore[arg-type]
+                data,  # type: ignore[arg-type]
                 user=request.user,
             )
-            return Response(AssistantSettingsSerializer(config).data, status=201)
         except Exception as e:
             return Response({"message": str(e)}, status=400)
+        for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
+            try:
+                await AssistantService.add_assistant_user(
+                    str(config.id), entry["user_id"], entry.get("can_manage", False)
+                )
+            except Exception:
+                pass
+        for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
+            try:
+                await AssistantService.add_assistant_group(
+                    str(config.id), entry["group_id"], entry.get("can_manage", False)
+                )
+            except Exception:
+                pass
+        return Response(AssistantSettingsSerializer(config).data)
 
 
 class RuntimeAssistantDetailAPIView(APIView):
@@ -583,16 +620,30 @@ class RuntimeAssistantDetailAPIView(APIView):
     async def patch(self, request: Request, runtime_id: str) -> Response:
         serializer = AssistantSettingsUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        skip_keys = {"users", "groups"}
+        data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
             config = await AssistantSettingsService.update(
                 runtime_id,
-                serializer.validated_data,  # type: ignore[arg-type]
+                data,  # type: ignore[arg-type]
             )
-            return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
         except Exception as e:
             return Response({"message": str(e)}, status=400)
+        for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
+            try:
+                await AssistantService.add_assistant_user(
+                    runtime_id, entry["user_id"], entry.get("can_manage", False)
+                )
+            except Exception:
+                pass
+        for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
+            try:
+                await AssistantService.add_assistant_group(runtime_id, entry["group_id"])
+            except Exception:
+                pass
+        return Response(AssistantSettingsSerializer(config).data)
 
     async def delete(self, request: Request, runtime_id: str) -> Response:
         try:
@@ -600,6 +651,128 @@ class RuntimeAssistantDetailAPIView(APIView):
             return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+
+
+# ── Assistant Users ───────────────────────────────────────────────────────────
+
+
+class AssistantUserOutSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField()
+    created_at = serializers.CharField()
+
+
+class AddAssistantUserInSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class UpdateAssistantUserInSerializer(serializers.Serializer):
+    can_manage = serializers.BooleanField()
+
+
+class AssistantUserListCreateAPIView(APIView):
+    def get(self, request: Request, runtime_id: str) -> Response:
+        try:
+            users = list_assistant_users(runtime_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(AssistantUserOutSerializer(users, many=True).data)
+
+    def post(self, request: Request, runtime_id: str) -> Response:
+        serializer = AddAssistantUserInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            entry = add_assistant_user(
+                runtime_id,
+                serializer.validated_data["user_id"],  # type: ignore[index]
+                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(AssistantUserOutSerializer(entry).data)
+
+
+class AssistantUserDetailAPIView(APIView):
+    def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        serializer = UpdateAssistantUserInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            entry = update_assistant_user(
+                runtime_id,
+                user_id,
+                serializer.validated_data["can_manage"],  # type: ignore[index]
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(AssistantUserOutSerializer(entry).data)
+
+    def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        try:
+            remove_assistant_user(runtime_id, user_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(status=204)
+
+
+# ── Assistant Groups ──────────────────────────────────────────────────────────
+
+
+class AssistantGroupOutSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    group_name = serializers.CharField(source="group.name")
+    created_at = serializers.CharField()
+
+
+class AddAssistantGroupInSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+
+
+class AssistantGroupListCreateAPIView(APIView):
+    def get(self, request: Request, runtime_id: str) -> Response:
+        try:
+            groups = list_assistant_groups(runtime_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(AssistantGroupOutSerializer(groups, many=True).data)
+
+    def post(self, request: Request, runtime_id: str) -> Response:
+        serializer = AddAssistantGroupInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            entry = add_assistant_group(
+                runtime_id,
+                serializer.validated_data["group_id"],  # type: ignore[index]
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(AssistantGroupOutSerializer(entry).data)
+
+
+class AssistantGroupDetailAPIView(APIView):
+    def delete(self, request: Request, runtime_id: str, group_id: int) -> Response:
+        try:
+            remove_assistant_group(runtime_id, group_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(status=204)
 
 
 urlpatterns = [
@@ -682,5 +855,25 @@ urlpatterns = [
         "assistants/runtimes/<str:runtime_id>/",
         RuntimeAssistantDetailAPIView.as_view(),
         name="runtime-assistant-detail",
+    ),
+    path(
+        "assistants/runtimes/<str:runtime_id>/users/",
+        AssistantUserListCreateAPIView.as_view(),
+        name="runtime-assistant-user-list",
+    ),
+    path(
+        "assistants/runtimes/<str:runtime_id>/users/<str:user_id>/",
+        AssistantUserDetailAPIView.as_view(),
+        name="runtime-assistant-user-detail",
+    ),
+    path(
+        "assistants/runtimes/<str:runtime_id>/groups/",
+        AssistantGroupListCreateAPIView.as_view(),
+        name="runtime-assistant-group-list",
+    ),
+    path(
+        "assistants/runtimes/<str:runtime_id>/groups/<int:group_id>/",
+        AssistantGroupDetailAPIView.as_view(),
+        name="runtime-assistant-group-detail",
     ),
 ]

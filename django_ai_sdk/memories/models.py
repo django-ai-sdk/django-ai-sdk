@@ -23,6 +23,7 @@ class Memory(models.Model):
     # Reverse relation type hints
     entries: models.Manager["Entry"]
     memory_users: models.Manager["MemoryUser"]
+    memory_groups: models.Manager["MemoryGroup"]
 
     # Annotated field from queries
     document_count: int
@@ -67,12 +68,13 @@ class MemoryUser(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="memory_user_links",
+        related_name="memories",
     )
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Reverse relation type hints
+    memory_id: int
     user_id: int
 
     class Meta:
@@ -81,6 +83,29 @@ class MemoryUser(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} - {self.memory.name}"
+
+
+class MemoryGroup(models.Model):
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="memory_groups")
+    group = models.ForeignKey(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        related_name="memories",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Reverse relation type hints
+    memory_id: int
+    group_id: int
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_memory_groups"
+        unique_together = [["memory", "group"]]
+
+    def __str__(self) -> str:
+        return f"{self.group} - {self.memory.name}"
 
 
 class Entry(models.Model):
@@ -153,11 +178,6 @@ class Entry(models.Model):
 
 
 class EntryDocument(models.Model):
-    """
-    An uploaded file attached to an Entry.
-    Stored in a separate table — only joined when file metadata is actually needed.
-    """
-
     class ProcessingStatus(models.TextChoices):
         PENDING = "pending", "Pending"
         PROCESSING = "processing", "Processing"
@@ -199,6 +219,7 @@ class EntryDocument(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_entry_documents"
 
     def __str__(self) -> str:
@@ -220,6 +241,7 @@ class ThreadMemory(models.Model):
     document_count: int
 
     class Meta:
+        app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_thread_memories"
         unique_together = [["thread", "memory"]]
 

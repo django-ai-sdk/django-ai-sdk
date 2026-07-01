@@ -1,5 +1,5 @@
 # Assistant Settings
-from .assistants.models import AssistantSettings
+from .assistants.models import AssistantGroup, AssistantSettings, AssistantUser
 
 # Conversation models from chats app
 from .conversation.models import (
@@ -12,6 +12,8 @@ from .memories.models import (
     Entry,
     EntryDocument,
     Memory,
+    MemoryGroup,
+    MemoryUser,
     ThreadMemory,
 )
 
@@ -23,7 +25,11 @@ __all__ = [
     "Entry",
     "EntryDocument",
     "Memory",
+    "MemoryGroup",
+    "MemoryUser",
     "ThreadMemory",
     # Assistant Settings
+    "AssistantGroup",
     "AssistantSettings",
+    "AssistantUser",
 ]
