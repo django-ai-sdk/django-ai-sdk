@@ -541,11 +541,6 @@ class AssistantSettingsSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
-class AssistantOwnerInSerializer(serializers.Serializer):
-    user_id = serializers.CharField()
-    can_manage = serializers.BooleanField(default=False)
-
-
 class AssistantSettingsCreateSerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.SlugField(default="")
@@ -560,7 +555,7 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(default=False)
-    owners = AssistantOwnerInSerializer(many=True, required=False, default=list)
+    users = AssistantUserInSerializer(many=True, required=False, default=list)
 
 
 class AssistantSettingsUpdateSerializer(serializers.Serializer):
@@ -577,7 +572,7 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(required=False)
     active = serializers.BooleanField(required=False)
-    owners = AssistantOwnerInSerializer(many=True, required=False)
+    users = AssistantUserInSerializer(many=True, required=False)
 
 
 class RuntimeAssistantBasesAPIView(APIView):
@@ -1074,6 +1069,79 @@ class UserSessionListAPIView(APIView):
 
         sessions = UserSession.objects.filter(user_id=user_id).order_by("-last_seen_at")
         return Response(UserSessionSerializer(sessions, many=True).data)
+
+
+# ── Assistant Users ───────────────────────────────────────────────────────────
+
+
+class AssistantUserSerializer(serializers.Serializer):
+    user_id = serializers.CharField(source="user.id")
+    first_name = serializers.CharField(source="user.first_name")
+    last_name = serializers.CharField(source="user.last_name")
+    can_manage = serializers.BooleanField()
+
+
+class AssistantUserAddSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class AssistantUserUpdateSerializer(serializers.Serializer):
+    can_manage = serializers.BooleanField()
+
+
+class AssistantUserListCreateAPIView(APIView):
+    async def get(self, request: Request, runtime_id: str) -> Response:
+        try:
+            users = await AssistantService.list_assistant_users(runtime_id, user=request.user)
+            return Response(AssistantUserSerializer(users, many=True).data)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+    async def post(self, request: Request, runtime_id: str) -> Response:
+        serializer = AssistantUserAddSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        try:
+            entry = await AssistantService.add_assistant_user(
+                runtime_id,
+                serializer.validated_data["user_id"],
+                serializer.validated_data["can_manage"],
+                user=request.user,
+            )
+            return Response(AssistantUserSerializer(entry).data, status=201)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+
+class AssistantUserDetailAPIView(APIView):
+    async def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        serializer = AssistantUserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        try:
+            entry = await AssistantService.update_assistant_user(
+                runtime_id,
+                user_id,
+                serializer.validated_data["can_manage"],
+                user=request.user,
+            )
+            return Response(AssistantUserSerializer(entry).data)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+    async def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        try:
+            await AssistantService.remove_assistant_user(runtime_id, user_id, user=request.user)
+            return Response(status=204)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
 
 
 urlpatterns = [

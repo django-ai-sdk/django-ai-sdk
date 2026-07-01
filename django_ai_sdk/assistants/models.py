@@ -67,7 +67,9 @@ class AssistantSettings(models.Model):
 
 class AssistantUser(models.Model):
     assistant = models.ForeignKey(
-        AssistantSettings, on_delete=models.CASCADE, related_name="assistant_users"
+        AssistantSettings,
+        on_delete=models.CASCADE,
+        related_name="assistant_users",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
