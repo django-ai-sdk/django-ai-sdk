@@ -814,9 +814,7 @@ async def update_assistant_user(
     response={200: Success, 403: Error, 404: Error},
     operation_id="delete_assistant_user",
 )
-async def delete_assistant_user_endpoint(
-    request: HttpRequest, runtime_id: UUID, user_id: str
-) -> Any:
+async def delete_assistant_user(request: HttpRequest, runtime_id: UUID, user_id: str) -> Any:
     try:
         await AssistantService.remove_assistant_user(str(runtime_id), user_id, user=request.user)
         return Success(success=True, message="User removed from assistant")
@@ -844,7 +842,7 @@ class AddAssistantGroupIn(Schema):
     response={200: list[AssistantGroupOut], 403: Error, 404: Error},
     operation_id="list_assistant_groups",
 )
-async def list_assistant_groups_endpoint(request: HttpRequest, runtime_id: UUID) -> Any:
+async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
         groups = await AssistantService.list_assistant_groups(str(runtime_id), user=request.user)
         return [
@@ -864,7 +862,7 @@ async def list_assistant_groups_endpoint(request: HttpRequest, runtime_id: UUID)
     response={200: AssistantGroupOut, 403: Error, 404: Error},
     operation_id="add_assistant_group",
 )
-async def add_assistant_group_endpoint(
+async def add_assistant_group(
     request: HttpRequest, runtime_id: UUID, payload: AddAssistantGroupIn
 ) -> Any:
     try:
@@ -889,9 +887,7 @@ async def add_assistant_group_endpoint(
     response={200: Success, 403: Error, 404: Error},
     operation_id="delete_assistant_group",
 )
-async def delete_assistant_group_endpoint(
-    request: HttpRequest, runtime_id: UUID, group_id: int
-) -> Any:
+async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_id: int) -> Any:
     try:
         await AssistantService.remove_assistant_group(str(runtime_id), group_id, user=request.user)
         return Success(success=True, message="Group removed from assistant")
