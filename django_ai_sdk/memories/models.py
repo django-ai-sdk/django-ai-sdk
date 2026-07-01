@@ -85,6 +85,7 @@ class MemoryUser(models.Model):
     user_id: int
 
     class Meta:
+        app_label = "django_ai_sdk"
         unique_together = [["memory", "user"]]
         db_table = "django_ai_sdk_memory_users"
 
