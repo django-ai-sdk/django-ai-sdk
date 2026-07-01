@@ -74,9 +74,8 @@ class PirateBasicAssistant(Assistant):
     rag_provider = RAGProvider()
 
     tools: list = [get_today, get_memory_files]
-    #: Registry keys of installed integration apps. `weather` needs no credentials, so
-    #: it works out of the box; `linear` reports "needs setup" until LINEAR_API_KEY
-    #: reaches AI_SDK_INTEGRATIONS, rather than breaking this assistant.
+
+    # Registry keys of installed integration apps.
     integrations: list[str] = ["linear", "weather"]
 
     citation_formatter_class = DefaultCitationFormatter
