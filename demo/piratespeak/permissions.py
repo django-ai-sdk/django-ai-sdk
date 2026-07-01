@@ -7,6 +7,7 @@ from django_ai_sdk.permissions import BasePermission, Operation
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from django.db.models import QuerySet
     from django_ai_sdk.memories.models import Memory
 
 
@@ -77,3 +78,22 @@ class AllowAnonymousMemoryPermission(BasePermission):
         if operation in self.MANAGER:
             return ownership.can_manage
         return True
+
+    def get_queryset_perms(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        queryset: QuerySet,
+    ) -> QuerySet | None:
+        """Return a filtered queryset for the given user and operation."""
+        is_authenticated = user is not None and getattr(user, "is_authenticated", False)
+
+        if not is_authenticated:
+            return queryset.filter(is_public=True) if operation in self.READ else queryset.none()
+
+        if operation in self.READ or operation in self.WRITE:
+            return queryset.filter(is_public=True) | queryset.filter(memory_users__user=user)
+        if operation in self.MANAGER:
+            return queryset.filter(memory_users__user=user)
+
+        return queryset.none()

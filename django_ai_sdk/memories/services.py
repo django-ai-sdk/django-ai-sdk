@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Q
+from django.db.models import Count, QuerySet
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.assistants.registry import registry
@@ -206,24 +206,20 @@ class MemoryService:
     ) -> list[MemoryOut]:
         """List memories visible to the requesting user.
 
-        Staff see all non-hidden memories. Authenticated users see non-hidden
-        memories that are public or that they own. Anonymous users see only
-        public non-hidden memories.
+        Filtering is driven by the permission classes configured via
+        ``AI_SDK_MEMORY_PERMISSIONS`` — each class's
+        :meth:`~django_ai_sdk.permissions.BasePermission.get_queryset_perms`
+        is called in order.
         """
         await _check_permission(user, Operation.VIEW_MEMORY)
 
-        base = Memory.objects.filter(is_hidden=False)
-        is_authenticated = user is not None and getattr(user, "is_authenticated", False)
-        is_staff = is_authenticated and getattr(user, "is_staff", False)
+        qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY)
+        qs = (
+            qs.filter(is_hidden=False)
+            .annotate(document_count=Count("entries"))
+            .order_by("-created_at")
+        )
 
-        if is_staff:
-            qs = base
-        elif is_authenticated:
-            qs = base.filter(Q(is_public=True) | Q(memory_users__user=user)).distinct()
-        else:
-            qs = base.filter(is_public=True)
-
-        memories = qs.annotate(document_count=Count("entries")).order_by("-created_at")
         return [
             MemoryOut(
                 id=str(memory.id),
@@ -235,7 +231,7 @@ class MemoryService:
                 created_at=memory.created_at.isoformat(),
                 updated_at=memory.updated_at.isoformat(),
             )
-            async for memory in memories
+            async for memory in qs
         ]
 
     @staticmethod
@@ -830,6 +826,36 @@ class MemoryService:
     # ============================================================================
     # Private helpers
     # ============================================================================
+
+    @staticmethod
+    def get_queryset_perms(
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        queryset: QuerySet | None = None,
+    ) -> QuerySet:
+        """Apply permission filters to *queryset*, returning only items *user* can access.
+
+        Each permission class's :meth:`~django_ai_sdk.permissions.BasePermission.get_queryset_perms`
+        receives the queryset and returns a filtered version; results are ANDed
+        together (all classes must approve).
+
+        If *queryset* is ``None``, ``Memory.objects.all()`` is used.
+
+        Examples::
+
+            qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY)
+            qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY, Memory.objects.filter(slug__in=slugs))
+        """
+        if queryset is None:
+            queryset = Memory.objects.all()
+
+        permissions = _get_memory_permissions()
+        for cls in permissions:
+            perm = cls() if isinstance(cls, type) else cls  # type: ignore[type-arg]
+            result = perm.get_queryset_perms(user, operation, queryset)
+            if result is not None:
+                queryset = result
+        return queryset
 
     @staticmethod
     def _entry_doc_to_out(entry_doc: EntryDocument) -> DocumentOut:
