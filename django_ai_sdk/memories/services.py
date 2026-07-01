@@ -249,7 +249,10 @@ class MemoryService(PermissionsMixin):
             Operation.VIEW_MEMORY,
             queryset=Memory.objects.filter(is_hidden=False),
         )
-        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")
+
+        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")[
+            offset : offset + limit
+        ]
 
         return [
             MemoryOut(

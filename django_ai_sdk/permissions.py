@@ -263,9 +263,6 @@ class MemoryDefaultPermission(BasePermission):
         obj: Memory,
         **kwargs: Any,
     ) -> bool:
-        if user is None or not bool(user.is_authenticated):
-            return False
-
         ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is not None and (operation not in self.MANAGER or ownership.can_manage):
             return True

@@ -118,7 +118,11 @@ class TestThreadServicePagination:
                 return_value=[mock_adapter],
             ),
             patch(
-                "django_ai_sdk.storage.services._check_object_permission",
+                "django_ai_sdk.storage.services.get_thread_permissions",
+                return_value=[],
+            ),
+            patch(
+                "django_ai_sdk.storage.services.has_perms",
                 new_callable=AsyncMock,
             ),
         ):
@@ -164,7 +168,11 @@ class TestThreadServicePagination:
                 return_value=[mock_a, mock_b],
             ),
             patch(
-                "django_ai_sdk.storage.services._check_object_permission",
+                "django_ai_sdk.storage.services.get_thread_permissions",
+                return_value=[],
+            ),
+            patch(
+                "django_ai_sdk.storage.services.has_perms",
                 new_callable=AsyncMock,
             ),
         ):
@@ -257,7 +265,7 @@ class TestAssistantServiceListAssistantsPagination:
         with (
             patch("django_ai_sdk.assistants.services.registry", registry),
             patch(
-                "django_ai_sdk.assistants.services.check_permissions",
+                "django_ai_sdk.storage.services.has_perms",
                 new_callable=AsyncMock,
             ),
             patch.object(
