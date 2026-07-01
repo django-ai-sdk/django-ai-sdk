@@ -74,7 +74,7 @@ class PirateBasicAssistant(Assistant):
     rag_provider = RAGProvider()
 
     tools: list = [get_today, get_memory_files]
-    mcp_servers: list[str] = ["linear"]
+    mcp_servers: list[str] = []
 
     citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
@@ -192,8 +192,8 @@ class PirateBasicAssistant(Assistant):
             tools.extend(rag_tools)
 
         # MCP tools
-        mcp_tools = await self.get_mcp_tools(user)
-        tools.extend(mcp_tools)
+        # mcp_tools = await self.get_mcp_tools(user)
+        # tools.extend(mcp_tools)
 
         # Build tool agent with all tools
         tool_agent = ToolAgent(
