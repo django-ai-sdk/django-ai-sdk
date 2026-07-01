@@ -361,18 +361,19 @@ class Assistant(ABC, AssistantInfoMixin):
         if not self.rag_provider or not thread_id:
             return []
 
-        from django_ai_sdk.memories.models import ThreadMemory  # noqa: PLC0415
+        from django_ai_sdk.memories.services import MemoryService
 
         tools: list[Any] = []
-        memory_links = ThreadMemory.objects.filter(thread_id=thread_id, active=True).select_related(
-            "memory"
+        memories = await MemoryService.get_thread_memories(
+            thread_id,
+            user=user,
         )
 
-        async for link in memory_links:
-            spec = await link.memory.get_tool_spec()
+        for memory in memories:
+            spec = await memory.get_tool_spec()
             tool = await self.rag_provider.get_tool(
                 self,
-                str(link.memory.id),
+                str(memory.id),
                 spec=spec,
                 citation_registry=citation_registry,
                 citation_formatter=citation_formatter,
@@ -380,7 +381,7 @@ class Assistant(ABC, AssistantInfoMixin):
             if tool is None:
                 logger.warning(
                     "Memory '{}' has 0 documents — no RAG tool created",
-                    link.memory.name,
+                    memory.name,
                 )
                 continue
             tools.append(tool)
@@ -409,7 +410,9 @@ class Assistant(ABC, AssistantInfoMixin):
 
         if memory_id:
             return Entry.objects.filter(memory_id=memory_id)
-        return Entry.objects.all()
+        # No memory scope → retrieve nothing. Returning every Entry in the system
+        # would leak content across memories; callers always pass a memory_id.
+        return Entry.objects.none()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:
         """

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class RuntimeAssistant(Assistant):
     """Assistant whose configuration is loaded from an AssistantSettings DB record.
 
-    Constructed on demand by AssistantService — not registered in the class registry.
+    Constructed on demand by AssistantService, not registered in the class registry.
     Each instance reflects the live DB config at construction time.
     """
 
@@ -40,11 +40,13 @@ class RuntimeAssistant(Assistant):
         self.model = config.model
         self.instructions = prompt(config.system_prompt or "You are a helpful assistant.")
         self.mcp_servers = list(config.mcp_servers or [])
+        self.memories = list(config.memories or [])
         self.title_generation = config.title_generation
         self.max_history = config.max_history
         self.file_upload = config.file_upload
         if config.suggestion_enabled:
             self.suggestion_generator = DefaultSuggestionGenerator
+
         super().__init__()
 
     @property

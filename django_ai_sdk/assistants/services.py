@@ -44,6 +44,9 @@ class AssistantCreateData(TypedDict, total=False):
     system_prompt: str
     tools: list[str]
     mcp_servers: list[str]
+    memories: list[str]
+    users: list[str]
+    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -57,6 +60,9 @@ class AssistantUpdateData(TypedDict, total=False):
     system_prompt: str
     tools: list[str]
     mcp_servers: list[str]
+    memories: list[str]
+    users: list[str]
+    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -148,9 +154,25 @@ class AssistantService:
             except PermissionDenied:
                 continue
 
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
 
         async for config in AssistantSettings.objects.filter(active=True):
+            # Resolve the runtime instance, it is used to for permission checking.
+            try:
+                assistant = get_runtime_assistant_class(config.assistant)(config)
+            except Exception:
+                _logger.exception(
+                    "Skipping assistant %r (id=%s): failed to instantiate",
+                    config.name,
+                    config.id,
+                )
+                continue
+            permissions: list = getattr(assistant, "permissions", get_default_permissions())
+            try:
+                await check_permissions(user, Operation.VIEW_ASSISTANT, permissions)
+            except PermissionDenied:
+                continue
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
 
         return result
@@ -274,11 +296,14 @@ class AssistantSettingsService:
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
             mcp_servers=data.get("mcp_servers", []),
+            memories=data.get("memories", []),
+            users=data.get("users", []),
+            groups=data.get("groups", []),
             suggestion_enabled=data.get("suggestion_enabled", False),
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),
             file_upload=data.get("file_upload", False),
-            owner=user if getattr(user, "is_authenticated", False) else None,
+            user=user if getattr(user, "is_authenticated", False) else None,
         )
         await config.asave()
         return config

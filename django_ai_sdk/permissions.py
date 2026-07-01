@@ -107,6 +107,24 @@ class IsAdminUser(BasePermission):
         )
 
 
+class IsInAllowedGroups(BasePermission):
+    """Allow only authenticated users belonging to one of the given auth groups.
+
+    Parameterized: instantiate with the allowed group names, e.g.
+    ``IsInAllowedGroups(groups=["Sales"])``
+    """
+
+    def __init__(self, groups: list[str] | None = None) -> None:
+        self.groups = list(groups or [])
+
+    async def has_permission(
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
+        if user is None or not bool(user.is_authenticated):
+            return False
+        return await user.groups.filter(name__in=self.groups).aexists()
+
+
 class IsOwner(BasePermission):
     async def has_object_permission(
         self,
@@ -137,14 +155,14 @@ class MemoryDefaultPermission(BasePermission):
             Operation.VIEW_DOCUMENT,
             Operation.LIST_DOCUMENTS,
             Operation.LIST_THREAD_MEMORIES,
+            Operation.LINK_MEMORY,
+            Operation.UNLINK_MEMORY,
         }
     )
     WRITE: frozenset[Operation] = frozenset(
         {
             Operation.UPLOAD_DOCUMENT,
             Operation.DELETE_DOCUMENT,
-            Operation.LINK_MEMORY,
-            Operation.UNLINK_MEMORY,
         }
     )
     MANAGER: frozenset[Operation] = frozenset(
@@ -169,7 +187,7 @@ class MemoryDefaultPermission(BasePermission):
         if user is None or not bool(user.is_authenticated):
             return False
 
-        ownership = await obj.owners.filter(user=user).afirst()
+        ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
             if operation in self.READ and obj.is_public:
                 return True
@@ -189,16 +207,34 @@ def get_default_permissions() -> list[type[BasePermission]]:
     return [import_string(p) for p in paths]
 
 
+def ensure_permission_instance(
+    perm: type[BasePermission] | BasePermission,
+) -> BasePermission:
+    """Normalise a permission class *or* instance to an instance.
+
+    Callers may store bare classes (e.g. ``[IsAuthenticated]``) or pre-built
+    instances (e.g. ``[IsInAllowedGroups(groups=["eng"])]``).  Both forms are
+    accepted throughout the permission-checking API; this helper enforces a
+    consistent runtime type.
+    """
+    return perm() if isinstance(perm, type) else perm
+
+
 async def check_permissions(
     user: AbstractBaseUser | AnonymousUser | None,
     operation: Operation,
     permissions: list[type[BasePermission]],
+    *,
+    raise_on_deny: bool = True,
     **kwargs: Any,
-) -> None:
+) -> bool:
     for perm_class in permissions:
-        perm = perm_class()
+        perm = ensure_permission_instance(perm_class)
         if not await perm.has_permission(user, operation, **kwargs):
-            raise PermissionDenied(f"{perm_class.__name__}: {operation.value} not permitted")
+            if raise_on_deny:
+                raise PermissionDenied(f"{type(perm).__name__}: {operation.value} not permitted")
+            return False
+    return True
 
 
 async def check_object_permissions(
@@ -206,11 +242,16 @@ async def check_object_permissions(
     operation: Operation,
     obj: Any,
     permissions: list[type[BasePermission]],
+    *,
+    raise_on_deny: bool = True,
     **kwargs: Any,
-) -> None:
+) -> bool:
     for perm_class in permissions:
-        perm = perm_class()
+        perm = ensure_permission_instance(perm_class)
         if not await perm.has_object_permission(user, operation, obj, **kwargs):
-            raise PermissionDenied(
-                f"{perm_class.__name__}: {operation.value} not permitted for this object"
-            )
+            if raise_on_deny:
+                raise PermissionDenied(
+                    f"{type(perm).__name__}: {operation.value} not permitted for this object"
+                )
+            return False
+    return True

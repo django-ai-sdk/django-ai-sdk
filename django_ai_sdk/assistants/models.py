@@ -15,19 +15,26 @@ class AssistantSettings(models.Model):
     system_prompt = models.TextField(blank=True, default="")
     assistant = models.CharField(max_length=255, blank=True, default="")
     tools = models.JSONField(default=list, blank=True)
+    memories = models.JSONField(default=list, blank=True)
     mcp_servers = models.JSONField(default=list, blank=True)
     suggestion_enabled = models.BooleanField(default=False)
     title_generation = models.BooleanField(default=True)
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
     active = models.BooleanField(default=True, db_index=True)
-    owner = models.ForeignKey(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="assistant_settings",
     )
+
+    # Optional access restriction to specific users
+    users = models.JSONField(default=list, blank=True)
+    # Optional access restriction to specific groups
+    groups = models.JSONField(default=list, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,16 +1,16 @@
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
-    AddMemoryOwnerIn,
+    AddMemoryUserIn,
     BulkConnectMemoriesIn,
     DocumentOut,
     DocumentStatusOut,
     DocumentUploadResponse,
     MemoryIn,
     MemoryOut,
-    MemoryOwnerOut,
+    MemoryUserOut,
     ThreadMemoryOut,
     ToggleMemoryActiveIn,
-    UpdateMemoryOwnerIn,
+    UpdateMemoryUserIn,
 )
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -284,15 +284,15 @@ async def disconnect_memory_from_thread(
 
 
 @router.get(
-    "/{memory_id}/owners/",
-    response={200: list[MemoryOwnerOut], 403: dict, 404: dict},
-    operation_id="list_owners",
+    "/{memory_id}/users/",
+    response={200: list[MemoryUserOut], 403: dict, 404: dict},
+    operation_id="list_memory_users",
 )
-async def list_owners(
+async def list_memory_users(
     request: HttpRequest, memory_id: str
-) -> list[MemoryOwnerOut] | tuple[int, dict]:
+) -> list[MemoryUserOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_owners(memory_id, user=request.user)
+        return await MemoryService.list_memory_users(memory_id, user=request.user)
     except ValueError as e:
         return 404, {"detail": str(e)}
     except PermissionDenied as e:
@@ -300,15 +300,15 @@ async def list_owners(
 
 
 @router.post(
-    "/{memory_id}/owners/",
-    response={200: MemoryOwnerOut, 403: dict, 404: dict},
-    operation_id="add_owner",
+    "/{memory_id}/users/",
+    response={200: MemoryUserOut, 403: dict, 404: dict},
+    operation_id="add_memory_user",
 )
-async def add_owner(
-    request: HttpRequest, memory_id: str, payload: AddMemoryOwnerIn
-) -> MemoryOwnerOut | tuple[int, dict]:
+async def add_memory_user(
+    request: HttpRequest, memory_id: str, payload: AddMemoryUserIn
+) -> MemoryUserOut | tuple[int, dict]:
     try:
-        return await MemoryService.add_owner(
+        return await MemoryService.add_memory_user(
             memory_id, payload.user_id, payload.can_manage, user=request.user
         )
     except ValueError as e:
@@ -318,15 +318,15 @@ async def add_owner(
 
 
 @router.patch(
-    "/{memory_id}/owners/{user_id}/",
-    response={200: MemoryOwnerOut, 403: dict, 404: dict},
-    operation_id="update_owner",
+    "/{memory_id}/users/{user_id}/",
+    response={200: MemoryUserOut, 403: dict, 404: dict},
+    operation_id="update_memory_user",
 )
-async def update_owner(
-    request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryOwnerIn
-) -> MemoryOwnerOut | tuple[int, dict]:
+async def update_memory_user(
+    request: HttpRequest, memory_id: str, user_id: str, payload: UpdateMemoryUserIn
+) -> MemoryUserOut | tuple[int, dict]:
     try:
-        return await MemoryService.update_owner(
+        return await MemoryService.update_memory_user(
             memory_id, user_id, payload.can_manage, user=request.user
         )
     except ValueError as e:
@@ -336,15 +336,15 @@ async def update_owner(
 
 
 @router.delete(
-    "/{memory_id}/owners/{user_id}/",
+    "/{memory_id}/users/{user_id}/",
     response={204: None, 403: dict, 404: dict},
-    operation_id="remove_owner",
+    operation_id="remove_memory_user",
 )
-async def remove_owner(
+async def remove_memory_user(
     request: HttpRequest, memory_id: str, user_id: str
 ) -> tuple[int, None | dict]:
     try:
-        await MemoryService.remove_owner(memory_id, user_id, user=request.user)
+        await MemoryService.remove_memory_user(memory_id, user_id, user=request.user)
         return 204, None
     except ValueError as e:
         return 404, {"detail": str(e)}

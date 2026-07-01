@@ -75,34 +75,34 @@ class TestMemoryServicePermissions:
 
     async def test_owner_can_delete_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
+        from django_ai_sdk.memories.models import Memory, MemoryUser
         from tests.mocks.permissions import memory_permissions
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
 
         mem = await Memory.objects.acreate(
             name="to-delete", description="x", is_public=False
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
-            await MemoryService.delete_memory(str(mem.id), user=owner)
+            await MemoryService.delete_memory(str(mem.id), user=memory_user)
 
         assert not await Memory.objects.filter(id=mem.id).aexists()
 
     async def test_stranger_cannot_delete_private_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
+        from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.permissions import PermissionDenied
         from tests.mocks.permissions import memory_permissions
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
         stranger = await self._get_user()
 
         mem = await Memory.objects.acreate(
             name="private", description="x", is_public=False
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
             with pytest.raises(PermissionDenied):
@@ -112,16 +112,16 @@ class TestMemoryServicePermissions:
 
     async def test_stranger_can_read_public_memory(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
+        from django_ai_sdk.memories.models import Memory, MemoryUser
         from tests.mocks.permissions import memory_permissions
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
         stranger = await self._get_user()
 
         mem = await Memory.objects.acreate(
             name="public", description="x", is_public=True
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
             result = await MemoryService.get_memory(str(mem.id), user=stranger)
@@ -131,17 +131,17 @@ class TestMemoryServicePermissions:
 
     async def test_get_memory_denied_for_private_not_owner(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
+        from django_ai_sdk.memories.models import Memory, MemoryUser
         from django_ai_sdk.permissions import PermissionDenied
         from tests.mocks.permissions import memory_permissions
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
         stranger = await self._get_user()
 
         mem = await Memory.objects.acreate(
             name="private-no-peek", description="x", is_public=False
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
             with pytest.raises(PermissionDenied):
@@ -151,25 +151,86 @@ class TestMemoryServicePermissions:
 
     async def test_link_memories_links_assistant_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
         from tests.mocks.assistant import mock_assistant_memories
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
             name="link-test", is_public=False
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with (
             mock_assistant_memories([mem.slug]),
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.link_memories(
-                "test-asst", str(thread.id), user=owner
+                "test-asst", str(thread.id), user=memory_user
+            )
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert linked
+
+        await mem.adelete()
+
+    async def test_link_memories_skips_when_user_cannot_read(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
+
+        memory_user = await self._get_user()
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-link", is_public=False
+        )
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
+
+        with (
+            mock_assistant_memories([mem.slug]),
+            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
+        ):
+            await MemoryService.link_memories(
+                "test-asst", str(thread.id), user=None
+            )
+
+        linked = await ThreadMemory.objects.filter(
+            thread=thread, memory=mem
+        ).aexists()
+        assert not linked
+
+        await mem.adelete()
+
+    async def test_unlink_memories_skips_when_user_cannot_read(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+        from tests.mocks.assistant import mock_assistant_memories
+
+        memory_user = await self._get_user()
+        thread = await Thread.objects.acreate()
+
+        mem = await Memory.objects.acreate(
+            name="req-unlink", is_public=False
+        )
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with (
+            mock_assistant_memories([mem.slug]),
+            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
+        ):
+            await MemoryService.unlink_memories(
+                "test-asst", str(thread.id), user=None
             )
 
         linked = await ThreadMemory.objects.filter(
@@ -181,18 +242,18 @@ class TestMemoryServicePermissions:
 
     async def test_unlink_memories_unlinks_assistant_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner, ThreadMemory
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
         from tests.mocks.assistant import mock_assistant_memories
 
-        owner = await self._get_user()
+        memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
 
         mem = await Memory.objects.acreate(
             name="unlink-test", is_public=False
         )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
         await ThreadMemory.objects.acreate(
             thread=thread, memory=mem, active=True
         )
@@ -202,7 +263,7 @@ class TestMemoryServicePermissions:
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.unlink_memories(
-                "test-asst", str(thread.id), user=owner
+                "test-asst", str(thread.id), user=memory_user
             )
 
         linked = await ThreadMemory.objects.filter(
@@ -212,59 +273,6 @@ class TestMemoryServicePermissions:
 
         await mem.adelete()
 
-    async def test_link_memories_requires_user(self):
-        from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
-        from django_ai_sdk.conversation.models import Thread
-        from django_ai_sdk.permissions import PermissionDenied
-        from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
-
-        owner = await self._get_user()
-        thread = await Thread.objects.acreate()
-
-        mem = await Memory.objects.acreate(
-            name="req-link", is_public=False
-        )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
-
-        with (
-            mock_assistant_memories([mem.slug]),
-            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
-        ):
-            with pytest.raises(PermissionDenied):
-                await MemoryService.link_memories(
-                    "test-asst", str(thread.id), user=None
-                )
-
-        await mem.adelete()
-
-    async def test_unlink_memories_requires_user(self):
-        from django_ai_sdk.memories.services import MemoryService
-        from django_ai_sdk.memories.models import Memory, MemoryOwner
-        from django_ai_sdk.conversation.models import Thread
-        from django_ai_sdk.permissions import PermissionDenied
-        from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
-
-        owner = await self._get_user()
-        thread = await Thread.objects.acreate()
-
-        mem = await Memory.objects.acreate(
-            name="req-unlink", is_public=False
-        )
-        await MemoryOwner.objects.acreate(memory=mem, user=owner, can_manage=True)
-
-        with (
-            mock_assistant_memories([mem.slug]),
-            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
-        ):
-            with pytest.raises(PermissionDenied):
-                await MemoryService.unlink_memories(
-                    "test-asst", str(thread.id), user=None
-                )
-
-        await mem.adelete()
 
     async def test_ownerless_memory_denied_all(self):
         from django_ai_sdk.memories.services import MemoryService

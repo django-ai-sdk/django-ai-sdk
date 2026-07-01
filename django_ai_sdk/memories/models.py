@@ -22,7 +22,7 @@ class Memory(models.Model):
 
     # Reverse relation type hints
     entries: models.Manager["Entry"]
-    owners: models.Manager["MemoryOwner"]
+    memory_users: models.Manager["MemoryUser"]
 
     # Annotated field from queries
     document_count: int
@@ -62,12 +62,12 @@ class Memory(models.Model):
         )
 
 
-class MemoryOwner(models.Model):
-    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="owners")
+class MemoryUser(models.Model):
+    memory = models.ForeignKey(Memory, on_delete=models.CASCADE, related_name="memory_users")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="memory_ownerships",
+        related_name="memory_user_links",
     )
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -77,7 +77,7 @@ class MemoryOwner(models.Model):
 
     class Meta:
         unique_together = [["memory", "user"]]
-        db_table = "django_ai_sdk_memory_owners"
+        db_table = "django_ai_sdk_memory_users"
 
     def __str__(self) -> str:
         return f"{self.user} - {self.memory.name}"
@@ -169,6 +169,15 @@ class EntryDocument(models.Model):
         Entry,
         on_delete=models.CASCADE,
         related_name="document",
+        null=True,
+        blank=True,
+    )
+    # Direct link to the owning Memory, set at upload time. Lets in-flight and
+    # failed documents (which have no Entry yet) still be listed by memory.
+    memory = models.ForeignKey(
+        Memory,
+        on_delete=models.CASCADE,
+        related_name="documents",
         null=True,
         blank=True,
     )

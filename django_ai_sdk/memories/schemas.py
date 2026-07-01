@@ -96,7 +96,13 @@ class DocumentIn(BaseModel):
 
 
 class DocumentOut(BaseModel):
-    """Schema for document output."""
+    """Schema for document output.
+
+    `id` is the EntryDocument id (stable across the upload → processing →
+    completed/failed lifecycle). `status` reflects EntryDocument.processing_status
+    and `error` carries any processing failure message. `content`/`extraction` are
+    only populated once processing has produced an Entry.
+    """
 
     id: str
     file: str
@@ -107,6 +113,8 @@ class DocumentOut(BaseModel):
     file_size: int
     content_type: str
     file_extension: str
+    status: str
+    error: str = ""
     created_at: str
     updated_at: str
 
@@ -150,22 +158,22 @@ class ToggleMemoryActiveIn(BaseModel):
     active: bool
 
 
-class MemoryOwnerOut(BaseModel):
-    """Schema for memory owner output."""
+class MemoryUserOut(BaseModel):
+    """Schema for memory user output."""
 
     user_id: str
     can_manage: bool
     created_at: str
 
 
-class AddMemoryOwnerIn(BaseModel):
-    """Schema for adding an owner to a memory."""
+class AddMemoryUserIn(BaseModel):
+    """Schema for adding a user to a memory."""
 
     user_id: str
     can_manage: bool = False
 
 
-class UpdateMemoryOwnerIn(BaseModel):
-    """Schema for updating a memory owner."""
+class UpdateMemoryUserIn(BaseModel):
+    """Schema for updating a memory user."""
 
     can_manage: bool
