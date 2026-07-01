@@ -10,9 +10,9 @@ from django_ai_sdk.permissions import (
     BasePermission,
     Operation,
     PermissionDenied,
-    check_object_permissions,
-    check_permissions,
+    get_assistant_permissions,
     get_default_permissions,
+    has_perms,
 )
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 
@@ -41,34 +41,12 @@ async def _get_storage(thread_info: ThreadInfo) -> Any:
     return storage_class(thread_info.id)
 
 
-async def _check_object_permission(
-    user: AbstractBaseUser | AnonymousUser | None,
-    operation: Operation,
-    obj: ThreadInfo,
-) -> None:
-    """Object-level permission using the thread's owning assistant's permission classes."""
+async def get_thread_permissions(thread: ThreadInfo) -> list[type[BasePermission]]:
     try:
-        assistant = await AssistantService.get(obj.assistant_id)
+        assistant = await AssistantService.get(thread.assistant_id)
     except ValueError:
         assistant = None
-
-    perm_classes: list[type[BasePermission]] = getattr(
-        assistant, "permissions", get_default_permissions()
-    )
-    await check_permissions(user, operation, perm_classes)
-    await check_object_permissions(user, operation, obj, perm_classes)
-
-
-async def _check_permission(
-    user: AbstractBaseUser | AnonymousUser | None,
-    operation: Operation,
-    assistant: Any,
-) -> None:
-    """Check a global permission for an assistant."""
-    perm_classes: list[type[BasePermission]] = getattr(
-        assistant, "permissions", get_default_permissions()
-    )
-    await check_permissions(user, operation, perm_classes)
+    return get_assistant_permissions(assistant) if assistant else get_default_permissions()
 
 
 class ThreadService:
@@ -82,7 +60,6 @@ class ThreadService:
     @staticmethod
     async def create_thread(
         assistant_id: str,
-        messages: list[Any] | None = None,
         title: str = "",
         metadata: dict | None = None,
         *,
@@ -96,8 +73,7 @@ class ThreadService:
 
         Args:
             assistant_id: ID of the assistant creating the thread
-            messages: Optional list of messages for auto-title generation
-            title: Thread title. If empty and messages provided, auto-generated
+            title: Thread title
             metadata: Additional metadata. Auto-populates model, assistant_name,
                      assistant_class, and created_via. Caller-provided values
                      take precedence over auto-generated ones.
@@ -114,7 +90,9 @@ class ThreadService:
 
         assistant = await AssistantService.get(assistant_id)
 
-        await _check_permission(user, Operation.CREATE_THREAD, assistant)
+        await has_perms(
+            user, Operation.CREATE_THREAD, permissions=get_assistant_permissions(assistant)
+        )
 
         storage_class = assistant.storage_adapter
         title = title or ""
@@ -158,7 +136,8 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(user, Operation.VIEW_THREAD, thread)
+            permissions = await get_thread_permissions(thread)
+            await has_perms(user, Operation.VIEW_THREAD, thread, permissions=permissions)
             logger.debug(f"Found thread {thread_id} in adapter, assistant: {thread.assistant_id}")
 
         if not thread:
@@ -185,7 +164,8 @@ class ThreadService:
             threads = await adapter_class.list_threads(user)
             for thread in threads:
                 try:
-                    await _check_object_permission(user, Operation.LIST_THREADS, thread)
+                    permissions = await get_thread_permissions(thread)
+                    await has_perms(user, Operation.LIST_THREADS, thread, permissions=permissions)
                     all_threads.append(thread)
                 except PermissionDenied:
                     continue
@@ -223,7 +203,8 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(user, Operation.UPDATE_THREAD, thread)
+            permissions = await get_thread_permissions(thread)
+            await has_perms(user, Operation.UPDATE_THREAD, thread, permissions=permissions)
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.update_thread(thread_id, title, metadata)
@@ -252,7 +233,8 @@ class ThreadService:
         """
         thread = await _get_thread(thread_id)
         if thread:
-            await _check_object_permission(user, Operation.DELETE_THREAD, thread)
+            permissions = await get_thread_permissions(thread)
+            await has_perms(user, Operation.DELETE_THREAD, thread, permissions=permissions)
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.delete_thread(thread_id)
@@ -281,7 +263,10 @@ class ThreadService:
             threads = await adapter_class.list_threads(user)
             for thread in threads:
                 try:
-                    await _check_object_permission(user, Operation.DELETE_ALL_THREADS, thread)
+                    permissions = await get_thread_permissions(thread)
+                    await has_perms(
+                        user, Operation.DELETE_ALL_THREADS, thread, permissions=permissions
+                    )
                     if await adapter_class.delete_thread(thread.id):
                         total_deleted += 1
                 except PermissionDenied:
@@ -318,7 +303,8 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(user, Operation.RATE_MESSAGE, thread)
+        permissions = await get_thread_permissions(thread)
+        await has_perms(user, Operation.RATE_MESSAGE, thread, permissions=permissions)
 
         storage = await _get_storage(thread)
         success = await storage.rate_message(message_id, rating, feedback, user=user)
@@ -348,7 +334,8 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(user, Operation.DELETE_MESSAGE, thread)
+        permissions = await get_thread_permissions(thread)
+        await has_perms(user, Operation.DELETE_MESSAGE, thread, permissions=permissions)
 
         storage = await _get_storage(thread)
         success = await storage.delete_message(message_id)
@@ -378,7 +365,8 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if not thread:
             raise ValueError("Thread not found")
-        await _check_object_permission(user, Operation.RESTORE_MESSAGE, thread)
+        permissions = await get_thread_permissions(thread)
+        await has_perms(user, Operation.RESTORE_MESSAGE, thread, permissions=permissions)
 
         storage = await _get_storage(thread)
         success = await storage.restore_message(message_id)
@@ -411,7 +399,8 @@ class ThreadService:
         thread = await _get_thread(thread_id)
         if thread is None:
             raise ValueError(f"Thread not found: {thread_id}")
-        await _check_object_permission(user, Operation.VIEW_THREAD, thread)
+        permissions = await get_thread_permissions(thread)
+        await has_perms(user, Operation.VIEW_THREAD, thread, permissions=permissions)
         return await _get_storage(thread)
 
     @staticmethod
@@ -505,7 +494,8 @@ async def aget_thread_file_meta(
     thread = await _get_thread(thread_id)
     if thread is None:
         raise ValueError("Thread not found")
-    await _check_object_permission(user, Operation.VIEW_THREAD, thread)
+    permissions = await get_thread_permissions(thread)
+    await has_perms(user, Operation.VIEW_THREAD, thread, permissions=permissions)
 
     # FIX: additional query, but we have not yet added it to info
     from django_ai_sdk.conversation.models import Thread

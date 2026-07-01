@@ -13,7 +13,7 @@ from django_ai_sdk.permissions import (
     Operation,
     PermissionDenied,
     check_permissions,
-    get_default_permissions,
+    get_assistant_permissions,
 )
 
 _logger = get_logger(__name__)
@@ -147,9 +147,9 @@ class AssistantService:
         result: list[AssistantSummary] = []
 
         for aid, assistant in registry.visible().items():
-            perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
+            permissions = get_assistant_permissions(assistant)
             try:
-                await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
+                await check_permissions(user, Operation.VIEW_ASSISTANT, permissions)
                 result.append(AssistantSummary(id=aid, name=assistant.name, model=assistant.model))
             except PermissionDenied:
                 continue
@@ -158,7 +158,6 @@ class AssistantService:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         async for config in AssistantSettings.objects.filter(active=True):
-            # Resolve the runtime instance, it is used to for permission checking.
             try:
                 assistant = get_runtime_assistant_class(config.assistant)(config)
             except Exception:
@@ -168,7 +167,7 @@ class AssistantService:
                     config.id,
                 )
                 continue
-            permissions: list = getattr(assistant, "permissions", get_default_permissions())
+            permissions = get_assistant_permissions(assistant)
             try:
                 await check_permissions(user, Operation.VIEW_ASSISTANT, permissions)
             except PermissionDenied:
@@ -183,8 +182,9 @@ class AssistantService:
     ) -> AssistantInfo:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = await AssistantService.get(assistant_id)
-        perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
-        await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
+        await check_permissions(
+            user, Operation.VIEW_ASSISTANT, get_assistant_permissions(assistant)
+        )
         return assistant.info()
 
     @staticmethod
@@ -197,8 +197,9 @@ class AssistantService:
 
         Returns a list of AssistantMCPServerStatus with status: 'active', 'expired', or 'disconnected'.
         """
-        perm_classes: list = getattr(assistant, "permissions", get_default_permissions())
-        await check_permissions(user, Operation.VIEW_ASSISTANT, perm_classes)
+        await check_permissions(
+            user, Operation.VIEW_ASSISTANT, get_assistant_permissions(assistant)
+        )
 
         try:
             from django_ai_sdk.mcp.constants import (

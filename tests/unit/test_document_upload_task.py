@@ -200,7 +200,7 @@ class TestUploadDocumentEnqueues:
         mock_pipeline.run = AsyncMock()
 
         with (
-            memory_permissions(),
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
             patch(
                 "django_ai_sdk.memories.services.process_document_upload",
             ) as mock_task,
@@ -228,7 +228,7 @@ class TestUploadDocumentEnqueues:
         uploaded = SimpleUploadedFile("doc.pdf", b"%PDF", content_type="application/pdf")
 
         with (
-            memory_permissions(),
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
             patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
         ):
             mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-resp"))
@@ -259,7 +259,7 @@ class TestUploadDocumentEnqueues:
             return _mock_task_result("task-order")
 
         with (
-            memory_permissions(),
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
             patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
         ):
             mock_task.aenqueue = capture_enqueue

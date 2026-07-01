@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Count, QuerySet
-from django.utils.module_loading import import_string
+from django.db.models import Count
 
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
@@ -24,57 +21,18 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.tasks import process_document_upload
 from django_ai_sdk.permissions import (
-    BasePermission,
     Operation,
-    check_object_permissions,
-    check_permissions,
-    get_default_permissions,
+    get_assistant_permissions,
+    get_memory_permissions,
+    get_queryset_perms,
+    has_perms,
 )
 from django_ai_sdk.tasks import aget_task_status
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
     from django.core.files.base import File
-
-
-@lru_cache(maxsize=1)
-def _get_memory_permissions() -> list[type[BasePermission]]:
-    paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
-    if not paths:
-        return get_default_permissions()
-    return [import_string(p) for p in paths]
-
-
-async def _check_permission(
-    user: AbstractBaseUser | AnonymousUser | None, operation: Operation
-) -> None:
-    """Permission check for memory operations."""
-    await check_permissions(user, operation, _get_memory_permissions())
-
-
-async def _check_object_permission(
-    user: AbstractBaseUser | AnonymousUser | None,
-    operation: Operation,
-    obj: Any,
-    *,
-    raise_on_deny: bool = True,
-) -> bool:
-    """Object permission check for memory operations.
-
-    When *raise_on_deny* is ``True`` (default), raises
-    :class:`~django_ai_sdk.permissions.PermissionDenied` on denial.
-    When ``False``, returns ``False`` instead.
-    """
-    permissions = _get_memory_permissions()
-    ok = await check_permissions(user, operation, permissions, raise_on_deny=raise_on_deny)
-    if not ok:
-        return False
-    return await check_object_permissions(
-        user, operation, obj, permissions, raise_on_deny=raise_on_deny
-    )
 
 
 class MemoryService:
@@ -99,7 +57,7 @@ class MemoryService:
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> MemoryOut:
         """Create a new memory."""
-        await _check_permission(user, Operation.CREATE_MEMORY)
+        await has_perms(user, Operation.CREATE_MEMORY, permissions=get_memory_permissions())
 
         memory = await Memory.objects.acreate(
             name=name,
@@ -134,7 +92,7 @@ class MemoryService:
     ) -> list[MemoryUserOut]:
         """List all users of a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
+        await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return [
             MemoryUserOut(
                 user_id=str(o.user_id),
@@ -154,7 +112,7 @@ class MemoryService:
     ) -> MemoryUserOut:
         """Add a user to a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         UserModel = get_user_model()
         target_user = await UserModel.objects.aget(id=user_id)
         ownership, _created = await MemoryUser.objects.aupdate_or_create(
@@ -178,7 +136,7 @@ class MemoryService:
     ) -> MemoryUserOut:
         """Update a memory user's can_manage flag."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         ownership = await memory.memory_users.select_related("user").aget(user_id=user_id)
         ownership.can_manage = can_manage
         await ownership.asave(update_fields=["can_manage"])
@@ -194,7 +152,7 @@ class MemoryService:
     ) -> None:
         """Remove a user from a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         ownership = await memory.memory_users.aget(user_id=user_id)
         await ownership.adelete()
 
@@ -204,21 +162,14 @@ class MemoryService:
     async def list_memories(
         *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[MemoryOut]:
-        """List memories visible to the requesting user.
-
-        Filtering is driven by the permission classes configured via
-        ``AI_SDK_MEMORY_PERMISSIONS`` — each class's
-        :meth:`~django_ai_sdk.permissions.BasePermission.get_queryset_perms`
-        is called in order.
-        """
-        await _check_permission(user, Operation.VIEW_MEMORY)
-
-        qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY)
-        qs = (
-            qs.filter(is_hidden=False)
-            .annotate(document_count=Count("entries"))
-            .order_by("-created_at")
+        """List memories visible to the requesting user."""
+        qs = get_queryset_perms(
+            user,
+            Operation.VIEW_MEMORY,
+            queryset=Memory.objects.filter(is_hidden=False),
+            permissions=get_memory_permissions(),
         )
+        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")
 
         return [
             MemoryOut(
@@ -260,8 +211,12 @@ class MemoryService:
         result: list[Memory] = []
         for memory_id in memory_ids:
             memory = await Memory.objects.aget(id=memory_id)
-            if not await _check_object_permission(
-                user, Operation.VIEW_MEMORY, memory, raise_on_deny=False
+            if not await has_perms(
+                user,
+                Operation.VIEW_MEMORY,
+                memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
             ):
                 continue
             result.append(memory)
@@ -283,8 +238,12 @@ class MemoryService:
         memory_ids = await MemoryService.get_assistant_memories(assistant_id)
         for memory_id in memory_ids:
             memory = await Memory.objects.aget(id=memory_id)
-            if not await _check_object_permission(
-                user, Operation.LINK_MEMORY, memory, raise_on_deny=False
+            if not await has_perms(
+                user,
+                Operation.LINK_MEMORY,
+                memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
             ):
                 continue
             await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory_id=memory_id)
@@ -305,8 +264,12 @@ class MemoryService:
             return
         for memory_id in memory_ids:
             memory = await Memory.objects.aget(id=memory_id)
-            if not await _check_object_permission(
-                user, Operation.UNLINK_MEMORY, memory, raise_on_deny=False
+            if not await has_perms(
+                user,
+                Operation.UNLINK_MEMORY,
+                memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
             ):
                 continue
             await ThreadMemory.objects.filter(
@@ -320,7 +283,7 @@ class MemoryService:
     ) -> MemoryOut:
         """Get a single memory by ID."""
         memory = await Memory.objects.annotate(document_count=Count("entries")).aget(id=memory_id)
-        await _check_object_permission(user, Operation.VIEW_MEMORY, memory)
+        await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return MemoryOut(
             id=str(memory.id),
             name=memory.name,
@@ -343,7 +306,7 @@ class MemoryService:
     ) -> MemoryOut:
         """Update a memory."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UPDATE_MEMORY, memory)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         memory.name = name
         memory.description = description
         if is_public is not None:
@@ -367,7 +330,7 @@ class MemoryService:
     ) -> None:
         """Delete a memory and all its entries."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.DELETE_MEMORY, memory)
+        await has_perms(user, Operation.DELETE_MEMORY, memory, permissions=get_memory_permissions())
         await memory.adelete()
 
     # ============================================================================
@@ -380,7 +343,9 @@ class MemoryService:
     ) -> DocumentUploadResponse:
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
+        await has_perms(
+            user, Operation.UPLOAD_DOCUMENT, memory, permissions=get_memory_permissions()
+        )
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
@@ -413,7 +378,9 @@ class MemoryService:
     ) -> list[DocumentOut]:
         """List all file-backed documents in a memory (all processing statuses)."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.LIST_DOCUMENTS, memory)
+        await has_perms(
+            user, Operation.LIST_DOCUMENTS, memory, permissions=get_memory_permissions()
+        )
         entry_docs = (
             EntryDocument.objects.filter(memory_id=memory_id)
             .select_related("entry")
@@ -427,7 +394,7 @@ class MemoryService:
     ) -> DocumentOut:
         """Get a single document from a memory by its EntryDocument id."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.VIEW_DOCUMENT, memory)
+        await has_perms(user, Operation.VIEW_DOCUMENT, memory, permissions=get_memory_permissions())
         entry_doc = await EntryDocument.objects.select_related("entry").aget(
             id=doc_id, memory_id=memory_id
         )
@@ -443,7 +410,9 @@ class MemoryService:
         cascades to the EntryDocument and triggers RAG cleanup via the delete signal.
         """
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.DELETE_DOCUMENT, memory)
+        await has_perms(
+            user, Operation.DELETE_DOCUMENT, memory, permissions=get_memory_permissions()
+        )
         entry_doc = await EntryDocument.objects.select_related("entry").aget(
             id=doc_id, memory_id=memory_id
         )
@@ -462,7 +431,7 @@ class MemoryService:
     ) -> None:
         """Link a memory to a thread."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.LINK_MEMORY, memory)
+        await has_perms(user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions())
         thread = await Thread.objects.aget(id=thread_id)
         await ThreadMemory.objects.aget_or_create(
             thread=thread,
@@ -475,7 +444,7 @@ class MemoryService:
     ) -> None:
         """Unlink a memory from a thread."""
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UNLINK_MEMORY, memory)
+        await has_perms(user, Operation.UNLINK_MEMORY, memory, permissions=get_memory_permissions())
         link = await ThreadMemory.objects.aget(memory_id=memory_id, thread_id=thread_id)
         await link.adelete()
 
@@ -494,8 +463,12 @@ class MemoryService:
         async for tm in thread_memories:
             # Skip memories this user cannot read instead of raising: a thread may
             # carry assistant-linked private memories the user has no access to.
-            if not await _check_object_permission(
-                user, Operation.VIEW_MEMORY, tm.memory, raise_on_deny=False
+            if not await has_perms(
+                user,
+                Operation.VIEW_MEMORY,
+                tm.memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
             ):
                 continue
             memories.append(
@@ -529,8 +502,12 @@ class MemoryService:
         async for tm in query:
             if tm.memory is None:
                 continue
-            if not await _check_object_permission(
-                user, Operation.VIEW_MEMORY, tm.memory, raise_on_deny=False
+            if not await has_perms(
+                user,
+                Operation.VIEW_MEMORY,
+                tm.memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
             ):
                 continue
             result.append(tm.memory)
@@ -550,7 +527,9 @@ class MemoryService:
             memory = memories.get(memory_id)
             if not memory:
                 continue
-            await _check_object_permission(user, Operation.LINK_MEMORY, memory)
+            await has_perms(
+                user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions()
+            )
             links.append(ThreadMemory(thread=thread, memory=memory, active=True))
 
         await ThreadMemory.objects.abulk_create(links, ignore_conflicts=True)
@@ -568,7 +547,7 @@ class MemoryService:
         """Toggle the active status of a memory for a thread."""
         thread_memory = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.LINK_MEMORY, memory)
+        await has_perms(user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions())
         thread_memory.active = active
         await thread_memory.asave()
 
@@ -590,7 +569,7 @@ class MemoryService:
         """Disconnect a memory from a thread."""
         link = await ThreadMemory.objects.aget(thread_id=thread_id, memory_id=memory_id)
         memory = await Memory.objects.aget(id=memory_id)
-        await _check_object_permission(user, Operation.UNLINK_MEMORY, memory)
+        await has_perms(user, Operation.UNLINK_MEMORY, memory, permissions=get_memory_permissions())
         await link.adelete()
 
     # ============================================================================
@@ -618,11 +597,15 @@ class MemoryService:
     ) -> DocumentUploadResponse:
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
-        await _check_object_permission(user, Operation.UPLOAD_FILE, thread)
-        memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
-
-        # assistant_id is stored in thread.metadata by ThreadService.create_thread
         assistant_id = thread.metadata.get("assistant_id") or None
+        assistant = await AssistantService.get(assistant_id)
+        await has_perms(
+            user,
+            Operation.UPLOAD_FILE,
+            thread,
+            permissions=get_assistant_permissions(assistant),
+        )
+        memory = await MemoryService.get_or_create_thread_file_memory(thread_id)
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
@@ -661,7 +644,14 @@ class MemoryService:
         except Thread.DoesNotExist:
             return []
 
-        await _check_object_permission(user, Operation.VIEW_FILE, thread)
+        assistant_id = thread.metadata.get("assistant_id") or None
+        assistant = await AssistantService.get(assistant_id)
+        await has_perms(
+            user,
+            Operation.VIEW_FILE,
+            thread,
+            permissions=get_assistant_permissions(assistant),
+        )
 
         if not thread.file_memory_id:
             return []
@@ -683,7 +673,14 @@ class MemoryService:
         cancelled to unblock a deferred send.
         """
         thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
-        await _check_object_permission(user, Operation.DELETE_FILE, thread)
+        assistant_id = thread.metadata.get("assistant_id") or None
+        assistant = await AssistantService.get(assistant_id)
+        await has_perms(
+            user,
+            Operation.DELETE_FILE,
+            thread,
+            permissions=get_assistant_permissions(assistant),
+        )
         if not thread.file_memory_id:
             return
         entry_doc = await EntryDocument.objects.select_related("entry").aget(
@@ -707,7 +704,12 @@ class MemoryService:
         """
         entry_doc = await EntryDocument.objects.select_related("memory").aget(id=doc_id)
         if entry_doc.memory_id is not None:
-            await _check_object_permission(user, Operation.VIEW_DOCUMENT, entry_doc.memory)
+            await has_perms(
+                user,
+                Operation.VIEW_DOCUMENT,
+                entry_doc.memory,
+                permissions=get_memory_permissions(),
+            )
         task_status = None
         if entry_doc.task_id:
             try:
@@ -755,10 +757,18 @@ class MemoryService:
         assistant_id = None
         thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
         if thread is not None:
-            await _check_object_permission(user, Operation.UPLOAD_FILE, thread)
-            assistant_id = thread.metadata.get("assistant_id") or None
+            assistant_id = thread.metadata.get("assistant_id")
+            assistant = await AssistantService.get(assistant_id)
+            await has_perms(
+                user,
+                Operation.UPLOAD_FILE,
+                thread,
+                permissions=get_assistant_permissions(assistant),
+            )
         else:
-            await _check_object_permission(user, Operation.UPLOAD_DOCUMENT, memory)
+            await has_perms(
+                user, Operation.UPLOAD_DOCUMENT, memory, permissions=get_memory_permissions()
+            )
 
         entry_doc.processing_status = EntryDocument.ProcessingStatus.PENDING
         entry_doc.processing_error = ""
@@ -804,7 +814,7 @@ class MemoryService:
         except Entry.DoesNotExist:
             return None
 
-        await _check_object_permission(user, Operation.VIEW_DOCUMENT, entry)
+        await has_perms(user, Operation.VIEW_DOCUMENT, entry, permissions=get_memory_permissions())
 
         if chunk_id is None:
             return entry.content
@@ -826,36 +836,6 @@ class MemoryService:
     # ============================================================================
     # Private helpers
     # ============================================================================
-
-    @staticmethod
-    def get_queryset_perms(
-        user: AbstractBaseUser | AnonymousUser | None,
-        operation: Operation,
-        queryset: QuerySet | None = None,
-    ) -> QuerySet:
-        """Apply permission filters to *queryset*, returning only items *user* can access.
-
-        Each permission class's :meth:`~django_ai_sdk.permissions.BasePermission.get_queryset_perms`
-        receives the queryset and returns a filtered version; results are ANDed
-        together (all classes must approve).
-
-        If *queryset* is ``None``, ``Memory.objects.all()`` is used.
-
-        Examples::
-
-            qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY)
-            qs = MemoryService.get_queryset_perms(user, Operation.VIEW_MEMORY, Memory.objects.filter(slug__in=slugs))
-        """
-        if queryset is None:
-            queryset = Memory.objects.all()
-
-        permissions = _get_memory_permissions()
-        for cls in permissions:
-            perm = cls() if isinstance(cls, type) else cls  # type: ignore[type-arg]
-            result = perm.get_queryset_perms(user, operation, queryset)
-            if result is not None:
-                queryset = result
-        return queryset
 
     @staticmethod
     def _entry_doc_to_out(entry_doc: EntryDocument) -> DocumentOut:

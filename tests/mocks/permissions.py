@@ -18,14 +18,13 @@ def memory_permissions(*perm_paths):
             result = await MemoryService.delete_memory(mem_id, user=user)
     """
     from django.test.utils import override_settings
-    from django_ai_sdk.memories.services import _get_memory_permissions
-    from django_ai_sdk.permissions import get_default_permissions
+    from django_ai_sdk.permissions import get_default_permissions, get_memory_permissions
 
-    _get_memory_permissions.cache_clear()
+    get_memory_permissions.cache_clear()
     get_default_permissions.cache_clear()
     with override_settings(AI_SDK_MEMORY_PERMISSIONS=list(perm_paths)):
-        _get_memory_permissions.cache_clear()
+        get_memory_permissions.cache_clear()
         get_default_permissions.cache_clear()
         yield
-    _get_memory_permissions.cache_clear()
+    get_memory_permissions.cache_clear()
     get_default_permissions.cache_clear()
