@@ -225,12 +225,81 @@ class MemoryDefaultPermission(BasePermission):
         return False
 
 
+class AssistantDefaultPermission(BasePermission):
+    """Three-tier permission for runtime assistants.
+
+    - Manager (can_manage=True): full access to update/delete.
+    - Owner (can_manage=False): can view and use the assistant.
+    - Group members: can view and use the assistant.
+    - Anonymous: blocked for assistant ops, pass-through for everything else.
+    """
+
+    MANAGER: frozenset[Operation] = frozenset(
+        {
+            Operation.UPDATE_ASSISTANT,
+            Operation.DELETE_ASSISTANT,
+        }
+    )
+
+    ASSISTANT_OPS: frozenset[Operation] = frozenset(
+        {
+            Operation.VIEW_ASSISTANT,
+            Operation.CREATE_ASSISTANT,
+            Operation.UPDATE_ASSISTANT,
+            Operation.DELETE_ASSISTANT,
+        }
+    )
+
+    async def has_permission(
+        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
+    ) -> bool:
+        if operation not in self.ASSISTANT_OPS:
+            return True
+        return user is not None and bool(user.is_authenticated)
+
+    async def has_object_permission(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
+    ) -> bool:
+        # Only handle AssistantSettings objects; pass through for everything else
+        from django_ai_sdk.assistants.models import AssistantSettings
+
+        if not isinstance(obj, AssistantSettings):
+            return True
+
+        if user is None or not bool(user.is_authenticated):
+            return False
+
+        # Check direct user membership
+        from django_ai_sdk.assistants.models import AssistantUser
+
+        user_entry = await AssistantUser.objects.filter(assistant=obj, user=user).afirst()
+        if user_entry is not None:
+            if operation in self.MANAGER:
+                return user_entry.can_manage
+            return True
+
+        # Check group membership
+        from django_ai_sdk.assistants.models import AssistantGroup
+
+        group_entry = await AssistantGroup.objects.filter(assistant=obj, group__user=user).afirst()
+        if group_entry is not None:
+            if operation in self.MANAGER:
+                return group_entry.can_manage
+            return True
+
+        return False
+
+
 @lru_cache(maxsize=1)
 def get_default_permissions() -> list[type[BasePermission]]:
-    """Resolve default permission classes from settings, falling back to AllowAll."""
+    """Resolve default permission classes from settings"""
     paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
     if not paths:
-        return [AllowAll]
+        return [AssistantDefaultPermission, AllowAll]
     return [import_string(p) for p in paths]
 
 
