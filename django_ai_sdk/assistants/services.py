@@ -102,7 +102,7 @@ class AssistantService:
 
     @staticmethod
     async def get_assistant(
-        thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> Assistant:
         """Find the thread and return its associated assistant.
 
@@ -142,7 +142,7 @@ class AssistantService:
 
     @staticmethod
     async def list_assistants(
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> list[AssistantSummary]:
         """Return all assistants the user is allowed to view (registry + DB-backed)."""
         result: list[AssistantSummary] = []
@@ -179,7 +179,7 @@ class AssistantService:
 
     @staticmethod
     async def get_assistant_info(
-        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> AssistantInfo:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = await AssistantService.get(assistant_id)
@@ -189,7 +189,7 @@ class AssistantService:
 
     @staticmethod
     async def get_mcp_server_status(
-        assistant: Any, *, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant: Any, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[AssistantMCPServerStatus]:
         """Get MCP server connection status for an assistant.
 
@@ -266,7 +266,7 @@ class AssistantService:
 
     @staticmethod
     async def list_assistant_users(
-        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> Sequence[AssistantUser]:
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
@@ -291,7 +291,7 @@ class AssistantService:
         target_user_id: Any,
         can_manage: bool = False,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> AssistantUser:
         from django.contrib.auth import get_user_model
 
@@ -324,7 +324,7 @@ class AssistantService:
         target_user_id: Any,
         can_manage: bool,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> AssistantUser:
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
@@ -352,7 +352,7 @@ class AssistantService:
         assistant_id: str,
         target_user_id: Any,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> None:
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
@@ -376,7 +376,7 @@ class AssistantService:
 
     @staticmethod
     async def list_assistant_groups(
-        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> Sequence[AssistantGroup]:
         from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
 
@@ -401,7 +401,7 @@ class AssistantService:
         group_id: Any,
         can_manage: bool = False,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> AssistantGroup:
         from django.contrib.auth.models import Group
 
@@ -432,7 +432,7 @@ class AssistantService:
         assistant_id: str,
         group_id: Any,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> None:
         from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
 
@@ -456,7 +456,7 @@ class AssistantService:
 
     @staticmethod
     async def list_runtime_assistants(
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> list[Any]:
         from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
@@ -482,7 +482,7 @@ class AssistantService:
 
     @staticmethod
     async def get_runtime_assistant(
-        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> Any:
         from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
@@ -499,7 +499,7 @@ class AssistantService:
     @staticmethod
     async def create_runtime_assistant(
         data: AssistantCreateData,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
 
@@ -526,7 +526,7 @@ class AssistantService:
     async def update_runtime_assistant(
         assistant_id: str,
         data: AssistantUpdateData,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> Any:
         from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
@@ -552,7 +552,7 @@ class AssistantService:
 
     @staticmethod
     async def delete_runtime_assistant(
-        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> Any:
         from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings

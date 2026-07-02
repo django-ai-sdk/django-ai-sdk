@@ -147,7 +147,7 @@ class ThreadService:
 
     @staticmethod
     async def threads(
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
@@ -376,7 +376,7 @@ class ThreadService:
 
     @staticmethod
     async def storage_for_thread(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> Any:
         """
         Resolve a thread's storage adapter, instantiated and bound to the thread.
@@ -431,7 +431,7 @@ class ThreadService:
 
 
 async def aget_thread_history(
-    thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    thread_id: str, user: AbstractBaseUser | AnonymousUser | None
 ) -> dict[str, Any]:
     """
     Get thread history: thread metadata and messages with feedbacks.

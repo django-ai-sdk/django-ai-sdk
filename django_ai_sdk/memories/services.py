@@ -184,8 +184,8 @@ class MemoryService:
         group_id: int,
         can_manage: bool = False,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> dict:
+        user: AbstractBaseUser | AnonymousUser | None,
+    ) -> MemoryGroupOut:
         from django.contrib.auth.models import Group
 
         memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
@@ -208,7 +208,7 @@ class MemoryService:
         memory_id: str,
         group_id: int,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> None:
         memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
@@ -218,9 +218,6 @@ class MemoryService:
     async def list_memory_groups(
         memory_id: str,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> list[dict]:
-
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> list[MemoryGroupOut]:
         """List all groups of a memory."""
@@ -239,9 +236,7 @@ class MemoryService:
     # ============================================================================
 
     @staticmethod
-    async def list_memories(
-        *, user: AbstractBaseUser | AnonymousUser | None = None
-    ) -> list[MemoryOut]:
+    async def list_memories(*, user: AbstractBaseUser | AnonymousUser | None) -> list[MemoryOut]:
         """List memories visible to the requesting user."""
         qs = get_queryset_perms(
             user,
@@ -266,48 +261,59 @@ class MemoryService:
         ]
 
     @staticmethod
-    async def get_assistant_memories(assistant_id: str) -> list[str]:
+    async def _get_assistant_memory_objects(assistant_id: str) -> list[Memory]:
+        """Resolve the assistant's configured memories in a single query."""
         try:
             assistant = await AssistantService.get(assistant_id)
         except ValueError:
             return []
-        memories: list[str] = getattr(assistant, "memories", [])
-        if not memories:
+        slugs: list[str] = getattr(assistant, "memories", [])
+        if not slugs:
             return []
-        return [str(m.id) async for m in Memory.objects.filter(slug__in=memories).distinct()]
+        return [m async for m in Memory.objects.filter(slug__in=slugs).distinct()]
+
+    @staticmethod
+    async def get_assistant_memories(assistant_id: str) -> list[str]:
+        memories = await MemoryService._get_assistant_memory_objects(assistant_id)
+        return [str(m.id) for m in memories]
+
+    @staticmethod
+    async def _filter_memories_by_perm(
+        memories: list[Memory],
+        operation: Operation,
+        user: AbstractBaseUser | AnonymousUser | None,
+    ) -> list[Memory]:
+        """Keep only memories the user has *operation* permission for (silent skip)."""
+        result: list[Memory] = []
+        for memory in memories:
+            if await has_perms(
+                user,
+                operation,
+                memory,
+                permissions=get_memory_permissions(),
+                raise_on_deny=False,
+            ):
+                result.append(memory)
+        return result
 
     @staticmethod
     async def get_assistant_memories_for_user(
-        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[Memory]:
         """Return the assistant's configured memories the user can ``VIEW_MEMORY``.
 
         Filters out memories the user doesn't have permission to see, so the
         caller never receives unreadable memories.
         """
-        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
-        if not memory_ids:
-            return []
-        result: list[Memory] = []
-        for memory_id in memory_ids:
-            memory = await Memory.objects.aget(id=memory_id)
-            if not await has_perms(
-                user,
-                Operation.VIEW_MEMORY,
-                memory,
-                permissions=get_memory_permissions(),
-                raise_on_deny=False,
-            ):
-                continue
-            result.append(memory)
-        return result
+        memories = await MemoryService._get_assistant_memory_objects(assistant_id)
+        return await MemoryService._filter_memories_by_perm(memories, Operation.VIEW_MEMORY, user)
 
     @staticmethod
     async def link_memories(
         assistant_id: str,
         thread_id: str,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> None:
         """Link an assistant's configured memories to a thread.
 
@@ -315,54 +321,42 @@ class MemoryService:
         consistent with the per-request retrieval filter, a private memory
         the user cannot read is simply not linked, rather than blocking by raise.
         """
-        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
-        for memory_id in memory_ids:
-            memory = await Memory.objects.aget(id=memory_id)
-            if not await has_perms(
-                user,
-                Operation.LINK_MEMORY,
-                memory,
-                permissions=get_memory_permissions(),
-                raise_on_deny=False,
-            ):
-                continue
-            await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory_id=memory_id)
+        memories = await MemoryService._get_assistant_memory_objects(assistant_id)
+        for memory in await MemoryService._filter_memories_by_perm(
+            memories, Operation.LINK_MEMORY, user
+        ):
+            await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory=memory)
 
     @staticmethod
     async def unlink_memories(
         assistant_id: str,
         thread_id: str,
         *,
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: AbstractBaseUser | AnonymousUser | None,
     ) -> None:
         """Unlink an assistant's configured memories from a thread.
 
         Only unlinks memories the user has ``UNLINK_MEMORY`` permission for.
         """
-        memory_ids = await MemoryService.get_assistant_memories(assistant_id)
-        if not memory_ids:
+        memories = await MemoryService._get_assistant_memory_objects(assistant_id)
+        allowed = await MemoryService._filter_memories_by_perm(
+            memories, Operation.UNLINK_MEMORY, user
+        )
+        if not allowed:
             return
-        for memory_id in memory_ids:
-            memory = await Memory.objects.aget(id=memory_id)
-            if not await has_perms(
-                user,
-                Operation.UNLINK_MEMORY,
-                memory,
-                permissions=get_memory_permissions(),
-                raise_on_deny=False,
-            ):
-                continue
-            await ThreadMemory.objects.filter(
-                thread_id=thread_id,
-                memory_id=memory_id,
-            ).adelete()
+        await ThreadMemory.objects.filter(
+            thread_id=thread_id,
+            memory_id__in=[m.id for m in allowed],
+        ).adelete()
 
     @staticmethod
     async def get_memory(
-        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> MemoryOut:
         """Get a single memory by ID."""
-        memory = await Memory.objects.annotate(document_count=Count("entries")).aget(id=memory_id)
+        memory = await _aget_or_not_found(
+            Memory.objects.annotate(document_count=Count("entries")), "Memory", id=memory_id
+        )
         await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return MemoryOut(
             id=str(memory.id),
@@ -454,7 +448,7 @@ class MemoryService:
 
     @staticmethod
     async def list_documents(
-        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        memory_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[DocumentOut]:
         """List all file-backed documents in a memory (all processing statuses)."""
         memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
@@ -470,7 +464,7 @@ class MemoryService:
 
     @staticmethod
     async def get_document(
-        memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        memory_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> DocumentOut:
         """Get a single document from a memory by its EntryDocument id."""
         memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
@@ -538,7 +532,7 @@ class MemoryService:
 
     @staticmethod
     async def list_thread_memories(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
         thread_memories = (
@@ -605,16 +599,22 @@ class MemoryService:
     async def bulk_connect_memories(
         thread_id: str, memory_ids: list[str], *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[ThreadMemoryOut]:
-        """Connect multiple memories to a thread at once."""
-        thread = await Thread.objects.aget(id=thread_id)
+        """Connect multiple memories to a thread at once.
+
+        Raises:
+            ValueError: If any of the requested memory ids does not exist.
+            PermissionDenied: If the user lacks LINK_MEMORY on any memory.
+        """
+        thread = await _aget_or_not_found(Thread.objects, "Thread", id=thread_id)
 
         memories = {str(m.id): m async for m in Memory.objects.filter(id__in=memory_ids)}
+        missing = [mid for mid in memory_ids if mid not in memories]
+        if missing:
+            raise ValueError(f"Memories not found: {', '.join(missing)}")
 
         links = []
         for memory_id in memory_ids:
-            memory = memories.get(memory_id)
-            if not memory:
-                continue
+            memory = memories[memory_id]
             await has_perms(
                 user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions()
             )
@@ -687,7 +687,7 @@ class MemoryService:
 
     @staticmethod
     async def upload_thread_file(
-        thread_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, file: File, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> DocumentUploadResponse:
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         thread = await _aget_or_not_found(
@@ -734,7 +734,7 @@ class MemoryService:
 
     @staticmethod
     async def list_thread_files(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
         try:
@@ -767,7 +767,7 @@ class MemoryService:
 
     @staticmethod
     async def delete_thread_file(
-        thread_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        thread_id: str, doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> None:
         """Delete a file from a thread by its EntryDocument id.
 
@@ -802,7 +802,7 @@ class MemoryService:
 
     @staticmethod
     async def get_document_status(
-        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> DocumentStatusOut:
         """Return processing status for a document.
 
@@ -836,7 +836,7 @@ class MemoryService:
 
     @staticmethod
     async def retry_document(
-        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
+        doc_id: str, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> DocumentStatusOut:
         """Re-enqueue processing for a failed or stuck document.
 
@@ -913,7 +913,7 @@ class MemoryService:
 
     @staticmethod
     async def get_chunk_content(
-        entry_id: str, chunk_id: str | None, *, user: AbstractBaseUser | AnonymousUser | None = None
+        entry_id: str, chunk_id: str | None, *, user: AbstractBaseUser | AnonymousUser | None
     ) -> str | None:
         """Return a specific chunk from the vector store, falling back to full Entry content.
 
