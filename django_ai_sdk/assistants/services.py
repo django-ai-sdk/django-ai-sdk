@@ -149,7 +149,7 @@ class AssistantService:
         for aid, assistant in registry.visible().items():
             permissions = get_assistant_permissions(assistant)
             try:
-                await has_perms(user, Operation.VIEW_ASSISTANT, permissions)
+                await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
                 result.append(AssistantSummary(id=aid, name=assistant.name, model=assistant.model))
             except PermissionDenied:
                 continue
@@ -169,7 +169,7 @@ class AssistantService:
                 continue
             permissions = get_assistant_permissions(assistant)
             try:
-                await has_perms(user, Operation.VIEW_ASSISTANT, permissions)
+                await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
             except PermissionDenied:
                 continue
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
@@ -182,7 +182,8 @@ class AssistantService:
     ) -> AssistantInfo:
         """Return assistant info if user has VIEW_ASSISTANT permission."""
         assistant = await AssistantService.get(assistant_id)
-        await has_perms(user, Operation.VIEW_ASSISTANT, get_assistant_permissions(assistant))
+        permissions = get_assistant_permissions(assistant)
+        await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
         return assistant.info()
 
     @staticmethod
@@ -195,7 +196,8 @@ class AssistantService:
 
         Returns a list of AssistantMCPServerStatus with status: 'active', 'expired', or 'disconnected'.
         """
-        await has_perms(user, Operation.VIEW_ASSISTANT, get_assistant_permissions(assistant))
+        permissions = get_assistant_permissions(assistant)
+        await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
 
         try:
             from django_ai_sdk.mcp.constants import (
