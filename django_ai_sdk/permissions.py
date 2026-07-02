@@ -209,14 +209,20 @@ class MemoryDefaultPermission(BasePermission):
             return False
 
         ownership = await obj.memory_users.filter(user=user).afirst()
-        if ownership is None:
-            if operation in self.READ and obj.is_public:
-                return True
-            return False
+        if ownership is not None:
+            if operation in self.MANAGER:
+                return ownership.can_manage
+            return True
 
-        if operation in self.MANAGER:
-            return ownership.can_manage
-        return True
+        is_group_member = await obj.memory_groups.filter(group__user=user).aexists()
+        if is_group_member:
+            if operation in self.MANAGER:
+                return False
+            return True
+
+        if operation in self.READ and obj.is_public:
+            return True
+        return False
 
 
 @lru_cache(maxsize=1)
