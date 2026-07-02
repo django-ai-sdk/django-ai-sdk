@@ -97,7 +97,7 @@ class TestPermissions:
         from django_ai_sdk.permissions import IsOwner, Operation, check_object_permissions
 
         user = MagicMock(pk="user-1")
-        memory = MagicMock(spec=["owner_id"], owner_id="user-1")
+        memory = MagicMock(spec=["user_id"], user_id="user-1")
         await check_object_permissions(user, Operation.VIEW_MEMORY, memory, [IsOwner])
 
     async def test_check_object_permissions_raises_on_first_failure(self):
@@ -607,28 +607,249 @@ class TestAssistantServicePermissions:
         assistant = MagicMock(name="test", id="test-id", permissions=[AllowAll])
         assistant.info.return_value = {"id": "test-id", "name": "Test"}
 
+        user = MagicMock(is_authenticated=True)
         reg.get.return_value = assistant
         with patch("django_ai_sdk.assistants.services.registry", reg):
-            info = await AssistantService.get_assistant_info("test-id")
+            info = await AssistantService.get_assistant_info("test-id", user=user)
             assert info["id"] == "test-id"
 
     async def test_get_assistant_info_denies_without_permission(self):
         from django_ai_sdk.assistants.services import AssistantService
         from django_ai_sdk.permissions import DenyAll, PermissionDenied
 
+        user = MagicMock(is_authenticated=True)
         reg = MagicMock()
         assistant = MagicMock(name="test", id="test-id", permissions=[DenyAll])
 
         reg.get.return_value = assistant
         with patch("django_ai_sdk.assistants.services.registry", reg):
             with pytest.raises(PermissionDenied):
-                await AssistantService.get_assistant_info("test-id")
+                await AssistantService.get_assistant_info("test-id", user=user)
 
     async def test_get_assistant_info_raises_on_unknown(self):
         from django_ai_sdk.assistants.services import AssistantService
 
+        user = MagicMock(is_authenticated=True)
         reg = MagicMock()
         reg.get.return_value = None
         with patch("django_ai_sdk.assistants.services.registry", reg):
             with pytest.raises(ValueError, match="not found"):
-                await AssistantService.get_assistant_info("nonexistent")
+                await AssistantService.get_assistant_info("nonexistent", user=user)
+
+
+# ============================================================================
+# IsOwner — configurable field & null-owner behavior
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestIsOwner:
+    async def test_custom_field_parameter(self):
+        """IsOwner(field="owner_id") checks the specified attribute."""
+        from django_ai_sdk.permissions import IsOwner, Operation, check_object_permissions
+
+        obj = MagicMock(spec=["owner_id"], owner_id="user-1")
+        user = MagicMock(pk="user-1")
+
+        await check_object_permissions(
+            user, Operation.VIEW_THREAD, obj, [IsOwner(field="owner_id")]
+        )
+
+    async def test_custom_field_denies_mismatch(self):
+        """IsOwner with custom field denies on mismatch."""
+        from django_ai_sdk.permissions import (
+            IsOwner,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+
+        obj = MagicMock(spec=["owner_id"], owner_id="owner-1")
+        user = MagicMock(pk="user-1")
+
+        with pytest.raises(PermissionDenied):
+            await check_object_permissions(
+                user, Operation.VIEW_THREAD, obj, [IsOwner(field="owner_id")]
+            )
+
+    async def test_null_owner_denies_all(self):
+        """obj.user_id = None denies even for authenticated users."""
+        from django_ai_sdk.permissions import (
+            IsOwner,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+
+        obj = MagicMock(user_id=None)
+        user = MagicMock(pk="user-1", is_authenticated=True)
+
+        with pytest.raises(PermissionDenied):
+            await check_object_permissions(
+                user, Operation.VIEW_THREAD, obj, [IsOwner]
+            )
+
+    async def test_null_owner_denies_anonymous(self):
+        """obj.user_id = None denies anonymous users."""
+        from django_ai_sdk.permissions import (
+            IsOwner,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+
+        obj = MagicMock(user_id=None)
+
+        with pytest.raises(PermissionDenied):
+            await check_object_permissions(
+                None, Operation.VIEW_THREAD, obj, [IsOwner]
+            )
+
+    async def test_no_attr_no_opinion(self):
+        """Object without the field has no opinion (allows through)."""
+        from django_ai_sdk.permissions import IsOwner, Operation, check_permissions
+
+        obj = MagicMock(spec=[])  # no user_id attribute
+        user = MagicMock(pk="user-1")
+
+        await check_permissions(
+            user, Operation.CREATE_THREAD, [IsOwner], obj=obj
+        )
+
+
+# ============================================================================
+# AssistantDefaultPermission — creator-as-manager, upserts
+# ============================================================================
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestAssistantDefaultPermissionCreator:
+    """Creator automatically becomes manager via create_runtime_assistant."""
+
+    async def _make_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    async def test_creator_is_manager(self):
+        """After create_runtime_assistant, creator can manage."""
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+
+        user = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Creator Test",
+                "slug": "creator-test",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=user,
+        )
+
+        # Creator should be able to update (manager operation)
+        await check_object_permissions(
+            user, Operation.UPDATE_ASSISTANT, config, [AssistantDefaultPermission]
+        )
+
+        # Creator should be able to delete (manager operation)
+        await check_object_permissions(
+            user, Operation.DELETE_ASSISTANT, config, [AssistantDefaultPermission]
+        )
+
+    async def test_stranger_cannot_manage(self):
+        """Non-member cannot perform manager operations."""
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+
+        creator = await self._make_user()
+        stranger = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Stranger Test",
+                "slug": "stranger-test",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        with pytest.raises(PermissionDenied):
+            await check_object_permissions(
+                stranger, Operation.UPDATE_ASSISTANT, config, [AssistantDefaultPermission]
+            )
+
+    async def test_add_user_upsert(self):
+        """Adding existing user updates can_manage flag."""
+        from django_ai_sdk.assistants.models import AssistantUser
+        from django_ai_sdk.assistants.services import AssistantService
+
+        creator = await self._make_user()
+        member = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Upsert Test",
+                "slug": "upsert-test",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        # Add as viewer
+        await AssistantService.add_assistant_user(
+            str(config.id), str(member.id), can_manage=False, user=creator
+        )
+
+        # Re-add as manager (upsert)
+        await AssistantService.add_assistant_user(
+            str(config.id), str(member.id), can_manage=True, user=creator
+        )
+
+        entry = await AssistantUser.objects.aget(assistant=config, user=member)
+        assert entry.can_manage is True
+
+    async def test_add_group_upsert(self):
+        """Adding existing group updates can_manage flag."""
+        from django.contrib.auth.models import Group
+        from django_ai_sdk.assistants.models import AssistantGroup
+        from django_ai_sdk.assistants.services import AssistantService
+
+        creator = await self._make_user()
+        group = await Group.objects.acreate(name="test-group")
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Group Upsert",
+                "slug": "group-upsert",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        # Add as viewer
+        await AssistantService.add_assistant_group(
+            str(config.id), group.id, can_manage=False, user=creator
+        )
+
+        # Re-add as manager (upsert)
+        await AssistantService.add_assistant_group(
+            str(config.id), group.id, can_manage=True, user=creator
+        )
+
+        entry = await AssistantGroup.objects.aget(assistant=config, group=group)
+        assert entry.can_manage is True
