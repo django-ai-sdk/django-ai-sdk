@@ -32,7 +32,6 @@ class TestThreadServiceCreateThread:
 
             result = await ThreadService.create_thread(
                 assistant_id="test-assistant",
-                messages=[chat_message("user", "Hello world")],
                 user=mock_user,
             )
 
@@ -53,7 +52,6 @@ class TestThreadServiceCreateThread:
 
             await ThreadService.create_thread(
                 assistant_id="test-assistant",
-                messages=[chat_message("user", "Hello")],
                 user=mock_user,
             )
 

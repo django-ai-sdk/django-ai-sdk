@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
 
+    from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.memories.models import Memory
 
 
@@ -235,6 +236,58 @@ def ensure_permission_instance(
     consistent runtime type.
     """
     return perm() if isinstance(perm, type) else perm
+
+
+@lru_cache(maxsize=1)
+def get_memory_permissions() -> list[type[BasePermission]]:
+    paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
+    if not paths:
+        return [MemoryDefaultPermission]
+    return [import_string(p) for p in paths]
+
+
+def get_assistant_permissions(assistant: Assistant) -> list[type[BasePermission]]:
+    return getattr(assistant, "permissions", get_default_permissions())
+
+
+async def has_perms(
+    user: AbstractBaseUser | AnonymousUser | None,
+    operation: Operation,
+    obj: Any = None,
+    *,
+    permissions: list[type[BasePermission]] | None = None,
+    raise_on_deny: bool = True,
+    **kwargs: Any,
+) -> bool:
+    if permissions is None:
+        permissions = get_default_permissions()
+    ok = await check_permissions(
+        user, operation, permissions, raise_on_deny=raise_on_deny, **kwargs
+    )
+    if not ok:
+        return False
+    if obj is not None:
+        return await check_object_permissions(
+            user, operation, obj, permissions, raise_on_deny=raise_on_deny, **kwargs
+        )
+    return True
+
+
+def get_queryset_perms(
+    user: AbstractBaseUser | AnonymousUser | None,
+    operation: Operation,
+    queryset: QuerySet,
+    *,
+    permissions: list[type[BasePermission]] | None = None,
+) -> QuerySet:
+    if permissions is None:
+        permissions = get_default_permissions()
+    for cls in permissions:
+        perm = ensure_permission_instance(cls)
+        result = perm.get_queryset_perms(user, operation, queryset)
+        if result is not None:
+            queryset = result
+    return queryset
 
 
 async def check_permissions(

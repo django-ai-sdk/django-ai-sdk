@@ -319,7 +319,7 @@ class TestOpenMode:
         mock_assistants_registry.get.return_value.storage_adapter = mock_storage_class
 
         result = await ThreadService.create_thread(
-            "test-assistant", messages=[], user=None
+            "test-assistant", user=None
         )
         assert result == "new-thread-id"
 
@@ -375,7 +375,7 @@ class TestOpenMode:
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
 
-        with memory_permissions():
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
             try:
                 result = await MemoryService.create_memory(
                     name="open-test", user=None
@@ -389,6 +389,6 @@ class TestOpenMode:
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
 
-        with memory_permissions():
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
             result = await MemoryService.list_memories(user=None)
             assert isinstance(result, list)
