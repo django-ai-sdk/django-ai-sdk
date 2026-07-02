@@ -13,6 +13,7 @@ from django_ai_sdk.permissions import (
     Operation,
     PermissionDenied,
     get_assistant_permissions,
+    get_default_permissions,
     has_perms,
 )
 
@@ -454,23 +455,55 @@ class AssistantService:
     # ============================================================================
 
     @staticmethod
-    async def list_runtime_assistants() -> list[Any]:
+    async def list_runtime_assistants(
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Any]:
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
 
-        return [config async for config in AssistantSettings.objects.all().order_by("name")]
+        result: list[Any] = []
+        async for config in AssistantSettings.objects.all().order_by("name"):
+            try:
+                assistant = get_runtime_assistant_class(config.assistant)(config)
+            except Exception:
+                _logger.exception(
+                    "Skipping runtime assistant %r (id=%s): failed to instantiate",
+                    config.name,
+                    config.id,
+                )
+                continue
+            permissions = get_assistant_permissions(assistant)
+            try:
+                await has_perms(user, Operation.VIEW_ASSISTANT, config, permissions=permissions)
+            except PermissionDenied:
+                continue
+            result.append(config)
+        return result
 
     @staticmethod
-    async def get_runtime_assistant(assistant_id: str) -> Any:
+    async def get_runtime_assistant(
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> Any:
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
-            return await AssistantSettings.objects.aget(id=assistant_id)
+            config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
             raise ValueError(f"Assistant '{assistant_id}' not found")
+        assistant = get_runtime_assistant_class(config.assistant)(config)
+        permissions = get_assistant_permissions(assistant)
+        await has_perms(user, Operation.VIEW_ASSISTANT, config, permissions=permissions)
+        return config
 
     @staticmethod
-    async def create_runtime_assistant(data: AssistantCreateData) -> Any:
+    async def create_runtime_assistant(
+        data: AssistantCreateData,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
+
+        await has_perms(user, Operation.CREATE_ASSISTANT, permissions=get_default_permissions())
 
         config = AssistantSettings(
             name=data["name"],
@@ -493,13 +526,18 @@ class AssistantService:
     async def update_runtime_assistant(
         assistant_id: str,
         data: AssistantUpdateData,
+        user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
             raise ValueError(f"Assistant '{assistant_id}' not found")
+        assistant = get_runtime_assistant_class(config.assistant)(config)
+        permissions = get_assistant_permissions(assistant)
+        await has_perms(user, Operation.UPDATE_ASSISTANT, config, permissions=permissions)
 
         update_fields: list[str] = []
         for field, value in data.items():
@@ -513,13 +551,19 @@ class AssistantService:
         return config
 
     @staticmethod
-    async def delete_runtime_assistant(assistant_id: str) -> Any:
+    async def delete_runtime_assistant(
+        assistant_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> Any:
+        from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
             raise ValueError(f"Assistant '{assistant_id}' not found")
+        assistant = get_runtime_assistant_class(config.assistant)(config)
+        permissions = get_assistant_permissions(assistant)
+        await has_perms(user, Operation.DELETE_ASSISTANT, config, permissions=permissions)
 
         await config.adelete()
         return config

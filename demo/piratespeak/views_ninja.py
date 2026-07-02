@@ -625,7 +625,7 @@ def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantT
     operation_id="list_runtime_assistants",
 )
 async def list_runtime_assistants(request: HttpRequest) -> Any:
-    return await AssistantService.list_runtime_assistants()
+    return await AssistantService.list_runtime_assistants(user=request.user)
 
 
 @router.post(
@@ -649,7 +649,8 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "title_generation": payload.title_generation,
                 "max_history": payload.max_history,
                 "file_upload": payload.file_upload,
-            }
+            },
+            user=request.user,
         )
         for entry in payload.users:
             try:
@@ -677,7 +678,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
 )
 async def get_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantService.get_runtime_assistant(str(runtime_id))
+        return await AssistantService.get_runtime_assistant(str(runtime_id), user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
 
@@ -699,7 +700,9 @@ async def update_runtime_assistant(
             "AssistantUpdateData",
             {k: v for k, v in payload.model_dump().items() if v is not None},
         )
-        return await AssistantService.update_runtime_assistant(str(runtime_id), data)
+        return await AssistantService.update_runtime_assistant(
+            str(runtime_id), data, user=request.user
+        )
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -713,7 +716,7 @@ async def update_runtime_assistant(
 )
 async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantService.delete_runtime_assistant(str(runtime_id))
+        return await AssistantService.delete_runtime_assistant(str(runtime_id), user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
 

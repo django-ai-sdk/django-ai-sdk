@@ -576,7 +576,7 @@ class RuntimeAssistantToolsAPIView(APIView):
 
 class RuntimeAssistantListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
-        configs = await AssistantService.list_runtime_assistants()
+        configs = await AssistantService.list_runtime_assistants(user=request.user)
         return Response(AssistantSettingsSerializer(configs, many=True).data)
 
     async def post(self, request: Request) -> Response:
@@ -587,6 +587,7 @@ class RuntimeAssistantListCreateAPIView(APIView):
         try:
             config = await AssistantService.create_runtime_assistant(
                 data,  # type: ignore[arg-type]
+                user=request.user,
             )
         except Exception as e:
             return Response({"message": str(e)}, status=400)
@@ -616,7 +617,7 @@ class RuntimeAssistantListCreateAPIView(APIView):
 class RuntimeAssistantDetailAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantService.get_runtime_assistant(runtime_id)
+            config = await AssistantService.get_runtime_assistant(runtime_id, user=request.user)
             return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
@@ -630,6 +631,7 @@ class RuntimeAssistantDetailAPIView(APIView):
             config = await AssistantService.update_runtime_assistant(
                 runtime_id,
                 data,  # type: ignore[arg-type]
+                user=request.user,
             )
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
@@ -653,7 +655,7 @@ class RuntimeAssistantDetailAPIView(APIView):
 
     async def delete(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantService.delete_runtime_assistant(runtime_id)
+            config = await AssistantService.delete_runtime_assistant(runtime_id, user=request.user)
             return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
