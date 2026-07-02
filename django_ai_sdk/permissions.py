@@ -9,12 +9,11 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 if TYPE_CHECKING:
-    from django.contrib.auth.base_user import AbstractBaseUser
-    from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.memories.models import Memory
+    from django_ai_sdk.types import UserType
 
 
 class PermissionDenied(Exception):
@@ -61,14 +60,12 @@ class Operation(StrEnum):
 
 
 class BasePermission(ABC):
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return True
 
     async def has_object_permission(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         obj: Any,
         **kwargs: Any,
@@ -77,7 +74,7 @@ class BasePermission(ABC):
 
     def get_queryset_perms(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet | None:
@@ -97,14 +94,12 @@ class AllowAll(BasePermission):
 
 
 class DenyAll(BasePermission):
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return False
 
     async def has_object_permission(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         obj: Any,
         **kwargs: Any,
@@ -113,16 +108,12 @@ class DenyAll(BasePermission):
 
 
 class IsAuthenticated(BasePermission):
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return user is not None and bool(user.is_authenticated)
 
 
 class IsAdminUser(BasePermission):
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return user is not None and bool(
             getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
         )
@@ -138,18 +129,18 @@ class IsInAllowedGroups(BasePermission):
     def __init__(self, groups: list[str] | None = None) -> None:
         self.groups = list(groups or [])
 
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
-        return await user.groups.filter(name__in=self.groups).aexists()
+        if not hasattr(user, "groups"):
+            raise TypeError("IsInAllowedGroups requires a user model with groups support")
+        return await user.groups.filter(name__in=self.groups).aexists()  # ty: ignore[unresolved-attribute]
 
 
 class IsOwner(BasePermission):
     async def has_object_permission(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         obj: Any,
         **kwargs: Any,
@@ -196,14 +187,12 @@ class MemoryDefaultPermission(BasePermission):
         }
     )
 
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return user is not None and bool(user.is_authenticated)
 
     async def has_object_permission(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         obj: Memory,
         **kwargs: Any,
@@ -253,16 +242,14 @@ class AssistantDefaultPermission(BasePermission):
         }
     )
 
-    async def has_permission(
-        self, user: AbstractBaseUser | AnonymousUser | None, operation: Operation, **kwargs: Any
-    ) -> bool:
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if operation not in self.ASSISTANT_OPS:
             return True
         return user is not None and bool(user.is_authenticated)
 
     async def has_object_permission(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         obj: Any,
         **kwargs: Any,
@@ -332,7 +319,7 @@ def get_assistant_permissions(assistant: Assistant) -> list[type[BasePermission]
 
 
 async def has_perms(
-    user: AbstractBaseUser | AnonymousUser | None,
+    user: UserType,
     operation: Operation,
     obj: Any = None,
     *,
@@ -355,7 +342,7 @@ async def has_perms(
 
 
 def get_queryset_perms(
-    user: AbstractBaseUser | AnonymousUser | None,
+    user: UserType,
     operation: Operation,
     queryset: QuerySet,
     *,
@@ -372,7 +359,7 @@ def get_queryset_perms(
 
 
 async def check_permissions(
-    user: AbstractBaseUser | AnonymousUser | None,
+    user: UserType,
     operation: Operation,
     permissions: list[type[BasePermission]],
     *,
@@ -389,7 +376,7 @@ async def check_permissions(
 
 
 async def check_object_permissions(
-    user: AbstractBaseUser | AnonymousUser | None,
+    user: UserType,
     operation: Operation,
     obj: Any,
     permissions: list[type[BasePermission]],

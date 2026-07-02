@@ -19,8 +19,7 @@ from django_ai_sdk.mcp.models import MCPOAuthClient, MCPOAuthToken
 from django_ai_sdk.mcp.schemas import ConnectionOut
 
 if TYPE_CHECKING:
-    from django.contrib.auth.base_user import AbstractBaseUser
-    from django.contrib.auth.models import AnonymousUser
+    from django_ai_sdk.types import UserType
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +46,7 @@ class MCPService:
     # ============================================================================
 
     @staticmethod
-    async def list_connections(
-        *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> list[ConnectionOut]:
+    async def list_connections(*, user: UserType) -> list[ConnectionOut]:
         """List all MCP servers with connection status for the user."""
         all_servers = _get_mcp_servers()
         if not all_servers:
@@ -102,9 +99,7 @@ class MCPService:
         return result
 
     @staticmethod
-    async def disconnect(
-        server_name: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> bool:
+    async def disconnect(server_name: str, *, user: UserType) -> bool:
         """Revoke OAuth token for a server. Returns True if deleted, False if not found."""
         if not user:
             return False
@@ -250,9 +245,7 @@ class MCPService:
         return token_response
 
     @staticmethod
-    async def store_token(
-        user: AbstractBaseUser | AnonymousUser | None, server_name: str, token_response: dict
-    ) -> MCPOAuthToken:
+    async def store_token(user: UserType, server_name: str, token_response: dict) -> MCPOAuthToken:
         """Store OAuth token for user."""
         if not user:
             raise ValueError("User required to store token")
@@ -267,9 +260,7 @@ class MCPService:
         return token_obj
 
     @staticmethod
-    async def refresh_access_token(
-        server_name: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> MCPOAuthToken:
+    async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
         """Refresh the OAuth access token using the stored refresh_token.
 
         Raises:

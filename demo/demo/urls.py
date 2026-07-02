@@ -40,6 +40,7 @@ api.add_router("/", piratespeak_router)
 api.add_router("/memories", memories_router)
 api.add_router("/mcp", mcp_router)
 
+
 # Global safety net so service-layer errors never surface as 500s.
 # Endpoints may still catch these earlier for custom payloads.
 @api.exception_handler(PermissionDenied)
@@ -56,7 +57,6 @@ def _on_does_not_exist(request: HttpRequest, exc: ObjectDoesNotExist) -> HttpRes
 def _on_value_error(request: HttpRequest, exc: ValueError) -> HttpResponse:
     # Service-layer convention: ValueError means a referenced object was not found.
     return api.create_response(request, {"detail": str(exc)}, status=404)
-
 
 
 urlpatterns = [

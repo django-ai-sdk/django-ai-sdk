@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import (
+    AssistantCreateData,
     AssistantService,
+    AssistantUpdateData,
     add_assistant_group,
     add_assistant_user,
     get_assistant_info,
@@ -192,8 +194,8 @@ class ThreadCreateAPIView(APIView):
             thread_id = create_thread(
                 assistant_id=assistant_id,
                 user=request.user,
-            # Initial messages are not persisted here; the chat/stream endpoint
-            # receives and stores the full message list.
+                # Initial messages are not persisted here; the chat/stream endpoint
+                # receives and stores the full message list.
             )
             return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
         except PermissionDenied as e:
