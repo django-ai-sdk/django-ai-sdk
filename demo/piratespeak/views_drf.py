@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
@@ -37,9 +39,15 @@ from django_ai_sdk.storage.services import (
 from django_ai_sdk.views.schemas import Message
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    from django_ai_sdk.assistants.services import (
+        AssistantCreateData,
+        AssistantUpdateData,
+    )
+    from rest_framework.request import Request
 
 logger = get_logger(__name__)
 

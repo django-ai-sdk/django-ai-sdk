@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.rags.schemas import RagDocument
 
 
 logger = get_logger(__name__)
@@ -37,7 +40,7 @@ class BaseRAGProvider(ABC):
     """
 
     @abstractmethod
-    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
+    async def warmup(self, assistant: Assistant, memory_id: str | None = None) -> None:
         """
         Warm up the RAG by building indexes and loading embeddings.
 
@@ -51,7 +54,7 @@ class BaseRAGProvider(ABC):
         """
 
     @abstractmethod
-    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: Assistant, memory_id: str | None = None) -> Any:
         """
         Get the RAG instance for retrieval.
 
@@ -68,7 +71,7 @@ class BaseRAGProvider(ABC):
             Framework-specific RAG instance, or None if no documents
         """
 
-    def get_cached_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+    def get_cached_rag_instance(self, assistant: Assistant, memory_id: str | None = None) -> Any:
         """Return a previously-warmed RAG instance without creating a new one.
 
         Safe to call when a second connection would conflict (e.g. Qdrant's
@@ -79,12 +82,12 @@ class BaseRAGProvider(ABC):
 
     async def get_tool(
         self,
-        assistant: "Assistant",
+        assistant: Assistant,
         memory_id: str | None = None,
         *,
         spec: Any = None,
-        citation_registry: "CitationRegistry | None" = None,
-        citation_formatter: "CitationFormatter | None" = None,
+        citation_registry: CitationRegistry | None = None,
+        citation_formatter: CitationFormatter | None = None,
     ) -> Any:
         """Build a tool for this memory, optionally citation-wired.
 
@@ -105,8 +108,8 @@ class BaseRAGProvider(ABC):
     def _attach_citations(
         self,
         tool: Any,
-        formatter: "CitationFormatter",
-        registry: "CitationRegistry",
+        formatter: CitationFormatter,
+        registry: CitationRegistry,
     ) -> None:
         """Hook called by get_tool to attach citation wiring to a tool.
 
@@ -142,7 +145,7 @@ class BaseRAGProvider(ABC):
 
     @abstractmethod
     async def reindex(
-        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        self, assistant: Assistant, memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
@@ -159,7 +162,7 @@ class BaseRAGProvider(ABC):
 
     @abstractmethod
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+        self, assistant: Assistant, memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """
         Incrementally add documents to the RAG index.
@@ -172,7 +175,7 @@ class BaseRAGProvider(ABC):
 
     @abstractmethod
     async def remove_documents(
-        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+        self, assistant: Assistant, memory_id: str | None, document_ids: list[str]
     ) -> None:
         """
         Incrementally remove documents from the RAG index.
@@ -222,7 +225,7 @@ class RAGProvider(BaseRAGProvider):
         self._warmup_locks: dict[str, asyncio.Lock] = {}
         logger.debug("RAGProvider initialized")
 
-    async def warmup(self, assistant: "Assistant", memory_id: str | None = None) -> None:
+    async def warmup(self, assistant: Assistant, memory_id: str | None = None) -> None:
         """
         Warm up the RAG by building the search index.
 
@@ -253,7 +256,7 @@ class RAGProvider(BaseRAGProvider):
             self._cache[cache_key] = None
             logger.warning(f"No RAG available for {cache_key}")
 
-    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: Assistant, memory_id: str | None = None) -> Any:
         """
         Get the RAG instance (cached or newly created).
 
@@ -315,7 +318,7 @@ class RAGProvider(BaseRAGProvider):
         return tool
 
     async def reindex(
-        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        self, assistant: Assistant, memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
@@ -353,7 +356,7 @@ class RAGProvider(BaseRAGProvider):
         logger.debug(f"Base RAG cache cleared ({cache_size} entries)")
 
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+        self, assistant: Assistant, memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """Add documents to RAG - fallback to reindex since BM25RAG doesn't support incremental."""
         cache_key = self._get_cache_key(assistant, memory_id)
@@ -363,7 +366,7 @@ class RAGProvider(BaseRAGProvider):
         logger.info(f"Reindexed (add) for {cache_key}")
 
     async def remove_documents(
-        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+        self, assistant: Assistant, memory_id: str | None, document_ids: list[str]
     ) -> None:
         """Remove documents from RAG - fallback to reindex since BM25RAG doesn't support incremental."""
         cache_key = self._get_cache_key(assistant, memory_id)
@@ -372,6 +375,6 @@ class RAGProvider(BaseRAGProvider):
         await self.warmup(assistant, memory_id)
         logger.info(f"Reindexed (remove) for {cache_key}")
 
-    def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
+    def _get_cache_key(self, assistant: Assistant, memory_id: str | None) -> str:
         """Generate cache key for this assistant and memory."""
         return f"{assistant.__class__.__name__}_{memory_id or 'default'}"

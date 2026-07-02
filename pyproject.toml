@@ -112,6 +112,22 @@ select = [
 ]
 ignore = ["ANN401", "E501"]
 
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+    "ninja.Schema",
+    "pydantic.BaseModel",
+]
+runtime-evaluated-decorators = [
+    "ninja.Router.get",
+    "ninja.Router.post",
+    "ninja.Router.put",
+    "ninja.Router.patch",
+    "ninja.Router.delete",
+]
+
 [tool.ty.src]
 include = ["django_ai_sdk", "demo"]
 exclude = [

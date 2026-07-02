@@ -1,9 +1,13 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from haystack import Document as HaystackDocument
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.schemas import RagDocument
+
+if TYPE_CHECKING:
+    from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
 

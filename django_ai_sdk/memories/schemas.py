@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -162,6 +164,15 @@ class MemoryUserOut(BaseModel):
     """Schema for memory user output."""
 
     user_id: str
+    can_manage: bool
+    created_at: str
+
+
+class MemoryGroupOut(BaseModel):
+    """Schema for memory group output."""
+
+    group_id: int
+    group_name: str
     can_manage: bool
     created_at: str
 

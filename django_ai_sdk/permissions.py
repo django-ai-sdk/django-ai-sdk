@@ -154,10 +154,13 @@ class IsOwner(BasePermission):
         obj: Any,
         **kwargs: Any,
     ) -> bool:
-        # SECURITY: this seems to deep, we might wanna pass on just the owner.
-        owner_id = getattr(obj, "user_id", None)
+        # SECURITY: distinguish "no ownership field" from "anonymous-owned".
+        if not hasattr(obj, "user_id"):
+            return True  # no opinion on ownership
+        owner_id = obj.user_id
         if owner_id is None:
-            return True
+            # Anonymous-owned object: allow only anonymous users.
+            return user is None or (hasattr(user, "is_authenticated") and not user.is_authenticated)
         return user is not None and str(owner_id) == str(user.pk)
 
 

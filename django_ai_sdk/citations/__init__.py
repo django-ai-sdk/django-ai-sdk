@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .formatter import CitationFormatter, DefaultCitationFormatter, NumberedSource
 from .registry import CitationRegistry
 

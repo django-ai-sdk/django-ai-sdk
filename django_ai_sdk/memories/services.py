@@ -37,6 +37,8 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.tasks import aget_task_status
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
     from django.core.files.base import File

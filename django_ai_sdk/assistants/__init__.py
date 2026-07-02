@@ -26,6 +26,8 @@ Registration Methods:
 Both methods can be combined, a class will only be registered once.
 """
 
+from __future__ import annotations
+
 from .mixins import AssistantInfo, AssistantInfoMixin
 from .registry import (
     AssistantRegistrationError,

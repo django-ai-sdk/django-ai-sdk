@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
     AddMemoryUserIn,

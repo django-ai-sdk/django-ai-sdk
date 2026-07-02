@@ -2,6 +2,8 @@
 Django AI SDK - A plug-and-play Django AI streaming SDK.
 """
 
+from __future__ import annotations
+
 from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.permissions import (

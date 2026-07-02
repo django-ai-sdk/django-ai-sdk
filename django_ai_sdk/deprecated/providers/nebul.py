@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from agents.models.interface import Model, ModelProvider
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 
 class NebulModelProvider(ModelProvider):

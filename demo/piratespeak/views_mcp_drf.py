@@ -1,8 +1,11 @@
 """Demo MCP views using Django REST Framework."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import httpx
 from django.conf import settings
-from django.http import HttpRequest
 from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.services import (
     disconnect_sync,
@@ -12,6 +15,9 @@ from django_ai_sdk.mcp.services import (
 from rest_framework import routers, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest
 
 
 class MCPConnectionSerializer(serializers.Serializer):

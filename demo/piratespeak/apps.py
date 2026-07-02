@@ -7,6 +7,8 @@ This module demonstrates both registration methods:
 Both methods work together - a class will only be registered once.
 """
 
+from __future__ import annotations
+
 from django.apps import AppConfig
 from django_ai_sdk.logger import get_logger
 

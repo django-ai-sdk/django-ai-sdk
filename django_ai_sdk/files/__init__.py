@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult
 from django_ai_sdk.files.processors import (
     BaseFileProcessor,

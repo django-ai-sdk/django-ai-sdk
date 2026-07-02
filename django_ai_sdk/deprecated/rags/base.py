@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
 logger = get_logger(__name__)
@@ -128,7 +131,7 @@ class BaseRAGAdapter(ABC):
         """
         pass
 
-    def get_tool(self, spec: "ToolSpec") -> Callable:
+    def get_tool(self, spec: ToolSpec) -> Callable:
         """
         Get tool with custom specification.
 
@@ -143,7 +146,7 @@ class BaseRAGAdapter(ABC):
         tool.description = spec.description
         return tool
 
-    async def add_documents(self, documents: list["RagDocument"]) -> None:
+    async def add_documents(self, documents: list[RagDocument]) -> None:
         """
         Add documents incrementally (optional, override in subclass).
 
@@ -172,7 +175,7 @@ class BaseRAGAdapter(ABC):
         if hasattr(self, "warmup"):
             self.warmup()
 
-    def refresh_documents(self, documents: list["RagDocument"]) -> None:
+    def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
         Fully refresh the index with a new set of documents.
 

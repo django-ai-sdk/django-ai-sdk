@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from typing import TYPE_CHECKING
 
@@ -29,7 +31,7 @@ logger.add(
 
 
 # Create module loggers
-def get_logger(name: str) -> "Logger":
+def get_logger(name: str) -> Logger:
     """
     Get a logger instance for a specific module.
     """

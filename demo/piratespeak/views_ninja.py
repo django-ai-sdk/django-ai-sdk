@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -59,7 +61,7 @@ class AssistantInfoResponse(Schema):
 class Tool(Schema):
     label: str
     description: str | None = None
-    children: list["Tool"] = []
+    children: list[Tool] = []
 
 
 class MCPServerStatus(Schema):

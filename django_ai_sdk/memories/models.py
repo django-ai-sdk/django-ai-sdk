@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
@@ -21,9 +23,9 @@ class Memory(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     # Reverse relation type hints
-    entries: models.Manager["Entry"]
-    memory_users: models.Manager["MemoryUser"]
-    memory_groups: models.Manager["MemoryGroup"]
+    entries: models.Manager[Entry]
+    memory_users: models.Manager[MemoryUser]
+    memory_groups: models.Manager[MemoryGroup]
 
     # Annotated field from queries
     document_count: int

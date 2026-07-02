@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.memories.models import Entry, ThreadMemory
 from haystack.tools import Tool
 

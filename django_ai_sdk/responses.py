@@ -1,13 +1,18 @@
-from collections.abc import Callable
-from typing import cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
 
 from django.conf import settings
 from django.http import StreamingHttpResponse
 
-from django_ai_sdk.adapters.protocols import Streamable
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.protocols.base import BaseProtocolHandler
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.protocols.base import BaseProtocolHandler
 
 logger = get_logger(__name__)
 

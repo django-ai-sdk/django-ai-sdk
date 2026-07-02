@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -17,7 +19,7 @@ class RagDocument(BaseModel):
         extra = "allow"
 
     @classmethod
-    def from_document(cls, haystack_doc: Any) -> "RagDocument":
+    def from_document(cls, haystack_doc: Any) -> RagDocument:
         """
         Create RagDocument from a Haystack Document.
 

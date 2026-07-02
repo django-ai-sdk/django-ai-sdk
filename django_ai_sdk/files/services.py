@@ -1,6 +1,11 @@
-from pathlib import Path
+from __future__ import annotations
 
-from django.core.files.base import File
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from django.core.files.base import File
 
 
 class FileService:

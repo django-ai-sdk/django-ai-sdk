@@ -1,4 +1,6 @@
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import datetime  # noqa: TC003 — pydantic needs runtime access for field types
 from typing import Any
 
 from pydantic import BaseModel, Field

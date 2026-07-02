@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 import bm25s
@@ -8,6 +9,8 @@ from django_ai_sdk.rags.schemas import RagDocument
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django_ai_sdk.rags.schemas import ToolSpec
 
 logger = get_logger(__name__)
@@ -257,7 +260,7 @@ class BM25RAG(BaseRAGAdapter):
         search.description = "Search documents using BM25 keyword retrieval"
         return search
 
-    def get_tool(self, spec: "ToolSpec") -> Callable:
+    def get_tool(self, spec: ToolSpec) -> Callable:
         """
         Get tool with custom specification.
 

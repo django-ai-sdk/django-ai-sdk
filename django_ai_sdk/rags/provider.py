@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import asyncio
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.rags.schemas import RagDocument
 
 if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
 
@@ -37,7 +39,7 @@ class RAGProvider:
         self._warmup_locks: dict[str, asyncio.Lock] = {}
 
     async def warmup(
-        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        self, assistant: Assistant, memory_id: str | None = None, force_rebuild: bool = False
     ) -> None:
         """
         Warm up the RAG by building indexes.
@@ -56,7 +58,7 @@ class RAGProvider:
         await self._get_or_create_rag(assistant, memory_id, force_rebuild)
         logger.info(f"RAG warmed up for {cache_key}")
 
-    async def get_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+    async def get_rag_instance(self, assistant: Assistant, memory_id: str | None = None) -> Any:
         """
         Get the RAG instance.
 
@@ -74,7 +76,7 @@ class RAGProvider:
         """
         return await self._get_or_create_rag(assistant, memory_id, False)
 
-    def get_cached_rag_instance(self, assistant: "Assistant", memory_id: str | None = None) -> Any:
+    def get_cached_rag_instance(self, assistant: Assistant, memory_id: str | None = None) -> Any:
         """Return the cached RAG instance without warming up or creating a new one.
 
         Use instead of get_rag_instance() when a second connection would conflict
@@ -85,12 +87,12 @@ class RAGProvider:
 
     async def get_tool(
         self,
-        assistant: "Assistant",
+        assistant: Assistant,
         memory_id: str | None = None,
         *,
         spec: Any = None,
-        citation_registry: "CitationRegistry | None" = None,
-        citation_formatter: "CitationFormatter | None" = None,
+        citation_registry: CitationRegistry | None = None,
+        citation_formatter: CitationFormatter | None = None,
     ) -> Any:
         """Get a ready-to-use ComponentTool for the given memory, with optional citations."""
         rag_instance = await self.get_rag_instance(assistant, memory_id)
@@ -126,8 +128,8 @@ class RAGProvider:
     def _attach_citations(
         self,
         tool: Any,
-        formatter: "CitationFormatter",
-        registry: "CitationRegistry",
+        formatter: CitationFormatter,
+        registry: CitationRegistry,
     ) -> None:
         """Wire a ComponentTool via the citation bridge."""
         from django_ai_sdk.citations.utils import attach_citations  # noqa: PLC0415
@@ -140,7 +142,7 @@ class RAGProvider:
         logger.debug("RAG cache cleared")
 
     async def add_documents(
-        self, assistant: "Assistant", memory_id: str | None, documents: list[RagDocument]
+        self, assistant: Assistant, memory_id: str | None, documents: list[RagDocument]
     ) -> None:
         """Add documents to existing RAG instance."""
         cache_key = self._get_cache_key(assistant, memory_id)
@@ -151,7 +153,7 @@ class RAGProvider:
             logger.info(f"Added {len(documents)} documents to {cache_key}")
 
     async def remove_documents(
-        self, assistant: "Assistant", memory_id: str | None, document_ids: list[str]
+        self, assistant: Assistant, memory_id: str | None, document_ids: list[str]
     ) -> None:
         """Remove documents from existing RAG instance."""
         cache_key = self._get_cache_key(assistant, memory_id)
@@ -162,7 +164,7 @@ class RAGProvider:
             logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
 
     async def reindex(
-        self, assistant: "Assistant", memory_id: str | None = None, force_rebuild: bool = False
+        self, assistant: Assistant, memory_id: str | None = None, force_rebuild: bool = False
     ) -> Any:
         """
         Reindex the RAG by clearing cache and rebuilding.
@@ -192,13 +194,13 @@ class RAGProvider:
 
     # TODO: maybe we want to have some RagKey object
     # that would support many key types (assistant, memory, etc)
-    def _get_cache_key(self, assistant: "Assistant", memory_id: str | None) -> str:
+    def _get_cache_key(self, assistant: Assistant, memory_id: str | None) -> str:
         """Generate cache key for this assistant and memory."""
         return f"{assistant.__class__.__name__}_{memory_id or 'default'}"
 
     async def _get_or_create_rag(
         self,
-        assistant: "Assistant",
+        assistant: Assistant,
         memory_id: str | None,
         force_rebuild: bool = False,
     ) -> Any:

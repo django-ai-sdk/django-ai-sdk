@@ -1,4 +1,9 @@
-from .formatter import NumberedSource
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .formatter import NumberedSource
 
 
 class CitationRegistry:

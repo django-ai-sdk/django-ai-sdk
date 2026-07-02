@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 import httpx
 from asgiref.sync import async_to_sync
 from django.conf import settings
+from django.db import DatabaseError
 
 from django_ai_sdk.mcp.discovery import OAuthDiscovery, discover
 from django_ai_sdk.mcp.models import MCPOAuthClient, MCPOAuthToken
@@ -61,7 +62,7 @@ class MCPService:
                 "server_name", flat=True
             ):
                 connected.add(sn)
-        except Exception:
+        except DatabaseError:
             logger.warning(
                 "Failed to load MCP OAuth token connections for user=%s; continuing with no connected servers.",
                 getattr(user, "pk", None),

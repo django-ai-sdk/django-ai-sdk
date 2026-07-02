@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.urls import path
 from django_ai_sdk.memories.services import (
     add_memory_user,
@@ -28,9 +32,11 @@ from django_ai_sdk.memories.services import (
 from django_ai_sdk.permissions import PermissionDenied
 from rest_framework import serializers
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    from rest_framework.request import Request
 
 
 class MemoryInSerializer(serializers.Serializer):

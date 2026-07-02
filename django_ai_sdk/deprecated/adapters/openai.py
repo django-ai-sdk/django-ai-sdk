@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import uuid
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from agents.agent import Agent
@@ -28,12 +29,14 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
-from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from django_ai_sdk.suggestions import SuggestionGenerator
     from openai import AsyncOpenAI
+    from openai.types.chat import ChatCompletionMessageParam
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -50,7 +53,7 @@ class OpenAIRunnable(Runnable):
 
     def __init__(
         self,
-        client: "AsyncOpenAI",
+        client: AsyncOpenAI,
         model: str | None = None,
         instructions: str | None = None,
     ) -> None:
@@ -107,14 +110,14 @@ class OpenAIStream(Runnable, Streamable):
 
     model: str | None = None
     instructions: str | None = None
-    suggestion_generator: "SuggestionGenerator | None" = None
+    suggestion_generator: SuggestionGenerator | None = None
 
     # Message processing configuration
     merge_messages: bool = False
 
     def __init__(
         self,
-        client: "AsyncOpenAI",
+        client: AsyncOpenAI,
         model: str | None = None,
         instructions: str | None = None,
         store: bool = True,
@@ -545,7 +548,7 @@ class OpenAIAgentStream(Runnable, Streamable):
 
     model: str | None = None
     instructions: str | None = None
-    suggestion_generator: "SuggestionGenerator | None" = None
+    suggestion_generator: SuggestionGenerator | None = None
 
     def __init__(
         self,
@@ -576,7 +579,7 @@ class OpenAIAgentStream(Runnable, Streamable):
         """Convert internal ChatMessage format to OpenAI Agents format."""
         return [{"role": msg.role, "content": msg.content} for msg in messages]
 
-    def get_input(self, messages: list["ChatMessage"]) -> str:
+    def get_input(self, messages: list[ChatMessage]) -> str:
         """Extract the last user message as input for the agent."""
         user_messages = [m for m in messages if m.role == "user"]
         if not user_messages:
