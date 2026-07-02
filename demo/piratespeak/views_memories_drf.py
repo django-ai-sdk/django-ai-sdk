@@ -277,7 +277,7 @@ class ThreadFileListCreateAPIView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request: Request, thread_id: str) -> Response:
-        files = list_thread_files(thread_id)
+        files = list_thread_files(thread_id, user=request.user)
         return Response(DocumentOutSerializer(files, many=True).data)
 
     def post(self, request: Request, thread_id: str) -> Response:
@@ -290,7 +290,7 @@ class ThreadFileListCreateAPIView(APIView):
 
 class ThreadFileDetailAPIView(APIView):
     def delete(self, request: Request, thread_id: str, doc_id: str) -> Response:
-        delete_thread_file(thread_id, doc_id)
+        delete_thread_file(thread_id, doc_id, user=request.user)
         return Response(status=204)
 
 
@@ -329,7 +329,7 @@ class MemoryUserListCreateAPIView(APIView):
 
 class SourceContentAPIView(APIView):
     def get(self, request: Request, entry_id: str, chunk_id: str) -> Response:
-        content = get_chunk_content(entry_id, chunk_id or None)
+        content = get_chunk_content(entry_id, chunk_id or None, user=request.user)
         if content is None:
             return Response({"detail": f"Entry not found: {entry_id}"}, status=404)
         return Response(SourceContentSerializer({"content": content}).data)
