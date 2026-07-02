@@ -853,3 +853,147 @@ class TestAssistantDefaultPermissionCreator:
 
         entry = await AssistantGroup.objects.aget(assistant=config, group=group)
         assert entry.can_manage is True
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestAssistantUserManagement:
+    """Assistant owner/manager can add users; strangers and viewers are blocked."""
+
+    async def _make_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    async def test_manager_can_add_user(self):
+        """Assistant manager can add other users as viewers."""
+        from unittest.mock import patch
+
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import AssistantDefaultPermission
+
+        creator = await self._make_user()
+        viewer = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Add User Test",
+                "slug": "add-user-test",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        with patch(
+            "django_ai_sdk.assistants.services.get_assistant_permissions",
+            return_value=[AssistantDefaultPermission],
+        ):
+            result = await AssistantService.add_assistant_user(
+                str(config.id), str(viewer.id), can_manage=False, user=creator
+            )
+
+        assert result.can_manage is False
+        assert await AssistantUser.objects.filter(assistant=config, user=viewer).aexists()
+
+    async def test_manager_can_promote_user_to_manager(self):
+        """Assistant manager can promote viewer to manager."""
+        from unittest.mock import patch
+
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import AssistantDefaultPermission
+
+        creator = await self._make_user()
+        member = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Promote Test",
+                "slug": "promote-test",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        with patch(
+            "django_ai_sdk.assistants.services.get_assistant_permissions",
+            return_value=[AssistantDefaultPermission],
+        ):
+            await AssistantService.add_assistant_user(
+                str(config.id), str(member.id), can_manage=False, user=creator
+            )
+
+            result = await AssistantService.update_assistant_user(
+                str(config.id), str(member.id), can_manage=True, user=creator
+            )
+
+        assert result.can_manage is True
+
+    async def test_stranger_cannot_add_user(self):
+        """Non-member cannot add users to assistant."""
+        from unittest.mock import patch
+
+        from django_ai_sdk.assistants.models import AssistantSettings
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import AssistantDefaultPermission, PermissionDenied
+
+        creator = await self._make_user()
+        stranger = await self._make_user()
+        viewer = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Stranger Block",
+                "slug": "stranger-block",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        with patch(
+            "django_ai_sdk.assistants.services.get_assistant_permissions",
+            return_value=[AssistantDefaultPermission],
+        ):
+            with pytest.raises(PermissionDenied):
+                await AssistantService.add_assistant_user(
+                    str(config.id), str(viewer.id), can_manage=False, user=stranger
+                )
+
+    async def test_viewer_cannot_add_user(self):
+        """Non-manager member cannot add other users."""
+        from unittest.mock import patch
+
+        from django_ai_sdk.assistants.models import AssistantSettings
+        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.permissions import AssistantDefaultPermission, PermissionDenied
+
+        creator = await self._make_user()
+        viewer = await self._make_user()
+        new_user = await self._make_user()
+
+        config = await AssistantService.create_runtime_assistant(
+            {
+                "name": "Viewer Block",
+                "slug": "viewer-block",
+                "assistant": "",
+                "model": "gpt-4o",
+            },
+            user=creator,
+        )
+
+        with patch(
+            "django_ai_sdk.assistants.services.get_assistant_permissions",
+            return_value=[AssistantDefaultPermission],
+        ):
+            await AssistantService.add_assistant_user(
+                str(config.id), str(viewer.id), can_manage=False, user=creator
+            )
+
+            with pytest.raises(PermissionDenied):
+                await AssistantService.add_assistant_user(
+                    str(config.id), str(new_user.id), can_manage=False, user=viewer
+                )

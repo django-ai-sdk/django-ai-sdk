@@ -392,3 +392,98 @@ class TestOpenMode:
         with memory_permissions("django_ai_sdk.permissions.AllowAll"):
             result = await MemoryService.list_memories(user=None)
             assert isinstance(result, list)
+
+
+# ============================================================================
+# MemoryUser Management — RBAC enforcement
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestMemoryUserManagement:
+    async def _get_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    async def test_owner_can_add_user(self):
+        """Memory owner can add other users as viewers."""
+        from django_ai_sdk.memories.models import Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        viewer = await self._get_user()
+
+        mem = await Memory.objects.acreate(name="shared", description="x")
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.add_memory_user(
+                str(mem.id), str(viewer.id), can_manage=False, user=owner
+            )
+
+        assert result.can_manage is False
+        assert await MemoryUser.objects.filter(memory=mem, user=viewer).aexists()
+
+    async def test_owner_can_promote_user_to_manager(self):
+        """Memory owner can promote viewer to manager."""
+        from django_ai_sdk.memories.models import Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        member = await self._get_user()
+
+        mem = await Memory.objects.acreate(name="promote", description="x")
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=member, can_manage=False)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.update_memory_user(
+                str(mem.id), str(member.id), can_manage=True, user=owner
+            )
+
+        assert result.can_manage is True
+
+    async def test_non_owner_cannot_add_user(self):
+        """Stranger cannot add users to private memory."""
+        from django_ai_sdk.memories.models import Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        stranger = await self._get_user()
+        viewer = await self._get_user()
+
+        mem = await Memory.objects.acreate(name="private", description="x")
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            with pytest.raises(PermissionDenied):
+                await MemoryService.add_memory_user(
+                    str(mem.id), str(viewer.id), can_manage=False, user=stranger
+                )
+
+    async def test_viewer_cannot_add_user(self):
+        """Non-manager member cannot add other users."""
+        from django_ai_sdk.memories.models import Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        viewer = await self._get_user()
+        new_user = await self._get_user()
+
+        mem = await Memory.objects.acreate(name="viewer-only", description="x")
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await MemoryUser.objects.acreate(memory=mem, user=viewer, can_manage=False)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            with pytest.raises(PermissionDenied):
+                await MemoryService.add_memory_user(
+                    str(mem.id), str(new_user.id), can_manage=False, user=viewer
+                )
