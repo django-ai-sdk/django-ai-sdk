@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.assistants.mixins import AssistantInfo
     from django_ai_sdk.assistants.models import (
         AssistantGroup,
-        AssistantSettings,
         AssistantUser,
     )
     from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
@@ -448,30 +447,18 @@ class AssistantService:
         if not deleted:
             raise ValueError(f"Group '{group_id}' not found on assistant '{assistant_id}'")
 
-
-list_assistants = async_to_sync(AssistantService.list_assistants)
-get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
-get_mcp_server_status = async_to_sync(AssistantService.get_mcp_server_status)
-list_assistant_users = async_to_sync(AssistantService.list_assistant_users)
-add_assistant_user = async_to_sync(AssistantService.add_assistant_user)
-update_assistant_user = async_to_sync(AssistantService.update_assistant_user)
-remove_assistant_user = async_to_sync(AssistantService.remove_assistant_user)
-list_assistant_groups = async_to_sync(AssistantService.list_assistant_groups)
-add_assistant_group = async_to_sync(AssistantService.add_assistant_group)
-remove_assistant_group = async_to_sync(AssistantService.remove_assistant_group)
-
-
-class AssistantSettingsService:
-    """CRUD service for AssistantSettings — shared between DRF and Ninja views."""
+    # ============================================================================
+    # Runtime assistant CRUD
+    # ============================================================================
 
     @staticmethod
-    async def all() -> list[Any]:
+    async def list_runtime_assistants() -> list[Any]:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         return [config async for config in AssistantSettings.objects.all().order_by("name")]
 
     @staticmethod
-    async def get(assistant_id: str) -> AssistantSettings:
+    async def get_runtime_assistant(assistant_id: str) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
@@ -480,10 +467,7 @@ class AssistantSettingsService:
             raise ValueError(f"Assistant '{assistant_id}' not found")
 
     @staticmethod
-    async def create(
-        data: AssistantCreateData,
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> AssistantSettings:
+    async def create_runtime_assistant(data: AssistantCreateData) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         config = AssistantSettings(
@@ -504,10 +488,10 @@ class AssistantSettingsService:
         return config
 
     @staticmethod
-    async def update(
+    async def update_runtime_assistant(
         assistant_id: str,
         data: AssistantUpdateData,
-    ) -> AssistantSettings:
+    ) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
@@ -527,7 +511,7 @@ class AssistantSettingsService:
         return config
 
     @staticmethod
-    async def delete(assistant_id: str) -> AssistantSettings:
+    async def delete_runtime_assistant(assistant_id: str) -> Any:
         from django_ai_sdk.assistants.models import AssistantSettings
 
         try:
@@ -537,3 +521,20 @@ class AssistantSettingsService:
 
         await config.adelete()
         return config
+
+
+list_assistants = async_to_sync(AssistantService.list_assistants)
+get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
+get_mcp_server_status = async_to_sync(AssistantService.get_mcp_server_status)
+list_assistant_users = async_to_sync(AssistantService.list_assistant_users)
+add_assistant_user = async_to_sync(AssistantService.add_assistant_user)
+update_assistant_user = async_to_sync(AssistantService.update_assistant_user)
+remove_assistant_user = async_to_sync(AssistantService.remove_assistant_user)
+list_assistant_groups = async_to_sync(AssistantService.list_assistant_groups)
+add_assistant_group = async_to_sync(AssistantService.add_assistant_group)
+remove_assistant_group = async_to_sync(AssistantService.remove_assistant_group)
+list_runtime_assistants = async_to_sync(AssistantService.list_runtime_assistants)
+get_runtime_assistant = async_to_sync(AssistantService.get_runtime_assistant)
+create_runtime_assistant = async_to_sync(AssistantService.create_runtime_assistant)
+update_runtime_assistant = async_to_sync(AssistantService.update_runtime_assistant)
+delete_runtime_assistant = async_to_sync(AssistantService.delete_runtime_assistant)

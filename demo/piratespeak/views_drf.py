@@ -7,7 +7,6 @@ from django.views import View
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import (
     AssistantService,
-    AssistantSettingsService,
     add_assistant_group,
     add_assistant_user,
     get_assistant_info,
@@ -577,7 +576,7 @@ class RuntimeAssistantToolsAPIView(APIView):
 
 class RuntimeAssistantListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
-        configs = await AssistantSettingsService.all()
+        configs = await AssistantService.list_runtime_assistants()
         return Response(AssistantSettingsSerializer(configs, many=True).data)
 
     async def post(self, request: Request) -> Response:
@@ -586,9 +585,8 @@ class RuntimeAssistantListCreateAPIView(APIView):
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
-            config = await AssistantSettingsService.create(
+            config = await AssistantService.create_runtime_assistant(
                 data,  # type: ignore[arg-type]
-                user=request.user,
             )
         except Exception as e:
             return Response({"message": str(e)}, status=400)
@@ -612,7 +610,7 @@ class RuntimeAssistantListCreateAPIView(APIView):
 class RuntimeAssistantDetailAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantSettingsService.get(runtime_id)
+            config = await AssistantService.get_runtime_assistant(runtime_id)
             return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
@@ -623,7 +621,7 @@ class RuntimeAssistantDetailAPIView(APIView):
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
-            config = await AssistantSettingsService.update(
+            config = await AssistantService.update_runtime_assistant(
                 runtime_id,
                 data,  # type: ignore[arg-type]
             )
@@ -647,7 +645,7 @@ class RuntimeAssistantDetailAPIView(APIView):
 
     async def delete(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantSettingsService.delete(runtime_id)
+            config = await AssistantService.delete_runtime_assistant(runtime_id)
             return Response(AssistantSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)

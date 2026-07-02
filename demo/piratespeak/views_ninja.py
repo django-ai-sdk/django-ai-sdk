@@ -4,7 +4,7 @@ from uuid import UUID
 
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import AssistantService, AssistantSettingsService
+from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -625,7 +625,7 @@ def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantT
     operation_id="list_runtime_assistants",
 )
 async def list_runtime_assistants(request: HttpRequest) -> Any:
-    return await AssistantSettingsService.all()
+    return await AssistantService.list_runtime_assistants()
 
 
 @router.post(
@@ -635,7 +635,7 @@ async def list_runtime_assistants(request: HttpRequest) -> Any:
 )
 async def create_runtime_assistant(request: HttpRequest, payload: AssistantSettingsCreateIn) -> Any:
     try:
-        config = await AssistantSettingsService.create(
+        config = await AssistantService.create_runtime_assistant(
             {
                 "name": payload.name,
                 "slug": payload.slug,
@@ -649,8 +649,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "title_generation": payload.title_generation,
                 "max_history": payload.max_history,
                 "file_upload": payload.file_upload,
-            },
-            user=request.user,
+            }
         )
         for entry in payload.users:
             try:
@@ -678,7 +677,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
 )
 async def get_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantSettingsService.get(str(runtime_id))
+        return await AssistantService.get_runtime_assistant(str(runtime_id))
     except ValueError as e:
         return 404, Error(message=str(e))
 
@@ -700,7 +699,7 @@ async def update_runtime_assistant(
             "AssistantUpdateData",
             {k: v for k, v in payload.model_dump().items() if v is not None},
         )
-        return await AssistantSettingsService.update(str(runtime_id), data)
+        return await AssistantService.update_runtime_assistant(str(runtime_id), data)
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -714,7 +713,7 @@ async def update_runtime_assistant(
 )
 async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantSettingsService.delete(str(runtime_id))
+        return await AssistantService.delete_runtime_assistant(str(runtime_id))
     except ValueError as e:
         return 404, Error(message=str(e))
 
