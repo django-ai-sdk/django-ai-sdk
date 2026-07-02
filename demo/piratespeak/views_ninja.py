@@ -4,7 +4,7 @@ from uuid import UUID
 
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import AssistantService, AssistantSettingsService
+from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import PermissionDenied
@@ -16,7 +16,6 @@ from django_ai_sdk.storage.services import (
 )
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from ninja import Router, Schema
-from pydantic import ConfigDict
 
 router = Router()
 logger = get_logger(__name__)
@@ -520,8 +519,6 @@ async def reindex_assistant(
 
 
 class AssistantSettingsOut(Schema):
-    model_config = ConfigDict(from_attributes=True)
-
     id: UUID
     name: str
     slug: str
@@ -531,8 +528,6 @@ class AssistantSettingsOut(Schema):
     tools: list[str]
     mcp_servers: list[str]
     memories: list[str]
-    users: list[str]
-    groups: list[str]
     suggestion_enabled: bool
     title_generation: bool
     max_history: int | None
@@ -540,6 +535,16 @@ class AssistantSettingsOut(Schema):
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class AssistantSettingsCreateUserEntry(Schema):
+    user_id: str
+    can_manage: bool = False
+
+
+class AssistantSettingsCreateGroupEntry(Schema):
+    group_id: int
+    can_manage: bool = False
 
 
 class AssistantSettingsCreateIn(Schema):
@@ -551,8 +556,8 @@ class AssistantSettingsCreateIn(Schema):
     tools: list[str] = []
     mcp_servers: list[str] = []
     memories: list[str] = []
-    users: list[str] = []
-    groups: list[str] = []
+    users: list[AssistantSettingsCreateUserEntry] = []
+    groups: list[AssistantSettingsCreateGroupEntry] = []
     suggestion_enabled: bool = False
     title_generation: bool = True
     max_history: int | None = None
@@ -567,8 +572,6 @@ class AssistantSettingsUpdateIn(Schema):
     tools: list[str] | None = None
     mcp_servers: list[str] | None = None
     memories: list[str] | None = None
-    users: list[str] | None = None
-    groups: list[str] | None = None
     suggestion_enabled: bool | None = None
     title_generation: bool | None = None
     max_history: int | None = None
@@ -622,7 +625,7 @@ def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantT
     operation_id="list_runtime_assistants",
 )
 async def list_runtime_assistants(request: HttpRequest) -> Any:
-    return await AssistantSettingsService.all()
+    return await AssistantService.list_runtime_assistants(user=request.user)
 
 
 @router.post(
@@ -632,7 +635,7 @@ async def list_runtime_assistants(request: HttpRequest) -> Any:
 )
 async def create_runtime_assistant(request: HttpRequest, payload: AssistantSettingsCreateIn) -> Any:
     try:
-        return await AssistantSettingsService.create(
+        config = await AssistantService.create_runtime_assistant(
             {
                 "name": payload.name,
                 "slug": payload.slug,
@@ -642,8 +645,6 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "tools": payload.tools,
                 "mcp_servers": payload.mcp_servers,
                 "memories": payload.memories,
-                "users": payload.users,
-                "groups": payload.groups,
                 "suggestion_enabled": payload.suggestion_enabled,
                 "title_generation": payload.title_generation,
                 "max_history": payload.max_history,
@@ -651,6 +652,21 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
             },
             user=request.user,
         )
+        for entry in payload.users:
+            try:
+                await AssistantService.add_assistant_user(
+                    str(config.id), entry.user_id, entry.can_manage, user=request.user
+                )
+            except Exception:
+                pass
+        for entry in payload.groups:
+            try:
+                await AssistantService.add_assistant_group(
+                    str(config.id), entry.group_id, entry.can_manage, user=request.user
+                )
+            except Exception:
+                pass
+        return config
     except Exception as e:
         return 400, Error(message=str(e))
 
@@ -662,7 +678,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
 )
 async def get_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantSettingsService.get(str(runtime_id))
+        return await AssistantService.get_runtime_assistant(str(runtime_id), user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
 
@@ -684,7 +700,9 @@ async def update_runtime_assistant(
             "AssistantUpdateData",
             {k: v for k, v in payload.model_dump().items() if v is not None},
         )
-        return await AssistantSettingsService.update(str(runtime_id), data)
+        return await AssistantService.update_runtime_assistant(
+            str(runtime_id), data, user=request.user
+        )
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -698,6 +716,184 @@ async def update_runtime_assistant(
 )
 async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantSettingsService.delete(str(runtime_id))
+        return await AssistantService.delete_runtime_assistant(str(runtime_id), user=request.user)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+# ── Assistant Users ───────────────────────────────────────────────────────────
+
+
+class AssistantUserOut(Schema):
+    user_id: str
+    can_manage: bool
+    created_at: str
+
+
+class AddAssistantUserIn(Schema):
+    user_id: str
+    can_manage: bool = False
+
+
+class UpdateAssistantUserIn(Schema):
+    can_manage: bool
+
+
+@router.get(
+    "/assistants/runtimes/{runtime_id}/users/",
+    response={200: list[AssistantUserOut], 403: Error, 404: Error},
+    operation_id="list_assistant_users",
+)
+async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
+    try:
+        users = await AssistantService.list_assistant_users(str(runtime_id), user=request.user)
+        return [
+            AssistantUserOut(
+                user_id=u.user_id,
+                can_manage=u.can_manage,
+                created_at=u.created_at.isoformat() if u.created_at else "",
+            )
+            for u in users
+        ]
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.post(
+    "/assistants/runtimes/{runtime_id}/users/",
+    response={200: AssistantUserOut, 403: Error, 404: Error},
+    operation_id="add_assistant_user",
+)
+async def add_assistant_user(
+    request: HttpRequest, runtime_id: UUID, payload: AddAssistantUserIn
+) -> Any:
+    try:
+        entry = await AssistantService.add_assistant_user(
+            str(runtime_id),
+            payload.user_id,
+            payload.can_manage,
+            user=request.user,
+        )
+        return AssistantUserOut(
+            user_id=entry.user_id,
+            can_manage=entry.can_manage,
+            created_at=entry.created_at.isoformat() if entry.created_at else "",
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.patch(
+    "/assistants/runtimes/{runtime_id}/users/{user_id}/",
+    response={200: AssistantUserOut, 403: Error, 404: Error},
+    operation_id="update_assistant_user",
+)
+async def update_assistant_user(
+    request: HttpRequest, runtime_id: UUID, user_id: str, payload: UpdateAssistantUserIn
+) -> Any:
+    try:
+        entry = await AssistantService.update_assistant_user(
+            str(runtime_id),
+            user_id,
+            payload.can_manage,
+            user=request.user,
+        )
+        return AssistantUserOut(
+            user_id=entry.user_id,
+            can_manage=entry.can_manage,
+            created_at=entry.created_at.isoformat() if entry.created_at else "",
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.delete(
+    "/assistants/runtimes/{runtime_id}/users/{user_id}/",
+    response={200: Success, 403: Error, 404: Error},
+    operation_id="delete_assistant_user",
+)
+async def delete_assistant_user(request: HttpRequest, runtime_id: UUID, user_id: str) -> Any:
+    try:
+        await AssistantService.remove_assistant_user(str(runtime_id), user_id, user=request.user)
+        return Success(success=True, message="User removed from assistant")
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+# ── Assistant Groups ──────────────────────────────────────────────────────────
+
+
+class AssistantGroupOut(Schema):
+    group_id: int
+    group_name: str
+    created_at: str
+
+
+class AddAssistantGroupIn(Schema):
+    group_id: int
+
+
+@router.get(
+    "/assistants/runtimes/{runtime_id}/groups/",
+    response={200: list[AssistantGroupOut], 403: Error, 404: Error},
+    operation_id="list_assistant_groups",
+)
+async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
+    try:
+        groups = await AssistantService.list_assistant_groups(str(runtime_id), user=request.user)
+        return [
+            AssistantGroupOut(
+                group_id=g.group_id,
+                group_name=g.group.name,
+                created_at=g.created_at.isoformat() if g.created_at else "",
+            )
+            for g in groups
+        ]
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.post(
+    "/assistants/runtimes/{runtime_id}/groups/",
+    response={200: AssistantGroupOut, 403: Error, 404: Error},
+    operation_id="add_assistant_group",
+)
+async def add_assistant_group(
+    request: HttpRequest, runtime_id: UUID, payload: AddAssistantGroupIn
+) -> Any:
+    try:
+        entry = await AssistantService.add_assistant_group(
+            str(runtime_id),
+            payload.group_id,
+            user=request.user,
+        )
+        return AssistantGroupOut(
+            group_id=entry.group_id,
+            group_name=entry.group.name,
+            created_at=entry.created_at.isoformat() if entry.created_at else "",
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.delete(
+    "/assistants/runtimes/{runtime_id}/groups/{group_id}/",
+    response={200: Success, 403: Error, 404: Error},
+    operation_id="delete_assistant_group",
+)
+async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_id: int) -> Any:
+    try:
+        await AssistantService.remove_assistant_group(str(runtime_id), group_id, user=request.user)
+        return Success(success=True, message="Group removed from assistant")
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))

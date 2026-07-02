@@ -10,7 +10,14 @@ from django.db.models import Count
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
-from django_ai_sdk.memories.models import Entry, EntryDocument, Memory, MemoryUser, ThreadMemory
+from django_ai_sdk.memories.models import (
+    Entry,
+    EntryDocument,
+    Memory,
+    MemoryGroup,
+    MemoryUser,
+    ThreadMemory,
+)
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
     DocumentStatusOut,
@@ -155,6 +162,62 @@ class MemoryService:
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         ownership = await memory.memory_users.aget(user_id=user_id)
         await ownership.adelete()
+
+    @staticmethod
+    async def add_memory_group(
+        memory_id: str,
+        group_id: int,
+        can_manage: bool = False,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> dict:
+        from django.contrib.auth.models import Group
+
+        memory = await Memory.objects.aget(id=memory_id)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
+        group = await Group.objects.aget(id=group_id)
+        obj, _created = await MemoryGroup.objects.aupdate_or_create(
+            memory=memory,
+            group=group,
+            defaults={"can_manage": can_manage},
+        )
+        return {
+            "group_id": obj.group_id,
+            "can_manage": obj.can_manage,
+            "created_at": obj.created_at.isoformat(),
+        }
+
+    @staticmethod
+    async def remove_memory_group(
+        memory_id: str,
+        group_id: int,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> None:
+        memory = await Memory.objects.aget(id=memory_id)
+        await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
+        await memory.memory_groups.filter(group_id=group_id).adelete()
+
+    @staticmethod
+    async def list_memory_groups(
+        memory_id: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[dict]:
+
+        memory = await Memory.objects.aget(id=memory_id)
+        await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
+        groups = []
+        async for mg in memory.memory_groups.all().select_related("group"):
+            groups.append(
+                {
+                    "group_id": mg.group_id,
+                    "group_name": mg.group.name,
+                    "can_manage": mg.can_manage,
+                    "created_at": mg.created_at.isoformat(),
+                }
+            )
+        return groups
 
     # ============================================================================
 
@@ -893,3 +956,6 @@ list_memory_users = async_to_sync(MemoryService.list_memory_users)
 add_memory_user = async_to_sync(MemoryService.add_memory_user)
 update_memory_user = async_to_sync(MemoryService.update_memory_user)
 remove_memory_user = async_to_sync(MemoryService.remove_memory_user)
+add_memory_group = async_to_sync(MemoryService.add_memory_group)
+remove_memory_group = async_to_sync(MemoryService.remove_memory_group)
+list_memory_groups = async_to_sync(MemoryService.list_memory_groups)

@@ -241,14 +241,14 @@ async def get_thread_file_status(
     "/thread/{thread_id}/files", response=list[DocumentOut], operation_id="list_thread_files"
 )
 async def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
-    return await MemoryService.list_thread_files(thread_id)
+    return await MemoryService.list_thread_files(thread_id, user=request.user)
 
 
 @router.delete(
     "/thread/{thread_id}/files/{doc_id}", response={204: None}, operation_id="delete_thread_file"
 )
 async def delete_thread_file(request: HttpRequest, thread_id: str, doc_id: str) -> tuple[int, None]:
-    await MemoryService.delete_thread_file(thread_id, doc_id)
+    await MemoryService.delete_thread_file(thread_id, doc_id, user=request.user)
     return 204, None
 
 
@@ -360,7 +360,7 @@ async def remove_memory_user(
 async def get_source_content(
     request: HttpRequest, entry_id: str, chunk_id: str
 ) -> tuple[int, Error] | SourceContentOut:
-    content = await MemoryService.get_chunk_content(entry_id, chunk_id or None)
+    content = await MemoryService.get_chunk_content(entry_id, chunk_id or None, user=request.user)
     if content is None:
         return 404, Error(message=f"Entry not found: {entry_id}")
     return SourceContentOut(content=content)

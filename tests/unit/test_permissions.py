@@ -2,6 +2,7 @@
 Unit tests for the permission system.
 """
 
+from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -140,11 +141,11 @@ class TestPermissions:
     # --- get_default_permissions ---
 
     async def test_get_default_permissions_falls_back_to_allow_all(self):
-        from django_ai_sdk.permissions import AllowAll, get_default_permissions
+        from django_ai_sdk.permissions import AllowAll, AssistantDefaultPermission, get_default_permissions
 
         get_default_permissions.cache_clear()
         result = get_default_permissions()
-        assert result == [AllowAll]
+        assert result == [AssistantDefaultPermission, AllowAll]
 
     async def test_get_default_permissions_from_setting_single(self):
         from django_ai_sdk.permissions import DenyAll, get_default_permissions
@@ -371,10 +372,212 @@ class TestMemoryDefaultPermission:
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
+class TestAssistantDefaultPermission:
+    """Tests for AssistantDefaultPermission three-tier access model."""
+
+    async def _make_assistant_user(self, user, can_manage=False):
+        """Helper to create an assistant with a user entry."""
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+
+        config = AssistantSettings(name="Test Assistant", slug=str(uuid4()), assistant="test")
+        await config.asave()
+        assistant_user = AssistantUser(assistant=config, user=user, can_manage=can_manage)
+        await assistant_user.asave()
+        return config
+
+    async def _make_assistant_group(self, user, can_manage=False):
+        """Helper to create an assistant with a group entry."""
+        from asgiref.sync import sync_to_async
+        from django.contrib.auth.models import Group
+
+        from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
+
+        group = Group(name=f"Test Group {uuid4()}")
+        await group.asave()
+        await sync_to_async(user.groups.add)(group)
+
+        config = AssistantSettings(name="Group Assistant", slug=str(uuid4()), assistant="test")
+        await config.asave()
+        assistant_group = AssistantGroup(assistant=config, group=group, can_manage=can_manage)
+        await assistant_group.asave()
+        return config
+
+    async def _make_private_assistant(self):
+        from django_ai_sdk.assistants.models import AssistantSettings
+
+        config = AssistantSettings(name="Private Assistant", slug=str(uuid4()), assistant="test")
+        await config.asave()
+        return config
+
+    async def test_manager_can_do_anything(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        manager = await UserFactory.acreate()
+        config = await self._make_assistant_user(manager, can_manage=True)
+
+        for op in Operation:
+            await check_object_permissions(
+                manager, op, config, [AssistantDefaultPermission]
+            )
+
+    async def test_owner_cannot_manage(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        config = await self._make_assistant_user(owner, can_manage=False)
+
+        for op in AssistantDefaultPermission.MANAGER:
+            with pytest.raises(PermissionDenied):
+                await check_object_permissions(
+                    owner, op, config, [AssistantDefaultPermission]
+                )
+
+    async def test_owner_can_view_and_chat(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        config = await self._make_assistant_user(owner, can_manage=False)
+
+        for op in {Operation.VIEW_ASSISTANT, Operation.CHAT}:
+            await check_object_permissions(
+                owner, op, config, [AssistantDefaultPermission]
+            )
+
+    async def test_stranger_cannot_access(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        stranger = await UserFactory.acreate()
+        config = await self._make_private_assistant()
+
+        for op in Operation:
+            with pytest.raises(PermissionDenied):
+                await check_object_permissions(
+                    stranger, op, config, [AssistantDefaultPermission]
+                )
+
+    async def test_group_member_can_view_and_chat(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        member = await UserFactory.acreate()
+        config = await self._make_assistant_group(member, can_manage=False)
+
+        for op in {Operation.VIEW_ASSISTANT, Operation.CHAT}:
+            await check_object_permissions(
+                member, op, config, [AssistantDefaultPermission]
+            )
+
+    async def test_group_member_cannot_manage(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        member = await UserFactory.acreate()
+        config = await self._make_assistant_group(member, can_manage=False)
+
+        for op in AssistantDefaultPermission.MANAGER:
+            with pytest.raises(PermissionDenied):
+                await check_object_permissions(
+                    member, op, config, [AssistantDefaultPermission]
+                )
+
+    async def test_group_manager_can_manage(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        manager = await UserFactory.acreate()
+        config = await self._make_assistant_group(manager, can_manage=True)
+
+        for op in Operation:
+            await check_object_permissions(
+                manager, op, config, [AssistantDefaultPermission]
+            )
+
+    async def test_anonymous_denied(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_permissions,
+        )
+
+        with pytest.raises(PermissionDenied):
+            await check_permissions(
+                None, Operation.VIEW_ASSISTANT, [AssistantDefaultPermission]
+            )
+
+    async def test_authenticated_allowed_at_permission_level(self):
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_permissions,
+        )
+
+        user = MagicMock(is_authenticated=True)
+        await check_permissions(
+            user, Operation.VIEW_ASSISTANT, [AssistantDefaultPermission]
+        )
+
+    async def test_non_assistant_object_passes_through(self):
+        """AssistantDefaultPermission should not interfere with non-AssistantSettings objects."""
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            Operation,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        some_obj = MagicMock()
+
+        # Should not raise for any operation on non-AssistantSettings objects
+        for op in Operation:
+            await check_object_permissions(
+                user, op, some_obj, [AssistantDefaultPermission]
+            )
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
 class TestAssistantServicePermissions:
     """Permission checks in AssistantService (list_assistants, get_assistant_info)."""
 
     async def test_list_assistants_filters_by_permission(self):
+        from django_ai_sdk.assistants.models import AssistantSettings
         from django_ai_sdk.assistants.services import AssistantService
         from django_ai_sdk.permissions import AllowAll, DenyAll
 
@@ -387,10 +590,14 @@ class TestAssistantServicePermissions:
         reg.visible.return_value = {"allow": allow_assistant, "deny": deny_assistant}
         reg.get.side_effect = lambda id: reg.visible.return_value.get(id)
 
+        # Patch DB query to yield nothing so only registry assistants are tested
         with patch("django_ai_sdk.assistants.services.registry", reg):
-            summaries = await AssistantService.list_assistants(None)
-            assert len(summaries) == 1
-            assert summaries[0]["id"] == "allow"
+            with patch.object(
+                AssistantSettings.objects, "filter", return_value=AssistantSettings.objects.none()
+            ):
+                summaries = await AssistantService.list_assistants(None)
+                assert len(summaries) == 1
+                assert summaries[0]["id"] == "allow"
 
     async def test_get_assistant_info_allows_with_view_permission(self):
         from django_ai_sdk.assistants.services import AssistantService

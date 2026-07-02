@@ -81,8 +81,6 @@ class Command(BaseCommand):
                 tools=data.get("tools", []),
                 mcp_servers=data.get("mcp_servers", []),
                 memories=data.get("memories", []),
-                users=data.get("users", []),
-                groups=data.get("groups", []),
                 suggestion_enabled=data.get("suggestion_enabled", False),
                 title_generation=data.get("title_generation", True),
                 file_upload=data.get("file_upload", False),
