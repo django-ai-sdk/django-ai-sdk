@@ -208,3 +208,7 @@ AI_SDK_ALLOWED_FILES = {
     ".csv": "text/csv",
     ".json": "text/json",
 }
+
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
+}

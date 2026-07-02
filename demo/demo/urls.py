@@ -15,13 +15,23 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
+from django.core.exceptions import ObjectDoesNotExist
 from django.urls import include, path
+from django_ai_sdk.permissions import PermissionDenied
 from ninja import NinjaAPI
 
 from piratespeak.views_mcp_ninja import router as mcp_router
 from piratespeak.views_memories_ninja import router as memories_router
 from piratespeak.views_ninja import router as piratespeak_router
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest, HttpResponse
+
 
 # Create the main API instance
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
@@ -29,6 +39,25 @@ api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
 api.add_router("/", piratespeak_router)
 api.add_router("/memories", memories_router)
 api.add_router("/mcp", mcp_router)
+
+# Global safety net so service-layer errors never surface as 500s.
+# Endpoints may still catch these earlier for custom payloads.
+@api.exception_handler(PermissionDenied)
+def _on_permission_denied(request: HttpRequest, exc: PermissionDenied) -> HttpResponse:
+    return api.create_response(request, {"detail": str(exc)}, status=403)
+
+
+@api.exception_handler(ObjectDoesNotExist)
+def _on_does_not_exist(request: HttpRequest, exc: ObjectDoesNotExist) -> HttpResponse:
+    return api.create_response(request, {"detail": "Not found"}, status=404)
+
+
+@api.exception_handler(ValueError)
+def _on_value_error(request: HttpRequest, exc: ValueError) -> HttpResponse:
+    # Service-layer convention: ValueError means a referenced object was not found.
+    return api.create_response(request, {"detail": str(exc)}, status=404)
+
+
 
 urlpatterns = [
     path("admin/", admin.site.urls),
