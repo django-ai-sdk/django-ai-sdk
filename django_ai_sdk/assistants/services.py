@@ -27,7 +27,11 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.assistants.mixins import AssistantInfo
-    from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings, AssistantUser
+    from django_ai_sdk.assistants.models import (
+        AssistantGroup,
+        AssistantSettings,
+        AssistantUser,
+    )
     from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
 
 
@@ -201,7 +205,10 @@ class AssistantService:
                 MCP_STATUS_EXPIRED,
             )
             from django_ai_sdk.mcp.models import MCPOAuthToken
-            from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus, OAuthMCPServer
+            from django_ai_sdk.mcp.schemas import (
+                AssistantMCPServerStatus,
+                OAuthMCPServer,
+            )
         except ImportError:
             return []
 
@@ -259,7 +266,15 @@ class AssistantService:
     async def list_assistant_users(
         assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> Sequence[AssistantUser]:
-        from django_ai_sdk.assistants.models import AssistantUser
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
+        try:
+            config = await AssistantSettings.objects.aget(id=assistant_id)
+        except AssistantSettings.DoesNotExist:
+            raise ValueError(f"Assistant '{assistant_id}' not found")
+        await has_perms(user, Operation.UPDATE_ASSISTANT, config, permissions=permissions)
 
         return [
             u
@@ -280,8 +295,8 @@ class AssistantService:
 
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
-        assistant_obj = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant_obj)
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
@@ -311,8 +326,8 @@ class AssistantService:
     ) -> AssistantUser:
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
-        assistant_obj = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant_obj)
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
@@ -339,8 +354,8 @@ class AssistantService:
     ) -> None:
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
-        assistant_obj = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant_obj)
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
@@ -361,7 +376,15 @@ class AssistantService:
     async def list_assistant_groups(
         assistant_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> Sequence[AssistantGroup]:
-        from django_ai_sdk.assistants.models import AssistantGroup
+        from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
+
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
+        try:
+            config = await AssistantSettings.objects.aget(id=assistant_id)
+        except AssistantSettings.DoesNotExist:
+            raise ValueError(f"Assistant '{assistant_id}' not found")
+        await has_perms(user, Operation.UPDATE_ASSISTANT, config, permissions=permissions)
 
         return [
             g
@@ -382,8 +405,8 @@ class AssistantService:
 
         from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
 
-        assistant_obj = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant_obj)
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
@@ -411,8 +434,8 @@ class AssistantService:
     ) -> None:
         from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
 
-        assistant_obj = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant_obj)
+        assistant = await AssistantService.get(assistant_id)
+        permissions = get_assistant_permissions(assistant)
         try:
             config = await AssistantSettings.objects.aget(id=assistant_id)
         except AssistantSettings.DoesNotExist:
