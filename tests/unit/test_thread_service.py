@@ -269,16 +269,16 @@ class TestThreadServiceObjectPermissions:
 @pytest.mark.asyncio
 class TestGetThreadHistory:
     async def test_returns_thread_and_messages(
-        self, mock_assistants_registry, mock_storage_adapter_registry
+        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter
 
         setup_thread_adapter(mock_storage_adapter_registry)
-        result = await aget_thread_history("thread-1")
+        result = await aget_thread_history("thread-1", user=mock_user)
         assert result["thread"] is not None
 
     async def test_raises_when_thread_not_found(
-        self, mock_storage_adapter_registry
+        self, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.assistant import create_mock_adapter_class
 
@@ -286,7 +286,7 @@ class TestGetThreadHistory:
         mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]
 
         with pytest.raises(ValueError, match="not found"):
-            await aget_thread_history("nonexistent")
+            await aget_thread_history("nonexistent", user=mock_user)
 
 
 @pytest.mark.django_db

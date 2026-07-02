@@ -166,7 +166,7 @@ class AssistantService:
                 continue
             permissions = get_assistant_permissions(assistant)
             try:
-                await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
+                await has_perms(user, Operation.VIEW_ASSISTANT, config, permissions=permissions)
             except PermissionDenied:
                 continue
             result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
@@ -303,7 +303,7 @@ class AssistantService:
         except User.DoesNotExist:
             raise ValueError(f"User '{target_user_id}' not found")
 
-        entry, _ = await AssistantUser.objects.aget_or_create(
+        entry, _ = await AssistantUser.objects.aupdate_or_create(
             assistant_id=assistant_id,
             user=target_user,
             defaults={"can_manage": can_manage},
@@ -412,7 +412,7 @@ class AssistantService:
         except Group.DoesNotExist:
             raise ValueError(f"Group '{group_id}' not found")
 
-        entry, _ = await AssistantGroup.objects.aget_or_create(
+        entry, _ = await AssistantGroup.objects.aupdate_or_create(
             assistant_id=assistant_id,
             group=target_group,
             defaults={"can_manage": can_manage},
@@ -491,7 +491,7 @@ class AssistantService:
         data: AssistantCreateData,
         user: UserType,
     ) -> Any:
-        from django_ai_sdk.assistants.models import AssistantSettings
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
 
         await has_perms(user, Operation.CREATE_ASSISTANT, permissions=get_default_permissions())
 
@@ -510,6 +510,12 @@ class AssistantService:
             file_upload=data.get("file_upload", False),
         )
         await config.asave()
+        if user is not None and bool(user.is_authenticated):
+            await AssistantUser.objects.aupdate_or_create(
+                assistant=config,
+                user=user,
+                defaults={"can_manage": True},
+            )
         return config
 
     @staticmethod

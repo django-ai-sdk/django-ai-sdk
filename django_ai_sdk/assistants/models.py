@@ -28,13 +28,6 @@ class AssistantSettings(models.Model):
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
     active = models.BooleanField(default=True, db_index=True)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="assistant_settings",
-    )
 
     # Reverse relation type hints
     assistant_users: models.Manager[AssistantUser]

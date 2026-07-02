@@ -304,7 +304,9 @@ class TestGetDocumentStatus:
             "django_ai_sdk.memories.services.aget_task_status",
             new=AsyncMock(return_value=mock_task_status),
         ):
-            result = await MemoryService.get_document_status(str(entry_doc.id))
+            result = await MemoryService.get_document_status(
+                str(entry_doc.id), user=MagicMock(is_authenticated=True)
+            )
 
         assert isinstance(result, DocumentStatusOut)
         assert result.id == str(entry_doc.id)
@@ -320,7 +322,9 @@ class TestGetDocumentStatus:
         entry_doc = await _make_entry_doc(memory)
         # task_id left null
 
-        result = await MemoryService.get_document_status(str(entry_doc.id))
+        result = await MemoryService.get_document_status(
+            str(entry_doc.id), user=MagicMock(is_authenticated=True)
+        )
 
         assert result.id == str(entry_doc.id)
         assert result.status == "pending"
@@ -336,7 +340,9 @@ class TestGetDocumentStatus:
         entry_doc.processing_error = "File type not supported"
         await entry_doc.asave(update_fields=["processing_status", "processing_error"])
 
-        result = await MemoryService.get_document_status(str(entry_doc.id))
+        result = await MemoryService.get_document_status(
+            str(entry_doc.id), user=MagicMock(is_authenticated=True)
+        )
 
         assert result.status == "failed"
         assert result.error == "File type not supported"
