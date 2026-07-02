@@ -1,11 +1,14 @@
 """Bridge between the citation primitives and Haystack's `ComponentTool`."""
 
-from typing import Any
+from __future__ import annotations
 
-from haystack.tools import ComponentTool
+from typing import TYPE_CHECKING, Any
 
-from .formatter import CitationFormatter
-from .registry import CitationRegistry
+if TYPE_CHECKING:
+    from haystack.tools import ComponentTool
+
+    from .formatter import CitationFormatter
+    from .registry import CitationRegistry
 
 
 def attach_citations(

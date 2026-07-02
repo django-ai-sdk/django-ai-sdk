@@ -6,6 +6,8 @@ normalized events to various streaming formats like Vercel AI SDK,
 OpenAI native, etc.
 """
 
+from __future__ import annotations
+
 from .base import BaseProtocolHandler
 from .openai import OpenAIProtocolHandler
 from .vercel import VercelProtocolHandler

@@ -1,5 +1,7 @@
 """Assistant tools package."""
 
+from __future__ import annotations
+
 from piratespeak.assistants.tools.memories import get_memory_files
 from piratespeak.assistants.tools.today import get_today
 

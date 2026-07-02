@@ -17,10 +17,8 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 
 if TYPE_CHECKING:
-    from django.contrib.auth.base_user import AbstractBaseUser
-    from django.contrib.auth.models import AnonymousUser
-
     from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
+    from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
 
@@ -63,7 +61,7 @@ class ThreadService:
         title: str = "",
         metadata: dict | None = None,
         *,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -116,9 +114,7 @@ class ThreadService:
         return thread_id
 
     @staticmethod
-    async def get_thread(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> ThreadInfo | None:
+    async def get_thread(thread_id: str, *, user: UserType) -> ThreadInfo | None:
         """
         Find thread by querying storage adapters.
 
@@ -147,7 +143,7 @@ class ThreadService:
 
     @staticmethod
     async def threads(
-        user: AbstractBaseUser | AnonymousUser | None = None,
+        user: UserType,
     ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
@@ -180,7 +176,7 @@ class ThreadService:
     async def update_thread(
         thread_id: str,
         *,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         title: str | None = None,
         metadata: dict | None = None,
     ) -> bool:
@@ -215,9 +211,7 @@ class ThreadService:
         return False
 
     @staticmethod
-    async def delete_thread(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> bool:
+    async def delete_thread(thread_id: str, *, user: UserType) -> bool:
         """
         Delete a thread and all its messages.
 
@@ -245,7 +239,7 @@ class ThreadService:
         return False
 
     @staticmethod
-    async def delete_all_threads(*, user: AbstractBaseUser | AnonymousUser | None) -> int:
+    async def delete_all_threads(*, user: UserType) -> int:
         """
         Delete current user's threads and their messages.
 
@@ -282,7 +276,7 @@ class ThreadService:
         rating: int | None,
         feedback: str = "",
         *,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
     ) -> bool:
         """
         Rate a message in a thread.
@@ -313,9 +307,7 @@ class ThreadService:
         return True
 
     @staticmethod
-    async def delete_message(
-        thread_id: str, message_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> bool:
+    async def delete_message(thread_id: str, message_id: str, *, user: UserType) -> bool:
         """
         Soft delete a message in a thread.
 
@@ -344,9 +336,7 @@ class ThreadService:
         return True
 
     @staticmethod
-    async def restore_message(
-        thread_id: str, message_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-    ) -> bool:
+    async def restore_message(thread_id: str, message_id: str, *, user: UserType) -> bool:
         """
         Restore a soft-deleted message in a thread.
 
@@ -375,9 +365,7 @@ class ThreadService:
         return True
 
     @staticmethod
-    async def storage_for_thread(
-        thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None = None
-    ) -> Any:
+    async def storage_for_thread(thread_id: str, *, user: UserType) -> Any:
         """
         Resolve a thread's storage adapter, instantiated and bound to the thread.
 
@@ -430,9 +418,7 @@ class ThreadService:
 # ============================================================================
 
 
-async def aget_thread_history(
-    thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
-) -> dict[str, Any]:
+async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
     """
     Get thread history: thread metadata and messages with feedbacks.
 
@@ -472,9 +458,7 @@ get_thread_history = async_to_sync(aget_thread_history)
 # ============================================================================
 
 
-async def aget_thread_file_meta(
-    thread_id: str, *, user: AbstractBaseUser | AnonymousUser | None
-) -> dict[str, Any]:
+async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, Any]:
     """
     Get file metadata for a thread: file_count and file_memory_id.
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -205,4 +207,8 @@ AI_SDK_ALLOWED_FILES = {
     ".txt": "text/plain",
     ".csv": "text/csv",
     ".json": "text/json",
+}
+
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
 }

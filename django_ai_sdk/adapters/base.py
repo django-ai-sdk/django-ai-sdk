@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import ast
 import asyncio
 import json
 import uuid
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, cast, overload
 
 from django.conf import settings
@@ -11,9 +12,7 @@ from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
 
-from django_ai_sdk.adapters.protocols import T
 from django_ai_sdk.adapters.utils import merge_messages
-from django_ai_sdk.citations import CitationRegistry, NumberedSource
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -35,6 +34,10 @@ from django_ai_sdk.events import (
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from django_ai_sdk.adapters.protocols import T
+    from django_ai_sdk.citations import CitationRegistry, NumberedSource
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
 
@@ -103,7 +106,7 @@ class Run:
         self.model = model
         self.instructions = instructions
 
-    def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
+    def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Quick conversion."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted: list[HaystackChatMessage] = []
@@ -155,7 +158,7 @@ class Stream:
 
     model: str | None = None
     instructions: str | None = None
-    suggestion_generator: "SuggestionGenerator | None" = None
+    suggestion_generator: SuggestionGenerator | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -165,9 +168,9 @@ class Stream:
         pipeline: Any,
         generator: Any,
         store: bool = True,
-        storage_adapter: "BaseStorageAdapter | None" = None,
+        storage_adapter: BaseStorageAdapter | None = None,
         citation_registry: CitationRegistry | None = None,
-        suggestion_generator: "SuggestionGenerator | None" = None,
+        suggestion_generator: SuggestionGenerator | None = None,
     ) -> None:
         self.pipeline = pipeline
         if not isinstance(pipeline, AsyncPipeline):
@@ -195,7 +198,7 @@ class Stream:
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
 
-    def get_messages(self, messages: list[ChatMessage]) -> list["HaystackChatMessage"]:
+    def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Convert internal messages to Haystack ChatMessage format."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted_messages: list[HaystackChatMessage] = []
@@ -271,7 +274,7 @@ class Stream:
         self,
         haystack_messages: list[HaystackChatMessage],
         streaming_callback: Any,
-    ) -> "asyncio.Task[Any]":
+    ) -> asyncio.Task[Any]:
         """Create and schedule the pipeline or agent coroutine as a Task."""
         if self.agent_component:
             coro = self.agent_component.run_async(
@@ -285,7 +288,7 @@ class Stream:
 
     async def get_events(
         self,
-        queue: "asyncio.Queue[StreamingChunk | object]",
+        queue: asyncio.Queue[StreamingChunk | object],
         stream_writer: StreamWriter | None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Consume queue and yield stream events."""
@@ -343,7 +346,7 @@ class Stream:
 
     async def get_pipeline_result(
         self,
-        pipeline_task: "asyncio.Task[Any]",
+        pipeline_task: asyncio.Task[Any],
         stream_writer: StreamWriter | None,
     ) -> None:
         """Await pipeline completion and store tool chunks from response messages."""

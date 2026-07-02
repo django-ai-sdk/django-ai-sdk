@@ -1,5 +1,7 @@
 # Generated migration for MCPOAuthClient model
 
+from __future__ import annotations
+
 from django.db import migrations, models
 
 

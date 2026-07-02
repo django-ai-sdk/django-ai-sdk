@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.assistants.runtime import RuntimeAssistant
 
 __all__ = ["DefaultRuntimeAssistant"]

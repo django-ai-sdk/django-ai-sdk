@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Literal
 
 from django.conf import settings
@@ -28,7 +30,7 @@ class BaseStorageConfig(BaseModel):
         return f"{base_path}/{backend}/{memory_id}"
 
     @classmethod
-    def from_settings(cls, memory_id: str | None = None) -> "BaseStorageConfig":
+    def from_settings(cls, memory_id: str | None = None) -> BaseStorageConfig:
         """Create config from Django settings.
 
         Args:
@@ -47,7 +49,7 @@ class QdrantStorageConfig(BaseStorageConfig):
     qdrant_similarity: Literal["cosine", "dot", "euclidean"] = Field(default="cosine")
 
     @classmethod
-    def from_settings(cls, memory_id: str | None = None) -> "QdrantStorageConfig":
+    def from_settings(cls, memory_id: str | None = None) -> QdrantStorageConfig:
         """Create config from Django settings.
 
         Args:
@@ -70,7 +72,7 @@ class ChromaStorageConfig(BaseStorageConfig):
     chroma_anonymized_telemetry: bool = Field(default=False)
 
     @classmethod
-    def from_settings(cls, memory_id: str | None = None) -> "ChromaStorageConfig":
+    def from_settings(cls, memory_id: str | None = None) -> ChromaStorageConfig:
         """Create config from Django settings.
 
         Args:
@@ -90,7 +92,7 @@ class BM25StorageConfig(BaseStorageConfig):
     """Configuration for BM25 (plain) persistence."""
 
     @classmethod
-    def from_settings(cls, memory_id: str | None = None) -> "BM25StorageConfig":
+    def from_settings(cls, memory_id: str | None = None) -> BM25StorageConfig:
         """Create config from Django settings.
 
         Args:

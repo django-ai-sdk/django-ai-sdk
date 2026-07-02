@@ -1,5 +1,7 @@
 """MCP constants and status definitions."""
 
+from __future__ import annotations
+
 MCP_STATUS_ACTIVE = "active"
 MCP_STATUS_EXPIRED = "expired"
 MCP_STATUS_DISCONNECTED = "disconnected"

@@ -1,4 +1,9 @@
-from django_ai_sdk.common import ChatMessage
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from django_ai_sdk.common import ChatMessage
 
 
 def merge_messages(

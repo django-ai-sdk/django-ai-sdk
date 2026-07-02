@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.common import Prompt, prompt
 
 # Prompt template used for thread title generation.

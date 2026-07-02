@@ -1,17 +1,20 @@
+from __future__ import annotations
+
 import json
 import time
 import uuid
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel
 
-from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from django_ai_sdk.adapters.protocols import Streamable
     from django_ai_sdk.events import (
         ErrorEvent,
         MessageEndEvent,

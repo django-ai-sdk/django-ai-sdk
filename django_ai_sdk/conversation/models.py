@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
@@ -36,7 +38,7 @@ class Thread(models.Model):
     metadata = models.JSONField(default=dict, blank=True)
 
     # Reverse relation type hints
-    messages: models.Manager["Message"]
+    messages: models.Manager[Message]
     user_id: str | None
     file_memory_id: str | None
 
@@ -58,10 +60,10 @@ class Thread(models.Model):
         return self.messages.count()
 
     @property
-    def last_message(self) -> "Message | None":
+    def last_message(self) -> Message | None:
         return self.messages.order_by("-created_at").first()
 
-    def add_user_message(self, chat_message: ChatMessage) -> "Message":
+    def add_user_message(self, chat_message: ChatMessage) -> Message:
         """Add user ChatMessage to this thread."""
         message = Message.from_chat_message(self, chat_message)
         message.save()
@@ -119,7 +121,7 @@ class Message(models.Model):
         return chat_message
 
     @classmethod
-    def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> "Message":
+    def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> Message:
         """Create Message from ChatMessage - ID must be provided by adapter."""
         # Validate that ID is provided by adapter (contract enforcement)
         if not chat_message.id:
@@ -134,13 +136,13 @@ class Message(models.Model):
             ) from e
         return cls(id=message_id, thread=thread, result=chat_message.model_dump())
 
-    def delete_message(self) -> "Message":
+    def delete_message(self) -> Message:
         """Soft delete this message."""
         self.is_deleted = True
         self.deleted_at = timezone.now()
         return self
 
-    def restore_message(self) -> "Message":
+    def restore_message(self) -> Message:
         """Restore a soft-deleted message."""
         self.is_deleted = False
         self.deleted_at = None

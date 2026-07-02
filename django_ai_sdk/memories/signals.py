@@ -1,4 +1,7 @@
-from django.db.models.base import Model
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
@@ -6,6 +9,9 @@ from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.rags.utils import queryset_to_rag_documents
+
+if TYPE_CHECKING:
+    from django.db.models.base import Model
 
 logger = get_logger(__name__)
 

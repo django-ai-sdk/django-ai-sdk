@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -59,7 +61,7 @@ class AssistantInfoResponse(Schema):
 class Tool(Schema):
     label: str
     description: str | None = None
-    children: list["Tool"] = []
+    children: list[Tool] = []
 
 
 class MCPServerStatus(Schema):
@@ -179,9 +181,10 @@ async def list_threads(request: HttpRequest) -> Any:
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     try:
         assistant_id = payload.assistant_id or ""
+        # Initial messages are not persisted here; the chat/stream endpoint
+        # receives and stores the full message list.
         thread_id = await ThreadService.create_thread(
             assistant_id=assistant_id,
-            messages=payload.messages,
             user=request.user,
         )
         await MemoryService.link_memories(assistant_id, thread_id, user=request.user)
@@ -749,7 +752,7 @@ async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
         users = await AssistantService.list_assistant_users(str(runtime_id), user=request.user)
         return [
             AssistantUserOut(
-                user_id=u.user_id,
+                user_id=str(u.user_id),
                 can_manage=u.can_manage,
                 created_at=u.created_at.isoformat() if u.created_at else "",
             )
@@ -775,7 +778,7 @@ async def add_assistant_user(
             user=request.user,
         )
         return AssistantUserOut(
-            user_id=entry.user_id,
+            user_id=str(entry.user_id),
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
@@ -801,7 +804,7 @@ async def update_assistant_user(
             user=request.user,
         )
         return AssistantUserOut(
-            user_id=entry.user_id,
+            user_id=str(entry.user_id),
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )

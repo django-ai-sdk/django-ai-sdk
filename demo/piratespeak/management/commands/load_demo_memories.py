@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django.core.management.base import BaseCommand
 from django_ai_sdk.memories.models import Memory
 

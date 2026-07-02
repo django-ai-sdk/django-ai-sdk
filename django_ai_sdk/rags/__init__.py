@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.bm25 import (
     BM25QueryExpanderRAG,

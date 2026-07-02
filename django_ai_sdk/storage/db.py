@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import DatabaseError, models
 from django.db.models import Count
 from django.utils import timezone
 
@@ -264,7 +264,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             await message.asave()
             logger.debug(f"Message saved: id={message.id}, thread={message.thread_id}")
             return str(message.id)
-        except Exception:
+        except DatabaseError:
             logger.exception(
                 f"Database storage failed for thread {self.thread_id}. Content length: {len(chat_message.content) if chat_message.content else 0}"
             )

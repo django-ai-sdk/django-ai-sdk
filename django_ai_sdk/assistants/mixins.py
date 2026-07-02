@@ -1,5 +1,7 @@
 """Mixins for the Django AI SDK Assistant classes."""
 
+from __future__ import annotations
+
 import uuid
 from typing import Any
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django.contrib import admin
 
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread

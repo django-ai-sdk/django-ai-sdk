@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import (
+    AssistantCreateData,
     AssistantService,
+    AssistantUpdateData,
     add_assistant_group,
     add_assistant_user,
     get_assistant_info,
@@ -37,9 +41,11 @@ from django_ai_sdk.storage.services import (
 from django_ai_sdk.views.schemas import Message
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    from rest_framework.request import Request
 
 logger = get_logger(__name__)
 
@@ -184,12 +190,12 @@ class ThreadCreateAPIView(APIView):
         try:
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
             assistant_id = request.data.get("assistant_id", "")  # type: ignore[union-attr]
             thread_id = create_thread(
                 assistant_id=assistant_id,
-                messages=messages,
                 user=request.user,
+                # Initial messages are not persisted here; the chat/stream endpoint
+                # receives and stores the full message list.
             )
             return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
         except PermissionDenied as e:
@@ -586,7 +592,7 @@ class RuntimeAssistantListCreateAPIView(APIView):
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
             config = await AssistantService.create_runtime_assistant(
-                data,  # type: ignore[arg-type]
+                cast("AssistantCreateData", data),
                 user=request.user,
             )
         except Exception as e:
@@ -630,7 +636,7 @@ class RuntimeAssistantDetailAPIView(APIView):
         try:
             config = await AssistantService.update_runtime_assistant(
                 runtime_id,
-                data,  # type: ignore[arg-type]
+                cast("AssistantUpdateData", data),
                 user=request.user,
             )
         except ValueError as e:

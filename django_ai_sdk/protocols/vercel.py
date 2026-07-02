@@ -1,28 +1,33 @@
+from __future__ import annotations
+
 import uuid
-from collections.abc import AsyncGenerator
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
-from django_ai_sdk.adapters.protocols import Streamable
 from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.events import (
-    DataEvent,
-    ErrorEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    ReasoningChunkEvent,
-    SourceEvent,
-    StreamEvent,
-    SuggestionEvent,
-    TextChunkEvent,
-    ToolCallStartEvent,
-    ToolInputCompleteEvent,
-    ToolOutputEvent,
-)
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.events import (
+        DataEvent,
+        ErrorEvent,
+        MessageEndEvent,
+        MessageStartEvent,
+        ReasoningChunkEvent,
+        SourceEvent,
+        StreamEvent,
+        SuggestionEvent,
+        TextChunkEvent,
+        ToolCallStartEvent,
+        ToolInputCompleteEvent,
+        ToolOutputEvent,
+    )
 
 logger = get_logger(__name__)
 

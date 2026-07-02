@@ -1,5 +1,7 @@
 """Today's date and time tool."""
 
+from __future__ import annotations
+
 from django.utils import timezone
 from haystack.tools import Tool
 

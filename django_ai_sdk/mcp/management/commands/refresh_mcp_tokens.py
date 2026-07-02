@@ -1,9 +1,11 @@
 """Refresh expiring OAuth tokens for MCP servers."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from argparse import ArgumentParser
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -12,6 +14,9 @@ from django.utils import timezone
 from django_ai_sdk.mcp.loader import refresh_oauth_token
 from django_ai_sdk.mcp.models import MCPOAuthToken
 from django_ai_sdk.mcp.schemas import OAuthMCPServer
+
+if TYPE_CHECKING:
+    from argparse import ArgumentParser
 
 logger = logging.getLogger(__name__)
 

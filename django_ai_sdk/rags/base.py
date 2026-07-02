@@ -1,8 +1,8 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from haystack import AsyncPipeline
-from haystack.tools import ComponentTool
 from pydantic import BaseModel, Field
 
 from django_ai_sdk.logger import get_logger
@@ -10,6 +10,9 @@ from django_ai_sdk.logger import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
+    from haystack import AsyncPipeline
+    from haystack.tools import ComponentTool
+
     from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
 # TODO: move into prompts.py file, this should make maintenance easier.
@@ -124,7 +127,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         """
         pass
 
-    async def add_documents(self, documents: list["RagDocument"]) -> None:
+    async def add_documents(self, documents: list[RagDocument]) -> None:
         """
         Add documents to an existing index (incremental update).
 
@@ -152,7 +155,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
             f"{self.__class__.__name__} does not support incremental remove, use refresh_documents()"
         )
 
-    def refresh_documents(self, documents: list["RagDocument"]) -> None:
+    def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
         Fully refresh the index with a new set of documents.
 
@@ -176,7 +179,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         """
         return None
 
-    def get_tool(self, spec: "ToolSpec") -> ComponentTool:
+    def get_tool(self, spec: ToolSpec) -> ComponentTool:
         """Get tool with custom specification."""
         tool = self.as_tool()
         tool.name = spec.name

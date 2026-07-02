@@ -1,10 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from haystack import AsyncPipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
-from haystack.dataclasses import Document as HaystackDocument
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack.tools import ComponentTool
 from haystack.utils import Secret
@@ -12,8 +15,12 @@ from haystack.utils import Secret
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import MultiQueryBM25Retriever
-from django_ai_sdk.rags.schemas import RagDocument
 from django_ai_sdk.rags.utils import to_document
+
+if TYPE_CHECKING:
+    from haystack.dataclasses import Document as HaystackDocument
+
+    from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
 

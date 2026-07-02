@@ -1,4 +1,6 @@
 # Assistant Settings
+from __future__ import annotations
+
 from .assistants.models import AssistantGroup, AssistantSettings, AssistantUser
 
 # Conversation models from chats app
