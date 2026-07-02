@@ -138,6 +138,15 @@ class IsInAllowedGroups(BasePermission):
 
 
 class IsOwner(BasePermission):
+    """Allow only the authenticated owner of an object.
+
+    Parameterized: ``IsOwner(field="user_id")`` checks ``obj.user_id``.
+    Use ``IsOwner(field="owner_id")`` etc. for custom attribute names.
+    """
+
+    def __init__(self, field: str = "user_id") -> None:
+        self.field = field
+
     async def has_object_permission(
         self,
         user: UserType,
@@ -146,13 +155,10 @@ class IsOwner(BasePermission):
         **kwargs: Any,
     ) -> bool:
         # SECURITY: distinguish "no ownership field" from "anonymous-owned".
-        if not hasattr(obj, "user_id"):
-            return True  # no opinion on ownership
-        owner_id = obj.user_id
+        owner_id = getattr(obj, self.field, None)
         if owner_id is None:
-            # Anonymous-owned object: allow only anonymous users.
-            return user is None or (hasattr(user, "is_authenticated") and not user.is_authenticated)
-        return user is not None and str(owner_id) == str(user.pk)
+            return False
+        return user is not None and bool(user.is_authenticated) and str(owner_id) == str(user.pk)
 
 
 class MemoryDefaultPermission(BasePermission):
