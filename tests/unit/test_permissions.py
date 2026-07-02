@@ -436,22 +436,26 @@ class TestAssistantDefaultPermission:
         await assistant_user.asave()
         return config
 
-    async def _make_assistant_group(self, user, can_manage=False):
-        """Helper to create an assistant with a group entry."""
+    async def _make_assistant_group(self, user, can_manage=False, assistant=None):
+        """Helper to link *user* to *assistant* (or a fresh one) via a group."""
         from asgiref.sync import sync_to_async
         from django.contrib.auth.models import Group
 
         from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
 
+        if assistant is None:
+            assistant = AssistantSettings(
+                name="Group Assistant", slug=str(uuid4()), assistant="test"
+            )
+            await assistant.asave()
+
         group = Group(name=f"Test Group {uuid4()}")
         await group.asave()
         await sync_to_async(user.groups.add)(group)
 
-        config = AssistantSettings(name="Group Assistant", slug=str(uuid4()), assistant="test")
-        await config.asave()
-        assistant_group = AssistantGroup(assistant=config, group=group, can_manage=can_manage)
+        assistant_group = AssistantGroup(assistant=assistant, group=group, can_manage=can_manage)
         await assistant_group.asave()
-        return config
+        return assistant
 
     async def _make_private_assistant(self):
         from django_ai_sdk.assistants.models import AssistantSettings
@@ -577,6 +581,38 @@ class TestAssistantDefaultPermission:
             await check_object_permissions(
                 manager, op, config, [AssistantDefaultPermission]
             )
+
+    async def test_group_manage_grant_overrides_weaker_direct_membership(self):
+        """A user's direct (non-manager) membership must not mask a manager
+        grant coming from a group they also belong to."""
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        config = await self._make_assistant_user(user, can_manage=False)
+        await self._make_assistant_group(user, can_manage=True, assistant=config)
+
+        for op in AssistantDefaultPermission.MANAGER:
+            await check_object_permissions(user, op, config, [AssistantDefaultPermission])
+
+    async def test_direct_manage_grant_overrides_weaker_group_membership(self):
+        """The reverse: a manager-level direct membership must not be masked
+        by a weaker group membership on the same assistant."""
+        from django_ai_sdk.permissions import (
+            AssistantDefaultPermission,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        config = await self._make_assistant_user(user, can_manage=True)
+        await self._make_assistant_group(user, can_manage=False, assistant=config)
+
+        for op in AssistantDefaultPermission.MANAGER:
+            await check_object_permissions(user, op, config, [AssistantDefaultPermission])
 
     async def test_anonymous_denied(self):
         from django_ai_sdk.permissions import (
