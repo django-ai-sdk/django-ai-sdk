@@ -223,6 +223,25 @@ class TestMemoryDefaultPermission:
         await memory.asave()
         return memory
 
+    async def _make_memory_group(self, user, can_manage=False, memory=None):
+        """Helper to link *user* to *memory* (or a fresh one) via a group."""
+        from asgiref.sync import sync_to_async
+        from django.contrib.auth.models import Group
+
+        from django_ai_sdk.memories.models import Memory, MemoryGroup
+
+        if memory is None:
+            memory = Memory(name="Group Mem", is_public=False)
+            await memory.asave()
+
+        group = Group(name=f"Test Group {uuid4()}")
+        await group.asave()
+        await sync_to_async(user.groups.add)(group)
+
+        memory_group = MemoryGroup(memory=memory, group=group, can_manage=can_manage)
+        await memory_group.asave()
+        return memory
+
     async def test_manager_can_do_anything(self):
         from django_ai_sdk.permissions import (
             MemoryDefaultPermission,
@@ -273,6 +292,38 @@ class TestMemoryDefaultPermission:
             await check_object_permissions(
                 contributor, op, memory, [MemoryDefaultPermission]
             )
+
+    async def test_group_manage_grant_overrides_weaker_direct_membership(self):
+        """A user's direct (non-manager) membership must not mask a manager
+        grant coming from a group they also belong to."""
+        from django_ai_sdk.permissions import (
+            MemoryDefaultPermission,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        memory = await self._make_memory_user(user, can_manage=False)
+        await self._make_memory_group(user, can_manage=True, memory=memory)
+
+        for op in MemoryDefaultPermission.MANAGER:
+            await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
+
+    async def test_direct_manage_grant_overrides_weaker_group_membership(self):
+        """The reverse: a manager-level direct membership must not be masked
+        by a weaker group membership on the same memory."""
+        from django_ai_sdk.permissions import (
+            MemoryDefaultPermission,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        memory = await self._make_memory_user(user, can_manage=True)
+        await self._make_memory_group(user, can_manage=False, memory=memory)
+
+        for op in MemoryDefaultPermission.MANAGER:
+            await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_stranger_cannot_access_private_memory(self):
         from django_ai_sdk.permissions import (
