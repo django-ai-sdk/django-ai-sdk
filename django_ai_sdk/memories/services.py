@@ -45,14 +45,14 @@ if TYPE_CHECKING:
     from django_ai_sdk.types import UserType
 
 
-async def _aget_or_not_found(qs: Any, what: str, **lookup: Any) -> Any:
+async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
     """Fetch a single object or raise ValueError (mapped to 404 at the view layer)."""
     from django.core.exceptions import ObjectDoesNotExist
 
     try:
         return await qs.aget(**lookup)
     except ObjectDoesNotExist:
-        raise ValueError(f"{what} not found") from None
+        raise ValueError(f"{qs.model.__name__} not found") from None
 
 
 class MemoryService:
@@ -109,7 +109,7 @@ class MemoryService:
     @staticmethod
     async def list_memory_users(memory_id: str, *, user: UserType) -> list[MemoryUserOut]:
         """List all users of a memory."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return [
             MemoryUserOut(
@@ -129,10 +129,10 @@ class MemoryService:
         user: UserType,
     ) -> MemoryUserOut:
         """Add a user to a memory."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         UserModel = get_user_model()
-        target_user = await _aget_or_not_found(UserModel.objects, "User", id=user_id)
+        target_user = await _aget_or_not_found(UserModel.objects, id=user_id)
         ownership, _created = await MemoryUser.objects.aupdate_or_create(
             memory=memory,
             user=target_user,
@@ -153,10 +153,10 @@ class MemoryService:
         user: UserType,
     ) -> MemoryUserOut:
         """Update a memory user's can_manage flag."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         ownership = await _aget_or_not_found(
-            memory.memory_users.select_related("user"), "Memory user", user_id=user_id
+            memory.memory_users.select_related("user"), user_id=user_id
         )
         ownership.can_manage = can_manage
         await ownership.asave(update_fields=["can_manage"])
@@ -169,9 +169,9 @@ class MemoryService:
     @staticmethod
     async def remove_memory_user(memory_id: str, user_id: str, *, user: UserType) -> None:
         """Remove a user from a memory."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
-        ownership = await _aget_or_not_found(memory.memory_users, "Memory user", user_id=user_id)
+        ownership = await _aget_or_not_found(memory.memory_users, user_id=user_id)
         await ownership.adelete()
 
     @staticmethod
@@ -184,9 +184,9 @@ class MemoryService:
     ) -> MemoryGroupOut:
         from django.contrib.auth.models import Group
 
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
-        group = await _aget_or_not_found(Group.objects, "Group", id=group_id)
+        group = await _aget_or_not_found(Group.objects, id=group_id)
         obj, _created = await MemoryGroup.objects.aupdate_or_create(
             memory=memory,
             group=group,
@@ -206,7 +206,7 @@ class MemoryService:
         *,
         user: UserType,
     ) -> None:
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         await memory.memory_groups.filter(group_id=group_id).adelete()
 
@@ -217,7 +217,7 @@ class MemoryService:
         user: UserType,
     ) -> list[MemoryGroupOut]:
         """List all groups of a memory."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return [
             MemoryGroupOut(
@@ -347,7 +347,7 @@ class MemoryService:
     async def get_memory(memory_id: str, *, user: UserType) -> MemoryOut:
         """Get a single memory by ID."""
         memory = await _aget_or_not_found(
-            Memory.objects.annotate(document_count=Count("entries")), "Memory", id=memory_id
+            Memory.objects.annotate(document_count=Count("entries")), id=memory_id
         )
         await has_perms(user, Operation.VIEW_MEMORY, memory, permissions=get_memory_permissions())
         return MemoryOut(
@@ -371,7 +371,7 @@ class MemoryService:
         user: UserType,
     ) -> MemoryOut:
         """Update a memory."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UPDATE_MEMORY, memory, permissions=get_memory_permissions())
         memory.name = name
         memory.description = description
@@ -393,7 +393,7 @@ class MemoryService:
     @staticmethod
     async def delete_memory(memory_id: str, *, user: UserType) -> None:
         """Delete a memory and all its entries."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.DELETE_MEMORY, memory, permissions=get_memory_permissions())
         await memory.adelete()
 
@@ -406,7 +406,7 @@ class MemoryService:
         memory_id: str, file: File, *, user: UserType
     ) -> DocumentUploadResponse:
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(
             user, Operation.UPLOAD_DOCUMENT, memory, permissions=get_memory_permissions()
         )
@@ -439,7 +439,7 @@ class MemoryService:
     @staticmethod
     async def list_documents(memory_id: str, *, user: UserType) -> list[DocumentOut]:
         """List all file-backed documents in a memory (all processing statuses)."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(
             user, Operation.LIST_DOCUMENTS, memory, permissions=get_memory_permissions()
         )
@@ -453,11 +453,10 @@ class MemoryService:
     @staticmethod
     async def get_document(memory_id: str, doc_id: str, *, user: UserType) -> DocumentOut:
         """Get a single document from a memory by its EntryDocument id."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.VIEW_DOCUMENT, memory, permissions=get_memory_permissions())
         entry_doc = await _aget_or_not_found(
             EntryDocument.objects.select_related("entry"),
-            "Document",
             id=doc_id,
             memory_id=memory_id,
         )
@@ -470,13 +469,12 @@ class MemoryService:
         Works for in-flight docs (no Entry yet). When an Entry exists, deleting it
         cascades to the EntryDocument and triggers RAG cleanup via the delete signal.
         """
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(
             user, Operation.DELETE_DOCUMENT, memory, permissions=get_memory_permissions()
         )
         entry_doc = await _aget_or_not_found(
             EntryDocument.objects.select_related("entry"),
-            "Document",
             id=doc_id,
             memory_id=memory_id,
         )
@@ -492,9 +490,9 @@ class MemoryService:
     @staticmethod
     async def link_memory_to_thread(memory_id: str, thread_id: str, *, user: UserType) -> None:
         """Link a memory to a thread."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions())
-        thread = await _aget_or_not_found(Thread.objects, "Thread", id=thread_id)
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadMemory.objects.aget_or_create(
             thread=thread,
             memory=memory,
@@ -503,10 +501,10 @@ class MemoryService:
     @staticmethod
     async def unlink_memory_from_thread(memory_id: str, thread_id: str, *, user: UserType) -> None:
         """Unlink a memory from a thread."""
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UNLINK_MEMORY, memory, permissions=get_memory_permissions())
         link = await _aget_or_not_found(
-            ThreadMemory.objects, "Thread memory link", memory_id=memory_id, thread_id=thread_id
+            ThreadMemory.objects, memory_id=memory_id, thread_id=thread_id
         )
         await link.adelete()
 
@@ -581,7 +579,7 @@ class MemoryService:
             ValueError: If any of the requested memory ids does not exist.
             PermissionDenied: If the user lacks LINK_MEMORY on any memory.
         """
-        thread = await _aget_or_not_found(Thread.objects, "Thread", id=thread_id)
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
 
         memories = {str(m.id): m async for m in Memory.objects.filter(id__in=memory_ids)}
         missing = [mid for mid in memory_ids if mid not in memories]
@@ -610,9 +608,9 @@ class MemoryService:
     ) -> ThreadMemoryOut:
         """Toggle the active status of a memory for a thread."""
         thread_memory = await _aget_or_not_found(
-            ThreadMemory.objects, "Thread memory link", thread_id=thread_id, memory_id=memory_id
+            ThreadMemory.objects, thread_id=thread_id, memory_id=memory_id
         )
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.LINK_MEMORY, memory, permissions=get_memory_permissions())
         thread_memory.active = active
         await thread_memory.asave()
@@ -634,9 +632,9 @@ class MemoryService:
     ) -> None:
         """Disconnect a memory from a thread."""
         link = await _aget_or_not_found(
-            ThreadMemory.objects, "Thread memory link", thread_id=thread_id, memory_id=memory_id
+            ThreadMemory.objects, thread_id=thread_id, memory_id=memory_id
         )
-        memory = await _aget_or_not_found(Memory.objects, "Memory", id=memory_id)
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await has_perms(user, Operation.UNLINK_MEMORY, memory, permissions=get_memory_permissions())
         await link.adelete()
 
@@ -648,7 +646,7 @@ class MemoryService:
     async def get_or_create_thread_file_memory(thread_id: str) -> Memory:
         """Get or auto-create the hidden file-upload Memory for a thread."""
         thread = await _aget_or_not_found(
-            Thread.objects.select_related("file_memory"), "Thread", id=thread_id
+            Thread.objects.select_related("file_memory"), id=thread_id
         )
         if not thread.file_memory:
             memory = await Memory.objects.acreate(
@@ -667,7 +665,7 @@ class MemoryService:
     ) -> DocumentUploadResponse:
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         thread = await _aget_or_not_found(
-            Thread.objects.select_related("file_memory"), "Thread", id=thread_id
+            Thread.objects.select_related("file_memory"), id=thread_id
         )
         assistant_id = thread.metadata.get("assistant_id") or None
         if assistant_id is None:
@@ -711,12 +709,9 @@ class MemoryService:
     @staticmethod
     async def list_thread_files(thread_id: str, *, user: UserType) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
-        try:
-            thread = await _aget_or_not_found(
-                Thread.objects.select_related("file_memory"), "Thread", id=thread_id
-            )
-        except Thread.DoesNotExist:
-            return []
+        thread = await _aget_or_not_found(
+            Thread.objects.select_related("file_memory"), id=thread_id
+        )
 
         assistant_id = thread.metadata.get("assistant_id") or None
         if assistant_id is None:
@@ -747,7 +742,7 @@ class MemoryService:
         cancelled to unblock a deferred send.
         """
         thread = await _aget_or_not_found(
-            Thread.objects.select_related("file_memory"), "Thread", id=thread_id
+            Thread.objects.select_related("file_memory"), id=thread_id
         )
         assistant_id = thread.metadata.get("assistant_id") or None
         if assistant_id is None:
@@ -763,7 +758,6 @@ class MemoryService:
             return
         entry_doc = await _aget_or_not_found(
             EntryDocument.objects.select_related("entry"),
-            "Document",
             id=doc_id,
             memory_id=thread.file_memory_id,
         )
@@ -782,7 +776,7 @@ class MemoryService:
         — they carry no content, only a status string.
         """
         entry_doc = await _aget_or_not_found(
-            EntryDocument.objects.select_related("memory"), "Document", id=doc_id
+            EntryDocument.objects.select_related("memory"), id=doc_id
         )
         if entry_doc.memory_id is not None:
             await has_perms(
@@ -823,7 +817,7 @@ class MemoryService:
         }
 
         entry_doc = await _aget_or_not_found(
-            EntryDocument.objects.select_related("memory"), "Document", id=doc_id
+            EntryDocument.objects.select_related("memory"), id=doc_id
         )
         memory = entry_doc.memory
         if memory is None:
