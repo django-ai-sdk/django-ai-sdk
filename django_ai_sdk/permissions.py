@@ -207,15 +207,13 @@ class MemoryDefaultPermission(BasePermission):
             return False
 
         ownership = await obj.memory_users.filter(user=user).afirst()
-        if ownership is not None:
-            if operation in self.MANAGER:
-                return ownership.can_manage
+        if ownership is not None and (operation not in self.MANAGER or ownership.can_manage):
             return True
 
         group_ownership = await obj.memory_groups.filter(group__user=user).afirst()
-        if group_ownership is not None:
-            if operation in self.MANAGER:
-                return group_ownership.can_manage
+        if group_ownership is not None and (
+            operation not in self.MANAGER or group_ownership.can_manage
+        ):
             return True
 
         if operation in self.READ and obj.is_public:
@@ -273,18 +271,14 @@ class AssistantDefaultPermission(BasePermission):
         from django_ai_sdk.assistants.models import AssistantUser
 
         user_entry = await AssistantUser.objects.filter(assistant=obj, user=user).afirst()
-        if user_entry is not None:
-            if operation in self.MANAGER:
-                return user_entry.can_manage
+        if user_entry is not None and (operation not in self.MANAGER or user_entry.can_manage):
             return True
 
         # Check group membership
         from django_ai_sdk.assistants.models import AssistantGroup
 
         group_entry = await AssistantGroup.objects.filter(assistant=obj, group__user=user).afirst()
-        if group_entry is not None:
-            if operation in self.MANAGER:
-                return group_entry.can_manage
+        if group_entry is not None and (operation not in self.MANAGER or group_entry.can_manage):
             return True
 
         return False
