@@ -654,14 +654,14 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
         for entry in payload.users:
             try:
                 await AssistantService.add_assistant_user(
-                    str(config.id), entry.user_id, entry.can_manage
+                    str(config.id), entry.user_id, entry.can_manage, user=request.user
                 )
             except Exception:
                 pass
         for entry in payload.groups:
             try:
                 await AssistantService.add_assistant_group(
-                    str(config.id), entry.group_id, entry.can_manage
+                    str(config.id), entry.group_id, entry.can_manage, user=request.user
                 )
             except Exception:
                 pass

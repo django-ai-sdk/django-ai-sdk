@@ -593,14 +593,20 @@ class RuntimeAssistantListCreateAPIView(APIView):
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
                 await AssistantService.add_assistant_user(
-                    str(config.id), entry["user_id"], entry.get("can_manage", False)
+                    str(config.id),
+                    entry["user_id"],
+                    entry.get("can_manage", False),
+                    user=request.user,
                 )
             except Exception:
                 pass
         for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
             try:
                 await AssistantService.add_assistant_group(
-                    str(config.id), entry["group_id"], entry.get("can_manage", False)
+                    str(config.id),
+                    entry["group_id"],
+                    entry.get("can_manage", False),
+                    user=request.user,
                 )
             except Exception:
                 pass
@@ -632,13 +638,15 @@ class RuntimeAssistantDetailAPIView(APIView):
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
                 await AssistantService.add_assistant_user(
-                    runtime_id, entry["user_id"], entry.get("can_manage", False)
+                    runtime_id, entry["user_id"], entry.get("can_manage", False), user=request.user
                 )
             except Exception:
                 pass
         for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
             try:
-                await AssistantService.add_assistant_group(runtime_id, entry["group_id"])
+                await AssistantService.add_assistant_group(
+                    runtime_id, entry["group_id"], entry.get("can_manage", False), user=request.user
+                )
             except Exception:
                 pass
         return Response(AssistantSettingsSerializer(config).data)
