@@ -175,6 +175,12 @@ AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
+# Permission overrides by domain
+AI_SDK_PERMISSIONS = {
+    "memory": [
+        "piratespeak.permissions.AllowAnonymousMemoryPermission",
+    ],
+}
 
 
 # Default vector store path
