@@ -313,26 +313,30 @@ class TestOpenMode:
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
+        from tests.mocks.permissions import thread_permissions
 
         mock_storage_class = MagicMock()
         mock_storage_class.create_thread = AsyncMock(return_value="new-thread-id")
         mock_assistants_registry.get.return_value.storage_adapter = mock_storage_class
 
-        result = await ThreadService.create_thread(
-            "test-assistant", user=None
-        )
+        with thread_permissions("django_ai_sdk.permissions.AllowAll"):
+            result = await ThreadService.create_thread(
+                "test-assistant", user=None
+            )
         assert result == "new-thread-id"
 
     async def test_thread_service_get_with_none_user(
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
+        from tests.mocks.permissions import thread_permissions
         from tests.mocks.storage import setup_thread_adapter
 
         thread_info, _ = setup_thread_adapter(
             mock_storage_adapter_registry, user_id=None
         )
-        result = await ThreadService.get_thread("thread-1", user=None)
+        with thread_permissions("django_ai_sdk.permissions.AllowAll"):
+            result = await ThreadService.get_thread("thread-1", user=None)
         assert result is not None
         assert result.assistant_id == "test-assistant"
 
@@ -341,35 +345,39 @@ class TestOpenMode:
     ):
         from django_ai_sdk.storage.services import ThreadService
         from tests.factories.schemas import ThreadInfoFactory
+        from tests.mocks.permissions import thread_permissions
 
         thread_info = ThreadInfoFactory.build(assistant_id="test-assistant", user_id=None)
 
-        with (
-            patch(
-                "django_ai_sdk.storage.services._get_thread",
-                return_value=thread_info,
-            ),
-            patch(
-                "django_ai_sdk.storage.services._get_storage",
-                return_value=MagicMock(),
-            ),
-        ):
-            result = await ThreadService.storage_for_thread("thread-1", user=None)
-            assert result is not None
+        with thread_permissions("django_ai_sdk.permissions.AllowAll"):
+            with (
+                patch(
+                    "django_ai_sdk.storage.services._get_thread",
+                    return_value=thread_info,
+                ),
+                patch(
+                    "django_ai_sdk.storage.services._get_storage",
+                    return_value=MagicMock(),
+                ),
+            ):
+                result = await ThreadService.storage_for_thread("thread-1", user=None)
+        assert result is not None
 
     async def test_thread_service_rate_with_none_user(
         self, mock_assistants_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
+        from tests.mocks.permissions import thread_permissions
         from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
         setup_thread_adapter(mock_storage_adapter_registry, user_id=None)
 
-        with mock_get_storage(method="rate_message", return_value=True):
-            result = await ThreadService.rate_message(
-                "thread-1", "msg-1", 1, user=None
-            )
-            assert result is True
+        with thread_permissions("django_ai_sdk.permissions.AllowAll"):
+            with mock_get_storage(method="rate_message", return_value=True):
+                result = await ThreadService.rate_message(
+                    "thread-1", "msg-1", 1, user=None
+                )
+        assert result is True
 
     async def test_memory_service_create_with_none_user(self):
         from django_ai_sdk.memories.services import MemoryService
