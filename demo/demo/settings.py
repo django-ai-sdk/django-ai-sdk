@@ -175,10 +175,6 @@ AI_SDK_ASSISTANTS = [
     "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
-# Memory permission classes
-AI_SDK_MEMORY_PERMISSIONS = [
-    "piratespeak.permissions.AllowAnonymousMemoryPermission",
-]
 
 
 # Default vector store path

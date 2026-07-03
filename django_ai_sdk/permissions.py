@@ -284,12 +284,6 @@ class AssistantDefaultPermission(BasePermission):
         return False
 
 
-@lru_cache(maxsize=1)
-def get_default_permissions() -> list[type[BasePermission]]:
-    """Resolve default permission classes from settings"""
-    paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
-    if not paths:
-        return [AssistantDefaultPermission, AllowAll]
     return [import_string(p) for p in paths]
 
 
@@ -305,13 +299,6 @@ def ensure_permission_instance(
     """
     return perm() if isinstance(perm, type) else perm
 
-
-@lru_cache(maxsize=1)
-def get_memory_permissions() -> list[type[BasePermission]]:
-    paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
-    if not paths:
-        return [MemoryDefaultPermission]
-    return [import_string(p) for p in paths]
 
 
 def get_assistant_permissions(assistant: Assistant) -> list[type[BasePermission]]:
@@ -339,23 +326,6 @@ async def has_perms(
             user, operation, obj, permissions, raise_on_deny=raise_on_deny, **kwargs
         )
     return True
-
-
-def get_queryset_perms(
-    user: UserType,
-    operation: Operation,
-    queryset: QuerySet,
-    *,
-    permissions: list[type[BasePermission]] | None = None,
-) -> QuerySet:
-    if permissions is None:
-        permissions = get_default_permissions()
-    for cls in permissions:
-        perm = ensure_permission_instance(cls)
-        result = perm.get_queryset_perms(user, operation, queryset)
-        if result is not None:
-            queryset = result
-    return queryset
 
 
 async def check_permissions(
