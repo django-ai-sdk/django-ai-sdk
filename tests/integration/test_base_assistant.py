@@ -253,3 +253,48 @@ class TestStreamWriterIntegration:
             role="assistant",
         )
         assert stream_writer.message.id is not None
+
+
+@pytest.mark.django_db
+class TestTitleGenerationPrompt:
+    """`get_title_generation_prompt` is overridable and defaults to a
+    length-capped prompt, and `generate_thread_title` must honour whatever
+    the assistant returns from it."""
+
+    @pytest_asyncio.fixture
+    async def assistant(self):
+        class TestAssistant(Assistant):
+            name = "test_assistant"
+            model = "gpt-4o-mini"
+            instructions = ["You are a test assistant"]
+            protocol = VercelProtocolHandler
+            storage_adapter = MemoryStorageAdapter
+
+            async def get_pipeline_adapter(self, thread_id: str | None = None):
+                return MagicMock()
+
+        return TestAssistant()
+
+    def test_default_prompt_mentions_column_max_length(self, assistant):
+        from django_ai_sdk.conversation.models import Thread
+
+        max_length = Thread._meta.get_field("title").max_length
+        prompt = assistant.get_title_generation_prompt()
+
+        assert str(max_length) in prompt
+
+    @pytest.mark.asyncio
+    async def test_generate_thread_title_uses_overridden_prompt(self, assistant):
+        from django_ai_sdk.common import Prompt
+        from django_ai_sdk.conversation.utils import generate_thread_title
+
+        custom_prompt = Prompt("Custom title prompt, stay under 10 characters.")
+        assistant.get_title_generation_prompt = MagicMock(return_value=custom_prompt)
+        assistant.run = AsyncMock(return_value="Result")
+
+        await generate_thread_title(
+            assistant=assistant,
+            messages=[ChatMessage(role="user", content="hi")],
+        )
+
+        assert assistant.run.call_args.kwargs["system_prompt"] == custom_prompt

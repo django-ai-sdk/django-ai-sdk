@@ -7,6 +7,9 @@ from uuid import uuid4
 
 import pytest
 
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH
+from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.storage.services import (
     ThreadService,
     aget_thread_file_meta,
@@ -258,6 +261,49 @@ class TestThreadServiceObjectPermissions:
                 "thread-1", "msg-1", 1, user=mock_user
             )
             assert result is True
+
+
+# ============================================================================
+# DbStorageAdapter — update_thread title truncation
+# ============================================================================
+
+
+@pytest.mark.django_db
+class TestThreadTitleMaxLengthConstant:
+    def test_constant_matches_db_column(self):
+        """Guards against the constant and the model field drifting apart."""
+        assert THREAD_TITLE_MAX_LENGTH == Thread._meta.get_field("title").max_length
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestDbStorageAdapterUpdateThreadTitle:
+    """`title` must never exceed the DB column's max_length.
+
+    `update_thread` saves via `thread.asave()`, which bypasses Django's
+    `full_clean()` validation - an over-length title would otherwise hit the
+    raw DB constraint and raise instead of being handled gracefully.
+    """
+
+    async def test_truncates_title_exceeding_max_length(self):
+        thread = await Thread.objects.acreate()
+        overlong_title = "x" * (THREAD_TITLE_MAX_LENGTH + 50)
+
+        result = await DbStorageAdapter.update_thread(str(thread.id), title=overlong_title)
+
+        assert result is True
+        await thread.arefresh_from_db()
+        assert thread.title == overlong_title[:THREAD_TITLE_MAX_LENGTH]
+        assert len(thread.title) == THREAD_TITLE_MAX_LENGTH
+
+    async def test_leaves_title_within_max_length_untouched(self):
+        thread = await Thread.objects.acreate()
+
+        result = await DbStorageAdapter.update_thread(str(thread.id), title="Short title")
+
+        assert result is True
+        await thread.arefresh_from_db()
+        assert thread.title == "Short title"
 
 
 # ============================================================================
