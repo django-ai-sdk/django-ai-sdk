@@ -887,11 +887,13 @@ class MemoryService:
         Falls back to entry.content when no warmed RAG is available for this memory.
         """
         try:
-            entry = await Entry.objects.aget(id=entry_id)
+            entry = await Entry.objects.select_related("memory").aget(id=entry_id)
         except Entry.DoesNotExist:
             return None
 
-        await has_perms(user, Operation.VIEW_DOCUMENT, entry, permissions=get_memory_permissions())
+        await has_perms(
+            user, Operation.VIEW_DOCUMENT, entry.memory, permissions=get_memory_permissions()
+        )
 
         if chunk_id is None:
             return entry.content
