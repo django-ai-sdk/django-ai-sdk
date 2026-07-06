@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .models import WorkflowRun, WorkflowRunStep, WorkflowSettings
 from .schemas import StepField, WorkflowAction, WorkflowDefinition, WorkflowStep
 from .services import WorkflowService
