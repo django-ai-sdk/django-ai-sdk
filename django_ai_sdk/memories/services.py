@@ -168,17 +168,25 @@ class MemoryService(PermissionsMixin):
     # ============================================================================
 
     @classmethod
-    async def list_memory_users(cls, memory_id: str, *, user: UserType) -> list[MemoryUserOut]:
+    async def list_memory_users(
+        cls,
+        memory_id: str,
+        *,
+        user: UserType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[MemoryUserOut]:
         """List all users of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
+        qs = memory.memory_users.all().select_related("user")[offset : offset + limit]
         return [
             MemoryUserOut(
                 user_id=str(o.user_id),
                 can_manage=o.can_manage,
                 created_at=o.created_at.isoformat(),
             )
-            async for o in memory.memory_users.all().select_related("user")
+            async for o in qs
         ]
 
     @classmethod

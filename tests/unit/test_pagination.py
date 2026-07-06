@@ -117,12 +117,9 @@ class TestThreadServicePagination:
                 "django_ai_sdk.storage.services.StorageAdapterRegistry.get_all_adapters",
                 return_value=[mock_adapter],
             ),
-            patch(
-                "django_ai_sdk.storage.services.get_thread_permissions",
-                return_value=[],
-            ),
-            patch(
-                "django_ai_sdk.storage.services.has_perms",
+            patch.object(
+                ThreadService,
+                "has_perms",
                 new_callable=AsyncMock,
             ),
         ):
@@ -167,12 +164,9 @@ class TestThreadServicePagination:
                 "django_ai_sdk.storage.services.StorageAdapterRegistry.get_all_adapters",
                 return_value=[mock_a, mock_b],
             ),
-            patch(
-                "django_ai_sdk.storage.services.get_thread_permissions",
-                return_value=[],
-            ),
-            patch(
-                "django_ai_sdk.storage.services.has_perms",
+            patch.object(
+                ThreadService,
+                "has_perms",
                 new_callable=AsyncMock,
             ),
         ):
@@ -212,7 +206,7 @@ class TestMemoryServiceListMemoriesPagination:
 
         await self._create_memories(5)
         # Use limit=2 — should always return exactly 2 regardless of other DB rows
-        result = await MemoryService.list_memories(limit=2)
+        result = await MemoryService.list_memories(user=None, limit=2)
         assert len(result) == 2
 
     async def test_offset_shifts_page(self):
@@ -220,10 +214,10 @@ class TestMemoryServiceListMemoriesPagination:
 
         await self._create_memories(5)
         # Use a limit large enough to get all rows in the DB
-        all_results = await MemoryService.list_memories(limit=10_000)
+        all_results = await MemoryService.list_memories(user=None, limit=10_000)
         total = len(all_results)
 
-        page2 = await MemoryService.list_memories(limit=10_000, offset=2)
+        page2 = await MemoryService.list_memories(user=None, limit=10_000, offset=2)
         assert len(page2) == total - 2
         # First item after skip must match position [2] in the full list
         assert page2[0].id == all_results[2].id
@@ -232,7 +226,7 @@ class TestMemoryServiceListMemoriesPagination:
         from django_ai_sdk.memories.services import MemoryService
 
         await self._create_memories(3)
-        result = await MemoryService.list_memories(limit=10, offset=100_000)
+        result = await MemoryService.list_memories(user=None, limit=10, offset=100_000)
         assert result == []
 
 
@@ -264,8 +258,9 @@ class TestAssistantServiceListAssistantsPagination:
 
         with (
             patch("django_ai_sdk.assistants.services.registry", registry),
-            patch(
-                "django_ai_sdk.storage.services.has_perms",
+            patch.object(
+                AssistantService,
+                "has_perms",
                 new_callable=AsyncMock,
             ),
             patch.object(
