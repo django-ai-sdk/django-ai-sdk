@@ -22,7 +22,7 @@ class Thread(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="ai_threads",
+        related_name="threads",
         null=True,
         blank=True,
     )
@@ -31,7 +31,7 @@ class Thread(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="file_threads",
+        related_name="thread_files",
     )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
