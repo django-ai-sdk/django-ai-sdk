@@ -487,3 +487,52 @@ class TestMemoryUserManagement:
                 await MemoryService.add_memory_user(
                     str(mem.id), str(new_user.id), can_manage=False, user=viewer
                 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestMemoryServiceGetChunkContent:
+    """get_chunk_content checks permissions on the Entry's parent Memory.
+
+    MemoryDefaultPermission.has_object_permission expects a Memory (it reads
+    memory_users/memory_groups, relations Entry doesn't have), raising an
+    AttributeError instead of enforcing the permission.
+    """
+
+    async def _get_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    async def test_owner_can_read_chunk_content(self):
+        from django_ai_sdk.memories.models import Entry, Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        mem = await Memory.objects.acreate(name="chunk-owner", is_public=False)
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        entry = await Entry.objects.acreate(memory=mem, content="full content")
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.get_chunk_content(
+                str(entry.id), None, user=owner
+            )
+
+        assert result == "full content"
+
+    async def test_stranger_denied_chunk_content(self):
+        from django_ai_sdk.memories.models import Entry, Memory, MemoryUser
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        stranger = await self._get_user()
+        mem = await Memory.objects.acreate(name="chunk-private", is_public=False)
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        entry = await Entry.objects.acreate(memory=mem, content="secret content")
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            with pytest.raises(PermissionDenied):
+                await MemoryService.get_chunk_content(str(entry.id), None, user=stranger)
