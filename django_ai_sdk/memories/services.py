@@ -506,11 +506,9 @@ class MemoryService(PermissionsMixin):
 
         memories = []
         async for tm in thread_memories:
-            # Skip memories this user cannot read instead of raising: a thread may
-            # carry assistant-linked private memories the user has no access to.
             if not await cls.has_perms(
                 user,
-                Operation.VIEW_MEMORY,
+                Operation.LIST_THREAD_MEMORIES,
                 tm.memory,
                 raise_on_deny=False,
             ):

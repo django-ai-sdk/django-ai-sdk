@@ -544,3 +544,87 @@ class TestMemoryServiceGetChunkContent:
         with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
             with pytest.raises(PermissionDenied):
                 await MemoryService.get_chunk_content(str(entry.id), None, user=stranger)
+
+
+# ============================================================================
+# MemoryService — list_thread_memories
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestMemoryServiceListThreadMemories:
+    """list_thread_memories enforces LIST_THREAD_MEMORIES permission."""
+
+    async def _get_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    async def test_owner_can_list_thread_memories(self):
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        thread = await Thread.objects.acreate()
+        mem = await Memory.objects.acreate(name="owned", is_public=False)
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.list_thread_memories(str(thread.id), user=owner)
+
+        assert len(result) == 1
+        assert str(result[0].id) == str(mem.id)
+
+    async def test_stranger_cannot_list_private_thread_memory(self):
+        from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+
+        owner = await self._get_user()
+        stranger = await self._get_user()
+        thread = await Thread.objects.acreate()
+        mem = await Memory.objects.acreate(name="private", is_public=False)
+        await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.list_thread_memories(str(thread.id), user=stranger)
+
+        assert len(result) == 0
+
+    async def test_stranger_can_list_public_thread_memory(self):
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+
+        stranger = await self._get_user()
+        thread = await Thread.objects.acreate()
+        mem = await Memory.objects.acreate(name="public", is_public=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.list_thread_memories(str(thread.id), user=stranger)
+
+        assert len(result) == 1
+        assert str(result[0].id) == str(mem.id)
+
+    async def test_anonymous_gets_empty_list(self):
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.conversation.models import Thread
+        from tests.mocks.permissions import memory_permissions
+
+        thread = await Thread.objects.acreate()
+        mem = await Memory.objects.acreate(name="public", is_public=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
+
+        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
+            result = await MemoryService.list_thread_memories(str(thread.id), user=None)
+
+        assert len(result) == 0
