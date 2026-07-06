@@ -219,7 +219,7 @@ class TestStreamWriterIntegration:
             protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
 
-            async def get_pipeline_adapter(self, thread_id: str | None = None):
+            async def get_pipeline_adapter(self, thread_id: str | None = None, *args, **kwargs):
                 return MagicMock()
 
         return TestAssistant()
@@ -270,7 +270,7 @@ class TestTitleGenerationPrompt:
             protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
 
-            async def get_pipeline_adapter(self, thread_id: str | None = None):
+            async def get_pipeline_adapter(self, thread_id: str | None = None, *args, **kwargs):
                 return MagicMock()
 
         return TestAssistant()
