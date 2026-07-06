@@ -469,6 +469,9 @@ class AssistantService(PermissionsMixin):
     async def list_runtime_assistants(
         cls,
         user: UserType,
+        *,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Any]:
         from django_ai_sdk.assistants.config import get_runtime_assistant_class
         from django_ai_sdk.assistants.models import AssistantSettings
@@ -489,7 +492,7 @@ class AssistantService(PermissionsMixin):
             except PermissionDenied:
                 continue
             result.append(config)
-        return result
+        return result[offset : offset + limit]
 
     @classmethod
     async def get_runtime_assistant(cls, assistant_id: str, user: UserType) -> Any:
