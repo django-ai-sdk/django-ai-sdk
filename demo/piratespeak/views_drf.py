@@ -13,14 +13,10 @@ from django_ai_sdk.assistants.services import (
     AssistantService,
     AssistantUpdateData,
     add_assistant_group,
-    add_assistant_user,
     get_assistant_info,
     list_assistant_groups,
-    list_assistant_users,
     list_assistants,
     remove_assistant_group,
-    remove_assistant_user,
-    update_assistant_user,
 )
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
@@ -693,64 +689,6 @@ class AssistantUserOutSerializer(serializers.Serializer):
 class AddAssistantUserInSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     can_manage = serializers.BooleanField(default=False)
-
-
-class UpdateAssistantUserInSerializer(serializers.Serializer):
-    can_manage = serializers.BooleanField()
-
-
-class AssistantUserListCreateAPIView(APIView):
-    def get(self, request: Request, runtime_id: str) -> Response:
-        try:
-            users = list_assistant_users(runtime_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(users, many=True).data)
-
-    def post(self, request: Request, runtime_id: str) -> Response:
-        serializer = AddAssistantUserInSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            entry = add_assistant_user(
-                runtime_id,
-                serializer.validated_data["user_id"],  # type: ignore[index]
-                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
-                user=request.user,
-            )
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(entry).data)
-
-
-class AssistantUserDetailAPIView(APIView):
-    def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        serializer = UpdateAssistantUserInSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            entry = update_assistant_user(
-                runtime_id,
-                user_id,
-                serializer.validated_data["can_manage"],  # type: ignore[index]
-                user=request.user,
-            )
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(entry).data)
-
-    def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        try:
-            remove_assistant_user(runtime_id, user_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(status=204)
 
 
 # ── Assistant Groups ──────────────────────────────────────────────────────────

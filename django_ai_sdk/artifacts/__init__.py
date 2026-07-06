@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,
     ApprovalCardData,

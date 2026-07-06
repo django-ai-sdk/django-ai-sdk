@@ -335,15 +335,13 @@ class TestGetThreadFileMeta:
         file_memory_id = str(uuid4())
 
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
-            with (
-                patch("django_ai_sdk.storage.services._get_thread", return_value=MagicMock(assistant_id="test")),
-                patch("django_ai_sdk.conversation.models.Thread") as mock_thread,
+            with patch(
+                "django_ai_sdk.storage.services._get_thread",
+                return_value=MagicMock(assistant_id="test", file_memory_id=file_memory_id),
             ):
-                mock_thread.objects.filter.return_value.values_list.return_value.afirst = AsyncMock(return_value=file_memory_id)
-
                 result = await aget_thread_file_meta("thread-1", user=None)
         assert result["file_memory_id"] == file_memory_id
-        assert "file_count" in result
+        assert result["file_count"] == 0
 
     async def test_raises_when_thread_not_found(self):
         with patch("django_ai_sdk.storage.services._get_thread", return_value=None):
@@ -354,17 +352,16 @@ class TestGetThreadFileMeta:
         from tests.mocks.permissions import thread_permissions
 
         file_memory_id = str(uuid4())
-        mock_entry_qs = MagicMock()
-        mock_entry_qs.acount = AsyncMock(return_value=5)
 
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
             with (
-                patch("django_ai_sdk.storage.services._get_thread", return_value=MagicMock(assistant_id="test")),
-                patch("django_ai_sdk.conversation.models.Thread") as mock_thread,
+                patch(
+                    "django_ai_sdk.storage.services._get_thread",
+                    return_value=MagicMock(assistant_id="test", file_memory_id=file_memory_id),
+                ),
                 patch("django_ai_sdk.memories.models.Entry") as mock_entry,
             ):
-                mock_thread.objects.filter.return_value.values_list.return_value.afirst = AsyncMock(return_value=file_memory_id)
-                mock_entry.objects.filter.return_value = mock_entry_qs
-
+                mock_entry.objects.filter.return_value.acount = AsyncMock(return_value=5)
                 result = await aget_thread_file_meta("thread-1", user=None)
         assert result["file_count"] == 5
+        assert result["file_memory_id"] == file_memory_id

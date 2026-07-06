@@ -80,7 +80,6 @@ class ThreadService(PermissionsMixin):
         from django_ai_sdk.assistants.services import AssistantService
 
         assistant = await AssistantService.get(assistant_id)
-        permissions = get_assistant_permissions(assistant)
 
         await cls.has_perms(user, Operation.CREATE_THREAD)
 
@@ -123,7 +122,6 @@ class ThreadService(PermissionsMixin):
             PermissionDenied: If user has no VIEW_THREAD permission for the thread
         """
         thread = await _get_thread(thread_id)
-        permissions = await get_thread_permissions(thread)
         if thread:
             await cls.has_perms(user, Operation.VIEW_THREAD, thread)
             logger.debug(f"Found thread {thread_id} in adapter, assistant: {thread.assistant_id}")
@@ -196,7 +194,6 @@ class ThreadService(PermissionsMixin):
             PermissionDenied: If user has no UPDATE_THREAD permission
         """
         thread = await _get_thread(thread_id)
-        permissions = await get_thread_permissions(thread)
         if thread:
             await cls.has_perms(user, Operation.UPDATE_THREAD, thread)
 
