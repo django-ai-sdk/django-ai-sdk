@@ -14,6 +14,8 @@ logger = get_logger(__name__)
 
 Prompt = NewType("Prompt", str)
 
+THREAD_TITLE_MAX_LENGTH = 255
+
 
 def prompt(text: str) -> Prompt:
     """Helper to create Prompt type with dedented text."""
