@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from django.urls import path
 from django_ai_sdk.memories.services import (
+    add_memory_group,
     add_memory_user,
     bulk_connect_memories,
     create_memory,
@@ -18,9 +19,11 @@ from django_ai_sdk.memories.services import (
     link_memory_to_thread,
     list_documents,
     list_memories,
+    list_memory_groups,
     list_memory_users,
     list_thread_files,
     list_thread_memories,
+    remove_memory_group,
     remove_memory_user,
     toggle_memory_active,
     unlink_memory_from_thread,
@@ -95,6 +98,9 @@ class ToggleMemoryActiveInSerializer(serializers.Serializer):
 
 class MemoryUserOutSerializer(serializers.Serializer):
     user_id = serializers.CharField()
+    email = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
     can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 
@@ -392,6 +398,56 @@ class MemoryUserDetailAPIView(APIView):
         return Response(status=204)
 
 
+class MemoryGroupOutSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    group_name = serializers.CharField()
+    can_manage = serializers.BooleanField()
+    created_at = serializers.CharField()
+
+
+class AddMemoryGroupInSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class MemoryGroupListCreateAPIView(APIView):
+    def get(self, request: Request, memory_id: str) -> Response:
+        try:
+            groups = list_memory_groups(memory_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(MemoryGroupOutSerializer(groups, many=True).data)
+
+    def post(self, request: Request, memory_id: str) -> Response:
+        serializer = AddMemoryGroupInSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            group = add_memory_group(
+                memory_id,
+                serializer.validated_data["group_id"],
+                serializer.validated_data.get("can_manage", False),
+                user=request.user,
+            )
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(MemoryGroupOutSerializer(group).data, status=201)
+
+
+class MemoryGroupDetailAPIView(APIView):
+    def delete(self, request: Request, memory_id: str, group_id: int) -> Response:
+        try:
+            remove_memory_group(memory_id, group_id, user=request.user)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(status=204)
+
+
 urlpatterns = [
     path("memories/", MemoryListCreateAPIView.as_view(), name="memory-list-create"),
     path("memories/<str:memory_id>/", MemoryDetailAPIView.as_view(), name="memory-detail"),
@@ -444,6 +500,16 @@ urlpatterns = [
         "memories/<str:memory_id>/users/<str:user_id>/",
         MemoryUserDetailAPIView.as_view(),
         name="memory-user-detail",
+    ),
+    path(
+        "memories/<str:memory_id>/groups/",
+        MemoryGroupListCreateAPIView.as_view(),
+        name="memory-group-list-create",
+    ),
+    path(
+        "memories/<str:memory_id>/groups/<int:group_id>/",
+        MemoryGroupDetailAPIView.as_view(),
+        name="memory-group-detail",
     ),
     path(
         "memories/source/<str:entry_id>/<str:chunk_id>/",

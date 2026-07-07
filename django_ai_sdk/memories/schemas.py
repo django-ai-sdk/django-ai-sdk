@@ -164,6 +164,9 @@ class MemoryUserOut(BaseModel):
     """Schema for memory user output."""
 
     user_id: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
     can_manage: bool
     created_at: str
 
@@ -188,3 +191,10 @@ class UpdateMemoryUserIn(BaseModel):
     """Schema for updating a memory user."""
 
     can_manage: bool
+
+
+class AddMemoryGroupIn(BaseModel):
+    """Schema for adding a group to a memory."""
+
+    group_id: int
+    can_manage: bool = False

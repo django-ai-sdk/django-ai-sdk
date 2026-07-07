@@ -622,6 +622,9 @@ async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> An
 
 class AssistantUserOut(Schema):
     user_id: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
     can_manage: bool
     created_at: str
 
@@ -646,6 +649,9 @@ async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
         return [
             AssistantUserOut(
                 user_id=str(u.user_id),
+                email=u.user.email,
+                first_name=u.user.first_name,
+                last_name=u.user.last_name,
                 can_manage=u.can_manage,
                 created_at=u.created_at.isoformat() if u.created_at else "",
             )
@@ -672,6 +678,9 @@ async def add_assistant_user(
         )
         return AssistantUserOut(
             user_id=str(entry.user_id),
+            email=entry.user.email,
+            first_name=entry.user.first_name,
+            last_name=entry.user.last_name,
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
@@ -698,6 +707,9 @@ async def update_assistant_user(
         )
         return AssistantUserOut(
             user_id=str(entry.user_id),
+            email=entry.user.email,
+            first_name=entry.user.first_name,
+            last_name=entry.user.last_name,
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
@@ -728,11 +740,13 @@ async def delete_assistant_user(request: HttpRequest, runtime_id: UUID, user_id:
 class AssistantGroupOut(Schema):
     group_id: int
     group_name: str
+    can_manage: bool
     created_at: str
 
 
 class AddAssistantGroupIn(Schema):
     group_id: int
+    can_manage: bool = False
 
 
 @router.get(
@@ -747,6 +761,7 @@ async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
             AssistantGroupOut(
                 group_id=g.group_id,
                 group_name=g.group.name,
+                can_manage=g.can_manage,
                 created_at=g.created_at.isoformat() if g.created_at else "",
             )
             for g in groups
@@ -767,11 +782,13 @@ async def add_assistant_group(
         entry = await AssistantService.add_assistant_group(
             str(runtime_id),
             payload.group_id,
+            payload.can_manage,
             user=request.user,
         )
         return AssistantGroupOut(
             group_id=entry.group_id,
             group_name=entry.group.name,
+            can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
     except PermissionDenied as e:
@@ -1195,7 +1212,12 @@ def list_users(request: HttpRequest, q: str = "", limit: int = 10) -> Any:
     User = get_user_model()
     qs = User.objects.order_by("first_name", "last_name")
     if q.strip():
-        qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q))
+        qs = qs.filter(
+            Q(first_name__icontains=q)
+            | Q(last_name__icontains=q)
+            | Q(email__icontains=q)
+            | Q(username__icontains=q)
+        )
     return list(qs.values("id", "first_name", "last_name")[: min(limit, 100)])
 
 
@@ -1216,3 +1238,18 @@ def update_me(request: HttpRequest, payload: UserUpdateSchema) -> Any:
     if update_fields:
         user.save(update_fields=update_fields)
     return user
+
+
+class GroupOut(Schema):
+    id: int
+    name: str
+
+
+@router.get("/accounts/groups/", response=list[GroupOut], operation_id="search_groups")
+def search_groups(request: HttpRequest, q: str = "", limit: int = 10) -> Any:
+    from django.contrib.auth.models import Group
+
+    qs = Group.objects.order_by("name")
+    if q.strip():
+        qs = qs.filter(name__icontains=q)
+    return list(qs.values("id", "name")[: min(limit, 100)])
