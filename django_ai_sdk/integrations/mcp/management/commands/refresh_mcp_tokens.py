@@ -7,13 +7,12 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+from django_ai_sdk.integrations.mcp.loader import MCPIntegration, refresh_oauth_token
 from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
-from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
+from django_ai_sdk.integrations.registry import get_all_integrations
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -38,12 +37,16 @@ class Command(BaseCommand):
         )
 
     async def handle_async(self, threshold: int, server: str | None) -> int:
-        config = getattr(settings, "AI_SDK_INTEGRATIONS", {})
-        if not config:
-            self.stdout.write(self.style.WARNING("No integrations configured"))
+        integrations = get_all_integrations()
+        oauth_integrations: dict[str, MCPIntegration] = {
+            name: i
+            for name, i in integrations.items()
+            if isinstance(i, MCPIntegration) and i.kind == "oauth"
+        }
+        if not oauth_integrations:
+            self.stdout.write(self.style.WARNING("No OAuth MCP integrations configured"))
             return 0
 
-        # Query tokens expiring within threshold
         now = timezone.now()
         expiry_window = now + timedelta(minutes=threshold)
 
@@ -62,22 +65,19 @@ class Command(BaseCommand):
 
         for token_obj in tokens:
             server_name = token_obj.server_name
-            server_config = config.get(server_name)
+            integration = oauth_integrations.get(server_name)
 
-            if not server_config:
-                self.stdout.write(self.style.WARNING(f"Server {server_name!r} not found in config"))
-                failed += 1
-                continue
-
-            if not isinstance(server_config, OAuthMCPIntegrationConfig):
+            if not integration:
                 self.stdout.write(
-                    self.style.WARNING(f"Server {server_name!r} is not an OAuth server")
+                    self.style.WARNING(
+                        f"Server {server_name!r} not found among OAuth integrations"
+                    )
                 )
                 failed += 1
                 continue
 
             try:
-                result = await refresh_oauth_token(token_obj, server_config)
+                result = await refresh_oauth_token(token_obj, integration.config)
                 if result:
                     self.stdout.write(
                         self.style.SUCCESS(

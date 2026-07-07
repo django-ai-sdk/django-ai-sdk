@@ -121,7 +121,7 @@ class MCPIntegration(Integration):
         """
         if not isinstance(self.config, OAuthMCPIntegrationConfig):
             await self.get_tools(user)
-            return self._cache.status_for(self.name)
+            return self._cache.status_for(self._cache_key(user))
 
         token = await self._get_oauth_token(user)
         if token is None:

@@ -67,13 +67,11 @@ class MCPService:
         if not all_servers:
             return []
 
-        # Get connected OAuth servers for this user
-        connected = set()
+        # Bulk-fetch all OAuth tokens for this user in a single query.
+        oauth_tokens: dict[str, MCPOAuthToken] = {}
         try:
-            async for sn in MCPOAuthToken.objects.filter(user=user).values_list(
-                "server_name", flat=True
-            ):
-                connected.add(sn)
+            async for t in MCPOAuthToken.objects.filter(user=user):
+                oauth_tokens[t.server_name] = t
         except DatabaseError:
             logger.warning(
                 "Failed to load MCP OAuth token connections for user=%s; continuing with no connected servers.",
@@ -85,22 +83,11 @@ class MCPService:
 
         result = []
         for server_name, server_config in all_servers.items():
-            # Determine if this server is connected
-            is_connected = None
+            is_connected: bool | None = None
             if server_config.type == "oauth":
-                if server_name in connected:
-                    # Check if token is expired
-                    try:
-                        token_obj = await MCPOAuthToken.objects.aget(
-                            user=user, server_name=server_name
-                        )
-                        is_connected = not token_obj.is_expired()
-                    except MCPOAuthToken.DoesNotExist:
-                        is_connected = False
-                else:
-                    is_connected = False
+                token_obj = oauth_tokens.get(server_name)
+                is_connected = not token_obj.is_expired() if token_obj else False
             else:
-                # Static/token servers don't have OAuth tokens, so no "connection" state
                 is_connected = None
 
             integration = integrations.get(server_name)
@@ -116,7 +103,7 @@ class MCPService:
                     label=server_config.label or server_name.title(),
                     type=server_config.type,
                     connected=is_connected,
-                    has_token=server_name in connected,
+                    has_token=server_name in oauth_tokens,
                     status=status,
                 )
             )

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -46,7 +47,7 @@ class Integration(ABC):
     """Common interface every integration backend implements."""
 
     name: str = ""
-    label: str
+    label: str = ""
 
     @abstractmethod
     async def get_tools(
@@ -109,13 +110,13 @@ class ResilientCache:
     - Once a key has sat through one full cooldown at the cap and fails again, it is
       marked BROKEN and stops auto-retrying. ``invalidate()`` resets it.
 
-    All state is in-memory, per process, and asyncio-safe only: it assumes every
-    caller shares one event loop. If something drives it from a second loop
-    concurrently (e.g. a background pre-warm thread running its own ``asyncio.run()``
-    against the same process-wide integration registry), the GIL keeps individual
-    dict operations from corrupting state, but the check-then-act sequences in
-    ``get()`` aren't atomic across loops — worst case is a redundant duplicate fetch,
-    which is harmless for idempotent reads but worth knowing about.
+    All state is in-memory, per process. The cache is safe for concurrent use from
+    multiple event loops (e.g. a background pre-warm thread running its own
+    ``asyncio.run()``) — ``_maybe_schedule_refresh`` serialises with a threading lock
+    so two loops can't schedule duplicate background refreshes for the same key. The
+    remaining check-then-act sequences in ``get()`` are protected by asyncio Locks per
+    key, so within a single event loop they're correct; across loops the worst case
+    is a redundant duplicate fetch, which is harmless for idempotent reads.
     """
 
     def __init__(
@@ -153,6 +154,10 @@ class ResilientCache:
         self._broken: set[Any] = set()
         # Outcome of the most recent attempt per key, for status_for().
         self._last_ok: dict[Any, bool] = {}
+        # Guards _maybe_schedule_refresh so that a background pre-warm thread
+        # operating on a second event loop can't race a concurrent request into
+        # scheduling a duplicate background task for the same key.
+        self._schedule_lock = threading.Lock()
 
     def _lock_for(self, key: Any) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
@@ -257,9 +262,10 @@ class ResilientCache:
         or the circuit is open. Fire-and-forget: callers keep serving the stale/empty
         value immediately and don't await this.
         """
-        if key in self._refreshing or self._circuit_open(key):
-            return
-        self._refreshing.add(key)
+        with self._schedule_lock:
+            if key in self._refreshing or self._circuit_open(key):
+                return
+            self._refreshing.add(key)
 
         async def _refresh() -> None:
             try:
