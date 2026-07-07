@@ -697,11 +697,13 @@ class AddAssistantUserInSerializer(serializers.Serializer):
 class AssistantGroupOutSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
     group_name = serializers.CharField(source="group.name")
+    can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 
 
 class AddAssistantGroupInSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
+    can_manage = serializers.BooleanField(default=False)
 
 
 class AssistantGroupListCreateAPIView(APIView):
@@ -721,6 +723,7 @@ class AssistantGroupListCreateAPIView(APIView):
             entry = add_assistant_group(
                 runtime_id,
                 serializer.validated_data["group_id"],  # type: ignore[index]
+                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
                 user=request.user,
             )
         except PermissionDenied as e:
@@ -948,7 +951,12 @@ class UserListAPIView(APIView):
         if q:
             from django.db.models import Q
 
-            qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q))
+            qs = qs.filter(
+                Q(first_name__icontains=q)
+                | Q(last_name__icontains=q)
+                | Q(email__icontains=q)
+                | Q(username__icontains=q)
+            )
         limit = min(int(request.query_params.get("limit", 10)), 100)
         serializer = UserSerializer(qs.values("id", "first_name", "last_name")[:limit], many=True)
         return Response(serializer.data)
@@ -964,6 +972,24 @@ class UserDetailSerializer(serializers.Serializer):
 class UserUpdateSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False)
     last_name = serializers.CharField(required=False)
+
+
+class GroupOutSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class GroupSearchAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django.contrib.auth.models import Group
+
+        qs = Group.objects.order_by("name")
+        q = request.query_params.get("q", "").strip()
+        if q:
+            qs = qs.filter(name__icontains=q)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+        serializer = GroupOutSerializer(qs.values("id", "name")[:limit], many=True)
+        return Response(serializer.data)
 
 
 class UserSessionSerializer(serializers.Serializer):
@@ -1014,9 +1040,11 @@ class UserSessionListAPIView(APIView):
 
 class AssistantUserSerializer(serializers.Serializer):
     user_id = serializers.CharField(source="user.id")
+    email = serializers.CharField(source="user.email")
     first_name = serializers.CharField(source="user.first_name")
     last_name = serializers.CharField(source="user.last_name")
     can_manage = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
 
 
 class AssistantUserAddSerializer(serializers.Serializer):
@@ -1205,4 +1233,5 @@ urlpatterns = [
     path("users/", UserListAPIView.as_view(), name="user-list"),
     path("users/<str:user_id>/", UserDetailAPIView.as_view(), name="user-detail"),
     path("users/<str:user_id>/sessions/", UserSessionListAPIView.as_view(), name="user-sessions"),
+    path("accounts/groups/", GroupSearchAPIView.as_view(), name="group-search"),
 ]

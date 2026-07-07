@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
+    AddMemoryGroupIn,
     AddMemoryUserIn,
     BulkConnectMemoriesIn,
     DocumentOut,
     DocumentStatusOut,
     DocumentUploadResponse,
+    MemoryGroupOut,
     MemoryIn,
     MemoryOut,
     MemoryUserOut,
@@ -364,6 +366,57 @@ async def remove_memory_user(
 ) -> tuple[int, None | dict]:
     try:
         await MemoryService.remove_memory_user(memory_id, user_id, user=request.user)
+        return 204, None
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.get(
+    "/{memory_id}/groups/",
+    response={200: list[MemoryGroupOut], 403: dict, 404: dict},
+    operation_id="list_memory_groups",
+)
+async def list_memory_groups(
+    request: HttpRequest, memory_id: str
+) -> list[MemoryGroupOut] | tuple[int, dict]:
+    try:
+        return await MemoryService.list_memory_groups(memory_id, user=request.user)
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.post(
+    "/{memory_id}/groups/",
+    response={200: MemoryGroupOut, 403: dict, 404: dict},
+    operation_id="add_memory_group",
+)
+async def add_memory_group(
+    request: HttpRequest, memory_id: str, payload: AddMemoryGroupIn
+) -> MemoryGroupOut | tuple[int, dict]:
+    try:
+        return await MemoryService.add_memory_group(
+            memory_id, payload.group_id, payload.can_manage, user=request.user
+        )
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.delete(
+    "/{memory_id}/groups/{group_id}/",
+    response={204: None, 403: dict, 404: dict},
+    operation_id="remove_memory_group",
+)
+async def remove_memory_group(
+    request: HttpRequest, memory_id: str, group_id: int
+) -> tuple[int, None | dict]:
+    try:
+        await MemoryService.remove_memory_group(memory_id, group_id, user=request.user)
         return 204, None
     except ValueError as e:
         return 404, {"detail": str(e)}

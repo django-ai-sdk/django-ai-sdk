@@ -202,7 +202,9 @@ class ThreadDefaultPermission(BasePermission):
         obj: ThreadInfo,
         **kwargs: Any,
     ) -> bool:
-        return obj.user_id == getattr(user, "pk", None)
+        if user is None or not user.is_authenticated:
+            return False
+        return obj.user_id is not None and str(obj.user_id) == str(getattr(user, "pk", ""))
 
 
 class MemoryDefaultPermission(BasePermission):
