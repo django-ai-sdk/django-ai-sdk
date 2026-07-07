@@ -17,7 +17,12 @@ from django.db import DatabaseError
 from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
 from django_ai_sdk.integrations.mcp.models import MCPOAuthClient, MCPOAuthToken
-from django_ai_sdk.integrations.mcp.schemas import ConnectionOut
+from django_ai_sdk.integrations.mcp.schemas import (
+    ConnectionOut,
+    OAuthMCPIntegrationConfig,
+    StaticMCPIntegrationConfig,
+    TokenMCPIntegrationConfig,
+)
 from django_ai_sdk.integrations.registry import get_integrations
 
 if TYPE_CHECKING:
@@ -39,12 +44,6 @@ def _get_mcp_servers() -> dict:
     have no OAuth/connection concept, so this MCP-specific service layer filters
     them out rather than assuming every entry has a `.type`/`.label`.
     """
-    from django_ai_sdk.integrations.mcp.schemas import (
-        OAuthMCPIntegrationConfig,
-        StaticMCPIntegrationConfig,
-        TokenMCPIntegrationConfig,
-    )
-
     configured: dict = getattr(settings, "AI_SDK_INTEGRATIONS", {})
     mcp_types = (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig)
     return {name: value for name, value in configured.items() if isinstance(value, mcp_types)}
@@ -202,7 +201,7 @@ class MCPService:
 
         # Use static credentials if available
         if server.client_id:
-            return server.client_id, server.client_secret or ""
+            return server.client_id, server.client_secret.get_secret_value()
 
         # Otherwise use dynamic registration
         oauth_client, created = await MCPOAuthClient.objects.aget_or_create(
@@ -327,7 +326,8 @@ class MCPService:
             raise ValueError(f"Server {server_name!r} not found or not OAuth type")
 
         client_id = getattr(server, "client_id", "") or ""
-        client_secret = getattr(server, "client_secret", "") or ""
+        client_secret = getattr(server, "client_secret", None)
+        client_secret = client_secret.get_secret_value() if client_secret else ""
         try:
             oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
             client_id = oauth_client.client_id

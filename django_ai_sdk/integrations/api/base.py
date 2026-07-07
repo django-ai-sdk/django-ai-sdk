@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -21,7 +22,7 @@ class APIIntegration(Integration):
     """Base for integrations backed by a hand-written API client, not MCP.
 
     Each entry in ``tools`` is a factory called as ``factory(user=..., assistant=...)``,
-    returning a Tool or a list of Tools.
+    returning a Tool or a list of Tools, either directly or via an ``async`` factory.
 
     ``get_status()`` reports ACTIVE unconditionally unless a subclass sets
     ``health_check`` — an async, no-arg callable that raises on failure. When set, it's
@@ -69,6 +70,8 @@ class APIIntegration(Integration):
         result: list[Any] = []
         for factory in self.tools:
             items = factory(user=user, assistant=assistant)
+            if inspect.isawaitable(items):
+                items = await items
             if isinstance(items, list):
                 result.extend(items)
             else:

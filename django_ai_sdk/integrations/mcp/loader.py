@@ -160,7 +160,7 @@ class MCPIntegration(Integration):
         if isinstance(self.config, TokenMCPIntegrationConfig):
             return await _connect(
                 self.config.url,
-                token=self.config.token,
+                token=self.config.token.get_secret_value(),
                 tools=self.config.tools or None,
                 timeout=self._timeout,
             )
@@ -220,7 +220,7 @@ async def refresh_oauth_token(
         return None
 
     client_id = config.client_id
-    client_secret = config.client_secret
+    client_secret = config.client_secret.get_secret_value()
     try:
         oauth_client = await MCPOAuthClient.objects.aget(server_name=token_obj.server_name)
         client_id = oauth_client.client_id

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 from django_ai_sdk.integrations.base import IntegrationStatus
 
@@ -18,12 +18,12 @@ class TokenMCPIntegrationConfig(BaseModel):
     type: Literal["token"] = "token"
     url: str
     label: str = ""
-    token: str
+    token: SecretStr
     tools: list[str] = []
 
     @model_validator(mode="after")
     def validate_token(self) -> TokenMCPIntegrationConfig:
-        if not self.token:
+        if not self.token.get_secret_value():
             raise ValueError("token must not be empty for TokenMCPIntegrationConfig")
         return self
 
@@ -33,7 +33,7 @@ class OAuthMCPIntegrationConfig(BaseModel):
     url: str
     label: str = ""
     client_id: str = ""
-    client_secret: str = ""
+    client_secret: SecretStr = SecretStr("")
     scope: str = ""
     oauth_discovery_url: str = ""
     authorization_endpoint: str = ""
@@ -65,7 +65,7 @@ class ConnectionOut(BaseModel):
     type: str
     connected: bool | None = None
     has_token: bool = False
-    status: IntegrationStatus = IntegrationStatus.ACTIVE
+    status: IntegrationStatus
 
 
 class AssistantIntegrationStatus(BaseModel):

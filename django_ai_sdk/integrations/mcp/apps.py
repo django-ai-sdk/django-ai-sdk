@@ -30,7 +30,13 @@ class MCPConfig(AppConfig):
     def ready(self) -> None:
         if not getattr(settings, "AI_SDK_INTEGRATION_PREWARM", True):
             return
+        # sys.argv[1] catches `manage.py <command>` invocations. It misses pytest
+        # (no Django command in argv at all) and `call_command()` (this process's
+        # own argv, whatever launched it) — checking for pytest explicitly covers
+        # the common case of a test run accidentally triggering network I/O.
         if len(sys.argv) > 1 and sys.argv[1] in _SKIP_COMMANDS:
+            return
+        if "pytest" in sys.modules:
             return
         threading.Thread(target=_warm_all_sync, daemon=True, name="integration-prewarm").start()
 
