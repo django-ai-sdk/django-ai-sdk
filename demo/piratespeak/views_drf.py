@@ -379,7 +379,9 @@ class AssistantToolsAPIView(APIView):
 
         mcp_data = []
         try:
-            mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
+            integration_status = await AssistantService.get_integration_status(
+                assistant, user=request.user
+            )
             mcp_data = [
                 {
                     "server_name": s.server_name,
@@ -388,7 +390,7 @@ class AssistantToolsAPIView(APIView):
                     "status": s.status,
                     "tool_names": s.tool_names,
                 }
-                for s in mcp_status
+                for s in integration_status
             ]
         except Exception:
             logger.exception("Failed to load MCP status for assistant %s", assistant_id)
@@ -519,7 +521,7 @@ class AssistantSettingsSerializer(serializers.Serializer):
     model = serializers.CharField()
     system_prompt = serializers.CharField(allow_blank=True)
     tools = serializers.ListField(child=serializers.CharField(), default=list)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    integrations = serializers.ListField(child=serializers.CharField(), default=list)
     suggestion_enabled = serializers.BooleanField(default=False)
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
@@ -536,7 +538,7 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     model = serializers.CharField(default="gpt-4o")
     system_prompt = serializers.CharField(allow_blank=True, default="")
     tools = serializers.ListField(child=serializers.CharField(), default=list)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    integrations = serializers.ListField(child=serializers.CharField(), default=list)
     users = AssistantUserInSerializer(many=True, required=False)
     groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(default=False)
@@ -551,7 +553,7 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     model = serializers.CharField(required=False)
     system_prompt = serializers.CharField(allow_blank=True, required=False)
     tools = serializers.ListField(child=serializers.CharField(), required=False)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), required=False)
+    integrations = serializers.ListField(child=serializers.CharField(), required=False)
     users = AssistantUserInSerializer(many=True, required=False)
     groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(required=False)

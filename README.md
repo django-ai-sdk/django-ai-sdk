@@ -36,6 +36,7 @@ uv add django-ai-sdk
 INSTALLED_APPS = [
     ...
     "django_ai_sdk",
+    "django_ai_sdk.integrations.mcp",  # only needed if you use MCP-based integrations
 ]
 ```
 

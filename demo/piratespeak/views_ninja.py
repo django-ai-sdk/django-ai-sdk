@@ -469,7 +469,9 @@ async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
 
     mcp_data = []
     try:
-        mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
+        integration_status = await AssistantService.get_integration_status(
+            assistant, user=request.user
+        )
         mcp_data = [
             MCPServerStatus(
                 server_name=s.server_name,
@@ -478,7 +480,7 @@ async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
                 status=s.status,
                 tool_names=s.tool_names,
             )
-            for s in mcp_status
+            for s in integration_status
         ]
     except Exception:
         logger.exception("Failed to load MCP status for assistant %s", assistant_id)
@@ -529,7 +531,7 @@ class AssistantSettingsOut(Schema):
     model: str
     system_prompt: str
     tools: list[str]
-    mcp_servers: list[str]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -557,7 +559,7 @@ class AssistantSettingsCreateIn(Schema):
     model: str = "gpt-4o"
     system_prompt: str = ""
     tools: list[str] = []
-    mcp_servers: list[str] = []
+    integrations: list[str] = []
     memories: list[str] = []
     users: list[AssistantSettingsCreateUserEntry] = []
     groups: list[AssistantSettingsCreateGroupEntry] = []
@@ -573,7 +575,7 @@ class AssistantSettingsUpdateIn(Schema):
     model: str | None = None
     system_prompt: str | None = None
     tools: list[str] | None = None
-    mcp_servers: list[str] | None = None
+    integrations: list[str] | None = None
     memories: list[str] | None = None
     suggestion_enabled: bool | None = None
     title_generation: bool | None = None
@@ -646,7 +648,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "model": payload.model,
                 "system_prompt": payload.system_prompt,
                 "tools": payload.tools,
-                "mcp_servers": payload.mcp_servers,
+                "integrations": payload.integrations,
                 "memories": payload.memories,
                 "suggestion_enabled": payload.suggestion_enabled,
                 "title_generation": payload.title_generation,

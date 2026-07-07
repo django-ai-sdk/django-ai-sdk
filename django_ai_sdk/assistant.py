@@ -5,7 +5,6 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from django.conf import settings
 from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -17,8 +16,8 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
     AllowAll,
     BasePermission,
@@ -331,6 +330,10 @@ class Assistant(ABC, AssistantInfoMixin):
           def get_my_tool(thread_id="", user_id="", **kwargs): ...
           def get_my_tool(user_id="", **kwargs): ...
 
+        Integrations configured via `self.integrations` are always included here too
+        — this is deliberate: it's the one method every pipeline adapter must call to
+        get any tools at all, so an assistant can't accidentally end up without its
+        configured integrations by writing a custom get_pipeline_adapter.
         """
         tools = getattr(self.__class__, "tools", [])
         result = []
@@ -340,6 +343,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
+        result.extend(await self._get_integration_tools(user))
         return result
 
     async def get_rag_tools(
@@ -505,23 +509,34 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
-    mcp_servers: list[str] = []
+    integrations: list[str] = []
 
-    async def get_mcp_tools(
+    async def _get_integration_tools(
         self, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[Any]:
-        """
-        Load MCP tool objects for this assistant.
+        """Load tool objects from every integration configured via `self.integrations`.
 
-        Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
-        in self.mcp_servers.
+        Reads AI_SDK_INTEGRATIONS from settings and filters to the names listed in
+        `self.integrations`. Runs every integration concurrently — each one's
+        get_tools() is individually bounded (see django_ai_sdk.integrations.base.
+        Integration), but awaiting them one at a time would let those bounded delays
+        stack additively when more than one is degraded at the same time, turning a
+        single-integration timeout into a multi-timeout wait for the whole request.
         """
-        if not self.mcp_servers:
+        if not self.integrations:
             return []
 
-        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-        selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-        return await load_mcp_tools(selected, user)
+        async def _safe_get_tools(integration: Any) -> list[Any]:
+            try:
+                return await integration.get_tools(user, assistant=self)
+            except Exception:
+                logger.exception("Failed to load tools for integration %r", integration.name)
+                return []
+
+        results = await asyncio.gather(
+            *(_safe_get_tools(i) for i in get_integrations(self.integrations).values())
+        )
+        return [tool for tools in results for tool in tools]
 
     @abstractmethod
     async def get_pipeline_adapter(

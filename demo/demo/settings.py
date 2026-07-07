@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import environ
-from django_ai_sdk.mcp.schemas import TokenMCPServer
+from django_ai_sdk.integrations.mcp.schemas import TokenMCPIntegrationConfig
 
 env = environ.Env(
     # set casting, default value
@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "django_tasks",
     "django_tasks_db",
     "django_ai_sdk",
+    "django_ai_sdk.integrations.mcp",
     # local
     "piratespeak",
 ]
@@ -184,13 +185,14 @@ AI_SDK_MEMORY_PERMISSIONS = [
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-AI_SDK_MCP_SERVERS = {
-    "linear": TokenMCPServer(
+AI_SDK_INTEGRATIONS = {
+    "linear": TokenMCPIntegrationConfig(
         label="Linear",
         url="https://mcp.linear.app/mcp",
         token=env("LINEAR_API_KEY", default=None),
         tools=["list_issues"],
-    )
+    ),
+    "weather": "piratespeak.integrations.weather.WeatherIntegration",
 }
 
 

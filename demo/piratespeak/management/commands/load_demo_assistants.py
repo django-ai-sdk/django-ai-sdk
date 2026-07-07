@@ -81,7 +81,7 @@ class Command(BaseCommand):
                 model=_MODEL,
                 system_prompt=data.get("system_prompt", ""),
                 tools=data.get("tools", []),
-                mcp_servers=data.get("mcp_servers", []),
+                integrations=data.get("integrations", []),
                 memories=data.get("memories", []),
                 suggestion_enabled=data.get("suggestion_enabled", False),
                 title_generation=data.get("title_generation", True),

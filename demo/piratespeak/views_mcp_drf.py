@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 from django.conf import settings
-from django_ai_sdk.mcp.models import MCPOAuthToken
-from django_ai_sdk.mcp.services import (
+from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+from django_ai_sdk.integrations.mcp.services import (
     disconnect_sync,
     list_connections_sync,
     refresh_access_token_sync,
@@ -89,7 +89,7 @@ class MCPViewSet(viewsets.ViewSet):
             return Response({"detail": "Server name required"}, status=status.HTTP_400_BAD_REQUEST)
 
         server_name: str = pk
-        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+        all_servers = getattr(settings, "AI_SDK_INTEGRATIONS", {})
         server = all_servers.get(server_name)
         if not server:
             result = {"status": "error", "message": "Server not configured"}

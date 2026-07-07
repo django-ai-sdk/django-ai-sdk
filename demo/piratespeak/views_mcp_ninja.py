@@ -8,8 +8,8 @@ import httpx
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
-from django_ai_sdk.mcp.models import MCPOAuthToken
-from django_ai_sdk.mcp.services import MCPService
+from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+from django_ai_sdk.integrations.mcp.services import MCPService
 from ninja import Router, Schema
 
 router = Router()
@@ -83,7 +83,7 @@ async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
     if not request.user.is_authenticated:
         return MCPTestOut(status="not_connected", message="Not authenticated")
 
-    all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+    all_servers = getattr(settings, "AI_SDK_INTEGRATIONS", {})
     server = all_servers.get(server_name)
     if not server:
         return MCPTestOut(status="error", message="Server not configured")

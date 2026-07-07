@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Required, TypedDict
 
-from asgiref.sync import async_to_sync, sync_to_async
-from django.conf import settings
+from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.logger import get_logger
@@ -29,7 +27,7 @@ if TYPE_CHECKING:
         AssistantGroup,
         AssistantUser,
     )
-    from django_ai_sdk.mcp.schemas import AssistantMCPServerStatus
+    from django_ai_sdk.integrations.mcp.schemas import AssistantIntegrationStatus
     from django_ai_sdk.types import UserType
 
 
@@ -46,7 +44,7 @@ class AssistantCreateData(TypedDict, total=False):
     model: str
     system_prompt: str
     tools: list[str]
-    mcp_servers: list[str]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -60,7 +58,7 @@ class AssistantUpdateData(TypedDict, total=False):
     model: str
     system_prompt: str
     tools: list[str]
-    mcp_servers: list[str]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -182,73 +180,41 @@ class AssistantService:
         return assistant.info()
 
     @staticmethod
-    async def get_mcp_server_status(
+    async def get_integration_status(
         assistant: Any, *, user: UserType
-    ) -> list[AssistantMCPServerStatus]:
-        """Get MCP server connection status for an assistant.
+    ) -> list[AssistantIntegrationStatus]:
+        """Get integration status for every integration configured on an assistant.
 
         Requires VIEW_ASSISTANT permission.
 
-        Returns a list of AssistantMCPServerStatus with status: 'active', 'expired', or 'disconnected'.
+        Returns a list of AssistantIntegrationStatus, each carrying an IntegrationStatus
+        (see django_ai_sdk.integrations.base). `type`/`tool_names` come from the
+        Integration itself (`.kind`/`.get_tool_names()`), which each backend implements
+        without triggering live I/O.
         """
         permissions = get_assistant_permissions(assistant)
         await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
 
         try:
-            from django_ai_sdk.mcp.constants import (
-                MCP_STATUS_ACTIVE,
-                MCP_STATUS_DISCONNECTED,
-                MCP_STATUS_EXPIRED,
-            )
-            from django_ai_sdk.mcp.models import MCPOAuthToken
-            from django_ai_sdk.mcp.schemas import (
-                AssistantMCPServerStatus,
-                OAuthMCPServer,
-            )
+            from django_ai_sdk.integrations.mcp.schemas import AssistantIntegrationStatus
+            from django_ai_sdk.integrations.registry import get_integrations
         except ImportError:
             return []
 
-        mcp_server_names: list[str] = getattr(assistant, "mcp_servers", [])
-        if not mcp_server_names:
+        integration_names: list[str] = getattr(assistant, "integrations", [])
+        if not integration_names:
             return []
 
-        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-
-        def _get_tokens() -> dict[str, dict]:
-            return {
-                row["server_name"]: row
-                for row in MCPOAuthToken.objects.filter(
-                    user=user, server_name__in=mcp_server_names
-                ).values("server_name", "expires_at")
-            }
-
-        oauth_tokens = await sync_to_async(_get_tokens)()
-
-        now = timezone.now()
         result = []
-        for name in mcp_server_names:
-            server = all_servers.get(name)
-            if server is None:
-                continue
-
-            if isinstance(server, OAuthMCPServer):
-                token_row = oauth_tokens.get(name)
-                if token_row is None:
-                    status = MCP_STATUS_DISCONNECTED
-                elif token_row["expires_at"] and token_row["expires_at"] <= now:
-                    status = MCP_STATUS_EXPIRED
-                else:
-                    status = MCP_STATUS_ACTIVE
-            else:
-                status = MCP_STATUS_ACTIVE
-
+        for name, integration in get_integrations(integration_names).items():
+            status = await integration.get_status(user)
             result.append(
-                AssistantMCPServerStatus(
+                AssistantIntegrationStatus(
                     server_name=name,
-                    label=server.label or name.title(),
-                    type=server.type,
+                    label=integration.label,
+                    type=integration.kind,
                     status=status,
-                    tool_names=server.tools or [],
+                    tool_names=await integration.get_tool_names(user),
                 )
             )
 
@@ -502,7 +468,7 @@ class AssistantService:
             model=data.get("model", "gpt-4o"),
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
-            mcp_servers=data.get("mcp_servers", []),
+            integrations=data.get("integrations", []),
             memories=data.get("memories", []),
             suggestion_enabled=data.get("suggestion_enabled", False),
             title_generation=data.get("title_generation", True),
@@ -565,7 +531,7 @@ class AssistantService:
 
 list_assistants = async_to_sync(AssistantService.list_assistants)
 get_assistant_info = async_to_sync(AssistantService.get_assistant_info)
-get_mcp_server_status = async_to_sync(AssistantService.get_mcp_server_status)
+get_integration_status = async_to_sync(AssistantService.get_integration_status)
 list_assistant_users = async_to_sync(AssistantService.list_assistant_users)
 add_assistant_user = async_to_sync(AssistantService.add_assistant_user)
 update_assistant_user = async_to_sync(AssistantService.update_assistant_user)
