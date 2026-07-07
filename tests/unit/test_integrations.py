@@ -164,19 +164,19 @@ class TestResilientCacheBackoffAndBroken:
             raise RuntimeError("dead")
 
         await cache.get("k", fails)  # opens at level 0 -> cooldown 10s
-        assert cache._circuit_open_until["k"] - time.monotonic() == pytest.approx(10, abs=1)
+        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(10, abs=1)
 
-        cache._circuit_open_until["k"] = 0  # simulate cooldown having elapsed
+        cache._circuits["k"].open_until = 0  # simulate cooldown having elapsed
         await cache.get("k", fails)  # level 1 -> cooldown 20s
-        assert cache._circuit_open_until["k"] - time.monotonic() == pytest.approx(20, abs=1)
+        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(20, abs=1)
 
-        cache._circuit_open_until["k"] = 0
+        cache._circuits["k"].open_until = 0
         await cache.get("k", fails)  # level 2 -> cooldown 40s, still under the 45s cap
-        assert cache._circuit_open_until["k"] - time.monotonic() == pytest.approx(40, abs=1)
+        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(40, abs=1)
 
-        cache._circuit_open_until["k"] = 0
+        cache._circuits["k"].open_until = 0
         await cache.get("k", fails)  # level 3 -> would be 80s, capped at 45s
-        assert cache._circuit_open_until["k"] - time.monotonic() == pytest.approx(45, abs=1)
+        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(45, abs=1)
         assert cache.status_for("k") == IntegrationStatus.DEGRADED  # still auto-retrying
 
     async def test_gives_up_and_reports_broken_after_one_full_cycle_at_the_cap(self):
@@ -190,7 +190,7 @@ class TestResilientCacheBackoffAndBroken:
         await cache.get("k", fails)  # first failure immediately hits the cap (cooldown == max)
         assert cache.status_for("k") == IntegrationStatus.DEGRADED  # one cap cycle still allowed
 
-        cache._circuit_open_until["k"] = 0  # let that one capped cooldown elapse
+        cache._circuits["k"].open_until = 0  # let that one capped cooldown elapse
         result = await cache.get("k", fails)  # fails again while already at the cap -> give up
         assert result == []
         assert cache.status_for("k") == IntegrationStatus.BROKEN
@@ -207,12 +207,12 @@ class TestResilientCacheBackoffAndBroken:
             raise RuntimeError("dead")
 
         await cache.get("k", fails)
-        cache._circuit_open_until["k"] = 0
+        cache._circuits["k"].open_until = 0
         await cache.get("k", fails)
         assert cache.status_for("k") == IntegrationStatus.BROKEN
         assert calls == 2
 
-        cache._circuit_open_until["k"] = 0  # even if "cooldown" elapses, BROKEN doesn't expire
+        cache._circuits["k"].open_until = 0  # even if "cooldown" elapses, BROKEN doesn't expire
         result = await cache.get("k", fails)
         assert result == []
         assert calls == 2  # no third attempt — broken keys are never auto-probed
@@ -229,7 +229,7 @@ class TestResilientCacheBackoffAndBroken:
             return ["ok"]
 
         await cache.get("k", fails)
-        cache._circuit_open_until["k"] = 0
+        cache._circuits["k"].open_until = 0
         await cache.get("k", fails)
         assert cache.status_for("k") == IntegrationStatus.BROKEN
 
@@ -413,7 +413,7 @@ class TestMCPIntegrationGetStatus:
         )
 
         await integration.get_status()
-        integration._cache._circuit_open_until["linear-broken"] = (
+        integration._cache._circuits["linear-broken"].open_until = (
             0  # let the capped cooldown elapse
         )
         assert await integration.get_status() == IntegrationStatus.BROKEN
@@ -476,7 +476,7 @@ class TestAPIIntegrationGetStatus:
 
         integration = RecoverableIntegration()
         await integration.get_status()
-        integration._cache._circuit_open_until["recoverable"] = 0  # let the cooldown elapse
+        integration._cache._circuits["recoverable"].open_until = 0  # let the cooldown elapse
         assert await integration.get_status() == IntegrationStatus.BROKEN
 
         should_fail = False
@@ -513,7 +513,7 @@ class TestExtensibility:
             name = "custom"
             label = "Custom"
 
-            async def get_tools(self, user=None, assistant=None):
+            async def get_tools(self, user=None, assistant=None, thread_id=""):
                 return ["custom-tool"]
 
             async def get_status(self, user=None, assistant=None):
@@ -532,7 +532,7 @@ class TestExtensibility:
 
         received: dict = {}
 
-        def factory(*, user=None, assistant=None):
+        def factory(*, user=None, assistant=None, thread_id=""):
             received["assistant"] = assistant
             return []
 
@@ -575,7 +575,7 @@ class TestIntegrationFailureIsolation:
             name = "broken"
             tools = []
 
-            async def get_tools(self, user=None, assistant=None):
+            async def get_tools(self, user=None, assistant=None, thread_id=""):
                 raise RuntimeError("upstream is down")
 
         class HealthyIntegration(APIIntegration):
@@ -615,7 +615,7 @@ class TestIntegrationFailureIsolation:
             name = "slow"
             tools = []
 
-            async def get_tools(self, user=None, assistant=None):
+            async def get_tools(self, user=None, assistant=None, thread_id=""):
                 await asyncio.sleep(DELAY)
                 return ["slow-tool"]
 
@@ -623,7 +623,7 @@ class TestIntegrationFailureIsolation:
             name = "other-slow"
             tools = []
 
-            async def get_tools(self, user=None, assistant=None):
+            async def get_tools(self, user=None, assistant=None, thread_id=""):
                 await asyncio.sleep(DELAY)
                 return ["other-slow-tool"]
 

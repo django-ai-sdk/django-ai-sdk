@@ -103,6 +103,21 @@ class _CacheEntry:
         self.expires_at = expires_at
 
 
+class _CircuitState:
+    """Circuit-breaker bookkeeping for one key, gathered in one place instead of
+    five parallel dicts."""
+
+    __slots__ = ("failures", "open_until", "backoff_level", "maxed", "broken", "last_ok")
+
+    def __init__(self) -> None:
+        self.failures = 0
+        self.open_until = 0.0
+        self.backoff_level = 0
+        self.maxed = False
+        self.broken = False
+        self.last_ok: bool | None = None
+
+
 class ResilientCache:
     """Stale-while-revalidate cache with a per-key circuit breaker.
 
@@ -116,10 +131,13 @@ class ResilientCache:
     - Once a key has sat through one full cooldown at the cap and fails again, it is
       marked BROKEN and stops auto-retrying. ``invalidate()`` resets it.
 
-    All state is in-memory, per process. The cache is safe for concurrent use from
-    multiple event loops (e.g. a background pre-warm thread running its own
-    ``asyncio.run()``) — ``_maybe_schedule_refresh`` serialises with a threading lock
-    so two loops can't schedule duplicate background refreshes for the same key.
+    All state is in-memory, per process. ``_schedule_background_refresh`` uses a threading
+    lock so a background pre-warm thread running its own ``asyncio.run()`` can't race
+    a concurrent request into scheduling duplicate background refreshes for the same
+    key. It does not make the rest of the cache safe against two event loops calling
+    ``get()``/``warm()`` for the same key at the same time — ``asyncio.Lock`` isn't
+    cross-loop safe, so callers must ensure pre-warming finishes before request
+    handling starts (as ``apps.py`` does today) rather than running them concurrently.
     """
 
     def __init__(
@@ -145,19 +163,9 @@ class ResilientCache:
         # Strong refs to in-flight background refresh tasks, so they aren't garbage
         # collected mid-flight (asyncio only holds a weak ref internally).
         self._background_tasks: set[asyncio.Task[None]] = set()
-        # Consecutive failure count per key.
-        self._failures: dict[Any, int] = {}
-        # Monotonic deadline per key; live fetches are skipped until then.
-        self._circuit_open_until: dict[Any, float] = {}
-        # Doublings applied so far: cooldown = cb_cooldown * 2**level.
-        self._backoff_level: dict[Any, int] = {}
-        # Keys whose cooldown already hit cb_max_cooldown once; their next failure gives up.
-        self._backoff_maxed: set[Any] = set()
-        # Keys that gave up auto-retrying. Only invalidate() clears this.
-        self._broken: set[Any] = set()
-        # Outcome of the most recent attempt per key, for status_for().
-        self._last_ok: dict[Any, bool] = {}
-        # Guards _maybe_schedule_refresh so that a background pre-warm thread
+        # Circuit-breaker state per key, populated on first failure.
+        self._circuits: dict[Any, _CircuitState] = {}
+        # Guards _schedule_background_refresh so that a background pre-warm thread
         # operating on a second event loop can't race a concurrent request into
         # scheduling a duplicate background task for the same key.
         self._schedule_lock = threading.Lock()
@@ -166,7 +174,8 @@ class ResilientCache:
         return self._locks.setdefault(key, asyncio.Lock())
 
     def _circuit_open(self, key: Any) -> bool:
-        return key in self._broken or self._circuit_open_until.get(key, 0.0) > time.monotonic()
+        state = self._circuits.get(key)
+        return state is not None and (state.broken or state.open_until > time.monotonic())
 
     def status_for(self, key: Any) -> IntegrationStatus:
         """Return the status based on the last attempt for ``key``.
@@ -175,38 +184,33 @@ class ResilientCache:
         Callers MUST call ``get()`` (or ``warm()``) for ``key`` first, or this reports
         a false ACTIVE for an integration nothing has actually checked yet.
         """
-        if key in self._broken:
+        state = self._circuits.get(key)
+        if state is None:
+            return IntegrationStatus.ACTIVE
+        if state.broken:
             return IntegrationStatus.BROKEN
-        if self._circuit_open(key):
-            return IntegrationStatus.DEGRADED
-        if self._last_ok.get(key) is False:
+        if state.open_until > time.monotonic() or state.last_ok is False:
             return IntegrationStatus.DEGRADED
         return IntegrationStatus.ACTIVE
 
-    def _clear_circuit_state(self, key: Any) -> None:
-        self._failures.pop(key, None)
-        self._circuit_open_until.pop(key, None)
-        self._backoff_level.pop(key, None)
-        self._backoff_maxed.discard(key)
-        self._broken.discard(key)
-
     def _record_success(self, key: Any) -> None:
-        self._clear_circuit_state(key)
-        self._last_ok[key] = True
+        state = _CircuitState()
+        state.last_ok = True
+        self._circuits[key] = state
 
     def _record_failure(self, key: Any) -> None:
-        self._last_ok[key] = False
-        count = self._failures.get(key, 0) + 1
-        self._failures[key] = count
-        if count < self._cb_threshold:
+        state = self._circuits.setdefault(key, _CircuitState())
+        state.last_ok = False
+        state.failures += 1
+        if state.failures < self._cb_threshold:
             return
 
-        if key in self._backoff_maxed:
+        if state.maxed:
             # Already waited out one full max-length cooldown and failed again — that's
             # enough evidence this isn't a transient blip. Stop auto-retrying.
-            self._broken.add(key)
-            self._circuit_open_until.pop(key, None)
-            self._backoff_maxed.discard(key)
+            state.broken = True
+            state.open_until = 0.0
+            state.maxed = False
             logger.error(
                 "Integration %r marked BROKEN after sustained failures at max backoff; "
                 "call invalidate() to retry",
@@ -214,16 +218,15 @@ class ResilientCache:
             )
             return
 
-        level = self._backoff_level.get(key, 0)
-        cooldown = min(self._cb_cooldown * (2**level), self._cb_max_cooldown)
-        self._circuit_open_until[key] = time.monotonic() + cooldown
-        self._backoff_level[key] = level + 1
+        cooldown = min(self._cb_cooldown * (2**state.backoff_level), self._cb_max_cooldown)
+        state.open_until = time.monotonic() + cooldown
+        state.backoff_level += 1
         if cooldown >= self._cb_max_cooldown:
-            self._backoff_maxed.add(key)
+            state.maxed = True
         logger.warning(
             "Circuit breaker open for %r after %d consecutive failures; cooling down for %.0fs",
             key,
-            count,
+            state.failures,
             cooldown,
         )
 
@@ -238,7 +241,7 @@ class ResilientCache:
         if entry is not None:
             if entry.expires_at > now:
                 return entry.value
-            self._maybe_schedule_refresh(key, fetch)
+            self._schedule_background_refresh(key, fetch)
             return entry.value
 
         if self._circuit_open(key):
@@ -254,13 +257,12 @@ class ResilientCache:
             except Exception:
                 logger.warning("Integration fetch failed/timed out for %r", key, exc_info=True)
                 self._record_failure(key)
-                self._maybe_schedule_refresh(key, fetch)
                 return self._empty()
             self._record_success(key)
             self._entries[key] = _CacheEntry(value, time.monotonic() + self._ttl)
             return value
 
-    def _maybe_schedule_refresh(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> None:
+    def _schedule_background_refresh(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> None:
         """Fire off a background refresh for ``key``, unless one's already in flight
         or the circuit is open. Fire-and-forget: callers keep serving the stale/empty
         value immediately and don't await this.
@@ -289,8 +291,7 @@ class ResilientCache:
     def invalidate(self, key: Any) -> None:
         """Reset a key to a fresh state. The only way to recover a BROKEN key."""
         self._entries.pop(key, None)
-        self._clear_circuit_state(key)
-        self._last_ok.pop(key, None)
+        self._circuits.pop(key, None)
 
     async def warm(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> None:
         """Populate the cache for ``key`` if it isn't already cached.
