@@ -45,7 +45,7 @@ class IntegrationStatus(StrEnum):
 class Integration(ABC):
     """Common interface every integration backend implements."""
 
-    name: str
+    name: str = ""
     label: str
 
     @abstractmethod
@@ -77,8 +77,10 @@ class Integration(ABC):
     ) -> list[str]:
         """Return this integration's tool names, for display purposes.
 
-        Derives the names from ``get_tools()`` by default. Subclasses can override
-        with a cheaper source.
+        Derives the names from ``get_tools()`` by default, which may do I/O (e.g. an
+        MCP connect or an API health check). Callers that assume this is cheap should
+        confirm the concrete Integration overrides it with a cached/static source;
+        a custom subclass that doesn't override this will pay that I/O cost too.
         """
         return [t.name for t in await self.get_tools(user)]
 
@@ -107,7 +109,13 @@ class ResilientCache:
     - Once a key has sat through one full cooldown at the cap and fails again, it is
       marked BROKEN and stops auto-retrying. ``invalidate()`` resets it.
 
-    All state is in-memory, per process.
+    All state is in-memory, per process, and asyncio-safe only: it assumes every
+    caller shares one event loop. If something drives it from a second loop
+    concurrently (e.g. a background pre-warm thread running its own ``asyncio.run()``
+    against the same process-wide integration registry), the GIL keeps individual
+    dict operations from corrupting state, but the check-then-act sequences in
+    ``get()`` aren't atomic across loops — worst case is a redundant duplicate fetch,
+    which is harmless for idempotent reads but worth knowing about.
     """
 
     def __init__(
@@ -130,6 +138,9 @@ class ResilientCache:
         self._locks: dict[Any, asyncio.Lock] = {}
         # Keys with a background refresh in flight.
         self._refreshing: set[Any] = set()
+        # Strong refs to in-flight background refresh tasks, so they aren't garbage
+        # collected mid-flight (asyncio only holds a weak ref internally).
+        self._background_tasks: set[asyncio.Task[None]] = set()
         # Consecutive failure count per key.
         self._failures: dict[Any, int] = {}
         # Monotonic deadline per key; live fetches are skipped until then.
@@ -262,7 +273,9 @@ class ResilientCache:
             finally:
                 self._refreshing.discard(key)
 
-        asyncio.create_task(_refresh())  # noqa: RUF006 — not awaited
+        task = asyncio.create_task(_refresh())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def invalidate(self, key: Any) -> None:
         """Reset a key to a fresh state. The only way to recover a BROKEN key."""
