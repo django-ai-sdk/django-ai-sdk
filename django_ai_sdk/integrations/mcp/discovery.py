@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import re
@@ -14,6 +15,8 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# A plain TTL memoize, not django_ai_sdk.integrations.base.ResilientCache — discovery
+# results don't fail in a way that needs per-key backoff/circuit-breaking, just expiry.
 _cache: dict[str, tuple[float, OAuthDiscovery]] = {}
 
 
@@ -29,8 +32,26 @@ def _allowed_issuer_domains() -> list[str] | None:
     return getattr(settings, "AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS", None)
 
 
-def _is_safe_url(url: str) -> bool:
-    """Validate URL is http(s) and not a private/reserved IP (SSRF protection)."""
+def _is_unsafe_ip(ip_str: str) -> bool:
+    """Private, loopback, reserved, or link-local (which covers the 169.254.169.254
+    cloud metadata address) — anything internal-only."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparsable — fail closed
+    return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+
+
+async def _is_safe_url(url: str) -> bool:
+    """Validate URL is http(s) and resolves only to public IPs (SSRF protection).
+
+    Resolves the hostname via DNS rather than only checking literal IPs — a
+    hostname isn't safe just because it isn't itself an IP address; it can still
+    resolve to 127.0.0.1 or a cloud metadata address. This matters here because
+    callers use this to validate URLs sourced from an untrusted MCP server's own
+    response (e.g. its `authorization_servers` list) — a compromised server could
+    otherwise point discovery at internal infrastructure.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -38,22 +59,18 @@ def _is_safe_url(url: str) -> bool:
         hostname = parsed.hostname
         if not hostname:
             return False
-        # Reject private and reserved IP ranges (loopback, private networks, metadata services, etc)
         try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                return False
-        except ValueError:
-            # Not an IP, hostname is OK
-            pass
-        return True
+            addrs = await asyncio.get_running_loop().getaddrinfo(hostname, None)
+        except OSError:
+            return False  # DNS resolution failed — fail closed
+        return not any(_is_unsafe_ip(addr[4][0]) for addr in addrs)
     except Exception:
         return False
 
 
-def _is_valid_issuer(issuer: str) -> bool:
+async def _is_valid_issuer(issuer: str) -> bool:
     """Validate issuer is a proper URI per RFC 9728 (authorization_servers field)."""
-    return _is_safe_url(issuer)
+    return await _is_safe_url(issuer)
 
 
 @dataclass
@@ -108,7 +125,7 @@ async def discover(
             logger.debug("Discovery cache hit for %s", mcp_url)
             return cached
 
-    if not _is_safe_url(mcp_url):
+    if not await _is_safe_url(mcp_url):
         raise ValueError(f"Unsafe MCP URL: {mcp_url}")
 
     logger.info("Discovering OAuth for MCP server: %s", mcp_url)
@@ -136,7 +153,7 @@ async def discover(
 
     # Validate issuer format and allowed domains
     for issuer in auth_servers:
-        if not _is_valid_issuer(issuer):
+        if not await _is_valid_issuer(issuer):
             raise ValueError(f"Invalid issuer format: {issuer}")
 
         # Check against allowlist if configured (None = no restriction, [] = allow none, [...] = allow specific)
@@ -202,7 +219,7 @@ async def _probe_resource_metadata(mcp_url: str) -> str:
                 match = re.search(r'resource_metadata="?([^",\s]+)"?', www_auth)
                 if match:
                     url = match.group(1)
-                    if _is_safe_url(url):
+                    if await _is_safe_url(url):
                         return url
     except httpx.HTTPError as e:
         logger.debug("Probe for resource metadata failed: %s", e)
@@ -225,7 +242,7 @@ async def _probe_resource_metadata(mcp_url: str) -> str:
 
 async def _get_json(url: str) -> dict:
     """Safely fetch and parse JSON from a URL with security checks."""
-    if not _is_safe_url(url):
+    if not await _is_safe_url(url):
         raise ValueError(f"Unsafe URL: {url}")
 
     async with httpx.AsyncClient(timeout=_discovery_timeout(), follow_redirects=False) as client:
@@ -242,7 +259,7 @@ async def _get_json(url: str) -> dict:
 
 async def _get_oauth_server_metadata(auth_server_url: str) -> dict | None:
     """Fetch OAuth authorization server metadata from well-known endpoints."""
-    if not _is_valid_issuer(auth_server_url):
+    if not await _is_valid_issuer(auth_server_url):
         return None
 
     base = auth_server_url.rstrip("/")

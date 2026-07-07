@@ -4,15 +4,17 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from django_ai_sdk.integrations.base import IntegrationStatus
 
-class StaticMCPServer(BaseModel):
+
+class StaticMCPIntegrationConfig(BaseModel):
     type: Literal["static"] = "static"
     url: str
     label: str = ""
     tools: list[str] = []
 
 
-class TokenMCPServer(BaseModel):
+class TokenMCPIntegrationConfig(BaseModel):
     type: Literal["token"] = "token"
     url: str
     label: str = ""
@@ -20,13 +22,13 @@ class TokenMCPServer(BaseModel):
     tools: list[str] = []
 
     @model_validator(mode="after")
-    def validate_token(self) -> TokenMCPServer:
+    def validate_token(self) -> TokenMCPIntegrationConfig:
         if not self.token:
-            raise ValueError("token must not be empty for TokenMCPServer")
+            raise ValueError("token must not be empty for TokenMCPIntegrationConfig")
         return self
 
 
-class OAuthMCPServer(BaseModel):
+class OAuthMCPIntegrationConfig(BaseModel):
     type: Literal["oauth"] = "oauth"
     url: str
     label: str = ""
@@ -39,7 +41,7 @@ class OAuthMCPServer(BaseModel):
     tools: list[str] = []
 
     @model_validator(mode="after")
-    def validate_endpoints(self) -> OAuthMCPServer:
+    def validate_endpoints(self) -> OAuthMCPIntegrationConfig:
         has_auth = bool(self.authorization_endpoint)
         has_token = bool(self.token_endpoint)
         if has_auth != has_token:
@@ -49,27 +51,28 @@ class OAuthMCPServer(BaseModel):
         return self
 
 
-MCPServer = Annotated[
-    StaticMCPServer | TokenMCPServer | OAuthMCPServer,
+MCPIntegrationConfig = Annotated[
+    StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
     Field(discriminator="type"),
 ]
 
 
 class ConnectionOut(BaseModel):
-    """MCP server connection status."""
+    """MCP server connection status (staff config UI: which servers exist to pick from)."""
 
     server_name: str
     label: str
     type: str
     connected: bool | None = None
     has_token: bool = False
+    status: IntegrationStatus = IntegrationStatus.ACTIVE
 
 
-class AssistantMCPServerStatus(BaseModel):
-    """MCP server status for an assistant."""
+class AssistantIntegrationStatus(BaseModel):
+    """One configured integration's status for a given assistant/user."""
 
     server_name: str
     label: str
     type: str
-    status: str  # "active", "expired", "disconnected"
+    status: IntegrationStatus
     tool_names: list[str]

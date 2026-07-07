@@ -8,12 +8,12 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from django_ai_sdk.mcp.loader import refresh_oauth_token
-from django_ai_sdk.mcp.models import MCPOAuthToken
-from django_ai_sdk.mcp.schemas import OAuthMCPServer
+from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -38,9 +38,9 @@ class Command(BaseCommand):
         )
 
     async def handle_async(self, threshold: int, server: str | None) -> int:
-        config = getattr(settings, "AI_SDK_MCP_SERVERS", {})
+        config = getattr(settings, "AI_SDK_INTEGRATIONS", {})
         if not config:
-            self.stdout.write(self.style.WARNING("No MCP servers configured"))
+            self.stdout.write(self.style.WARNING("No integrations configured"))
             return 0
 
         # Query tokens expiring within threshold
@@ -69,7 +69,7 @@ class Command(BaseCommand):
                 failed += 1
                 continue
 
-            if not isinstance(server_config, OAuthMCPServer):
+            if not isinstance(server_config, OAuthMCPIntegrationConfig):
                 self.stdout.write(
                     self.style.WARNING(f"Server {server_name!r} is not an OAuth server")
                 )
@@ -117,5 +117,6 @@ class Command(BaseCommand):
     def handle(
         self, *args: object, threshold: int, server: str | None, **options: object
     ) -> str | None:
-        asyncio.run(self.handle_async(threshold=threshold, server=server))
+        if asyncio.run(self.handle_async(threshold=threshold, server=server)):
+            raise CommandError("One or more token refreshes failed")
         return None

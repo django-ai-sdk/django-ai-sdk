@@ -14,9 +14,11 @@ from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.db import DatabaseError
 
-from django_ai_sdk.mcp.discovery import OAuthDiscovery, discover
-from django_ai_sdk.mcp.models import MCPOAuthClient, MCPOAuthToken
-from django_ai_sdk.mcp.schemas import ConnectionOut
+from django_ai_sdk.integrations.base import IntegrationStatus
+from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
+from django_ai_sdk.integrations.mcp.models import MCPOAuthClient, MCPOAuthToken
+from django_ai_sdk.integrations.mcp.schemas import ConnectionOut
+from django_ai_sdk.integrations.registry import get_integrations
 
 if TYPE_CHECKING:
     from django_ai_sdk.types import UserType
@@ -30,8 +32,22 @@ def _b64url(data: bytes) -> str:
 
 
 def _get_mcp_servers() -> dict:
-    """Get MCP servers from settings."""
-    return getattr(settings, "AI_SDK_MCP_SERVERS", {})
+    """Get the MCP-backed entries from AI_SDK_INTEGRATIONS.
+
+    AI_SDK_INTEGRATIONS may also contain hand-written API-backed integrations
+    (registered as a dotted class path rather than an MCP config object) — those
+    have no OAuth/connection concept, so this MCP-specific service layer filters
+    them out rather than assuming every entry has a `.type`/`.label`.
+    """
+    from django_ai_sdk.integrations.mcp.schemas import (
+        OAuthMCPIntegrationConfig,
+        StaticMCPIntegrationConfig,
+        TokenMCPIntegrationConfig,
+    )
+
+    configured: dict = getattr(settings, "AI_SDK_INTEGRATIONS", {})
+    mcp_types = (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig)
+    return {name: value for name, value in configured.items() if isinstance(value, mcp_types)}
 
 
 class MCPService:
@@ -66,6 +82,8 @@ class MCPService:
                 exc_info=True,
             )
 
+        integrations = get_integrations(list(all_servers))
+
         result = []
         for server_name, server_config in all_servers.items():
             # Determine if this server is connected
@@ -86,6 +104,13 @@ class MCPService:
                 # Static/token servers don't have OAuth tokens, so no "connection" state
                 is_connected = None
 
+            integration = integrations.get(server_name)
+            status = (
+                await integration.get_status(user=user)
+                if integration is not None
+                else IntegrationStatus.DISCONNECTED
+            )
+
             result.append(
                 ConnectionOut(
                     server_name=server_name,
@@ -93,6 +118,7 @@ class MCPService:
                     type=server_config.type,
                     connected=is_connected,
                     has_token=server_name in connected,
+                    status=status,
                 )
             )
 
@@ -108,6 +134,19 @@ class MCPService:
             user=user, server_name=server_name
         ).adelete()
         return deleted > 0
+
+    @staticmethod
+    async def reconnect(server_name: str, *, user: UserType) -> IntegrationStatus | None:
+        """Reset a degraded/broken integration's retry state and immediately make a
+        real attempt, so the caller gets the actual outcome rather than a blind
+        promise — resetting the state doesn't mean the underlying problem (e.g. a
+        still-wrong URL) is actually fixed. Returns None if the server isn't
+        configured."""
+        integration = get_integrations([server_name]).get(server_name)
+        if integration is None:
+            return None
+        await integration.reconnect(user=user)
+        return await integration.get_status(user=user)
 
     # ============================================================================
     # OAuth PKCE Helpers (pure, no I/O)
@@ -353,6 +392,7 @@ class MCPService:
 
 list_connections_sync = async_to_sync(MCPService.list_connections)
 disconnect_sync = async_to_sync(MCPService.disconnect)
+reconnect_sync = async_to_sync(MCPService.reconnect)
 get_oauth_discovery_sync = async_to_sync(MCPService.get_oauth_discovery)
 get_or_register_client_sync = async_to_sync(MCPService.get_or_register_client)
 exchange_token_sync = async_to_sync(MCPService.exchange_token)
