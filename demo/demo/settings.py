@@ -185,15 +185,18 @@ AI_SDK_MEMORY_PERMISSIONS = [
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-AI_SDK_INTEGRATIONS = {
-    "linear": TokenMCPIntegrationConfig(
-        label="Linear",
-        url="https://mcp.linear.app/mcp",
-        token=env("LINEAR_API_KEY", default=None),
-        tools=["list_issues"],
-    ),
+AI_SDK_INTEGRATIONS: dict[str, object] = {
     "weather": "piratespeak.integrations.weather.WeatherIntegration",
 }
+
+_linear_api_key = env("LINEAR_API_KEY", default=None)
+if _linear_api_key:
+    AI_SDK_INTEGRATIONS["linear"] = TokenMCPIntegrationConfig(
+        label="Linear",
+        url="https://mcp.linear.app/mcp",
+        token=_linear_api_key,
+        tools=["list_issues"],
+    )
 
 
 # MCP discovery configuration

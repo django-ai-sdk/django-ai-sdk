@@ -92,7 +92,7 @@ async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
     refreshed = False
 
     if server.type == "token":
-        token = server.token
+        token = server.token.get_secret_value()
     elif server.type == "oauth":
         try:
             token_obj = await MCPOAuthToken.objects.aget(user=request.user, server_name=server_name)

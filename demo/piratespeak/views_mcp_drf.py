@@ -99,7 +99,7 @@ class MCPViewSet(viewsets.ViewSet):
         refreshed = False
 
         if server.type == "token":
-            token = server.token
+            token = server.token.get_secret_value()
         elif server.type == "oauth":
             try:
                 token_obj = MCPOAuthToken.objects.get(user=request.user, server_name=server_name)
