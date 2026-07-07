@@ -15,6 +15,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.test.signals import setting_changed
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.integrations.base import Integration
@@ -73,6 +74,20 @@ def get_integrations(names: list[str]) -> dict[str, Integration]:
 
 
 def reset_registry_cache() -> None:
-    """Test-only: clear the resolved-integrations cache."""
+    """Clear the resolved-integrations cache, forcing a rebuild on next access."""
     global _registry_cache
     _registry_cache = None
+
+
+def _on_setting_changed(*, setting: str, **kwargs: Any) -> None:
+    """Auto-invalidate when AI_SDK_INTEGRATIONS changes under ``override_settings``.
+
+    Without this, a test suite using ``override_settings(AI_SDK_INTEGRATIONS=...)``
+    would silently keep serving integrations built from the previous value, since
+    the cache is otherwise process-lifetime.
+    """
+    if setting == "AI_SDK_INTEGRATIONS":
+        reset_registry_cache()
+
+
+setting_changed.connect(_on_setting_changed)
