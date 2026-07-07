@@ -97,10 +97,11 @@ class MCPIntegration(Integration):
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
         assistant: Assistant | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
-        # `assistant` is unused here — MCP tools are discovered from the remote
-        # server as-is, with no per-call model/context to inject. Accepted only for
-        # signature consistency with the Integration ABC.
+        # `assistant`/`thread_id` are unused here — MCP tools are discovered from
+        # the remote server as-is, with no per-call model/context to inject.
+        # Accepted only for signature consistency with the Integration ABC.
         key = self._cache_key(user)
         if key is None:
             return []

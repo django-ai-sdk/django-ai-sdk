@@ -189,8 +189,7 @@ class AssistantService:
 
         Returns a list of AssistantIntegrationStatus, each carrying an IntegrationStatus
         (see django_ai_sdk.integrations.base). `type`/`tool_names` come from the
-        Integration itself (`.kind`/`.get_tool_names()`), which each backend implements
-        without triggering live I/O.
+        Integration itself (`.kind`/`.get_tool_names()`).
         """
         permissions = get_assistant_permissions(assistant)
         await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)

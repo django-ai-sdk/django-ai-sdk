@@ -330,10 +330,6 @@ class Assistant(ABC, AssistantInfoMixin):
           def get_my_tool(thread_id="", user_id="", **kwargs): ...
           def get_my_tool(user_id="", **kwargs): ...
 
-        Integrations configured via `self.integrations` are always included here too
-        — this is deliberate: it's the one method every pipeline adapter must call to
-        get any tools at all, so an assistant can't accidentally end up without its
-        configured integrations by writing a custom get_pipeline_adapter.
         """
         tools = getattr(self.__class__, "tools", [])
         result = []
@@ -343,7 +339,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
-        result.extend(await self._get_integration_tools(user))
+        result.extend(await self._get_integration_tools(user, thread_id=thread_id))
         return result
 
     async def get_rag_tools(
@@ -512,23 +508,22 @@ class Assistant(ABC, AssistantInfoMixin):
     integrations: list[str] = []
 
     async def _get_integration_tools(
-        self, user: AbstractBaseUser | AnonymousUser | None = None
+        self,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
         """Load tool objects from every integration configured via `self.integrations`.
 
         Reads AI_SDK_INTEGRATIONS from settings and filters to the names listed in
         `self.integrations`. Runs every integration concurrently — each one's
-        get_tools() is individually bounded (see django_ai_sdk.integrations.base.
-        Integration), but awaiting them one at a time would let those bounded delays
-        stack additively when more than one is degraded at the same time, turning a
-        single-integration timeout into a multi-timeout wait for the whole request.
+        get_tools() is individually bounded.
         """
         if not self.integrations:
             return []
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:
-                return await integration.get_tools(user, assistant=self)
+                return await integration.get_tools(user, assistant=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []

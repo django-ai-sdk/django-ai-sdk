@@ -21,23 +21,17 @@ if TYPE_CHECKING:
 class APIIntegration(Integration):
     """Base for integrations backed by a hand-written API client, not MCP.
 
-    Each entry in ``tools`` is a factory called as ``factory(user=..., assistant=...)``,
-    returning a Tool or a list of Tools, either directly or via an ``async`` factory.
+    Each entry in ``tools`` is a factory called as
+    ``factory(user=..., assistant=..., thread_id=...)``, returning a Tool or a
+    list of Tools, either directly or via an ``async`` factory. A factory that
+    doesn't need ``thread_id`` can simply not declare it, as long as it accepts
+    ``**kwargs``.
 
     ``get_status()`` reports ACTIVE unconditionally unless a subclass sets
     ``health_check`` — an async, no-arg callable that raises on failure. When set, it's
     run through the same ResilientCache (stale-while-revalidate + circuit breaker; see
     ``django_ai_sdk.integrations.base``) every other integration kind uses, so a down
     API shows up as DEGRADED/BROKEN instead of a false ACTIVE.
-
-    A subclass only needs to set class attributes — see
-    ``piratespeak.integrations.weather.WeatherIntegration`` in the demo app for a
-    runnable example::
-
-        class WeatherIntegration(APIIntegration):
-            label = "Weather"
-            tools = [get_weather_tool]
-            health_check = staticmethod(check_weather_api)
     """
 
     name: str = ""
@@ -66,10 +60,11 @@ class APIIntegration(Integration):
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
         assistant: Assistant | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
         result: list[Any] = []
         for factory in self.tools:
-            items = factory(user=user, assistant=assistant)
+            items = factory(user=user, assistant=assistant, thread_id=thread_id)
             if inspect.isawaitable(items):
                 items = await items
             if isinstance(items, list):

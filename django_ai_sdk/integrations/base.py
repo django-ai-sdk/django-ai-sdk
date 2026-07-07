@@ -54,10 +54,16 @@ class Integration(ABC):
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
         assistant: Assistant | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
         """Return this integration's tool objects.
 
-        ``assistant`` is the calling Assistant instance.
+        ``assistant`` is the calling Assistant instance. ``thread_id`` is the
+        active conversation, forwarded from ``Assistant.get_tools()`` — most
+        integrations (MCP servers, external APIs) are user/assistant-scoped and
+        can ignore it; it exists for the rare integration whose tools need to
+        know which thread they're running in (e.g. one that lists documents
+        attached to *this* conversation).
         """
 
     @abstractmethod
@@ -113,10 +119,7 @@ class ResilientCache:
     All state is in-memory, per process. The cache is safe for concurrent use from
     multiple event loops (e.g. a background pre-warm thread running its own
     ``asyncio.run()``) — ``_maybe_schedule_refresh`` serialises with a threading lock
-    so two loops can't schedule duplicate background refreshes for the same key. The
-    remaining check-then-act sequences in ``get()`` are protected by asyncio Locks per
-    key, so within a single event loop they're correct; across loops the worst case
-    is a redundant duplicate fetch, which is harmless for idempotent reads.
+    so two loops can't schedule duplicate background refreshes for the same key.
     """
 
     def __init__(

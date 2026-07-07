@@ -69,9 +69,7 @@ class Command(BaseCommand):
 
             if not integration:
                 self.stdout.write(
-                    self.style.WARNING(
-                        f"Server {server_name!r} not found among OAuth integrations"
-                    )
+                    self.style.WARNING(f"Server {server_name!r} not found among OAuth integrations")
                 )
                 failed += 1
                 continue
