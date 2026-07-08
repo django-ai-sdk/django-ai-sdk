@@ -39,6 +39,43 @@ class Error(Schema):
     code: int | None = None
 
 
+class UploadSettingsOut(Schema):
+    max_upload_size: int
+    allowed_mime_types: list[str]
+
+
+@router.get(
+    "/settings",
+    response=UploadSettingsOut,
+    operation_id="get_upload_settings",
+    auth=None,
+)
+async def get_upload_settings(request: HttpRequest) -> UploadSettingsOut:
+    from django.conf import settings as dj_settings
+    from django.utils.module_loading import import_string
+
+    max_size = getattr(dj_settings, "AI_SDK_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
+
+    allowed: set[str] = set()
+    allowed_files = getattr(dj_settings, "AI_SDK_ALLOWED_FILES", {})
+    allowed.update(allowed_files.values())
+
+    pipeline_setting = getattr(dj_settings, "AI_SDK_MEMORY_FILE_PIPELINE", None)
+    if pipeline_setting:
+        paths = [pipeline_setting] if isinstance(pipeline_setting, str) else pipeline_setting
+        for path in paths:
+            try:
+                pipeline = import_string(path)()
+                allowed.update(pipeline.file_processor.ALLOWED_MIME_TYPES)
+            except Exception:
+                pass
+
+    return UploadSettingsOut(
+        max_upload_size=max_size,
+        allowed_mime_types=sorted(allowed) if allowed else ["*/*"],
+    )
+
+
 @router.post("", response={200: MemoryOut, 403: dict}, operation_id="create_memory")
 async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | tuple[int, dict]:
     try:
