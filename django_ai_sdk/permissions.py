@@ -3,11 +3,12 @@ from __future__ import annotations
 from abc import ABC
 from enum import StrEnum
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.conf import settings
 from django.db.models import Q
 from django.utils.module_loading import import_string
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -189,6 +190,33 @@ class ThreadDefaultPermission(BasePermission):
     - Anonymous users: no access to threads.
     """
 
+    READ: frozenset[Operation] = frozenset(
+        {
+            Operation.VIEW_THREAD,
+            Operation.VIEW_HISTORY,
+            Operation.VIEW_MESSAGES,
+            Operation.LIST_THREADS,
+        }
+    )
+    WRITE: frozenset[Operation] = frozenset(
+        {
+            Operation.CHAT,
+            Operation.SEND_MESSAGE,
+            Operation.UPLOAD_FILE,
+            Operation.RATE_MESSAGE,
+        }
+    )
+    MANAGE: frozenset[Operation] = frozenset(
+        {
+            Operation.DELETE_THREAD,
+            Operation.UPDATE_THREAD,
+            Operation.DELETE_MESSAGE,
+            Operation.RESTORE_MESSAGE,
+            Operation.DELETE_FILE,
+            Operation.DELETE_ALL_THREADS,
+        }
+    )
+
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         # Only authenticated users can access threads
         if user is None or not user.is_authenticated:
@@ -232,7 +260,7 @@ class MemoryDefaultPermission(BasePermission):
             Operation.DELETE_DOCUMENT,
         }
     )
-    MANAGER: frozenset[Operation] = frozenset(
+    MANAGE: frozenset[Operation] = frozenset(
         {
             Operation.UPDATE_MEMORY,
             Operation.DELETE_MEMORY,
@@ -266,7 +294,7 @@ class MemoryDefaultPermission(BasePermission):
                 Q(memory_users__user=user) | Q(memory_groups__group__user=user)
             ).distinct()
 
-        # MANAGER operations — let per-object checks handle the can_manage flag
+        # MANAGE operations — let per-object checks handle the can_manage flag
         return queryset
 
     async def has_object_permission(
@@ -277,12 +305,12 @@ class MemoryDefaultPermission(BasePermission):
         **kwargs: Any,
     ) -> bool:
         ownership = await obj.memory_users.filter(user=user).afirst()
-        if ownership is not None and (operation not in self.MANAGER or ownership.can_manage):
+        if ownership is not None and (operation not in self.MANAGE or ownership.can_manage):
             return True
 
         group_ownership = await obj.memory_groups.filter(group__user=user).afirst()
         if group_ownership is not None and (
-            operation not in self.MANAGER or group_ownership.can_manage
+            operation not in self.MANAGE or group_ownership.can_manage
         ):
             return True
 
@@ -300,21 +328,24 @@ class AssistantDefaultPermission(BasePermission):
     - Anonymous: blocked for assistant ops, pass-through for everything else.
     """
 
-    MANAGER: frozenset[Operation] = frozenset(
+    READ: frozenset[Operation] = frozenset(
+        {
+            Operation.VIEW_ASSISTANT,
+        }
+    )
+    WRITE: frozenset[Operation] = frozenset(
+        {
+            Operation.CREATE_ASSISTANT,
+        }
+    )
+    MANAGE: frozenset[Operation] = frozenset(
         {
             Operation.UPDATE_ASSISTANT,
             Operation.DELETE_ASSISTANT,
         }
     )
 
-    ASSISTANT_OPS: frozenset[Operation] = frozenset(
-        {
-            Operation.VIEW_ASSISTANT,
-            Operation.CREATE_ASSISTANT,
-            Operation.UPDATE_ASSISTANT,
-            Operation.DELETE_ASSISTANT,
-        }
-    )
+    ASSISTANT_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if operation not in self.ASSISTANT_OPS:
@@ -341,14 +372,14 @@ class AssistantDefaultPermission(BasePermission):
         from django_ai_sdk.assistants.models import AssistantUser
 
         user_entry = await AssistantUser.objects.filter(assistant=obj, user=user).afirst()
-        if user_entry is not None and (operation not in self.MANAGER or user_entry.can_manage):
+        if user_entry is not None and (operation not in self.MANAGE or user_entry.can_manage):
             return True
 
         # Check group membership
         from django_ai_sdk.assistants.models import AssistantGroup
 
         group_entry = await AssistantGroup.objects.filter(assistant=obj, group__user=user).afirst()
-        if group_entry is not None and (operation not in self.MANAGER or group_entry.can_manage):
+        if group_entry is not None and (operation not in self.MANAGE or group_entry.can_manage):
             return True
 
         return False
@@ -416,6 +447,38 @@ class PermissionsMixin:
         return await has_perms(
             user, operation, obj, permissions=perms, raise_on_deny=raise_on_deny, **kwargs
         )
+
+    @classmethod
+    async def get_object_permissions_map(
+        cls,
+        user: UserType,
+        obj: Any,
+    ) -> dict[str, bool]:
+        """Auto-discover frozenset permission groups and check user against them.
+
+        Iterates the domain's permission classes, finds ``READ`` / ``WRITE`` /
+        ``MANAGE`` (and any other upper-case frozensets), and checks one
+        representative operation per group against the full permission chain.
+
+        Returns a dict like ``{"read": True, "write": False, "manage": False}``.
+        """
+        groups: dict[str, Operation] = {}
+        for perm_cls in cls.get_default_permissions():
+            perm = ensure_permission_instance(perm_cls)
+            for attr in dir(perm):
+                val = getattr(perm, attr, None)
+                if attr.isupper() and isinstance(val, frozenset) and val:
+                    key = attr.lower()
+                    if key not in groups:
+                        groups[key] = cast("Operation", next(iter(val)))
+        result: dict[str, bool] = {}
+        for name, op in groups.items():
+            try:
+                await cls.has_perms(user, op, obj, raise_on_deny=True)
+                result[name] = True
+            except PermissionDenied:
+                result[name] = False
+        return result
 
     @classmethod
     def has_queryset_perms(
@@ -536,3 +599,9 @@ async def check_object_permissions(
                 )
             return False
     return True
+
+
+class ObjectPermissions(BaseModel):
+    can_read: bool = False
+    can_write: bool = False
+    can_manage: bool = False

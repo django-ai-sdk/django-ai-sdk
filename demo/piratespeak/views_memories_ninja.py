@@ -17,11 +17,17 @@ from django_ai_sdk.memories.schemas import (
     UpdateMemoryUserIn,
 )
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import ConflictError, PermissionDenied
+from django_ai_sdk.permissions import ConflictError, ObjectPermissions, PermissionDenied
 from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 
+from piratespeak.views_permissions import memory_permissions
+
 router = Router()
+
+
+class MemoryOutResponse(MemoryOut):
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class SourceContentOut(Schema):
@@ -47,20 +53,27 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | 
         return 403, {"detail": str(e)}
 
 
-@router.get("", response={200: list[MemoryOut], 403: dict}, operation_id="list_memories")
+@router.get("", response={200: list[MemoryOutResponse], 403: dict}, operation_id="list_memories")
 async def list_memories(
     request: HttpRequest, limit: int = 100, offset: int = 0
-) -> list[MemoryOut] | tuple[int, dict]:
+) -> list[MemoryOutResponse] | tuple[int, dict]:
     try:
-        return await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
+        memories = await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
+        result = []
+        for m in memories:
+            perms = await memory_permissions(request.user, m.id)
+            result.append(MemoryOutResponse(**m.model_dump(), permissions=perms))
+        return result
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}", response={200: MemoryOut, 403: dict}, operation_id="get_memory")
-async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOut | tuple[int, dict]:
+@router.get("/{memory_id}", response={200: MemoryOutResponse, 403: dict}, operation_id="get_memory")
+async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOutResponse | tuple[int, dict]:
     try:
-        return await MemoryService.get_memory(memory_id, user=request.user)
+        memory = await MemoryService.get_memory(memory_id, user=request.user)
+        perms = await memory_permissions(request.user, memory_id)
+        return MemoryOutResponse(**memory.model_dump(), permissions=perms)
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 

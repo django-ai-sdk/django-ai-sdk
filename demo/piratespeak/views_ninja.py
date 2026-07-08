@@ -12,8 +12,10 @@ from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import PermissionDenied
-from django_ai_sdk.storage.schemas import ThreadInfo
+from django_ai_sdk.permissions import ObjectPermissions, PermissionDenied
+from django_ai_sdk.storage.schemas import (
+    ThreadInfo,  # noqa: TC002 — needed at runtime for Pydantic schema
+)
 from django_ai_sdk.storage.services import (
     ThreadService,
     aget_thread_file_meta,
@@ -23,6 +25,8 @@ from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 from django_ai_sdk.workflows.models import WorkflowSettings
 from ninja import Router, Schema
+
+from piratespeak.views_permissions import assistant_permissions, thread_permissions
 
 router = Router()
 logger = get_logger(__name__)
@@ -64,6 +68,7 @@ class AssistantInfoResponse(Schema):
     instructions: str | None = None
     file_upload: bool = False
     rag: bool = False
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class Tool(Schema):
@@ -126,6 +131,7 @@ class ThreadMessage(Schema):
 class ThreadDetailResponse(Schema):
     thread: ThreadInfo
     messages: list[ThreadMessage]
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class ThreadFileMeta(Schema):
@@ -224,7 +230,8 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
             message["feedback"] = user_feedback
             del message["feedbacks"]
 
-        return ThreadDetailResponse(**data)
+        perms = await thread_permissions(request.user, thread_id)
+        return ThreadDetailResponse(**data, permissions=perms)
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
@@ -840,6 +847,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
     try:
         assistant = await AssistantService.get(assistant_id)
         info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
+        perms = await assistant_permissions(request.user, assistant_id)
         return AssistantInfoResponse(
             id=info.id,
             name=info.name,
@@ -849,6 +857,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
             instructions=assistant.get_system_prompt(),
             file_upload=info.file_upload,
             rag=info.rag,
+            permissions=perms,
         )
     except PermissionDenied as e:
         return 403, Error(message=str(e))
