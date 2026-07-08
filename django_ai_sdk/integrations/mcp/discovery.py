@@ -1,17 +1,36 @@
-"""RFC 9728 — OAuth 2.0 Protected Resource Metadata discovery for MCP servers."""
+"""RFC 9728 — OAuth 2.0 Protected Resource Metadata discovery for MCP servers.
+
+The RFC-compliant URL construction and response parsing are delegated to the
+official ``mcp`` SDK's stateless helpers (``mcp.client.auth.utils`` /
+``mcp.shared.auth``). This module keeps only what the SDK deliberately does not
+provide: SSRF protection over every outbound request, an issuer-domain allowlist,
+an in-process discovery cache, and the flattened ``OAuthDiscovery`` result that the
+rest of the codebase consumes.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import ipaddress
 import logging
-import re
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
 from django.conf import settings
+from mcp.client.auth.utils import (
+    build_oauth_authorization_server_metadata_discovery_urls,
+    build_protected_resource_metadata_discovery_urls,
+    extract_resource_metadata_from_www_auth,
+    handle_auth_metadata_response,
+    handle_protected_resource_response,
+)
+from mcp.shared.auth_utils import check_resource_allowed
+
+if TYPE_CHECKING:
+    from mcp.shared.auth import OAuthMetadata, ProtectedResourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +98,6 @@ class OAuthDiscovery:
     token_endpoint: str
     resource: str | None = None
     registration_endpoint: str | None = None
-    scopes_supported: list[str] | None = None
-    bearer_methods_supported: list[str] | None = None
 
 
 async def discover(
@@ -92,31 +109,28 @@ async def discover(
     """
     Discover OAuth endpoints for an MCP server per RFC 9728.
 
-    RFC 9728 flow:
+    Flow:
     1. POST initialize → expect 401 with WWW-Authenticate: Bearer resource_metadata=<url>
-    2. GET resource_metadata → authorization_servers list, validate resource
-    3. GET /.well-known/oauth-authorization-server → endpoints
+    2. GET protected-resource metadata → authorization_servers list, validate resource
+    3. GET the authorization server's metadata (RFC 8414 / OIDC) → endpoints
 
     Args:
         mcp_url: The MCP server URL to discover OAuth for
-        expected_resource: Optional. If provided, validate the discovered resource matches
-        allowed_issuer_domains: Optional. List of allowed OAuth issuer domains (e.g., ["accounts.notion.com"])
-                               Enables defense-in-depth against compromised MCP servers.
+        expected_resource: Optional. If provided, validate the discovered resource is
+                           allowed for it (RFC 8707 hierarchical/origin match).
+        allowed_issuer_domains: Optional. List of allowed OAuth issuer domains (e.g.,
+                               ["accounts.notion.com"]). Defense-in-depth against
+                               compromised MCP servers.
                                - None (default): No restriction, allow any issuer
                                - [] (empty): Reject all issuers
                                - ["domain"]: Only allow specified domains
-                               If not provided, uses AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS from settings.
+                               If not provided, uses AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS.
         use_cache: Whether to use cached results. Default True.
 
     Results are cached in-process for AI_SDK_MCP_DISCOVERY_CACHE_TTL seconds (default 3600).
 
-    Settings (configure in Django settings.py):
-        AI_SDK_MCP_DISCOVERY_CACHE_TTL: Cache TTL in seconds (default 3600)
-        AI_SDK_MCP_DISCOVERY_TIMEOUT: HTTP request timeout in seconds (default 10)
-        AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS: Default list of allowed OAuth issuer domains
-
     Raises:
-        ValueError: If discovery fails, resource validation fails, or URL is unsafe
+        ValueError: If discovery fails, resource validation fails, or a URL is unsafe.
     """
     now = time.monotonic()
     if use_cache and mcp_url in _cache:
@@ -129,36 +143,114 @@ async def discover(
         raise ValueError(f"Unsafe MCP URL: {mcp_url}")
 
     logger.info("Discovering OAuth for MCP server: %s", mcp_url)
-    resource_metadata_url = await _probe_resource_metadata(mcp_url)
-    resource_metadata = await _get_json(resource_metadata_url)
+    async with httpx.AsyncClient(timeout=_discovery_timeout(), follow_redirects=False) as client:
+        prm = await _fetch_protected_resource_metadata(client, mcp_url)
 
-    resource = resource_metadata.get("resource")
-    if not resource:
-        raise ValueError(f"Missing 'resource' in metadata from {resource_metadata_url}")
+        resource = str(prm.resource)
+        if expected_resource and not check_resource_allowed(
+            requested_resource=resource, configured_resource=expected_resource
+        ):
+            raise ValueError(f"Resource mismatch: expected {expected_resource}, got {resource}")
 
-    # RFC 9728: Client should validate resource matches expectations
-    if expected_resource and resource != expected_resource:
-        raise ValueError(f"Resource mismatch: expected {expected_resource}, got {resource}")
+        auth_servers = [str(s) for s in prm.authorization_servers]
+        logger.debug("Discovered %d authorization server(s) for %s", len(auth_servers), mcp_url)
+        await _validate_issuers(auth_servers, allowed_issuer_domains)
 
-    auth_servers: list[str] = resource_metadata.get("authorization_servers", [])
-    if not auth_servers:
-        raise ValueError(f"No authorization_servers in metadata from {resource_metadata_url}")
+        asm = await _fetch_authorization_server_metadata(client, auth_servers, mcp_url)
 
-    logger.debug("Discovered %d authorization server(s) for %s", len(auth_servers), mcp_url)
+    result = OAuthDiscovery(
+        authorization_endpoint=str(asm.authorization_endpoint),
+        token_endpoint=str(asm.token_endpoint),
+        resource=resource,
+        registration_endpoint=str(asm.registration_endpoint) if asm.registration_endpoint else None,
+    )
 
-    # Use settings default if not explicitly provided
+    if use_cache and _cache_ttl() > 0:
+        _cache[mcp_url] = (now + _cache_ttl(), result)
+        logger.debug("Cached discovery result for %s (TTL: %ds)", mcp_url, _cache_ttl())
+
+    return result
+
+
+async def _probe_www_auth(client: httpx.AsyncClient, mcp_url: str) -> str | None:
+    """POST initialize to elicit a 401 and pull the resource_metadata URL out of the
+    WWW-Authenticate header (RFC 9728). Returns None if there's no usable header —
+    the well-known fallbacks are then supplied by the SDK's URL builder."""
+    try:
+        response = await client.post(
+            mcp_url,
+            json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1},
+        )
+    except httpx.HTTPError as e:
+        logger.debug("Probe for resource metadata failed: %s", e)
+        return None
+    url = extract_resource_metadata_from_www_auth(response)
+    if url and await _is_safe_url(url):
+        return url
+    return None
+
+
+async def _fetch_protected_resource_metadata(
+    client: httpx.AsyncClient, mcp_url: str
+) -> ProtectedResourceMetadata:
+    """Try each RFC 9728 candidate URL until one returns valid PRM."""
+    www_auth_url = await _probe_www_auth(client, mcp_url)
+    for url in build_protected_resource_metadata_discovery_urls(www_auth_url, mcp_url):
+        if not await _is_safe_url(url):
+            continue
+        try:
+            response = await client.get(url)
+        except httpx.HTTPError as e:
+            logger.debug("Protected-resource metadata fetch failed for %s: %s", url, e)
+            continue
+        prm = await handle_protected_resource_response(response)
+        if prm is not None:
+            return prm
+    raise ValueError(f"Cannot discover resource metadata for {mcp_url}")
+
+
+async def _fetch_authorization_server_metadata(
+    client: httpx.AsyncClient, auth_servers: list[str], mcp_url: str
+) -> OAuthMetadata:
+    """Walk the advertised authorization servers, trying each server's RFC 8414 / OIDC
+    well-known URLs until one yields valid metadata."""
+    failed_issuers: list[str] = []
+    for server_url in auth_servers:
+        for url in build_oauth_authorization_server_metadata_discovery_urls(server_url, mcp_url):
+            if not await _is_safe_url(url):
+                continue
+            try:
+                response = await client.get(url)
+            except httpx.HTTPError as e:
+                logger.debug("Auth-server metadata fetch failed for %s: %s", url, e)
+                continue
+            keep_trying, asm = await handle_auth_metadata_response(response)
+            if asm is not None:
+                logger.info("Successfully discovered OAuth metadata from %s", server_url)
+                return asm
+            if not keep_trying:
+                break
+        failed_issuers.append(server_url)
+
+    raise ValueError(
+        f"No valid OAuth metadata found. Tried {len(auth_servers)} issuer(s). "
+        f"Failed: {failed_issuers}"
+    )
+
+
+async def _validate_issuers(
+    auth_servers: list[str], allowed_issuer_domains: list[str] | None
+) -> None:
+    """SSRF-check every advertised issuer, and enforce the domain allowlist if set."""
     domains_to_check = (
         allowed_issuer_domains if allowed_issuer_domains is not None else _allowed_issuer_domains()
     )
-
-    # Validate issuer format and allowed domains
     for issuer in auth_servers:
         if not await _is_valid_issuer(issuer):
             raise ValueError(f"Invalid issuer format: {issuer}")
 
-        # Check against allowlist if configured (None = no restriction, [] = allow none, [...] = allow specific)
-        # Each entry may be a bare hostname ("mcp.notion.com") or a full URL
-        # ("https://mcp.notion.com/mcp") — normalize both to netloc for comparison.
+        # None = no restriction, [] = allow none, [...] = allow specific. Each entry may
+        # be a bare hostname ("mcp.notion.com") or a full URL — normalize both to netloc.
         if domains_to_check is not None:
             issuer_domain = urlparse(issuer).netloc
             normalized = {urlparse(d).netloc if "://" in d else d for d in domains_to_check}
@@ -169,116 +261,6 @@ async def discover(
                     domains_to_check,
                 )
                 raise ValueError(f"Issuer {issuer_domain} not in allowed domains")
-
-    oauth_metadata: dict | None = None
-    failed_issuers = []
-    for server_url in auth_servers:
-        try:
-            oauth_metadata = await _get_oauth_server_metadata(server_url)
-            if oauth_metadata:
-                logger.info("Successfully discovered OAuth metadata from %s", server_url)
-                break
-        except Exception as e:
-            logger.debug("Failed to get metadata from %s: %s", server_url, e)
-            failed_issuers.append(server_url)
-
-    if not oauth_metadata:
-        raise ValueError(
-            f"No valid OAuth metadata found. Tried {len(auth_servers)} issuer(s). "
-            f"Failed: {failed_issuers}"
-        )
-
-    result = OAuthDiscovery(
-        authorization_endpoint=oauth_metadata["authorization_endpoint"],
-        token_endpoint=oauth_metadata["token_endpoint"],
-        resource=resource,
-        registration_endpoint=oauth_metadata.get("registration_endpoint"),
-        scopes_supported=oauth_metadata.get("scopes_supported"),
-        bearer_methods_supported=oauth_metadata.get("bearer_methods_supported"),
-    )
-
-    if use_cache and _cache_ttl() > 0:
-        _cache[mcp_url] = (now + _cache_ttl(), result)
-        logger.debug("Cached discovery result for %s (TTL: %ds)", mcp_url, _cache_ttl())
-
-    return result
-
-
-async def _probe_resource_metadata(mcp_url: str) -> str:
-    """POST initialize to trigger a 401 and extract the resource_metadata URL per RFC 9728."""
-    try:
-        async with httpx.AsyncClient(
-            timeout=_discovery_timeout(), follow_redirects=False
-        ) as client:
-            response = await client.post(
-                mcp_url,
-                json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1},
-            )
-            if response.status_code == 401:
-                www_auth = response.headers.get("WWW-Authenticate", "")
-                match = re.search(r'resource_metadata="?([^",\s]+)"?', www_auth)
-                if match:
-                    url = match.group(1)
-                    if await _is_safe_url(url):
-                        return url
-    except httpx.HTTPError as e:
-        logger.debug("Probe for resource metadata failed: %s", e)
-
-    parsed = urlparse(mcp_url)
-    base = f"{parsed.scheme}://{parsed.netloc}"
-    # RFC 9728 specifies this well-known path
-    try:
-        async with httpx.AsyncClient(
-            timeout=_discovery_timeout(), follow_redirects=False
-        ) as client:
-            response = await client.get(base + "/.well-known/oauth-protected-resource")
-            if response.status_code == 200:
-                return base + "/.well-known/oauth-protected-resource"
-    except httpx.HTTPError as e:
-        logger.debug("Well-known resource metadata endpoint not found: %s", e)
-
-    raise ValueError(f"Cannot discover resource metadata for {mcp_url}")
-
-
-async def _get_json(url: str) -> dict:
-    """Safely fetch and parse JSON from a URL with security checks."""
-    if not await _is_safe_url(url):
-        raise ValueError(f"Unsafe URL: {url}")
-
-    async with httpx.AsyncClient(timeout=_discovery_timeout(), follow_redirects=False) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-
-        # Validate content-type
-        content_type = response.headers.get("content-type", "").lower()
-        if "application/json" not in content_type:
-            raise ValueError(f"Invalid content-type from {url}: {content_type}")
-
-        return response.json()
-
-
-async def _get_oauth_server_metadata(auth_server_url: str) -> dict | None:
-    """Fetch OAuth authorization server metadata from well-known endpoints."""
-    if not await _is_valid_issuer(auth_server_url):
-        return None
-
-    base = auth_server_url.rstrip("/")
-    for path in ("/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"):
-        try:
-            async with httpx.AsyncClient(
-                timeout=_discovery_timeout(), follow_redirects=False
-            ) as client:
-                response = await client.get(base + path)
-                if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "").lower()
-                    if "application/json" not in content_type:
-                        continue
-                    data = response.json()
-                    if "authorization_endpoint" in data and "token_endpoint" in data:
-                        return data
-        except httpx.HTTPError:
-            continue
-    return None
 
 
 def clear_cache() -> None:

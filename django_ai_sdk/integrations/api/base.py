@@ -14,29 +14,73 @@ if TYPE_CHECKING:
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from haystack.tools import Tool
 
     from django_ai_sdk.assistant import Assistant
+
+
+def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> dict[str, Any]:
+    """Filter ``context`` to the keys ``factory`` actually accepts.
+
+    Lets a tool factory declare only the request context it needs — ``def f(user)``,
+    ``def f(user, thread_id)``, or ``def f(**kwargs)`` all work — instead of being
+    forced to accept every argument.
+    """
+    params = inspect.signature(factory).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return context
+    return {k: v for k, v in context.items() if k in params}
 
 
 class APIIntegration(Integration):
     """Base for integrations backed by a hand-written API client, not MCP.
 
-    Each entry in ``tools`` is a factory called as
-    ``factory(user=..., assistant=..., thread_id=...)``, returning a Tool or a
-    list of Tools, either directly or via an ``async`` factory. A factory that
-    doesn't need ``thread_id`` can simply not declare it, as long as it accepts
-    ``**kwargs``.
+    Each entry in ``tools`` is either:
+
+    - a ready-made Haystack ``Tool`` — the simple, common case. Decorate a plain
+      typed function with ``@haystack.tools.tool`` and the schema is inferred from
+      its type hints and docstring; no factory, no hand-written parameter schema::
+
+          @tool
+          def get_current_weather(location: str) -> dict:
+              \"\"\"Get the current weather for a place name.\"\"\"
+              ...
+
+          class WeatherIntegration(APIIntegration):
+              name = "weather"
+              tools = [get_current_weather]
+
+      Plain type hints work fine under ``from __future__ import annotations``. Only
+      per-parameter descriptions via ``Annotated[str, "..."]`` need the hints to be
+      real objects — for those, either pass an explicit ``parameters=`` schema or
+      define the tool in a module without the ``__future__`` import.
+
+    - a *factory* callable returning a Tool or list of Tools (optionally ``async``) —
+      for tools that must be built per request, e.g. one carrying the current user's
+      API token. A factory is passed only the arguments it declares: any subset of
+      ``user``, ``assistant``, ``thread_id`` (or all of them via ``**kwargs``). So
+      ``def make_tool(user): ...`` and ``def make_tool(**kwargs): ...`` both work::
+
+          def issue_tool(user):
+              return build_authed_tool(token=user.linear_token)
+
+          class LinearIntegration(APIIntegration):
+              name = "linear"
+              tools = [issue_tool]
 
     ``get_status()`` reports ACTIVE unconditionally unless a subclass sets
-    ``health_check`` — an async, no-arg callable that raises on failure. When set, it's
-    run through the same ResilientCache (stale-while-revalidate + circuit breaker; see
+    ``health_check`` — an async, no-arg callable that raises on failure. Assign it as a
+    ``staticmethod`` (``health_check = staticmethod(check_api)``) or as an
+    ``async def health_check(self)`` method; a bare function assigned to the attribute
+    would be bound and wrongly receive ``self``. When set, it's run through the same
+    ResilientCache (stale-while-revalidate + circuit breaker; see
     ``django_ai_sdk.integrations.base``) every other integration kind uses, so a down
-    API shows up as DEGRADED/BROKEN instead of a false ACTIVE.
+    API shows up as DEGRADED instead of a false ACTIVE.
     """
 
     name: str = ""
     label: str = ""
-    tools: list[Callable[..., Any]] = []
+    tools: list[Tool | Callable[..., Any]] = []
     health_check: Callable[[], Awaitable[Any]] | None = None
 
     def __init__(self) -> None:
@@ -48,9 +92,7 @@ class APIIntegration(Integration):
             ResilientCache(
                 ttl=getattr(settings, "AI_SDK_INTEGRATION_CACHE_TTL", 300),
                 timeout=getattr(settings, "AI_SDK_INTEGRATION_TIMEOUT", 5),
-                cb_threshold=getattr(settings, "AI_SDK_INTEGRATION_CB_THRESHOLD", 3),
                 cb_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
-                cb_max_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_MAX_COOLDOWN", 1800),
             )
             if self.health_check is not None
             else None
@@ -62,9 +104,17 @@ class APIIntegration(Integration):
         assistant: Assistant | None = None,
         thread_id: str = "",
     ) -> list[Any]:
+        from haystack.tools import Tool
+
+        context = {"user": user, "assistant": assistant, "thread_id": thread_id}
         result: list[Any] = []
-        for factory in self.tools:
-            items = factory(user=user, assistant=assistant, thread_id=thread_id)
+        for entry in self.tools:
+            # A ready-made Tool (e.g. a @tool-decorated function) is used as-is;
+            # anything else is a factory, called with only the context args it declares.
+            if isinstance(entry, Tool):
+                result.append(entry)
+                continue
+            items = entry(**_accepted_kwargs(entry, context))
             if inspect.isawaitable(items):
                 items = await items
             if isinstance(items, list):
@@ -84,6 +134,6 @@ class APIIntegration(Integration):
         return self._cache.status_for(self.name)
 
     async def reconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
-        """Reset a degraded/broken health check back to a fresh, never-attempted state."""
+        """Reset a degraded health check to a fresh state and retry on the next check."""
         if self._cache is not None:
-            self._cache.invalidate(self.name)
+            await self._cache.invalidate(self.name)

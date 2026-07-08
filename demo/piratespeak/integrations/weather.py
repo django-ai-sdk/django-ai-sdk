@@ -8,11 +8,9 @@ report a real get_status()), not to be a production-grade weather tool.
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
 from django_ai_sdk.integrations.api.base import APIIntegration
-from haystack.tools import Tool
+from haystack.tools import tool
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -22,8 +20,9 @@ _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 _HEALTH_CHECK_COORDS = {"latitude": 52.37, "longitude": 4.9, "current_weather": "true"}
 
 
+@tool
 def get_current_weather(location: str) -> dict:
-    """Look up the current weather for a place name via Open-Meteo (no API key)."""
+    """Get the current weather for a place name (e.g. 'Rotterdam' or 'Paris, France')."""
     with httpx.Client(timeout=5) as client:
         geo = client.get(_GEOCODE_URL, params={"name": location, "count": 1}).json()
         results = geo.get("results") or []
@@ -50,24 +49,6 @@ def get_current_weather(location: str) -> dict:
     }
 
 
-def get_weather_tool(**kwargs: Any) -> Tool:
-    return Tool(
-        name="get_current_weather",
-        description="Get the current weather for a place name.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "City or place name, e.g. 'Rotterdam' or 'Paris, France'.",
-                },
-            },
-            "required": ["location"],
-        },
-        function=get_current_weather,
-    )
-
-
 async def check_weather_api() -> None:
     """Health probe for get_status(): confirm the forecast endpoint responds."""
     async with httpx.AsyncClient(timeout=5) as client:
@@ -80,5 +61,5 @@ class WeatherIntegration(APIIntegration):
 
     name = "weather"
     label = "Weather"
-    tools = [get_weather_tool]
+    tools = [get_current_weather]
     health_check = staticmethod(check_weather_api)

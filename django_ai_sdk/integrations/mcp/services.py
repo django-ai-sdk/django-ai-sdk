@@ -1,9 +1,12 @@
-"""Service layer for MCP connection management and OAuth flows."""
+"""Service functions for MCP connection management and OAuth flows.
+
+Plain module-level async functions (no class namespace). Synchronous aliases for the
+few functions used from sync contexts (e.g. class-based views) are defined at the
+bottom of the module.
+"""
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 import secrets
 from typing import TYPE_CHECKING
@@ -13,6 +16,11 @@ import httpx
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.db import DatabaseError
+from mcp.client.auth import OAuthRegistrationError, OAuthTokenError
+from mcp.client.auth.oauth2 import PKCEParameters
+from mcp.client.auth.utils import handle_registration_response
+from mcp.shared.auth import OAuthClientMetadata
+from pydantic import AnyUrl
 
 from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
@@ -31,11 +39,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _b64url(data: bytes) -> str:
-    """Base64url encode without padding."""
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
 def _get_mcp_servers() -> dict:
     """Get the MCP-backed entries from AI_SDK_INTEGRATIONS.
 
@@ -49,339 +52,281 @@ def _get_mcp_servers() -> dict:
     return {name: value for name, value in configured.items() if isinstance(value, mcp_types)}
 
 
-class MCPService:
-    """Service for MCP connection management and OAuth flows.
+# ============================================================================
+# Connection Management
+# ============================================================================
 
-    All methods are async. Sync aliases are provided at module level for use in
-    synchronous contexts (e.g., class-based views).
+
+async def list_connections(*, user: UserType) -> list[ConnectionOut]:
+    """List all MCP servers with connection status for the user."""
+    all_servers = _get_mcp_servers()
+    if not all_servers:
+        return []
+
+    # Bulk-fetch all OAuth tokens for this user in a single query.
+    oauth_tokens: dict[str, MCPOAuthToken] = {}
+    try:
+        async for t in MCPOAuthToken.objects.filter(user=user):
+            oauth_tokens[t.server_name] = t
+    except DatabaseError:
+        logger.warning(
+            "Failed to load MCP OAuth token connections for user=%s; continuing with no connected servers.",
+            getattr(user, "pk", None),
+            exc_info=True,
+        )
+
+    integrations = get_integrations(list(all_servers))
+
+    result = []
+    for server_name, server_config in all_servers.items():
+        if server_config.type == "oauth":
+            token_obj = oauth_tokens.get(server_name)
+            is_connected: bool | None = not token_obj.is_expired() if token_obj else False
+        else:
+            is_connected = None
+
+        integration = integrations.get(server_name)
+        status = (
+            await integration.get_status(user=user)
+            if integration is not None
+            else IntegrationStatus.DISCONNECTED
+        )
+
+        result.append(
+            ConnectionOut(
+                server_name=server_name,
+                label=server_config.label or server_name.title(),
+                type=server_config.type,
+                connected=is_connected,
+                has_token=server_name in oauth_tokens,
+                status=status,
+            )
+        )
+
+    return result
+
+
+async def disconnect(server_name: str, *, user: UserType) -> bool:
+    """Revoke OAuth token for a server. Returns True if deleted, False if not found."""
+    if not user:
+        return False
+
+    deleted, _ = await MCPOAuthToken.objects.filter(user=user, server_name=server_name).adelete()
+    return deleted > 0
+
+
+async def reconnect(server_name: str, *, user: UserType) -> IntegrationStatus | None:
+    """Reset a degraded integration's retry state and immediately make a real attempt,
+    so the caller gets the actual outcome rather than a blind promise — resetting the
+    state doesn't mean the underlying problem (e.g. a still-wrong URL) is fixed. Returns
+    None if the server isn't configured."""
+    integration = get_integrations([server_name]).get(server_name)
+    if integration is None:
+        return None
+    await integration.reconnect(user=user)
+    return await integration.get_status(user=user)
+
+
+# ============================================================================
+# OAuth PKCE helpers (pure, no I/O)
+# ============================================================================
+
+
+def build_pkce_params() -> tuple[str, str, str]:
+    """Generate PKCE parameters: (verifier, challenge, state).
+
+    Verifier/challenge come from the mcp SDK's ``PKCEParameters``; ``state`` is
+    generated here (the SDK's PKCE model doesn't cover it).
     """
+    pkce = PKCEParameters.generate()
+    return pkce.code_verifier, pkce.code_challenge, secrets.token_urlsafe(32)
 
-    # ============================================================================
-    # Connection Management
-    # ============================================================================
 
-    @staticmethod
-    async def list_connections(*, user: UserType) -> list[ConnectionOut]:
-        """List all MCP servers with connection status for the user."""
-        all_servers = _get_mcp_servers()
-        if not all_servers:
-            return []
+def build_auth_url(
+    discovery: OAuthDiscovery,
+    client_id: str,
+    redirect_uri: str,
+    state: str,
+    challenge: str,
+    scope: str = "",
+) -> str:
+    """Build the OAuth authorization URL."""
+    auth_params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    if scope:
+        auth_params["scope"] = scope
 
-        # Bulk-fetch all OAuth tokens for this user in a single query.
-        oauth_tokens: dict[str, MCPOAuthToken] = {}
-        try:
-            async for t in MCPOAuthToken.objects.filter(user=user):
-                oauth_tokens[t.server_name] = t
-        except DatabaseError:
-            logger.warning(
-                "Failed to load MCP OAuth token connections for user=%s; continuing with no connected servers.",
-                getattr(user, "pk", None),
-                exc_info=True,
-            )
+    return discovery.authorization_endpoint + "?" + urlencode(auth_params)
 
-        integrations = get_integrations(list(all_servers))
 
-        result = []
-        for server_name, server_config in all_servers.items():
-            is_connected: bool | None = None
-            if server_config.type == "oauth":
-                token_obj = oauth_tokens.get(server_name)
-                is_connected = not token_obj.is_expired() if token_obj else False
-            else:
-                is_connected = None
+# ============================================================================
+# OAuth I/O helpers
+# ============================================================================
 
-            integration = integrations.get(server_name)
-            status = (
-                await integration.get_status(user=user)
-                if integration is not None
-                else IntegrationStatus.DISCONNECTED
-            )
 
-            result.append(
-                ConnectionOut(
-                    server_name=server_name,
-                    label=server_config.label or server_name.title(),
-                    type=server_config.type,
-                    connected=is_connected,
-                    has_token=server_name in oauth_tokens,
-                    status=status,
-                )
-            )
+async def get_or_register_client(
+    server_name: str, redirect_uri: str, discovery: OAuthDiscovery
+) -> tuple[str, str]:
+    """Get or register the OAuth client, performing dynamic registration if needed.
 
-        return result
+    Returns (client_id, client_secret).
+    """
+    server = _get_mcp_servers().get(server_name)
+    if not server or server.type != "oauth":
+        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
 
-    @staticmethod
-    async def disconnect(server_name: str, *, user: UserType) -> bool:
-        """Revoke OAuth token for a server. Returns True if deleted, False if not found."""
-        if not user:
-            return False
+    # Static credentials win when configured.
+    if server.client_id:
+        return server.client_id, server.client_secret.get_secret_value()
 
-        deleted, _ = await MCPOAuthToken.objects.filter(
-            user=user, server_name=server_name
-        ).adelete()
-        return deleted > 0
+    # Otherwise use dynamic registration (RFC 7591).
+    oauth_client, created = await MCPOAuthClient.objects.aget_or_create(
+        server_name=server_name,
+        defaults={"redirect_uri": redirect_uri},
+    )
+    if not created and oauth_client.client_id:
+        return oauth_client.client_id, oauth_client.get_client_secret()
 
-    @staticmethod
-    async def reconnect(server_name: str, *, user: UserType) -> IntegrationStatus | None:
-        """Reset a degraded/broken integration's retry state and immediately make a
-        real attempt, so the caller gets the actual outcome rather than a blind
-        promise — resetting the state doesn't mean the underlying problem (e.g. a
-        still-wrong URL) is actually fixed. Returns None if the server isn't
-        configured."""
-        integration = get_integrations([server_name]).get(server_name)
-        if integration is None:
-            return None
-        await integration.reconnect(user=user)
-        return await integration.get_status(user=user)
-
-    # ============================================================================
-    # OAuth PKCE Helpers (pure, no I/O)
-    # ============================================================================
-
-    @staticmethod
-    def build_pkce_params() -> tuple[str, str, str]:
-        """Generate PKCE parameters: (verifier, challenge, state)."""
-        verifier = secrets.token_urlsafe(96)
-        challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
-        state = secrets.token_urlsafe(32)
-        return verifier, challenge, state
-
-    @staticmethod
-    def build_auth_url(
-        discovery: OAuthDiscovery,
-        client_id: str,
-        redirect_uri: str,
-        state: str,
-        challenge: str,
-        scope: str = "",
-    ) -> str:
-        """Build the OAuth authorization URL."""
-        auth_params = {
-            "response_type": "code",
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "state": state,
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-        }
-        if scope:
-            auth_params["scope"] = scope
-
-        return discovery.authorization_endpoint + "?" + urlencode(auth_params)
-
-    # ============================================================================
-    # OAuth I/O Helpers
-    # ============================================================================
-
-    @staticmethod
-    async def get_or_register_client(
-        server_name: str, redirect_uri: str, discovery: OAuthDiscovery
-    ) -> tuple[str, str]:
-        """Get or register OAuth client, perform dynamic registration if needed.
-
-        Returns (client_id, client_secret).
-        """
-        all_servers = _get_mcp_servers()
-        server = all_servers.get(server_name)
-        if not server or server.type != "oauth":
-            raise ValueError(f"Server {server_name!r} not found or not OAuth type")
-
-        # Use static credentials if available
-        if server.client_id:
-            return server.client_id, server.client_secret.get_secret_value()
-
-        # Otherwise use dynamic registration
-        oauth_client, created = await MCPOAuthClient.objects.aget_or_create(
-            server_name=server_name,
-            defaults={"redirect_uri": redirect_uri},
+    if not discovery.registration_endpoint:
+        raise ValueError(
+            f"Server {server_name!r} has no registration_endpoint; "
+            "provide static client_id/client_secret instead."
         )
 
-        if not created and oauth_client.client_id:
-            return oauth_client.client_id, oauth_client.get_client_secret()
-
-        # Perform dynamic registration (RFC 7591)
-        if not discovery.registration_endpoint:
-            raise ValueError(
-                f"Server {server_name!r} has no registration_endpoint; "
-                "provide static client_id/client_secret instead."
-            )
-
-        client_name = getattr(settings, "AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client")
-        registration_data = {
-            "client_name": client_name,
-            "redirect_uris": [redirect_uri],
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-        }
-        async with httpx.AsyncClient(timeout=10) as http_client:
-            reg_response = await http_client.post(
-                discovery.registration_endpoint,
-                json=registration_data,
-            )
-        reg_response.raise_for_status()
-        reg_data = reg_response.json()
-        client_id = reg_data.get("client_id")
-        client_secret = reg_data.get("client_secret", "")
-        if not client_id:
-            raise ValueError("No client_id in registration response")
-
-        logger.info("Dynamically registered client for %r: client_id=%s", server_name, client_id)
-
-        oauth_client.set_credentials(client_id, client_secret)
-        await oauth_client.asave()
-
-        return client_id, client_secret
-
-    @staticmethod
-    async def exchange_token(
-        token_endpoint: str,
-        code: str,
-        redirect_uri: str,
-        verifier: str,
-        client_id: str,
-        client_secret: str = "",
-    ) -> dict:
-        """Exchange authorization code for access token."""
-        token_data: dict[str, str] = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "code_verifier": verifier,
-            "client_id": client_id,
-        }
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            if client_secret:
-                token_data.pop("client_id")
-                response = await client.post(
-                    token_endpoint,
-                    data=token_data,
-                    auth=(client_id, client_secret),
-                )
-            else:
-                response = await client.post(token_endpoint, data=token_data)
-
-        response.raise_for_status()
-        token_response = response.json()
-
-        if "access_token" not in token_response:
-            raise ValueError("No access_token in token response")
-
-        return token_response
-
-    @staticmethod
-    async def store_token(user: UserType, server_name: str, token_response: dict) -> MCPOAuthToken:
-        """Store OAuth token for user."""
-        if not user:
-            raise ValueError("User required to store token")
-
-        token_obj, _ = await MCPOAuthToken.objects.aget_or_create(
-            user=user,
-            server_name=server_name,
+    client_metadata = OAuthClientMetadata(
+        client_name=getattr(settings, "AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client"),
+        redirect_uris=[AnyUrl(redirect_uri)],
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+    )
+    async with httpx.AsyncClient(timeout=10) as http_client:
+        reg_response = await http_client.post(
+            discovery.registration_endpoint,
+            json=client_metadata.model_dump(by_alias=True, mode="json", exclude_none=True),
+            headers={"Content-Type": "application/json"},
         )
-        token_obj.set_tokens(token_response)
-        await token_obj.asave()
-        logger.info("Stored token for %r user=%s", server_name, user)
-        return token_obj
+    try:
+        client_info = await handle_registration_response(reg_response)
+    except OAuthRegistrationError as e:
+        raise ValueError(str(e)) from e
 
-    @staticmethod
-    async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
-        """Refresh the OAuth access token using the stored refresh_token.
+    client_id = client_info.client_id
+    client_secret = client_info.client_secret or ""
+    if not client_id:
+        raise ValueError("No client_id in registration response")
 
-        Raises:
-            ValueError: no token, no refresh_token, or bad token response
-            httpx.HTTPStatusError: token endpoint rejected the grant
-        """
-        if not user:
-            raise ValueError("User required")
+    logger.info("Dynamically registered client for %r: client_id=%s", server_name, client_id)
+    oauth_client.set_credentials(client_id, client_secret)
+    await oauth_client.asave()
+    return client_id, client_secret
 
-        try:
-            token_obj = await MCPOAuthToken.objects.aget(user=user, server_name=server_name)
-        except MCPOAuthToken.DoesNotExist:
-            raise ValueError(f"No token for server {server_name!r}")
 
-        refresh_token = token_obj.get_refresh_token()
-        if not refresh_token:
-            raise ValueError(f"No refresh_token stored for {server_name!r}")
+async def exchange_token(
+    token_endpoint: str,
+    code: str,
+    redirect_uri: str,
+    verifier: str,
+    client_id: str,
+    client_secret: str = "",
+) -> dict:
+    """Exchange an authorization code for an access token.
 
-        discovery = await MCPService.get_oauth_discovery(server_name)
+    Raises:
+        httpx.HTTPError: token endpoint transport/status error
+        ValueError: token endpoint returned an unparseable response
+    """
+    from django_ai_sdk.integrations.mcp.loader import post_token_request
 
-        # Resolve client credentials — dynamic registration takes precedence over static config
-        all_servers = _get_mcp_servers()
-        server = all_servers.get(server_name)
-        if not server or server.type != "oauth":
-            raise ValueError(f"Server {server_name!r} not found or not OAuth type")
-
-        client_id = getattr(server, "client_id", "") or ""
-        client_secret = getattr(server, "client_secret", None)
-        client_secret = client_secret.get_secret_value() if client_secret else ""
-        try:
-            oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
-            client_id = oauth_client.client_id
-            client_secret = oauth_client.get_client_secret()
-        except MCPOAuthClient.DoesNotExist:
-            logger.debug(
-                "No registered OAuth client for %r; using static server credentials",
-                server_name,
-            )
-
-        token_data: dict[str, str] = {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": client_id,
-        }
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            if client_secret:
-                token_data.pop("client_id")
-                response = await client.post(
-                    discovery.token_endpoint, data=token_data, auth=(client_id, client_secret)
-                )
-            else:
-                response = await client.post(discovery.token_endpoint, data=token_data)
-
-        response.raise_for_status()
-        token_response = response.json()
-        if "access_token" not in token_response:
-            raise ValueError("No access_token in refresh response")
-
-        token_obj = await MCPService.store_token(
-            user=user, server_name=server_name, token_response=token_response
+    try:
+        token = await post_token_request(
+            token_endpoint,
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": verifier,
+                "client_id": client_id,
+            },
+            client_id,
+            client_secret,
         )
-        logger.info("Refreshed OAuth token for %r user=%s", server_name, user)
-        return token_obj
+    except OAuthTokenError as e:
+        raise ValueError(str(e)) from e
+    return token.model_dump()
 
-    # ============================================================================
-    # OAuth Discovery
-    # ============================================================================
 
-    @staticmethod
-    async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
-        """Get OAuth discovery for a server."""
-        all_servers = _get_mcp_servers()
-        server = all_servers.get(server_name)
-        if not server or server.type != "oauth":
-            raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+async def store_token(user: UserType, server_name: str, token_response: dict) -> MCPOAuthToken:
+    """Store an OAuth token for a user."""
+    if not user:
+        raise ValueError("User required to store token")
 
-        if server.authorization_endpoint and server.token_endpoint:
-            return OAuthDiscovery(
-                authorization_endpoint=server.authorization_endpoint,
-                token_endpoint=server.token_endpoint,
-            )
+    token_obj, _ = await MCPOAuthToken.objects.aget_or_create(user=user, server_name=server_name)
+    token_obj.set_tokens(token_response)
+    await token_obj.asave()
+    logger.info("Stored token for %r user=%s", server_name, user)
+    return token_obj
 
-        discovery_url = server.oauth_discovery_url or server.url
-        return await discover(discovery_url)
+
+async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
+    """Refresh a user's stored OAuth access token.
+
+    A thin wrapper over the single refresh path in ``loader.refresh_oauth_token`` —
+    it just resolves the stored token and server config for this (user, server).
+
+    Raises:
+        ValueError: no token, server not configured/OAuth, or the refresh failed.
+    """
+    if not user:
+        raise ValueError("User required")
+
+    from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+
+    try:
+        token_obj = await MCPOAuthToken.objects.aget(user=user, server_name=server_name)
+    except MCPOAuthToken.DoesNotExist:
+        raise ValueError(f"No token for server {server_name!r}") from None
+
+    server = _get_mcp_servers().get(server_name)
+    if not server or server.type != "oauth":
+        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+
+    refreshed = await refresh_oauth_token(token_obj, server)
+    if refreshed is None:
+        raise ValueError(f"Token refresh failed for {server_name!r}")
+    logger.info("Refreshed OAuth token for %r user=%s", server_name, user)
+    return refreshed
+
+
+# ============================================================================
+# OAuth discovery
+# ============================================================================
+
+
+async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
+    """Get OAuth discovery for a server (static endpoints if configured, else RFC 9728)."""
+    server = _get_mcp_servers().get(server_name)
+    if not server or server.type != "oauth":
+        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+
+    if server.authorization_endpoint and server.token_endpoint:
+        return OAuthDiscovery(
+            authorization_endpoint=server.authorization_endpoint,
+            token_endpoint=server.token_endpoint,
+        )
+
+    return await discover(server.oauth_discovery_url or server.url)
 
 
 # ============================================================================
 # Sync aliases for use in synchronous contexts
 # ============================================================================
 
-list_connections_sync = async_to_sync(MCPService.list_connections)
-disconnect_sync = async_to_sync(MCPService.disconnect)
-reconnect_sync = async_to_sync(MCPService.reconnect)
-get_oauth_discovery_sync = async_to_sync(MCPService.get_oauth_discovery)
-get_or_register_client_sync = async_to_sync(MCPService.get_or_register_client)
-exchange_token_sync = async_to_sync(MCPService.exchange_token)
-store_token_sync = async_to_sync(MCPService.store_token)
-refresh_access_token_sync = async_to_sync(MCPService.refresh_access_token)
+list_connections_sync = async_to_sync(list_connections)
+disconnect_sync = async_to_sync(disconnect)
+refresh_access_token_sync = async_to_sync(refresh_access_token)

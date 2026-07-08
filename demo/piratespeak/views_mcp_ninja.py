@@ -8,8 +8,8 @@ import httpx
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
+from django_ai_sdk.integrations.mcp import services as mcp_service
 from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
-from django_ai_sdk.integrations.mcp.services import MCPService
 from ninja import Router, Schema
 
 router = Router()
@@ -46,7 +46,7 @@ async def list_connections(request: HttpRequest) -> list[MCPConnectionOut]:
     if isinstance(user, AnonymousUser) or not user.is_authenticated:
         return []
 
-    connections = await MCPService.list_connections(user=user)
+    connections = await mcp_service.list_connections(user=user)
     return [
         MCPConnectionOut(
             server_name=conn.server_name,
@@ -69,7 +69,7 @@ async def disconnect(request: HttpRequest, server_name: str) -> tuple[int, dict[
     if not request.user.is_authenticated:
         return 401, {"detail": "Not authenticated"}
 
-    deleted = await MCPService.disconnect(server_name, user=request.user)
+    deleted = await mcp_service.disconnect(server_name, user=request.user)
     if not deleted:
         return 404, {"detail": "Not connected"}
     return 200, {"disconnected": server_name}
@@ -103,7 +103,7 @@ async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
             if not token_obj.get_refresh_token():
                 return MCPTestOut(status="expired", message="Token expired, no refresh available")
             try:
-                token_obj = await MCPService.refresh_access_token(server_name, user=request.user)
+                token_obj = await mcp_service.refresh_access_token(server_name, user=request.user)
                 refreshed = True
             except Exception:
                 return MCPTestOut(status="expired", message="Token refresh failed")

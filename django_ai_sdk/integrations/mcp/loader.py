@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from django.conf import settings
+from mcp.client.auth import OAuthTokenError
+from mcp.client.auth.utils import handle_token_response_scopes
 
 from django_ai_sdk.integrations.base import Integration, IntegrationStatus, ResilientCache
 from django_ai_sdk.integrations.mcp.schemas import (
@@ -26,6 +28,7 @@ from django_ai_sdk.integrations.mcp.schemas import (
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from mcp.shared.auth import OAuthToken
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
@@ -60,9 +63,7 @@ class MCPIntegration(Integration):
         self._cache = ResilientCache(
             ttl=getattr(settings, "AI_SDK_INTEGRATION_CACHE_TTL", 300),
             timeout=self._timeout,
-            cb_threshold=getattr(settings, "AI_SDK_INTEGRATION_CB_THRESHOLD", 3),
             cb_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
-            cb_max_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_MAX_COOLDOWN", 1800),
         )
         self.label = config.label or name.title()
         self.config = config
@@ -136,16 +137,16 @@ class MCPIntegration(Integration):
         return self._cache.status_for(self._cache_key(user))
 
     async def reconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
-        """Manually reset this integration back to a fresh, never-attempted state.
+        """Reset this integration to a fresh, never-attempted state and retry now.
 
-        The only way out of BROKEN — auto-retry stops there by design (see
-        ResilientCache), so something (a staff action, a management command, a
-        "Reconnect" button) has to call this once the actual problem (wrong URL,
-        bad token, etc.) has been fixed.
+        A DEGRADED integration already recovers on its own (the breaker half-opens
+        after a cooldown), so this is an optional "retry immediately" — for a staff
+        action, a management command, or a "Reconnect" button — that clears the cached
+        value and resets the breaker rather than waiting out the cooldown.
         """
         key = self._cache_key(user)
         if key is not None:
-            self._cache.invalidate(key)
+            await self._cache.invalidate(key)
 
     async def warm(self) -> None:
         """Eagerly populate the cache for static/token servers at process startup."""
@@ -200,17 +201,62 @@ class MCPIntegration(Integration):
         )
 
 
+async def resolve_client_credentials(
+    server_name: str, config: OAuthMCPIntegrationConfig
+) -> tuple[str, str]:
+    """Return (client_id, client_secret) for an OAuth server.
+
+    A dynamically-registered client (RFC 7591, stored in MCPOAuthClient) takes
+    precedence over static credentials configured on the integration. This is the
+    single source of truth for credential resolution — the OAuth start/refresh
+    paths all go through it.
+    """
+    from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
+
+    try:
+        oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
+        return oauth_client.client_id, oauth_client.get_client_secret()
+    except MCPOAuthClient.DoesNotExist:
+        logger.debug(
+            "No dynamically registered OAuth client for %r, using static credentials",
+            server_name,
+        )
+        return config.client_id, config.client_secret.get_secret_value()
+
+
+async def post_token_request(
+    token_endpoint: str, data: dict[str, str], client_id: str, client_secret: str
+) -> OAuthToken:
+    """POST an OAuth token grant and return the parsed, validated token.
+
+    Confidential clients authenticate with HTTP Basic (client_secret); public
+    clients send client_id in the body. Raises on transport error (httpx) or an
+    unparseable token response (OAuthTokenError) — callers decide how to handle.
+    """
+    async with httpx.AsyncClient(timeout=10) as client:
+        if client_secret:
+            body = {k: v for k, v in data.items() if k != "client_id"}
+            response = await client.post(token_endpoint, data=body, auth=(client_id, client_secret))
+        else:
+            response = await client.post(token_endpoint, data=data)
+    response.raise_for_status()
+    return await handle_token_response_scopes(response)
+
+
 async def refresh_oauth_token(
     token_obj: MCPOAuthToken, config: OAuthMCPIntegrationConfig
 ) -> MCPOAuthToken | None:
-    """Attempt a refresh_token grant. Returns the updated token_obj or None on failure."""
+    """The single refresh_token grant. Returns the updated token_obj, or None on failure.
+
+    Every refresh in the codebase (the loader's own lazy refresh, the OAuth views,
+    and the refresh_mcp_tokens command) funnels through here.
+    """
     refresh_token = token_obj.get_refresh_token()
     if not refresh_token:
         logger.warning("No refresh token available for server %r", token_obj.server_name)
         return None
 
     from django_ai_sdk.integrations.mcp.discovery import discover
-    from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
 
     try:
         discovery = await discover(config.url)
@@ -220,50 +266,19 @@ async def refresh_oauth_token(
         )
         return None
 
-    client_id = config.client_id
-    client_secret = config.client_secret.get_secret_value()
+    client_id, client_secret = await resolve_client_credentials(token_obj.server_name, config)
     try:
-        oauth_client = await MCPOAuthClient.objects.aget(server_name=token_obj.server_name)
-        client_id = oauth_client.client_id
-        client_secret = oauth_client.get_client_secret()
-    except MCPOAuthClient.DoesNotExist:
-        logger.debug(
-            "No dynamically registered OAuth client for %r, using static credentials",
-            token_obj.server_name,
+        token = await post_token_request(
+            discovery.token_endpoint,
+            {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
+            client_id,
+            client_secret,
         )
-
-    payload: dict[str, str] = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            if client_secret:
-                payload.pop("client_id")
-                response = await client.post(
-                    discovery.token_endpoint,
-                    data=payload,
-                    auth=(client_id, client_secret),
-                )
-            else:
-                response = await client.post(discovery.token_endpoint, data=payload)
-        response.raise_for_status()
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, OAuthTokenError) as e:
         logger.error("Token refresh failed for server %r: %s", token_obj.server_name, e)
         return None
 
-    try:
-        token_data = response.json()
-    except ValueError as e:
-        logger.error("Invalid JSON in refresh response for %r: %s", token_obj.server_name, e)
-        return None
-
-    if "access_token" not in token_data:
-        logger.error("No access_token in refresh response for %r", token_obj.server_name)
-        return None
-
-    token_obj.set_tokens(token_data)
+    token_obj.set_tokens(token.model_dump())
     await token_obj.asave()
     logger.info("Refreshed OAuth token for server %r", token_obj.server_name)
     return token_obj

@@ -24,9 +24,7 @@ from django_ai_sdk.integrations.registry import _build
 
 class TestResilientCache:
     async def test_cache_hit_returns_immediately(self):
-        cache = ResilientCache(
-            ttl=60, timeout=5, cb_threshold=3, cb_cooldown=60, cb_max_cooldown=60
-        )
+        cache = ResilientCache(ttl=60, timeout=5)
         calls = 0
 
         async def fetch():
@@ -42,37 +40,34 @@ class TestResilientCache:
         assert calls == 1  # second call was a cache hit, no re-fetch
 
     async def test_stale_entry_served_immediately_while_refreshing_in_background(self):
-        cache = ResilientCache(
-            ttl=0.01, timeout=5, cb_threshold=3, cb_cooldown=60, cb_max_cooldown=60
-        )
+        # ttl=1.0 -> background refresh kicks in at early_ttl=0.8; hard expiry at 1.0.
+        cache = ResilientCache(ttl=1.0, timeout=5)
         calls = 0
 
         async def fetch():
             nonlocal calls
             calls += 1
-            await asyncio.sleep(0.2)  # slow refresh — must not block the caller
+            await asyncio.sleep(0.3)  # slow refresh — must not block the caller
             return [f"tool-{calls}"]
 
         first = await cache.get("k", fetch)
         assert first == ["tool-1"]
 
-        await asyncio.sleep(0.02)  # let the entry go stale
+        await asyncio.sleep(0.9)  # age now in [early_ttl=0.8, ttl=1.0): stale window
 
         start = time.monotonic()
         second = await cache.get("k", fetch)
         elapsed = time.monotonic() - start
 
         assert second == ["tool-1"]  # stale value served immediately, not the new one
-        assert elapsed < 0.05  # nowhere near the 0.2s refresh — never blocked on it
+        assert elapsed < 0.1  # nowhere near the 0.3s refresh — never blocked on it
 
-        await asyncio.sleep(0.3)  # let the background refresh finish
+        await asyncio.sleep(0.5)  # let the background refresh finish
         third = await cache.get("k", fetch)
         assert third == ["tool-2"]  # now warmed by the background refresh
 
     async def test_cache_miss_bounded_by_timeout(self):
-        cache = ResilientCache(
-            ttl=60, timeout=0.05, cb_threshold=3, cb_cooldown=60, cb_max_cooldown=60
-        )
+        cache = ResilientCache(ttl=60, timeout=0.05)
 
         async def hangs_forever():
             await asyncio.sleep(10)
@@ -85,10 +80,8 @@ class TestResilientCache:
         assert result == []  # degrades to empty rather than hanging
         assert elapsed < 0.5  # bounded by `timeout`, not the 10s fetch
 
-    async def test_circuit_breaker_opens_after_threshold_and_stops_retrying(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=2, cb_cooldown=60, cb_max_cooldown=60
-        )
+    async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(self):
+        cache = ResilientCache(ttl=60, timeout=1)
         calls = 0
 
         async def always_fails():
@@ -96,24 +89,21 @@ class TestResilientCache:
             calls += 1
             raise RuntimeError("dead server")
 
-        await cache.get("k", always_fails)  # failure 1 — below cb_threshold, circuit still closed
-        assert cache.status_for("k") == IntegrationStatus.DEGRADED  # but status is truthful
+        # Each failure is truthfully reported as DEGRADED while the breaker is still closed.
+        for _ in range(3):
+            await cache.get("k", always_fails)
+            assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
-        await cache.get("k", always_fails)  # failure 2 — threshold reached, circuit opens
+        # Breaker is now open — further gets short-circuit to empty without a live fetch.
+        result = await cache.get("k", always_fails)
+        assert result == []
+        assert calls == 3  # the 4th get() didn't attempt another live fetch
         assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
-        result = await cache.get("k", always_fails)  # circuit open — must not call fetch
-        assert result == []
-        assert calls == 2  # third get() didn't attempt another live fetch
-
     async def test_single_failure_immediately_reports_degraded_not_active(self):
-        """A wrong/invalid token must never show as ACTIVE just because the
-        consecutive-failure count hasn't reached cb_threshold yet — that's the bug
-        this cache is designed to avoid: status reflects the last real attempt, not
-        an optimistic default."""
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=3, cb_cooldown=60, cb_max_cooldown=60
-        )
+        """A wrong/invalid token must never show as ACTIVE — status reflects the last
+        real attempt, not an optimistic default, even before the breaker trips."""
+        cache = ResilientCache(ttl=60, timeout=1)
 
         async def wrong_token():
             raise RuntimeError("401 Unauthorized")
@@ -125,15 +115,11 @@ class TestResilientCache:
         """Documents the contract: status_for() alone can't distinguish "never
         checked" from "healthy" — callers (e.g. MCPIntegration.get_status()) must
         force a real attempt via get() first if they want a truthful answer."""
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=3, cb_cooldown=60, cb_max_cooldown=60
-        )
+        cache = ResilientCache(ttl=60, timeout=1)
         assert cache.status_for("never-checked") == IntegrationStatus.ACTIVE
 
-    async def test_circuit_breaker_resets_on_success(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=2, cb_cooldown=60, cb_max_cooldown=60
-        )
+    async def test_invalidate_resets_a_degraded_key(self):
+        cache = ResilientCache(ttl=60, timeout=1)
 
         async def fails():
             raise RuntimeError("dead")
@@ -144,83 +130,64 @@ class TestResilientCache:
         await cache.get("k", fails)
         assert cache.status_for("k") == IntegrationStatus.DEGRADED
 
-        cache.invalidate("k")  # simulate an explicit disconnect/reset
+        await cache.invalidate("k")  # the manual "reconnect" / retry-now action
         result = await cache.get("k", succeeds)
         assert result == ["ok"]
         assert cache.status_for("k") == IntegrationStatus.ACTIVE
 
-
-class TestResilientCacheBackoffAndBroken:
-    """A persistently broken integration must stop being probed forever at a flat
-    interval: cooldown should grow with repeated failure, and eventually give up
-    entirely (BROKEN) rather than retry at the capped interval indefinitely."""
-
-    async def test_cooldown_doubles_on_each_repeated_failure_up_to_the_cap(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=1, cb_cooldown=10, cb_max_cooldown=45
-        )
-
-        async def fails():
-            raise RuntimeError("dead")
-
-        await cache.get("k", fails)  # opens at level 0 -> cooldown 10s
-        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(10, abs=1)
-
-        cache._circuits["k"].open_until = 0  # simulate cooldown having elapsed
-        await cache.get("k", fails)  # level 1 -> cooldown 20s
-        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(20, abs=1)
-
-        cache._circuits["k"].open_until = 0
-        await cache.get("k", fails)  # level 2 -> cooldown 40s, still under the 45s cap
-        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(40, abs=1)
-
-        cache._circuits["k"].open_until = 0
-        await cache.get("k", fails)  # level 3 -> would be 80s, capped at 45s
-        assert cache._circuits["k"].open_until - time.monotonic() == pytest.approx(45, abs=1)
-        assert cache.status_for("k") == IntegrationStatus.DEGRADED  # still auto-retrying
-
-    async def test_gives_up_and_reports_broken_after_one_full_cycle_at_the_cap(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=1, cb_cooldown=10, cb_max_cooldown=10
-        )
-
-        async def fails():
-            raise RuntimeError("dead")
-
-        await cache.get("k", fails)  # first failure immediately hits the cap (cooldown == max)
-        assert cache.status_for("k") == IntegrationStatus.DEGRADED  # one cap cycle still allowed
-
-        cache._circuits["k"].open_until = 0  # let that one capped cooldown elapse
-        result = await cache.get("k", fails)  # fails again while already at the cap -> give up
-        assert result == []
-        assert cache.status_for("k") == IntegrationStatus.BROKEN
-
-    async def test_broken_key_is_never_probed_again_without_invalidate(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=1, cb_cooldown=10, cb_max_cooldown=10
-        )
+    async def test_invalidate_clears_a_cached_success_value(self):
+        """invalidate() ("retry now") must drop a previously cached *successful*
+        value, not just reset the breaker — otherwise reconnect keeps serving stale."""
+        cache = ResilientCache(ttl=60, timeout=1)
         calls = 0
 
-        async def fails():
+        async def fetch():
             nonlocal calls
             calls += 1
-            raise RuntimeError("dead")
+            return [f"tools-{calls}"]
 
-        await cache.get("k", fails)
-        cache._circuits["k"].open_until = 0
-        await cache.get("k", fails)
-        assert cache.status_for("k") == IntegrationStatus.BROKEN
+        assert await cache.get("k", fetch) == ["tools-1"]
+        assert await cache.get("k", fetch) == ["tools-1"]  # served from cache, no re-fetch
+        assert calls == 1
+
+        await cache.invalidate("k")
+        assert await cache.get("k", fetch) == ["tools-2"]  # cache cleared -> real re-fetch
         assert calls == 2
 
-        cache._circuits["k"].open_until = 0  # even if "cooldown" elapses, BROKEN doesn't expire
-        result = await cache.get("k", fails)
-        assert result == []
-        assert calls == 2  # no third attempt — broken keys are never auto-probed
 
-    async def test_invalidate_recovers_a_broken_key(self):
-        cache = ResilientCache(
-            ttl=60, timeout=1, cb_threshold=1, cb_cooldown=10, cb_max_cooldown=10
-        )
+class TestResilientCacheRecovery:
+    """The breaker recovers on its own via half-open probing after the cooldown —
+    there is no terminal give-up state (that bespoke BROKEN behaviour was removed in
+    favour of the standard circuit-breaker lifecycle)."""
+
+    async def test_open_breaker_half_opens_and_recovers_after_cooldown(self):
+        cache = ResilientCache(ttl=60, timeout=1, cb_cooldown=0.2)
+        state = {"fail": True}
+
+        async def fetch():
+            if state["fail"]:
+                raise RuntimeError("dead")
+            return ["ok"]
+
+        for _ in range(3):
+            await cache.get("k", fetch)
+        assert await cache.get("k", fetch) == []  # breaker open
+
+        # The server comes back; after the cooldown the breaker half-opens and, within
+        # a few probes, closes again — no manual reconnect required.
+        state["fail"] = False
+        recovered = False
+        for _ in range(20):
+            await asyncio.sleep(0.1)
+            if await cache.get("k", fetch) == ["ok"]:
+                recovered = True
+                break
+        assert recovered
+        assert cache.status_for("k") == IntegrationStatus.ACTIVE
+
+    async def test_isolated_per_key(self):
+        """One dead key's breaker must never trip another's."""
+        cache = ResilientCache(ttl=60, timeout=1)
 
         async def fails():
             raise RuntimeError("dead")
@@ -228,15 +195,12 @@ class TestResilientCacheBackoffAndBroken:
         async def succeeds():
             return ["ok"]
 
-        await cache.get("k", fails)
-        cache._circuits["k"].open_until = 0
-        await cache.get("k", fails)
-        assert cache.status_for("k") == IntegrationStatus.BROKEN
+        for _ in range(4):
+            await cache.get("dead", fails)
+        assert cache.status_for("dead") == IntegrationStatus.DEGRADED
 
-        cache.invalidate("k")  # the manual "reconnect" action
-        result = await cache.get("k", succeeds)
-        assert result == ["ok"]
-        assert cache.status_for("k") == IntegrationStatus.ACTIVE
+        assert await cache.get("healthy", succeeds) == ["ok"]
+        assert cache.status_for("healthy") == IntegrationStatus.ACTIVE
 
 
 class TestMCPIntegrationCacheKeys:
@@ -359,6 +323,23 @@ class TestIntegrationDisplayMetadata:
         names = await DummyIntegration().get_tool_names()
         assert names == ["dummy_tool"]
 
+    async def test_api_integration_factory_receives_only_declared_kwargs(self):
+        """A tool factory may declare any subset of user/assistant/thread_id (or
+        **kwargs) — it's called with only what it accepts, never a spurious TypeError."""
+
+        def tool(name):
+            return type("T", (), {"name": name})()
+
+        class DummyIntegration(APIIntegration):
+            tools = [
+                lambda user: tool("only_user"),
+                lambda user, thread_id: tool("user_thread"),
+                lambda **kw: tool("kwargs_all" if "assistant" in kw else "kwargs_bad"),
+            ]
+
+        names = [t.name for t in await DummyIntegration().get_tools(user="u", thread_id="t")]
+        assert names == ["only_user", "user_thread", "kwargs_all"]
+
 
 class TestMCPIntegrationGetStatus:
     async def test_wrong_static_token_reports_degraded_on_first_check(self, monkeypatch):
@@ -394,14 +375,11 @@ class TestMCPIntegrationGetStatus:
 
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
-    async def test_reconnect_recovers_a_broken_integration(self, settings, monkeypatch):
-        """reconnect() is the manual way out of BROKEN — e.g. after fixing a wrong
-        URL, something has to call this before auto-retry will ever try again."""
+    async def test_reconnect_recovers_a_degraded_integration(self, monkeypatch):
+        """reconnect() is an immediate retry-now: after the underlying problem (e.g. a
+        wrong token) is fixed, it clears the cached failure and re-probes without
+        waiting out the breaker cooldown."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
-
-        settings.AI_SDK_INTEGRATION_CB_THRESHOLD = 1
-        settings.AI_SDK_INTEGRATION_CB_COOLDOWN = 10
-        settings.AI_SDK_INTEGRATION_CB_MAX_COOLDOWN = 10
 
         async def fails(*args, **kwargs):
             raise RuntimeError("dead")
@@ -412,11 +390,7 @@ class TestMCPIntegrationGetStatus:
             "linear-broken", TokenMCPIntegrationConfig(url="https://example.com/mcp", token="bad")
         )
 
-        await integration.get_status()
-        integration._cache._circuits["linear-broken"].open_until = (
-            0  # let the capped cooldown elapse
-        )
-        assert await integration.get_status() == IntegrationStatus.BROKEN
+        assert await integration.get_status() == IntegrationStatus.DEGRADED
 
         async def succeeds(*args, **kwargs):
             return ["tool"]
@@ -428,7 +402,7 @@ class TestMCPIntegrationGetStatus:
 
 class TestAPIIntegrationGetStatus:
     """A hand-written API integration must report real health too — a down
-    backend shows up as DEGRADED/BROKEN, not a hardcoded ACTIVE."""
+    backend shows up as DEGRADED, not a hardcoded ACTIVE."""
 
     async def test_no_health_check_is_always_active(self):
         class NoHealthCheckIntegration(APIIntegration):
@@ -458,11 +432,7 @@ class TestAPIIntegrationGetStatus:
 
         assert await HealthyIntegration().get_status() == IntegrationStatus.ACTIVE
 
-    async def test_reconnect_recovers_a_broken_health_check(self, settings):
-        settings.AI_SDK_INTEGRATION_CB_THRESHOLD = 1
-        settings.AI_SDK_INTEGRATION_CB_COOLDOWN = 10
-        settings.AI_SDK_INTEGRATION_CB_MAX_COOLDOWN = 10
-
+    async def test_reconnect_recovers_a_degraded_health_check(self):
         should_fail = True
 
         async def probe():
@@ -475,12 +445,10 @@ class TestAPIIntegrationGetStatus:
             health_check = staticmethod(probe)
 
         integration = RecoverableIntegration()
-        await integration.get_status()
-        integration._cache._circuits["recoverable"].open_until = 0  # let the cooldown elapse
-        assert await integration.get_status() == IntegrationStatus.BROKEN
+        assert await integration.get_status() == IntegrationStatus.DEGRADED
 
         should_fail = False
-        await integration.reconnect()
+        await integration.reconnect()  # retry now, don't wait out the cooldown
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
 
