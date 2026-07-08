@@ -158,6 +158,8 @@ HEADLESS_FRONTEND_URLS = {
     "account_signup": "http://localhost:3000/signup",
 }
 
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+
 # Accounts
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
@@ -172,7 +174,6 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_HEADERS = (
     *default_headers,
-    "x-session-token",
     "x-email-verification-key",
     "x-password-reset-key",
 )
@@ -217,6 +218,7 @@ AI_SDK_RUNTIME_ASSISTANT_BASES = [
 # Tools selectable in runtime assistant configuration
 AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
     "get_today": "piratespeak.assistants.tools.get_today",
+    "get_memory_files": "piratespeak.assistants.tools.get_memory_files",
 }
 
 # Default Workflow actions
@@ -267,11 +269,12 @@ AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "allauth.headless.contrib.rest_framework.authentication.XSessionTokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
 }
 
 # Allowed upload filetypes
@@ -284,8 +287,4 @@ AI_SDK_ALLOWED_FILES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-}
-
-REST_FRAMEWORK = {
-    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
 }
