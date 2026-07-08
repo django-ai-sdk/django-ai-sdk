@@ -48,14 +48,14 @@ class DefaultCitationFormatter:
 
     RAG_TEMPLATE = (
         'Retrieved documents below are wrapped in <source id="N"> tags. '
-        "When you reference one, cite inline as [N] using the exact id from "
-        "the tag. Do not renumber.\n\n"
+        'When you reference one, cite it inline using <citation id="N" />, '
+        "using the exact id from the source tag. Do not renumber.\n\n"
         "Citation rules:\n"
-        "- Use ASCII square brackets only ([]), never CJK or fullwidth variants.\n"
-        "- Place [N] immediately after the clause it supports, not bundled at "
+        '- Use exactly this format: <citation id="N" /> - one self-closing tag per source.\n'
+        "- Place the citation tag immediately after the clause it supports, not bundled at "
         "the end of a paragraph.\n"
-        "- Multiple sources: separate brackets with a space, e.g. [1] [2]. "
-        "Never [1,2] or [1][2].\n"
+        '- Multiple sources: use separate tags, e.g. <citation id="1" /> <citation id="2" />. '
+        "Never combine ids in one tag.\n"
         "- Do not add a 'Sources:' or 'References:' section - citations are inline only."
     )
 
