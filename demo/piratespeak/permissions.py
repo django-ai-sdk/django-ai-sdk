@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
     from django_ai_sdk.memories.models import Memory
+    from django_ai_sdk.types import UserType
 
 
 class AllowAnonymousMemoryPermission(BasePermission):
@@ -81,10 +82,10 @@ class AllowAnonymousMemoryPermission(BasePermission):
 
     def get_queryset_perms(
         self,
-        user: AbstractBaseUser | AnonymousUser | None,
+        user: UserType,
         operation: Operation,
         queryset: QuerySet,
-    ) -> QuerySet | None:
+    ) -> QuerySet:
         """Return a filtered queryset for the given user and operation."""
         is_authenticated = user is not None and getattr(user, "is_authenticated", False)
 

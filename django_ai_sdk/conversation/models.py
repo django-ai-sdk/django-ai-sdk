@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage
 
 from .managers import MessageManager, ThreadManager
 
@@ -18,11 +18,11 @@ class Thread(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(max_length=255, blank=True, default="")
+    title = models.CharField(max_length=THREAD_TITLE_MAX_LENGTH, blank=True, default="")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="ai_threads",
+        related_name="threads",
         null=True,
         blank=True,
     )
@@ -31,7 +31,7 @@ class Thread(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="file_threads",
+        related_name="thread_files",
     )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

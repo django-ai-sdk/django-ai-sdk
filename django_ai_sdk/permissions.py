@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils.module_loading import import_string
 
 if TYPE_CHECKING:
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.memories.models import Memory
+    from django_ai_sdk.storage.schemas import ThreadInfo
     from django_ai_sdk.types import UserType
 
 
@@ -59,8 +61,15 @@ class Operation(StrEnum):
     DELETE_ASSISTANT = "delete_assistant"
 
 
+class PermissionDomain(StrEnum):
+    ASSISTANT = "assistant"
+    THREAD = "thread"
+    MEMORY = "memory"
+
+
 class BasePermission(ABC):
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        """Check if the user has permission for the given operation."""
         return True
 
     async def has_object_permission(
@@ -70,6 +79,7 @@ class BasePermission(ABC):
         obj: Any,
         **kwargs: Any,
     ) -> bool:
+        """Check if the user has permission for the given operation on the object."""
         return True
 
     def get_queryset_perms(
@@ -77,16 +87,16 @@ class BasePermission(ABC):
         user: UserType,
         operation: Operation,
         queryset: QuerySet,
-    ) -> QuerySet | None:
+    ) -> QuerySet:
         """Filter *queryset* to items this class grants *operation* for *user*.
 
         Implement this to let list endpoints apply your permission rules at the
         database level instead of post-filtering every row.
 
-        Return the filtered ``QuerySet``, ``queryset.none()`` to deny all items,
-        or ``None`` to skip this class (no opinion on queryset filtering).
+        Return the filtered ``QuerySet`` or ``queryset.none()`` to deny all items.
+        The default implementation returns the queryset unchanged.
         """
-        return None
+        return queryset
 
 
 class AllowAll(BasePermission):
@@ -161,6 +171,29 @@ class IsOwner(BasePermission):
         return user is not None and bool(user.is_authenticated) and str(owner_id) == str(user.pk)
 
 
+class ThreadDefaultPermission(BasePermission):
+    """Default permission class for threads.
+
+    - Authenticated users: full access to their own threads.
+    - Anonymous users: no access to threads.
+    """
+
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        # Only authenticated users can access threads
+        if user is None or not user.is_authenticated:
+            return False
+        return True
+
+    async def has_object_permission(
+        self,
+        user: UserType,
+        operation: Operation,
+        obj: ThreadInfo,
+        **kwargs: Any,
+    ) -> bool:
+        return obj.user_id == getattr(user, "pk", None)
+
+
 class MemoryDefaultPermission(BasePermission):
     """Three-tier permission for memories.
 
@@ -195,6 +228,33 @@ class MemoryDefaultPermission(BasePermission):
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return user is not None and bool(user.is_authenticated)
+
+    def get_queryset_perms(
+        self,
+        user: UserType,
+        operation: Operation,
+        queryset: QuerySet,
+    ) -> QuerySet:
+        """Filter *queryset* to memories this user may access for *operation*.
+
+        Applies the same rules as ``has_object_permission`` but at the
+        database level so list views avoid iterating every row.
+        """
+        if user is None or not bool(user.is_authenticated):
+            return queryset.none()
+
+        if operation in self.READ:
+            return queryset.filter(
+                Q(is_public=True) | Q(memory_users__user=user) | Q(memory_groups__group__user=user)
+            ).distinct()
+
+        if operation in self.WRITE:
+            return queryset.filter(
+                Q(memory_users__user=user) | Q(memory_groups__group__user=user)
+            ).distinct()
+
+        # MANAGER operations — let per-object checks handle the can_manage flag
+        return queryset
 
     async def has_object_permission(
         self,
@@ -284,13 +344,77 @@ class AssistantDefaultPermission(BasePermission):
         return False
 
 
-@lru_cache(maxsize=1)
-def get_default_permissions() -> list[type[BasePermission]]:
-    """Resolve default permission classes from settings"""
-    paths = getattr(settings, "AI_SDK_DEFAULT_PERMISSIONS", [])
-    if not paths:
-        return [AssistantDefaultPermission, AllowAll]
+DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
+    PermissionDomain.ASSISTANT: ["django_ai_sdk.permissions.AssistantDefaultPermission"],
+    PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
+    PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
+}
+
+
+@lru_cache(maxsize=10)
+def get_domain_permissions(domain: PermissionDomain) -> list[type[BasePermission]]:
+    """Resolve default permission classes for a permission domain.
+
+    Resolution:
+    1. AI_SDK_PERMISSIONS setting (per-domain override), or
+    2. Built-in DOMAIN_PERMISSION_DEFAULTS (defaults)
+    """
+    overrides = getattr(settings, "AI_SDK_PERMISSIONS", {}).get(domain.value)
+    if overrides is not None:
+        return [import_string(p) for p in overrides] if overrides else []
+    paths = DOMAIN_PERMISSION_DEFAULTS.get(domain, [])
     return [import_string(p) for p in paths]
+
+
+class PermissionsMixin:
+    """Mixin providing permission helpers for stateless service classes.
+    Subclasses must set ``domain`` to a :class:`PermissionDomain` value.
+    """
+
+    domain: PermissionDomain
+
+    @classmethod
+    def get_default_permissions(cls) -> list[type[BasePermission]]:
+        """Return the default permission classes for this service's domain."""
+        if not hasattr(cls, "domain"):
+            raise AttributeError(f"{cls.__name__} must define a 'domain' attribute")
+        return get_domain_permissions(cls.domain)
+
+    @classmethod
+    async def has_perms(
+        cls,
+        user: UserType,
+        operation: Operation,
+        obj: Any = None,
+        *,
+        raise_on_deny: bool = True,
+        **kwargs: Any,
+    ) -> bool:
+        perms = cls.get_default_permissions()
+        return await has_perms(
+            user, operation, obj, permissions=perms, raise_on_deny=raise_on_deny, **kwargs
+        )
+
+    @classmethod
+    def has_queryset_perms(
+        cls,
+        user: UserType,
+        operation: Operation,
+        *,
+        queryset: QuerySet,
+        permissions: list[type[BasePermission]] | None = None,
+    ) -> QuerySet:
+        """Filter a queryset through the domain's permission classes.
+
+        Each permission class in the domain chain receives the queryset and
+        can return a filtered version.  Classes that don't know how to filter
+        this model pass it through unchanged.
+        """
+        perms = permissions if permissions is not None else cls.get_default_permissions()
+        for perm_cls in perms:
+            perm = ensure_permission_instance(perm_cls)
+            queryset = perm.get_queryset_perms(user, operation, queryset)
+        return queryset
 
 
 def ensure_permission_instance(
@@ -306,16 +430,17 @@ def ensure_permission_instance(
     return perm() if isinstance(perm, type) else perm
 
 
-@lru_cache(maxsize=1)
-def get_memory_permissions() -> list[type[BasePermission]]:
-    paths = getattr(settings, "AI_SDK_MEMORY_PERMISSIONS", [])
-    if not paths:
-        return [MemoryDefaultPermission]
-    return [import_string(p) for p in paths]
+def get_assistant_permissions(assistant: Assistant | None) -> list[type[BasePermission]]:
+    """Resolve perms for an assistant.
 
-
-def get_assistant_permissions(assistant: Assistant) -> list[type[BasePermission]]:
-    return getattr(assistant, "permissions", get_default_permissions())
+    Resolution:
+    1. assistant.permissions if set (per-assistant override)
+    2. Domain default for ASSISTANT (fallback)
+    """
+    perms = getattr(assistant, "permissions", None) if assistant is not None else None
+    if perms is not None:
+        return perms
+    return get_domain_permissions(PermissionDomain.ASSISTANT)
 
 
 async def has_perms(
@@ -328,7 +453,7 @@ async def has_perms(
     **kwargs: Any,
 ) -> bool:
     if permissions is None:
-        permissions = get_default_permissions()
+        permissions = get_domain_permissions(PermissionDomain.ASSISTANT)
     ok = await check_permissions(
         user, operation, permissions, raise_on_deny=raise_on_deny, **kwargs
     )
@@ -339,23 +464,6 @@ async def has_perms(
             user, operation, obj, permissions, raise_on_deny=raise_on_deny, **kwargs
         )
     return True
-
-
-def get_queryset_perms(
-    user: UserType,
-    operation: Operation,
-    queryset: QuerySet,
-    *,
-    permissions: list[type[BasePermission]] | None = None,
-) -> QuerySet:
-    if permissions is None:
-        permissions = get_default_permissions()
-    for cls in permissions:
-        perm = ensure_permission_instance(cls)
-        result = perm.get_queryset_perms(user, operation, queryset)
-        if result is not None:
-            queryset = result
-    return queryset
 
 
 async def check_permissions(

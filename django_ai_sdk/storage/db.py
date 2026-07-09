@@ -8,6 +8,7 @@ from django.db import DatabaseError, models
 from django.db.models import Count
 from django.utils import timezone
 
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
@@ -144,7 +145,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             thread = await Thread.objects.aget(id=thread_id)
 
             if title is not None:
-                thread.title = title
+                thread.title = title[:THREAD_TITLE_MAX_LENGTH]
             if metadata is not None:
                 # Merge metadata
                 thread.metadata.update(metadata)

@@ -14,7 +14,7 @@ from django_ai_sdk.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
-from django_ai_sdk.common import ChatMessage, Prompt, prompt
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
@@ -25,6 +25,7 @@ from django_ai_sdk.permissions import (
     check_object_permissions,
     check_permissions,
 )
+from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
 from django_ai_sdk.responses import stream_response
@@ -291,6 +292,15 @@ class Assistant(ABC, AssistantInfoMixin):
         Alias for get_instructions()
         """
         return self.get_instructions()
+
+    def get_title_generation_prompt(self) -> Prompt:
+        """Return the system prompt used to generate a thread title.
+
+        Defaults to a prompt capped at the `Thread.title` column's
+        `max_length`, so the model is nudged to stay within the limit that
+        storage enforces anyway. Override to customize tone/format.
+        """
+        return build_title_generation_prompt(THREAD_TITLE_MAX_LENGTH)
 
     def get_model(self) -> str:
         """Return the model identifier."""

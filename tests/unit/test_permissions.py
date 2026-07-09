@@ -138,45 +138,47 @@ class TestPermissions:
         user = MagicMock(is_staff=True)
         await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
 
-    # --- get_default_permissions ---
+    # --- get_domain_permissions ---
 
-    async def test_get_default_permissions_falls_back_to_allow_all(self):
-        from django_ai_sdk.permissions import AllowAll, AssistantDefaultPermission, get_default_permissions
+    async def test_get_domain_permissions_falls_back_to_default(self):
+        from django_ai_sdk.permissions import AssistantDefaultPermission, get_domain_permissions, PermissionDomain
 
-        get_default_permissions.cache_clear()
-        result = get_default_permissions()
-        assert result == [AssistantDefaultPermission, AllowAll]
+        get_domain_permissions.cache_clear()
+        result = get_domain_permissions(PermissionDomain.ASSISTANT)
+        assert result == [AssistantDefaultPermission]
 
-    async def test_get_default_permissions_from_setting_single(self):
-        from django_ai_sdk.permissions import DenyAll, get_default_permissions
+    async def test_get_domain_permissions_from_setting_single(self):
+        from django_ai_sdk.permissions import DenyAll, get_domain_permissions, PermissionDomain
 
-        with override_settings(AI_SDK_DEFAULT_PERMISSIONS=["django_ai_sdk.permissions.DenyAll"]):
-            get_default_permissions.cache_clear()
-            result = get_default_permissions()
+        with override_settings(AI_SDK_PERMISSIONS={"assistant": ["django_ai_sdk.permissions.DenyAll"]}):
+            get_domain_permissions.cache_clear()
+            result = get_domain_permissions(PermissionDomain.ASSISTANT)
             assert result == [DenyAll]
-        get_default_permissions.cache_clear()
+        get_domain_permissions.cache_clear()
 
-    async def test_get_default_permissions_from_setting_multiple(self):
-        from django_ai_sdk.permissions import DenyAll, IsAuthenticated, get_default_permissions
+    async def test_get_domain_permissions_from_setting_multiple(self):
+        from django_ai_sdk.permissions import DenyAll, IsAuthenticated, get_domain_permissions, PermissionDomain
 
         with override_settings(
-            AI_SDK_DEFAULT_PERMISSIONS=[
-                "django_ai_sdk.permissions.DenyAll",
-                "django_ai_sdk.permissions.IsAuthenticated",
-            ]
+            AI_SDK_PERMISSIONS={
+                "assistant": [
+                    "django_ai_sdk.permissions.DenyAll",
+                    "django_ai_sdk.permissions.IsAuthenticated",
+                ]
+            }
         ):
-            get_default_permissions.cache_clear()
-            result = get_default_permissions()
+            get_domain_permissions.cache_clear()
+            result = get_domain_permissions(PermissionDomain.ASSISTANT)
             assert result == [DenyAll, IsAuthenticated]
-        get_default_permissions.cache_clear()
+        get_domain_permissions.cache_clear()
 
-    async def test_get_default_permissions_used_as_fallback_in_assistant_permissions(self):
+    async def test_get_domain_permissions_used_as_fallback_in_assistant_permissions(self):
         from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.permissions import AllowAll, DenyAll, get_default_permissions
+        from django_ai_sdk.permissions import AllowAll, DenyAll, get_domain_permissions, PermissionDomain
 
-        get_default_permissions.cache_clear()
-        with override_settings(AI_SDK_DEFAULT_PERMISSIONS=["django_ai_sdk.permissions.DenyAll"]):
-            get_default_permissions.cache_clear()
+        get_domain_permissions.cache_clear()
+        with override_settings(AI_SDK_PERMISSIONS={"assistant": ["django_ai_sdk.permissions.DenyAll"]}):
+            get_domain_permissions.cache_clear()
             reg = MagicMock()
             assistant_a = MagicMock(name="a", id="a")
             del assistant_a.permissions
@@ -188,7 +190,7 @@ class TestPermissions:
                 assert len(summaries) == 1
                 assert summaries[0]["id"] == "b"
 
-        get_default_permissions.cache_clear()
+        get_domain_permissions.cache_clear()
 
 
 @pytest.mark.django_db
