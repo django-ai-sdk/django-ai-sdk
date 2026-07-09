@@ -36,7 +36,7 @@ def _patch_oauth_transport(monkeypatch, transport: httpx.MockTransport) -> None:
     module builds, whether called from loader.refresh_oauth_token directly or
     from services.exchange_token (which imports build_oauth_client locally, so
     patching the loader's copy covers both)."""
-    import django_ai_sdk.integrations.mcp.loader as loader_module
+    from django_ai_sdk.integrations.mcp import loader as loader_module
 
     original = loader_module.build_oauth_client
 

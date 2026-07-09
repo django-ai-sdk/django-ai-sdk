@@ -232,9 +232,7 @@ async def resolve_client_credentials(
         return config.client_id, config.client_secret.get_secret_value()
 
 
-def build_oauth_client(
-    client_id: str, client_secret: str, **kwargs: Any
-) -> AsyncOAuth2Client:
+def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> AsyncOAuth2Client:
     """Build an Authlib OAuth2 client with the right client-authentication method.
 
     Confidential clients (a client_secret is configured) authenticate with HTTP
