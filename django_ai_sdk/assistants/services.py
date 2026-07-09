@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Required, TypedDict
 
 from asgiref.sync import async_to_sync
@@ -194,30 +195,38 @@ class AssistantService:
         permissions = get_assistant_permissions(assistant)
         await has_perms(user, Operation.VIEW_ASSISTANT, permissions=permissions)
 
-        try:
-            from django_ai_sdk.integrations.mcp.schemas import AssistantIntegrationStatus
-            from django_ai_sdk.integrations.registry import get_integrations
-        except ImportError:
-            return []
-
         integration_names: list[str] = getattr(assistant, "integrations", [])
         if not integration_names:
             return []
 
-        result = []
-        for name, integration in get_integrations(integration_names).items():
-            status = await integration.get_status(user)
-            result.append(
-                AssistantIntegrationStatus(
-                    server_name=name,
-                    label=integration.label,
-                    type=integration.kind,
-                    status=status,
-                    tool_names=await integration.get_tool_names(user),
-                )
+        from django_ai_sdk.integrations.base import IntegrationStatus
+        from django_ai_sdk.integrations.mcp.schemas import AssistantIntegrationStatus
+        from django_ai_sdk.integrations.registry import get_integrations
+
+        async def _status_for(name: str, integration: Any) -> AssistantIntegrationStatus:
+            # Isolate each integration: one that errors (a slow/dead server, a DB
+            # hiccup fetching an OAuth token) degrades its own row instead of failing
+            # the whole status response.
+            try:
+                status = await integration.get_status(user)
+                tool_names = await integration.get_tool_names(user)
+            except Exception:
+                _logger.exception("Failed to load status for integration %r", name)
+                status, tool_names = IntegrationStatus.DEGRADED, []
+            return AssistantIntegrationStatus(
+                server_name=name,
+                label=integration.label,
+                type=integration.kind,
+                status=status,
+                tool_names=tool_names,
             )
 
-        return result
+        # Run every integration concurrently — each get_status()/get_tool_names() is
+        # individually bounded — mirroring Assistant._get_integration_tools().
+        integrations = get_integrations(integration_names)
+        return list(
+            await asyncio.gather(*(_status_for(name, i) for name, i in integrations.items()))
+        )
 
     # ============================================================================
     # Assistant user management

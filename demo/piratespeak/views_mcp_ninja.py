@@ -10,6 +10,11 @@ from django.contrib.auth.models import AnonymousUser
 from django.http import HttpRequest
 from django_ai_sdk.integrations.mcp import services as mcp_service
 from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+from django_ai_sdk.integrations.mcp.schemas import (
+    OAuthMCPIntegrationConfig,
+    StaticMCPIntegrationConfig,
+    TokenMCPIntegrationConfig,
+)
 from ninja import Router, Schema
 
 router = Router()
@@ -85,7 +90,12 @@ async def test_connection(request: HttpRequest, server_name: str) -> MCPTestOut:
 
     all_servers = getattr(settings, "AI_SDK_INTEGRATIONS", {})
     server = all_servers.get(server_name)
-    if not server:
+    # AI_SDK_INTEGRATIONS also holds non-MCP entries (API integrations, dotted paths);
+    # this endpoint only tests MCP servers.
+    if not isinstance(
+        server,
+        (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig),
+    ):
         return MCPTestOut(status="error", message="Server not configured")
 
     token: str | None = None

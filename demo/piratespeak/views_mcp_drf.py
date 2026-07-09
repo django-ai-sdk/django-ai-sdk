@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING
 import httpx
 from django.conf import settings
 from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+from django_ai_sdk.integrations.mcp.schemas import (
+    OAuthMCPIntegrationConfig,
+    StaticMCPIntegrationConfig,
+    TokenMCPIntegrationConfig,
+)
 from django_ai_sdk.integrations.mcp.services import (
     disconnect_sync,
     list_connections_sync,
@@ -91,7 +96,12 @@ class MCPViewSet(viewsets.ViewSet):
         server_name: str = pk
         all_servers = getattr(settings, "AI_SDK_INTEGRATIONS", {})
         server = all_servers.get(server_name)
-        if not server:
+        # AI_SDK_INTEGRATIONS also holds non-MCP entries (API integrations, dotted
+        # paths); this endpoint only tests MCP servers.
+        if not isinstance(
+            server,
+            (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig),
+        ):
             result = {"status": "error", "message": "Server not configured"}
             return Response(MCPTestSerializer(result).data)
 
