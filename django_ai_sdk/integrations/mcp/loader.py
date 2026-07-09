@@ -1,10 +1,8 @@
 """MCP-backed Integration — connects to a remote MCP server over Streamable HTTP.
 
-Discovery (connect + list_tools) is the one place this backend touches the network,
-and it's the part that used to sit directly on the chat-request critical path. Every
-MCPIntegration instance owns a ResilientCache (stale-while-revalidate + circuit
-breaker — see django_ai_sdk.integrations.base) so a slow or dead MCP server can add
-at most one bounded, cache-miss-only delay, never a per-turn one.
+Each MCPIntegration owns a ResilientCache (stale-while-revalidate + circuit breaker —
+see django_ai_sdk.integrations.base) so discovery (connect + list_tools) never sits
+directly on the chat-request critical path.
 """
 
 from __future__ import annotations
@@ -14,9 +12,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from authlib.integrations.base_client.errors import OAuthError
+from authlib.integrations.httpx_client import AsyncOAuth2Client
 from django.conf import settings
-from mcp.client.auth import OAuthTokenError
-from mcp.client.auth.utils import handle_token_response_scopes
 
 from django_ai_sdk.integrations.base import Integration, IntegrationStatus, ResilientCache
 from django_ai_sdk.integrations.mcp.schemas import (
@@ -28,7 +26,6 @@ from django_ai_sdk.integrations.mcp.schemas import (
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
-    from mcp.shared.auth import OAuthToken
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
@@ -128,7 +125,11 @@ class MCPIntegration(Integration):
         token = await self._get_oauth_token(user)
         if token is None:
             return IntegrationStatus.DISCONNECTED
-        if token.is_expired():
+        # An expired access token with no refresh token can't recover without a fresh
+        # OAuth flow, so surface EXPIRED to prompt a reconnect. When a refresh token is
+        # present, get_tools() below refreshes transparently — fall through and report
+        # the real post-refresh outcome rather than a misleading EXPIRED.
+        if token.is_expired() and not token.get_refresh_token():
             return IntegrationStatus.EXPIRED
 
         await self.get_tools(user)
@@ -181,9 +182,16 @@ class MCPIntegration(Integration):
             return None
 
     async def _fetch_oauth(self, user: AbstractBaseUser | AnonymousUser | None) -> list[Any]:
+        # Only reached via _fetch() for an OAuth config; narrow it for both type-checking
+        # and a clear failure if that invariant is ever broken.
+        assert isinstance(self.config, OAuthMCPIntegrationConfig)
+
         token_obj = await self._get_oauth_token(user)
         if token_obj is None:
+            # _get_oauth_token() returns None for a None user, so past this point
+            # `user` is guaranteed non-None.
             return []
+        assert user is not None
 
         if token_obj.is_expired():
             logger.info("Access token expired for %r — attempting refresh", self.name)
@@ -224,23 +232,21 @@ async def resolve_client_credentials(
         return config.client_id, config.client_secret.get_secret_value()
 
 
-async def post_token_request(
-    token_endpoint: str, data: dict[str, str], client_id: str, client_secret: str
-) -> OAuthToken:
-    """POST an OAuth token grant and return the parsed, validated token.
+def build_oauth_client(
+    client_id: str, client_secret: str, **kwargs: Any
+) -> AsyncOAuth2Client:
+    """Build an Authlib OAuth2 client with the right client-authentication method.
 
-    Confidential clients authenticate with HTTP Basic (client_secret); public
-    clients send client_id in the body. Raises on transport error (httpx) or an
-    unparseable token response (OAuthTokenError) — callers decide how to handle.
+    Confidential clients (a client_secret is configured) authenticate with HTTP
+    Basic; public clients send client_id in the request body instead.
     """
-    async with httpx.AsyncClient(timeout=10) as client:
-        if client_secret:
-            body = {k: v for k, v in data.items() if k != "client_id"}
-            response = await client.post(token_endpoint, data=body, auth=(client_id, client_secret))
-        else:
-            response = await client.post(token_endpoint, data=data)
-    response.raise_for_status()
-    return await handle_token_response_scopes(response)
+    return AsyncOAuth2Client(
+        client_id=client_id,
+        client_secret=client_secret or None,
+        token_endpoint_auth_method="client_secret_basic" if client_secret else "none",
+        timeout=10,
+        **kwargs,
+    )
 
 
 async def refresh_oauth_token(
@@ -267,21 +273,59 @@ async def refresh_oauth_token(
         return None
 
     client_id, client_secret = await resolve_client_credentials(token_obj.server_name, config)
-    try:
-        token = await post_token_request(
-            discovery.token_endpoint,
-            {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
-            client_id,
-            client_secret,
+
+    from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+    # Two callers can redeem the same refresh_token concurrently (a live request
+    # racing the refresh_mcp_tokens cron, or two overlapping cron runs). Only persist
+    # our result if the row still holds the refresh_token we read — otherwise we lost
+    # the race and must not clobber the winner's tokens with our own.
+    stale_refresh_token = token_obj.refresh_token
+    outcome = {"updated": 0}
+
+    async def _persist(token: dict[str, Any], refresh_token: str | None = None, **_: Any) -> None:
+        if not token.get("access_token"):
+            raise OAuthError(error="invalid_response", description="missing access_token")
+        token_obj.set_tokens(token)
+        outcome["updated"] = await MCPOAuthToken.objects.filter(
+            pk=token_obj.pk, refresh_token=stale_refresh_token
+        ).aupdate(
+            access_token=token_obj.access_token,
+            refresh_token=token_obj.refresh_token,
+            token_type=token_obj.token_type,
+            scope=token_obj.scope,
+            expires_at=token_obj.expires_at,
         )
-    except (httpx.HTTPError, OAuthTokenError) as e:
+
+    client = build_oauth_client(client_id, client_secret, update_token=_persist)
+    try:
+        async with client:
+            await client.refresh_token(discovery.token_endpoint, refresh_token=refresh_token)
+    except (httpx.HTTPError, OAuthError) as e:
+        # Our own exchange may have failed *because* a concurrent refresh already
+        # rotated this refresh_token (e.g. the IDP rejected our now-stale one with
+        # invalid_grant). Check whether another writer already landed a good token
+        # before reporting failure upstream.
+        current = await MCPOAuthToken.objects.aget(pk=token_obj.pk)
+        if current.refresh_token != stale_refresh_token and not current.is_expired():
+            logger.info(
+                "Refresh for %r failed (%s) but another refresh already landed",
+                token_obj.server_name,
+                e,
+            )
+            return current
         logger.error("Token refresh failed for server %r: %s", token_obj.server_name, e)
         return None
 
-    token_obj.set_tokens(token.model_dump())
-    await token_obj.asave()
-    logger.info("Refreshed OAuth token for server %r", token_obj.server_name)
-    return token_obj
+    if outcome["updated"]:
+        logger.info("Refreshed OAuth token for server %r", token_obj.server_name)
+        return token_obj
+
+    logger.info(
+        "Lost refresh race for %r — another refresh already landed, reloading its result",
+        token_obj.server_name,
+    )
+    return await MCPOAuthToken.objects.aget(pk=token_obj.pk)
 
 
 async def _connect(

@@ -21,6 +21,43 @@ from django_ai_sdk.integrations.mcp.schemas import (
 )
 from django_ai_sdk.integrations.registry import _build
 
+import httpx
+
+
+def _mock_transport(token_response: dict, status_code: int = 200) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, json=token_response)
+
+    return httpx.MockTransport(handler)
+
+
+def _patch_oauth_transport(monkeypatch, transport: httpx.MockTransport) -> None:
+    """Inject a fake token-endpoint transport into every AsyncOAuth2Client this
+    module builds, whether called from loader.refresh_oauth_token directly or
+    from services.exchange_token (which imports build_oauth_client locally, so
+    patching the loader's copy covers both)."""
+    import django_ai_sdk.integrations.mcp.loader as loader_module
+
+    original = loader_module.build_oauth_client
+
+    def wrapper(client_id, client_secret, **kwargs):
+        kwargs.setdefault("transport", transport)
+        return original(client_id, client_secret, **kwargs)
+
+    monkeypatch.setattr(loader_module, "build_oauth_client", wrapper)
+
+
+def _patch_discovery(monkeypatch, token_endpoint: str = "https://auth.example.com/token") -> None:
+    import django_ai_sdk.integrations.mcp.discovery as discovery_module
+
+    async def fake_discover(*args, **kwargs):
+        return discovery_module.OAuthDiscovery(
+            authorization_endpoint="https://auth.example.com/authorize",
+            token_endpoint=token_endpoint,
+        )
+
+    monkeypatch.setattr(discovery_module, "discover", fake_discover)
+
 
 class TestResilientCache:
     async def test_cache_hit_returns_immediately(self):
@@ -618,3 +655,180 @@ class TestIntegrationFailureIsolation:
 
         assert set(tools) == {"slow-tool", "other-slow-tool"}
         assert elapsed < DELAY * 2
+
+
+@pytest.mark.django_db
+class TestOAuthTokenRefresh:
+    """refresh_oauth_token() goes through Authlib's AsyncOAuth2Client now. These
+    cover the actual HTTP exchange plus the optimistic-concurrency guard against a
+    concurrent refresh (another request, or an overlapping refresh_mcp_tokens run)
+    landing first."""
+
+    async def _make_token(self, user, server_name="notion", refresh_token="old-refresh"):
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+        token_obj = MCPOAuthToken(user=user, server_name=server_name)
+        token_obj.set_tokens(
+            {"access_token": "old-access", "refresh_token": refresh_token, "expires_in": -10}
+        )
+        await token_obj.asave()
+        return token_obj
+
+    async def test_refresh_success_persists_new_tokens(self, monkeypatch):
+        from tests.factories.db import UserFactory
+
+        from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
+
+        user = await UserFactory.acreate()
+        token_obj = await self._make_token(user)
+
+        _patch_discovery(monkeypatch)
+        _patch_oauth_transport(
+            monkeypatch,
+            _mock_transport(
+                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+            ),
+        )
+
+        config = OAuthMCPIntegrationConfig(
+            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+        )
+        result = await refresh_oauth_token(token_obj, config)
+
+        assert result is not None
+        assert result.get_access_token() == "new-access"
+        assert result.get_refresh_token() == "new-refresh"
+
+        stored = await MCPOAuthToken.objects.aget(pk=token_obj.pk)
+        assert stored.get_access_token() == "new-access"
+
+    async def test_refresh_returns_none_on_oauth_error(self, monkeypatch):
+        from tests.factories.db import UserFactory
+
+        from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
+
+        user = await UserFactory.acreate()
+        token_obj = await self._make_token(user)
+
+        _patch_discovery(monkeypatch)
+        _patch_oauth_transport(
+            monkeypatch, _mock_transport({"error": "invalid_grant"}, status_code=400)
+        )
+
+        config = OAuthMCPIntegrationConfig(
+            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+        )
+        result = await refresh_oauth_token(token_obj, config)
+
+        assert result is None
+        stored = await MCPOAuthToken.objects.aget(pk=token_obj.pk)
+        assert stored.get_access_token() == "old-access"  # untouched by the failed attempt
+
+    async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(self, monkeypatch):
+        """By the time our refresh response comes back, a concurrent refresh has
+        already rotated the DB row's refresh_token out from under us. Our own
+        conditional update must then no-op, and the caller must get the winner's
+        tokens back — not silently overwrite them with our own stale result."""
+        from tests.factories.db import UserFactory
+
+        from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
+
+        user = await UserFactory.acreate()
+        token_obj = await self._make_token(user)
+
+        winner = MCPOAuthToken(user=user, server_name=token_obj.server_name)
+        winner.set_tokens(
+            {"access_token": "winner-access", "refresh_token": "winner-refresh", "expires_in": 3600}
+        )
+        await MCPOAuthToken.objects.filter(pk=token_obj.pk).aupdate(
+            access_token=winner.access_token,
+            refresh_token=winner.refresh_token,
+            expires_at=winner.expires_at,
+        )
+
+        _patch_discovery(monkeypatch)
+        _patch_oauth_transport(
+            monkeypatch,
+            _mock_transport(
+                {
+                    "access_token": "loser-access",
+                    "refresh_token": "loser-refresh",
+                    "expires_in": 3600,
+                }
+            ),
+        )
+
+        config = OAuthMCPIntegrationConfig(
+            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+        )
+        # token_obj still holds the pre-race refresh_token in memory — exactly the
+        # stale value a real caller would have if it read the row before the race.
+        result = await refresh_oauth_token(token_obj, config)
+
+        assert result is not None
+        assert result.get_access_token() == "winner-access"
+
+
+@pytest.mark.django_db
+class TestExchangeToken:
+    """The authorization_code exchange also goes through Authlib now."""
+
+    async def test_exchange_returns_token_dict(self, monkeypatch):
+        from django_ai_sdk.integrations.mcp.services import exchange_token
+
+        _patch_oauth_transport(
+            monkeypatch,
+            _mock_transport(
+                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+            ),
+        )
+
+        token = await exchange_token(
+            "https://auth.example.com/token",
+            code="auth-code",
+            redirect_uri="https://app.example.com/callback",
+            verifier="verifier-value",
+            client_id="client-1",
+            client_secret="secret-1",
+        )
+
+        assert token["access_token"] == "new-access"
+        assert token["refresh_token"] == "new-refresh"
+
+    async def test_exchange_raises_on_oauth_error(self, monkeypatch):
+        from django_ai_sdk.integrations.mcp.services import exchange_token
+
+        _patch_oauth_transport(
+            monkeypatch, _mock_transport({"error": "invalid_grant"}, status_code=400)
+        )
+
+        with pytest.raises(ValueError):
+            await exchange_token(
+                "https://auth.example.com/token",
+                code="auth-code",
+                redirect_uri="https://app.example.com/callback",
+                verifier="verifier-value",
+                client_id="client-1",
+                client_secret="secret-1",
+            )
+
+    async def test_exchange_raises_when_access_token_missing(self, monkeypatch):
+        from django_ai_sdk.integrations.mcp.services import exchange_token
+
+        _patch_oauth_transport(monkeypatch, _mock_transport({"token_type": "Bearer"}))
+
+        with pytest.raises(ValueError, match="access_token"):
+            await exchange_token(
+                "https://auth.example.com/token",
+                code="auth-code",
+                redirect_uri="https://app.example.com/callback",
+                verifier="verifier-value",
+                client_id="client-1",
+                client_secret="secret-1",
+            )

@@ -19,7 +19,6 @@ from django.test.signals import setting_changed
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.integrations.base import Integration
-from django_ai_sdk.integrations.mcp.loader import MCPIntegration
 from django_ai_sdk.integrations.mcp.schemas import (
     OAuthMCPIntegrationConfig,
     StaticMCPIntegrationConfig,
@@ -42,6 +41,10 @@ def _build(name: str, value: Any) -> Integration:
         resolved = import_string(value)
         integration = resolved() if isinstance(resolved, type) else resolved
     elif isinstance(value, _MCP_CONFIG_TYPES):
+        # Imported lazily: MCPIntegration pulls in the optional `mcp` extra (see the
+        # loader's `mcp.client.auth` imports).
+        from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+
         integration = MCPIntegration(name, value)
     else:
         raise ImproperlyConfigured(

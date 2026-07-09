@@ -14,9 +14,10 @@ from urllib.parse import urlencode
 
 import httpx
 from asgiref.sync import async_to_sync
+from authlib.integrations.base_client.errors import OAuthError
 from django.conf import settings
 from django.db import DatabaseError
-from mcp.client.auth import OAuthRegistrationError, OAuthTokenError
+from mcp.client.auth import OAuthRegistrationError
 from mcp.client.auth.oauth2 import PKCEParameters
 from mcp.client.auth.utils import handle_registration_response
 from mcp.shared.auth import OAuthClientMetadata
@@ -43,9 +44,7 @@ def _get_mcp_servers() -> dict:
     """Get the MCP-backed entries from AI_SDK_INTEGRATIONS.
 
     AI_SDK_INTEGRATIONS may also contain hand-written API-backed integrations
-    (registered as a dotted class path rather than an MCP config object) — those
-    have no OAuth/connection concept, so this MCP-specific service layer filters
-    them out rather than assuming every entry has a `.type`/`.label`.
+    (registered as a dotted class path rather than an MCP config object).
     """
     configured: dict = getattr(settings, "AI_SDK_INTEGRATIONS", {})
     mcp_types = (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig)
@@ -239,26 +238,25 @@ async def exchange_token(
 
     Raises:
         httpx.HTTPError: token endpoint transport/status error
-        ValueError: token endpoint returned an unparseable response
+        ValueError: token endpoint returned an error or unparseable/incomplete response
     """
-    from django_ai_sdk.integrations.mcp.loader import post_token_request
+    from django_ai_sdk.integrations.mcp.loader import build_oauth_client
 
+    client = build_oauth_client(client_id, client_secret)
     try:
-        token = await post_token_request(
-            token_endpoint,
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": verifier,
-                "client_id": client_id,
-            },
-            client_id,
-            client_secret,
-        )
-    except OAuthTokenError as e:
+        async with client:
+            token = await client.fetch_token(
+                token_endpoint,
+                grant_type="authorization_code",
+                code=code,
+                redirect_uri=redirect_uri,
+                code_verifier=verifier,
+            )
+    except (OAuthError, ValueError) as e:
         raise ValueError(str(e)) from e
-    return token.model_dump()
+    if not token.get("access_token"):
+        raise ValueError("Token endpoint response missing access_token")
+    return dict(token)
 
 
 async def store_token(user: UserType, server_name: str, token_response: dict) -> MCPOAuthToken:

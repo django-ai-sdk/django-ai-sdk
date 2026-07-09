@@ -82,7 +82,7 @@ async def _is_safe_url(url: str) -> bool:
             addrs = await asyncio.get_running_loop().getaddrinfo(hostname, None)
         except OSError:
             return False  # DNS resolution failed — fail closed
-        return not any(_is_unsafe_ip(addr[4][0]) for addr in addrs)
+        return not any(_is_unsafe_ip(str(addr[4][0])) for addr in addrs)
     except Exception:
         return False
 
