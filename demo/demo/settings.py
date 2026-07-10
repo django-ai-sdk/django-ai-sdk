@@ -189,12 +189,27 @@ AI_SDK_PERMISSIONS = {
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
 # Integrations are enabled by listing their app in INSTALLED_APPS; per-app settings
-# slices below only feed credentials/params. The weather app needs none. Linear is
-# enabled only when a token is configured.
+# slices below only feed credentials/params. Three flavors are demonstrated here:
+# - weather: no auth at all — needs nothing.
+# - linear/github: a shared token, read from a settings slice.
+# - notion: OAuth 2.1 — needs no static secret (dynamic client registration), just
+#   a flag to enable the app; each user connects via the browser redirect flow.
 _linear_api_key = env("LINEAR_API_KEY", default=None)
 if _linear_api_key:
-    INSTALLED_APPS.append("django_ai_sdk.integrations.linear.apps.LinearConfig")
+    INSTALLED_APPS.append("django_ai_sdk.integrations.defaults.linear.apps.LinearConfig")
     AI_SDK_LINEAR = {"token": _linear_api_key, "tools": ["list_issues"]}
+
+_github_token = env("GITHUB_TOKEN", default=None)
+if _github_token:
+    INSTALLED_APPS.append("piratespeak.integrations.github.apps.GithubConfig")
+    AI_SDK_GITHUB = {"token": _github_token}
+
+if env.bool("ENABLE_NOTION", default=False):
+    INSTALLED_APPS.append("django_ai_sdk.integrations.defaults.notion.apps.NotionConfig")
+
+# Encrypts stored OAuth/MCP credentials at rest — required, no fallback. Generate
+# your own with `Fernet.generate_key()`; this one is fine for local dev only.
+AI_SDK_FERNET_KEY = "TQN8DDSUkK70jYGz4ms8wJ_vYC9R40DYWp32d37m-Lo="
 
 
 # MCP discovery configuration

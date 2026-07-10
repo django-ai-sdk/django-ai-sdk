@@ -74,7 +74,9 @@ class PirateBasicAssistant(Assistant):
     rag_provider = RAGProvider()
 
     tools: list = [get_today, get_memory_files]
-    integrations: list[str] = ["linear", "weather"]
+    # Unregistered names (an integration not enabled in settings/INSTALLED_APPS) are
+    # silently skipped — safe to list all demo integrations regardless of which are on.
+    integrations: list[str] = ["linear", "weather", "github", "notion"]
 
     citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
