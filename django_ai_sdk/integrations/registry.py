@@ -1,96 +1,105 @@
-"""Resolves the AI_SDK_INTEGRATIONS setting into Integration instances.
+"""Process-wide registry of integration services.
 
-Each value in AI_SDK_INTEGRATIONS can be:
-  - an MCP config object (Static/Token/OAuthMCPIntegrationConfig) — resolved to an
-    MCPIntegration, or
-  - a dotted path to an Integration subclass or instance, or
-  - an Integration instance directly.
+Two sources merge, keyed by name:
 
-Instances are built once per process and cached.
+- **App-registered** (code): each integration is a Django app whose
+  ``IntegrationAppConfig.ready()`` constructs its ``IntegrationService`` and calls
+  :func:`register`. Being listed in ``INSTALLED_APPS`` is what enables it.
+- **DB-declared** (data): ``MCPServerConfig`` rows, for MCP servers that are pure
+  config (URL + auth + tool allow-list) and don't warrant a code app — added, edited,
+  enabled/disabled from Django admin with no deploy. See :func:`_db_services`.
+
+A name registered both ways is served from the app (code wins); a warning is logged.
+
+``get_all_integrations``/``get_integrations`` are async because the DB-declared source
+does a real query — matching this codebase's convention of async ORM access
+(``aget``/``async for``) everywhere a lookup runs inside a request/async call chain.
+The one legitimate synchronous caller (the ``manage.py check`` system check) bridges
+with ``asgiref.sync.async_to_sync``.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import TYPE_CHECKING
 
-from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
-from django.test.signals import setting_changed
-from django.utils.module_loading import import_string
+if TYPE_CHECKING:
+    from django_ai_sdk.integrations.base import IntegrationService
 
-from django_ai_sdk.integrations.base import Integration
-from django_ai_sdk.integrations.mcp.schemas import (
-    OAuthMCPIntegrationConfig,
-    StaticMCPIntegrationConfig,
-    TokenMCPIntegrationConfig,
-)
+logger = logging.getLogger(__name__)
 
-_MCP_CONFIG_TYPES = (
-    StaticMCPIntegrationConfig,
-    TokenMCPIntegrationConfig,
-    OAuthMCPIntegrationConfig,
-)
+_registry: dict[str, IntegrationService] = {}
 
-_registry_cache: dict[str, Integration] | None = None
+# DB-declared services are cached per name so each one keeps its ResilientCache/circuit
+# breaker across requests instead of losing that state on every rebuild. Invalidated by
+# post_save/post_delete signals on MCPServerConfig (see integrations/mcp/apps.py).
+_db_cache: dict[str, IntegrationService] = {}
 
 
-def _build(name: str, value: Any) -> Integration:
-    if isinstance(value, Integration):
-        integration = value
-    elif isinstance(value, str):
-        resolved = import_string(value)
-        integration = resolved() if isinstance(resolved, type) else resolved
-    elif isinstance(value, _MCP_CONFIG_TYPES):
-        # Imported lazily: MCPIntegration pulls in the optional `mcp` extra (see the
-        # loader's `mcp.client.auth` imports).
-        from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+def register(service: IntegrationService) -> None:
+    """Register (or replace) an integration service under its ``name``."""
+    if not service.name:
+        raise ValueError(f"{type(service).__name__} must set a non-empty `name` to register")
+    _registry[service.name] = service
 
-        integration = MCPIntegration(name, value)
-    else:
-        raise ImproperlyConfigured(
-            f"AI_SDK_INTEGRATIONS[{name!r}] = {value!r} is not a recognized integration. "
-            "Use a Static/Token/OAuthMCPIntegrationConfig, a dotted path to an "
-            "Integration subclass or instance, or an Integration instance directly."
+
+async def _db_services() -> dict[str, IntegrationService]:
+    """Build (or return cached) services for every enabled ``MCPServerConfig`` row.
+
+    Returns ``{}`` if the mcp toolkit's tables aren't migrated yet (e.g. ``manage.py
+    check`` on a fresh checkout, before the first ``migrate``) — a missing table must
+    never crash a call to :func:`get_all_integrations`.
+    """
+    from django.db import DatabaseError
+
+    from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+    from django_ai_sdk.integrations.mcp.models import MCPServerConfig
+
+    result: dict[str, IntegrationService] = {}
+    try:
+        async for row in MCPServerConfig.objects.filter(enabled=True):
+            svc = _db_cache.get(row.name)
+            if svc is None:
+                config, needs_setup = row.to_config()
+                svc = MCPIntegration(row.name, config, needs_setup=needs_setup)
+                _db_cache[row.name] = svc
+            result[row.name] = svc
+    except DatabaseError:
+        return {}
+    return result
+
+
+async def get_all_integrations() -> dict[str, IntegrationService]:
+    """Return every integration service, keyed by name — app-registered + DB-declared.
+
+    App-registered wins on a name collision.
+    """
+    db = await _db_services()
+    collisions = db.keys() & _registry.keys()
+    for name in collisions:
+        logger.warning(
+            "Integration %r is both an app-registered service and a DB MCPServerConfig "
+            "row; the app-registered service wins.",
+            name,
         )
-
-    # Fill in the name from the settings key if the integration didn't set one.
-    if not getattr(integration, "name", None):
-        integration.name = name
-    return integration
+    return {**db, **_registry}
 
 
-def get_all_integrations() -> dict[str, Integration]:
-    """Build every configured Integration from AI_SDK_INTEGRATIONS, once per process."""
-    global _registry_cache
-    if _registry_cache is not None:
-        return _registry_cache
-
-    configured: dict[str, Any] = getattr(settings, "AI_SDK_INTEGRATIONS", {})
-    _registry_cache = {name: _build(name, value) for name, value in configured.items()}
-    return _registry_cache
-
-
-def get_integrations(names: list[str]) -> dict[str, Integration]:
-    """Return the configured Integrations named in ``names``. Unknown names are skipped."""
-    all_integrations = get_all_integrations()
+async def get_integrations(names: list[str]) -> dict[str, IntegrationService]:
+    """Return the services named in ``names``. Unknown names are skipped."""
+    all_integrations = await get_all_integrations()
     return {name: all_integrations[name] for name in names if name in all_integrations}
 
 
-def reset_registry_cache() -> None:
-    """Clear the resolved-integrations cache, forcing a rebuild on next access."""
-    global _registry_cache
-    _registry_cache = None
-
-
-def _on_setting_changed(*, setting: str, **kwargs: Any) -> None:
-    """Auto-invalidate when AI_SDK_INTEGRATIONS changes under ``override_settings``.
-
-    Without this, a test suite using ``override_settings(AI_SDK_INTEGRATIONS=...)``
-    would silently keep serving integrations built from the previous value, since
-    the cache is otherwise process-lifetime.
+def invalidate_db_service(name: str) -> None:
+    """Drop a DB-declared service's cached instance so the next access rebuilds it
+    from the current row — picks up an edited config or an enabled/disabled toggle.
+    Connected to ``MCPServerConfig`` post_save/post_delete (see ``mcp/apps.py``).
     """
-    if setting == "AI_SDK_INTEGRATIONS":
-        reset_registry_cache()
+    _db_cache.pop(name, None)
 
 
-setting_changed.connect(_on_setting_changed)
+def reset_registry() -> None:
+    """Clear both registries — for tests that register their own services."""
+    _registry.clear()
+    _db_cache.clear()

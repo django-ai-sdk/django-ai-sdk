@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 
-from django_ai_sdk.integrations.base import Integration, IntegrationStatus, ResilientCache
+from django_ai_sdk.integrations.base import (
+    IntegrationService,
+    IntegrationStatus,
+    ResilientCache,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -32,7 +36,7 @@ def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> di
     return {k: v for k, v in context.items() if k in params}
 
 
-class APIIntegration(Integration):
+class APIIntegration(IntegrationService):
     """Base for integrations backed by a hand-written API client, not MCP.
 
     Each entry in ``tools`` is either:

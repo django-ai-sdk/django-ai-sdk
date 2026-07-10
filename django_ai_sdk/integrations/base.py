@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from cashews import Cache, CircuitBreakerOpen
 
+from django_ai_sdk.permissions import Operation, PermissionDomain
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -25,8 +27,13 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.permissions import BasePermission
 
 logger = logging.getLogger(__name__)
+
+
+class IntegrationNotConnectable(Exception):
+    """Raised when connect() is called on an integration that doesn't support it."""
 
 
 class IntegrationStatus(StrEnum):
@@ -46,11 +53,39 @@ class IntegrationStatus(StrEnum):
     DISCONNECTED = "disconnected"  # never connected yet
 
 
-class Integration(ABC):
-    """Common interface every integration backend implements."""
+class IntegrationService(ABC):
+    """The single point of contact for one integration.
+
+    Every integration — an MCP server, a hand-written API wrapper — is one
+    ``IntegrationService`` subclass, living in its app's ``services.py``. It owns the
+    integration's tools, health, permissions, connection lifecycle and credential
+    refresh, and is what the Assistant and the ``/api/integrations``
+    endpoints talk to. An ``IntegrationAppConfig`` (see ``apps.py``) constructs it and
+    registers it into the process registry on app ``ready()``.
+    """
 
     name: str = ""
     label: str = ""
+
+    #: Permission classes gating this integration (like ``Assistant.permissions``).
+    #: Empty falls back to the INTEGRATIONS domain default (see ``permissions.py``).
+    permissions: list[type[BasePermission] | BasePermission] = []
+    domain: PermissionDomain = PermissionDomain.INTEGRATIONS
+
+    #: Connection-management capabilities the generic ``/api/integrations`` router
+    #: reads to decide which actions to offer. The router never branches on ``kind`` —
+    #: it dispatches to the methods below and lets the service decide.
+    supports_connect: bool = False
+    supports_test: bool = True
+
+    #: How the client should let a user connect, when ``supports_connect`` is True:
+    #: ``"oauth"`` (redirect via ``connect()``) or ``"credential"`` (submit a secret
+    #: via ``store_credential()``). ``None`` when not connectable.
+    connect_kind: str | None = None
+
+    #: Human-readable reason this integration can't run yet (e.g. a missing secret),
+    #: or ``None`` when fully configured. Never raises — surfaced to the UI instead.
+    detail: str | None = None
 
     @abstractmethod
     async def get_tools(
@@ -89,13 +124,89 @@ class Integration(ABC):
 
         Derives the names from ``get_tools()`` by default, which may do I/O (e.g. an
         MCP connect or an API health check). Callers that assume this is cheap should
-        confirm the concrete Integration overrides it with a cached/static source;
+        confirm the concrete service overrides it with a cached/static source;
         a custom subclass that doesn't override this will pay that I/O cost too.
         """
         return [t.name for t in await self.get_tools(user)]
 
     async def reconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
         """Reset this integration to a fresh state. No-op by default."""
+
+    # -- connection lifecycle (polymorphic; the router calls these, never on `kind`) --
+
+    async def connect(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        request: Any = None,
+        redirect_uri: str = "",
+    ) -> dict[str, Any]:
+        """Begin connecting this integration for ``user``.
+
+        Return a dict the client acts on — e.g. ``{"redirect_url": ...}`` for an
+        OAuth flow. ``request`` is passed through for services (like MCP-OAuth) that
+        need session/PKCE state. Integrations that need no connection step raise
+        :class:`IntegrationNotConnectable` (guarded by ``supports_connect``).
+        """
+        raise IntegrationNotConnectable(f"{self.name!r} does not support connect()")
+
+    async def disconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> bool:
+        """Drop any stored credential/connection for ``user``. No-op default."""
+        return False
+
+    async def store_credential(
+        self, user: AbstractBaseUser | AnonymousUser | None, secret: str
+    ) -> None:
+        """Store a user-submitted credential (``connect_kind == "credential"``).
+
+        Raises :class:`IntegrationNotConnectable` by default — override for
+        integrations whose ``connect_kind`` is ``"credential"``.
+        """
+        raise IntegrationNotConnectable(f"{self.name!r} does not accept a stored credential")
+
+    async def test(self, user: AbstractBaseUser | AnonymousUser | None = None) -> IntegrationStatus:
+        """Force a fresh connection attempt and report the real outcome.
+
+        Default: reset cached state and re-probe via ``get_status()``.
+        """
+        await self.reconnect(user)
+        return await self.get_status(user)
+
+    # -- lifecycle: refresh (recurring) --
+
+    async def refresh(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
+        """Refresh credentials (e.g. rotate an OAuth token). Recurring task. No-op default.
+
+        There is deliberately no boot-time warmup hook: caches populate lazily on first
+        use (``ResilientCache`` is stale-while-revalidate), so the only cost avoided by
+        pre-warming is the very first request's connect latency — not worth a boot
+        side-effect in a library. Deployers who want it can hit ``get_status()`` at
+        deploy time.
+        """
+
+    # -- permissions --
+
+    async def has_perms(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation = Operation.USE_INTEGRATION,
+        *,
+        raise_on_deny: bool = False,
+    ) -> bool:
+        """Whether ``user`` may use/manage this integration.
+
+        Resolves ``self.permissions`` (falling back to the INTEGRATIONS domain
+        default) and checks them.
+        """
+        from django_ai_sdk.permissions import get_integration_permissions
+        from django_ai_sdk.permissions import has_perms as _has_perms
+
+        return await _has_perms(
+            user,
+            operation,
+            permissions=get_integration_permissions(self),
+            raise_on_deny=raise_on_deny,
+        )
 
 
 # Standard circuit-breaker defaults — open once a clear majority of a small sample of
@@ -207,11 +318,3 @@ class ResilientCache:
         await self._cache.delete_match(f"*:v:{k}")
         await self._cache.delete_match(f"circuit_breaker:cb:{k}:*")
         self._last_ok.pop(k, None)
-
-    async def warm(self, key: Any, fetch: Callable[[], Awaitable[Any]]) -> None:
-        """Populate the cache for ``key`` if it isn't already cached.
-
-        Fetch failures are already handled by ``get()``, which records them and
-        returns ``empty()`` instead of raising.
-        """
-        await self.get(key, fetch)
