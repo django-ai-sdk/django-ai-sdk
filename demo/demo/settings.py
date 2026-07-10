@@ -207,10 +207,6 @@ if _github_token:
 if env.bool("ENABLE_NOTION", default=False):
     INSTALLED_APPS.append("django_ai_sdk.integrations.defaults.notion.apps.NotionConfig")
 
-# Encrypts stored OAuth/MCP credentials at rest — required, no fallback. Generate
-# your own with `Fernet.generate_key()`; this one is fine for local dev only.
-AI_SDK_FERNET_KEY = "TQN8DDSUkK70jYGz4ms8wJ_vYC9R40DYWp32d37m-Lo="
-
 
 # MCP discovery configuration
 AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds

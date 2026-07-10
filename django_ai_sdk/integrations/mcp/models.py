@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_fernet() -> Fernet:
-    """Derive a Fernet key from Django's SECRET_KEY via SHA-256."""
+    """Derive the Fernet key used to encrypt/decrypt integration credentials
+    from Django's SECRET_KEY, so there's no second secret to configure."""
     secret = settings.SECRET_KEY
     if isinstance(secret, str):
         secret = secret.encode()
@@ -85,9 +86,9 @@ class MCPOAuthToken(models.Model):
 class MCPServerConfig(models.Model):
     """An MCP server declared as data — added/edited/enabled via Django admin.
 
-    Unlike notion/linear (shipped as code apps), a server declared here needs no app,
-    no deploy, no restart: the registry (see ``integrations.registry``) picks it up on
-    next access and drops it the moment ``enabled`` is unchecked or the row is deleted.
+    A server declared here needs no app, no deploy, no restart: the registry (see
+    ``integrations.registry``) picks it up on next access and drops it the moment
+    ``enabled`` is unchecked or the row is deleted.
 
     ``token``/``client_secret`` are Fernet-encrypted, same as ``MCPOAuthToken``. For
     ``auth="user_token"`` no server-wide secret is stored here at all — each user
