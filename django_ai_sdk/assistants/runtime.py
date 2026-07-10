@@ -39,7 +39,14 @@ class RuntimeAssistant(Assistant):
         self.name = config.name
         self.model = config.model
         self.instructions = prompt(config.system_prompt or "You are a helpful assistant.")
-        self.integrations = list(config.integrations or [])
+        # config.integrations may be a flat list (all tools) or a {name: subset} dict
+        # (T-3 per-assistant tool subset) — preserve either form, don't collapse a dict
+        # to its keys.
+        self.integrations = (
+            config.integrations
+            if isinstance(config.integrations, dict)
+            else list(config.integrations or [])
+        )
         self.memories = list(config.memories or [])
         self.title_generation = config.title_generation
         self.max_history = config.max_history
