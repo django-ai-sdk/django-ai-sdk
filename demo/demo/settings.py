@@ -209,6 +209,9 @@ AI_SDK_ALLOWED_FILES = {
     ".txt": "text/plain",
     ".csv": "text/csv",
     ".json": "text/json",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
 REST_FRAMEWORK = {

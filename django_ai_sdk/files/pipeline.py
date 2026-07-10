@@ -35,7 +35,7 @@ class FilePipeline:
 
         FilePipeline(
             CSVFileProcessor(),
-            transforms=[CSVParseTransform(), LLMExtractTransform(response_format=MySchema)],
+            transforms=[CSVTransform(), LLMExtractTransform(response_format=MySchema)],
         )
     """
 

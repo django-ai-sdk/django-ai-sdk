@@ -11,8 +11,8 @@ class BaseTransform:
         raise NotImplementedError
 
 
-class CSVParseTransform(BaseTransform):
-    """str → list[dict] via csv.DictReader. No LLM."""
+class CSVTransform(BaseTransform):
+    """CSV to list transform"""
 
     async def run(self, data: Any, **kwargs: Any) -> list[dict] | Any:
         if not isinstance(data, str):
@@ -21,8 +21,8 @@ class CSVParseTransform(BaseTransform):
         return list(reader)
 
 
-class JSONParseTransform(BaseTransform):
-    """str → dict | list via json.loads. No LLM."""
+class JSONTransform(BaseTransform):
+    """JSON to dict tranform"""
 
     async def run(self, data: Any, **kwargs: Any) -> dict | list | Any:
         if not isinstance(data, str):
@@ -30,12 +30,12 @@ class JSONParseTransform(BaseTransform):
         return json.loads(data)
 
 
-class ToTextTransform(BaseTransform):
-    """Any → str. json.dumps for dict/list, str() otherwise. No LLM."""
+class TextTransform(BaseTransform):
+    """Text to dict transform"""
 
-    async def run(self, data: Any, **kwargs: Any) -> str:
+    async def run(self, data: Any, **kwargs: Any) -> dict:
         if isinstance(data, str):
-            return data
+            return {"data": data}
         if isinstance(data, (dict, list)):
-            return json.dumps(data, default=str, ensure_ascii=False)
-        return str(data)
+            return {"data": json.dumps(data, default=str, ensure_ascii=False)}
+        return {"data": str(data)}
