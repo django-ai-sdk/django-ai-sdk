@@ -181,6 +181,7 @@ class PptxFileProcessor(BaseBinaryFileProcessor):
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
     EXTENSIONS: ClassVar[tuple[str, ...]] = (".pptx",)
 
@@ -208,7 +209,7 @@ class XlsxFileProcessor(BaseBinaryFileProcessor):
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     EXTENSIONS: ClassVar[tuple[str, ...]] = (".xlsx", ".xls")
 
