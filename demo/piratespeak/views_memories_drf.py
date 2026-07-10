@@ -29,7 +29,7 @@ from django_ai_sdk.memories.services import (
     upload_document,
     upload_thread_file,
 )
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.permissions import ConflictError, PermissionDenied
 from rest_framework import serializers
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -191,6 +191,8 @@ class DocumentListCreateAPIView(APIView):
             result = upload_document(memory_id, uploaded_file, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
+        except ConflictError as e:
+            return Response({"detail": str(e)}, status=409)
         return Response(DocumentUploadResponseSerializer(result).data, status=202)
 
 
@@ -284,7 +286,10 @@ class ThreadFileListCreateAPIView(APIView):
         uploaded_file = request.FILES.get("file")  # type: ignore[union-attr]
         if not uploaded_file:
             return Response({"detail": "file is required"}, status=400)
-        result = upload_thread_file(thread_id, uploaded_file, user=request.user)
+        try:
+            result = upload_thread_file(thread_id, uploaded_file, user=request.user)
+        except ConflictError as e:
+            return Response({"detail": str(e)}, status=409)
         return Response(DocumentUploadResponseSerializer(result).data, status=202)
 
 

@@ -208,6 +208,7 @@ class EntryDocument(models.Model):
     file_size = models.PositiveIntegerField(default=0)
     content_type = models.CharField(max_length=100, blank=True, default="")
     file_extension = models.CharField(max_length=20, blank=True, default="")
+    file_hash = models.CharField(max_length=64, blank=True, default="")
     extracted = models.BooleanField(default=False)
     processing_status = models.CharField(
         max_length=20,

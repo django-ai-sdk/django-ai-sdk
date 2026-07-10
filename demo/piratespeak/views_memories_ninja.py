@@ -15,7 +15,7 @@ from django_ai_sdk.memories.schemas import (
     UpdateMemoryUserIn,
 )
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.permissions import ConflictError, PermissionDenied
 from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 
@@ -88,7 +88,7 @@ async def delete_memory(request: HttpRequest, memory_id: str) -> tuple[int, None
 
 @router.post(
     "/{memory_id}/documents",
-    response={202: DocumentUploadResponse, 400: dict, 403: dict},
+    response={202: DocumentUploadResponse, 400: dict, 403: dict, 409: dict},
     operation_id="upload_document",
 )
 async def upload_document(
@@ -100,6 +100,8 @@ async def upload_document(
         return 202, await MemoryService.upload_document(memory_id, file, user=request.user)
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
+    except ConflictError as e:
+        return 409, {"detail": str(e)}
 
 
 @router.get(
@@ -217,15 +219,18 @@ async def bulk_connect_memories(
 
 @router.post(
     "/thread/{thread_id}/files",
-    response={202: DocumentUploadResponse, 400: dict},
+    response={202: DocumentUploadResponse, 400: dict, 409: dict},
     operation_id="upload_thread_file",
 )
 async def upload_thread_file(
     request: HttpRequest,
     thread_id: str,
     file: UploadedFile = File(...),  # type: ignore
-) -> tuple[int, DocumentUploadResponse]:
-    return 202, await MemoryService.upload_thread_file(thread_id, file, user=request.user)
+) -> tuple[int, DocumentUploadResponse | dict]:
+    try:
+        return 202, await MemoryService.upload_thread_file(thread_id, file, user=request.user)
+    except ConflictError as e:
+        return 409, {"detail": str(e)}
 
 
 @router.get(
