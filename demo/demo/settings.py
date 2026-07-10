@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import environ
-from django_ai_sdk.integrations.mcp.schemas import TokenMCPIntegrationConfig
 
 env = environ.Env(
     # set casting, default value
@@ -50,7 +49,9 @@ INSTALLED_APPS = [
     "django_tasks",
     "django_tasks_db",
     "django_ai_sdk",
+    # Integrations: the mcp toolkit (models) + one app per enabled integration.
     "django_ai_sdk.integrations.mcp",
+    "piratespeak.integrations.weather.apps.WeatherConfig",
     # local
     "piratespeak",
 ]
@@ -187,18 +188,13 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-AI_SDK_INTEGRATIONS: dict[str, object] = {
-    "weather": "piratespeak.integrations.weather.WeatherIntegration",
-}
-
+# Integrations are enabled by listing their app in INSTALLED_APPS; per-app settings
+# slices below only feed credentials/params. The weather app needs none. Linear is
+# enabled only when a token is configured.
 _linear_api_key = env("LINEAR_API_KEY", default=None)
 if _linear_api_key:
-    AI_SDK_INTEGRATIONS["linear"] = TokenMCPIntegrationConfig(
-        label="Linear",
-        url="https://mcp.linear.app/mcp",
-        token=_linear_api_key,
-        tools=["list_issues"],
-    )
+    INSTALLED_APPS.append("django_ai_sdk.integrations.linear.apps.LinearConfig")
+    AI_SDK_LINEAR = {"token": _linear_api_key, "tools": ["list_issues"]}
 
 
 # MCP discovery configuration

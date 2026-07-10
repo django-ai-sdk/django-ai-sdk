@@ -1,16 +1,8 @@
-"""Demo API-backed integration: current weather via Open-Meteo.
-
-Open-Meteo (https://open-meteo.com) requires no API key, which makes this genuinely
-testable with zero credentials — the point of this example is to demonstrate the
-APIIntegration contract end-to-end (register it, call get_tools(), invoke the tool,
-report a real get_status()), not to be a production-grade weather tool.
-"""
+"""Outbound client + health probe for the Open-Meteo weather API (no auth)."""
 
 from __future__ import annotations
 
 import httpx
-from django_ai_sdk.integrations.api.base import APIIntegration
-from haystack.tools import tool
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -20,9 +12,8 @@ _WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 _HEALTH_CHECK_COORDS = {"latitude": 52.37, "longitude": 4.9, "current_weather": "true"}
 
 
-@tool
-def get_current_weather(location: str) -> dict:
-    """Get the current weather for a place name (e.g. 'Rotterdam' or 'Paris, France')."""
+def fetch_current_weather(location: str) -> dict:
+    """Geocode ``location`` and return its current weather, or an error dict."""
     with httpx.Client(timeout=5) as client:
         geo = client.get(_GEOCODE_URL, params={"name": location, "count": 1}).json()
         results = geo.get("results") or []
@@ -54,12 +45,3 @@ async def check_weather_api() -> None:
     async with httpx.AsyncClient(timeout=5) as client:
         response = await client.get(_WEATHER_URL, params=_HEALTH_CHECK_COORDS)
         response.raise_for_status()
-
-
-class WeatherIntegration(APIIntegration):
-    """Minimal APIIntegration example — current weather, no auth required."""
-
-    name = "weather"
-    label = "Weather"
-    tools = [get_current_weather]
-    health_check = staticmethod(check_weather_api)
