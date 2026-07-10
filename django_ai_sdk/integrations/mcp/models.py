@@ -82,6 +82,94 @@ class MCPOAuthToken(models.Model):
         return bool(self.expires_at and self.expires_at <= tz.now())
 
 
+class MCPServerConfig(models.Model):
+    """An MCP server declared as data — added/edited/enabled via Django admin.
+
+    Unlike notion/linear (shipped as code apps), a server declared here needs no app,
+    no deploy, no restart: the registry (see ``integrations.registry``) picks it up on
+    next access and drops it the moment ``enabled`` is unchecked or the row is deleted.
+
+    ``token``/``client_secret`` are Fernet-encrypted, same as ``MCPOAuthToken``. For
+    ``auth="user_token"`` no server-wide secret is stored here at all — each user
+    submits their own via ``POST /api/integrations/<name>/credential``.
+    """
+
+    AUTH_CHOICES = [
+        ("static", "No auth"),
+        ("token", "Shared token"),
+        ("user_token", "Per-user token"),
+        ("oauth", "OAuth 2.1"),
+    ]
+
+    name = models.SlugField(unique=True, help_text="Registry key — must be URL-safe.")
+    label = models.CharField(max_length=200, blank=True)
+    url = models.URLField()
+    auth = models.CharField(max_length=20, choices=AUTH_CHOICES, default="static")
+    token = models.TextField(blank=True, help_text="Encrypted. Only used when auth='token'.")
+    client_id = models.CharField(max_length=500, blank=True)
+    client_secret = models.TextField(blank=True, help_text="Encrypted.")
+    scope = models.CharField(max_length=500, blank=True)
+    oauth_discovery_url = models.URLField(blank=True)
+    authorization_endpoint = models.URLField(blank=True)
+    token_endpoint = models.URLField(blank=True)
+    tools = models.JSONField(default=list, blank=True, help_text="Tool allow-list; empty = all.")
+    enabled = models.BooleanField(default=True, help_text="Unchecking removes it immediately.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "django_ai_sdk_mcp"
+        verbose_name = "MCP server"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def set_token(self, token: str) -> None:
+        self.token = _get_fernet().encrypt(token.encode()).decode() if token else ""
+
+    def get_token(self) -> str:
+        if not self.token:
+            return ""
+        try:
+            return _get_fernet().decrypt(self.token.encode()).decode()
+        except InvalidToken:
+            logger.error("Failed to decrypt token for MCPServerConfig %r", self.name)
+            return ""
+
+    def set_client_secret(self, client_secret: str) -> None:
+        self.client_secret = (
+            _get_fernet().encrypt(client_secret.encode()).decode() if client_secret else ""
+        )
+
+    def get_client_secret(self) -> str:
+        if not self.client_secret:
+            return ""
+        try:
+            return _get_fernet().decrypt(self.client_secret.encode()).decode()
+        except InvalidToken:
+            logger.error("Failed to decrypt client_secret for MCPServerConfig %r", self.name)
+            return ""
+
+    def to_config(self) -> tuple[Any, str | None]:
+        """Build the pydantic MCP config for this row. Returns ``(config, needs_setup)``
+        — never raises; see ``mcp.loader.build_mcp_config_safe``."""
+        from django_ai_sdk.integrations.mcp.loader import build_mcp_config_safe
+
+        return build_mcp_config_safe(
+            auth=self.auth,
+            url=self.url,
+            label=self.label or self.name.title(),
+            tools=list(self.tools or []),
+            scope=self.scope,
+            client_id=self.client_id,
+            client_secret=self.get_client_secret(),
+            oauth_discovery_url=self.oauth_discovery_url,
+            authorization_endpoint=self.authorization_endpoint,
+            token_endpoint=self.token_endpoint,
+            token=self.get_token(),
+        )
+
+
 class MCPOAuthClient(models.Model):
     """Stores dynamically-registered OAuth client credentials (RFC 7591) per MCP server."""
 

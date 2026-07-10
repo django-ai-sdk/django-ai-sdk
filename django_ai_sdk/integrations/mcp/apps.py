@@ -1,66 +1,49 @@
 from __future__ import annotations
 
-import logging
-import sys
-import threading
+from typing import Any
 
 from django.apps import AppConfig
-from django.conf import settings
 
-logger = logging.getLogger(__name__)
 
-# Management commands that shouldn't trigger a network-touching pre-warm as a side
-# effect of loading the app registry (migrations, tests, static introspection, etc.).
-_SKIP_COMMANDS = {
-    "migrate",
-    "makemigrations",
-    "test",
-    "shell",
-    "shell_plus",
-    "collectstatic",
-    "check",
-}
+def _invalidate_on_change(sender: type, instance: Any, **kwargs: Any) -> None:
+    """post_save/post_delete receiver for MCPServerConfig — module-level (not a
+    closure) so Django's default weak-reference signal connection doesn't garbage
+    collect it the moment ``ready()`` returns."""
+    from django_ai_sdk.integrations.registry import invalidate_db_service
+
+    invalidate_db_service(instance.name)
 
 
 class MCPConfig(AppConfig):
+    """The MCP toolkit app — ships the OAuth token/client models, the DB-declared
+    ``MCPServerConfig`` model, and their migrations.
+
+    It holds no integrations of its own. Concrete MCP integrations (notion, linear,
+    …) are separate apps whose ``IntegrationAppConfig`` self-registers a service; they
+    reuse this app's models. A DB-declared MCP server (``MCPServerConfig`` row) needs
+    no app at all — see ``integrations.registry._db_services``.
+
+    There is no boot-time network warmup anywhere — tool lists populate lazily on
+    first use via the cache. ``ready()`` only registers a signal handler (no I/O) that
+    invalidates a DB-declared service's cached instance when its row changes.
+    """
+
     name = "django_ai_sdk.integrations.mcp"
     label = "django_ai_sdk_mcp"
-    verbose_name = "Django AI SDK — MCP"
+    verbose_name = "Django AI SDK — MCP toolkit"
 
     def ready(self) -> None:
-        if not getattr(settings, "AI_SDK_INTEGRATION_PREWARM", True):
-            return
-        # sys.argv[1] catches `manage.py <command>` invocations. It misses pytest
-        # (no Django command in argv at all) and `call_command()` (this process's
-        # own argv, whatever launched it) — checking for pytest explicitly covers
-        # the common case of a test run accidentally triggering network I/O.
-        if len(sys.argv) > 1 and sys.argv[1] in _SKIP_COMMANDS:
-            return
-        if "pytest" in sys.modules:
-            return
-        threading.Thread(target=_warm_all_sync, daemon=True, name="integration-prewarm").start()
+        from django.db.models.signals import post_delete, post_save
 
+        from django_ai_sdk.integrations.mcp.models import MCPServerConfig
 
-def _warm_all_sync() -> None:
-    """Populate the shared cache for every static/token MCP integration.
-
-    Runs in a background thread with its own event loop so a slow/dead server at
-    startup can't delay process boot — by the time the first real request arrives,
-    static/token integrations are (usually) already warm. OAuth integrations aren't
-    pre-warmed here (no per-user variance to warm without a specific user); they pay
-    the normal bounded first-fetch cost on that user's first request instead.
-    """
-    import asyncio
-
-    from django_ai_sdk.integrations.mcp.loader import MCPIntegration
-    from django_ai_sdk.integrations.registry import get_all_integrations
-
-    async def _warm() -> None:
-        integrations = get_all_integrations()
-        mcp_integrations = [i for i in integrations.values() if isinstance(i, MCPIntegration)]
-        await asyncio.gather(*(i.warm() for i in mcp_integrations), return_exceptions=True)
-
-    try:
-        asyncio.run(_warm())
-    except Exception:
-        logger.exception("Integration pre-warm failed")
+        post_save.connect(
+            _invalidate_on_change,
+            sender=MCPServerConfig,
+            dispatch_uid="mcp_server_config_invalidate_save",
+        )
+        post_delete.connect(
+            _invalidate_on_change,
+            sender=MCPServerConfig,
+            dispatch_uid="mcp_server_config_invalidate_delete",
+        )

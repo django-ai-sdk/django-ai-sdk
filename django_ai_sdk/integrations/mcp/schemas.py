@@ -4,8 +4,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from django_ai_sdk.integrations.base import IntegrationStatus
-
 
 class StaticMCPIntegrationConfig(BaseModel):
     type: Literal["static"] = "static"
@@ -26,6 +24,20 @@ class TokenMCPIntegrationConfig(BaseModel):
         if not self.token.get_secret_value():
             raise ValueError("token must not be empty for TokenMCPIntegrationConfig")
         return self
+
+
+class UserTokenMCPIntegrationConfig(BaseModel):
+    """A token-auth MCP server where each user supplies their own token.
+
+    Unlike ``TokenMCPIntegrationConfig`` (one shared deployment secret), no token is
+    configured here — it's submitted per-user via ``POST /api/integrations/<name>/
+    credential`` and stored like an OAuth token (access_token only, no refresh/expiry).
+    """
+
+    type: Literal["user_token"] = "user_token"
+    url: str
+    label: str = ""
+    tools: list[str] = []
 
 
 class OAuthMCPIntegrationConfig(BaseModel):
@@ -52,27 +64,9 @@ class OAuthMCPIntegrationConfig(BaseModel):
 
 
 MCPIntegrationConfig = Annotated[
-    StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
+    StaticMCPIntegrationConfig
+    | TokenMCPIntegrationConfig
+    | UserTokenMCPIntegrationConfig
+    | OAuthMCPIntegrationConfig,
     Field(discriminator="type"),
 ]
-
-
-class ConnectionOut(BaseModel):
-    """MCP server connection status (staff config UI: which servers exist to pick from)."""
-
-    server_name: str
-    label: str
-    type: str
-    connected: bool | None = None
-    has_token: bool = False
-    status: IntegrationStatus
-
-
-class AssistantIntegrationStatus(BaseModel):
-    """One configured integration's status for a given assistant/user."""
-
-    server_name: str
-    label: str
-    type: str
-    status: IntegrationStatus
-    tool_names: list[str]

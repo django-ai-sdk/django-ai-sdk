@@ -26,29 +26,31 @@ from pydantic import AnyUrl
 from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
 from django_ai_sdk.integrations.mcp.models import MCPOAuthClient, MCPOAuthToken
-from django_ai_sdk.integrations.mcp.schemas import (
-    ConnectionOut,
-    OAuthMCPIntegrationConfig,
-    StaticMCPIntegrationConfig,
-    TokenMCPIntegrationConfig,
-)
 from django_ai_sdk.integrations.registry import get_integrations
+from django_ai_sdk.integrations.schemas import ConnectionOut
 
 if TYPE_CHECKING:
+    from django_ai_sdk.integrations.mcp.schemas import MCPIntegrationConfig
     from django_ai_sdk.types import UserType
 
 logger = logging.getLogger(__name__)
 
 
-def _get_mcp_servers() -> dict:
-    """Get the MCP-backed entries from AI_SDK_INTEGRATIONS.
+async def _get_mcp_servers() -> dict[str, MCPIntegrationConfig]:
+    """Return the config of every registered MCP-backed integration, keyed by name.
 
-    AI_SDK_INTEGRATIONS may also contain hand-written API-backed integrations
-    (registered as a dotted class path rather than an MCP config object).
+    Sourced from the integrations registry (app-registered + DB-declared
+    MCPServerConfig rows), filtered to MCP integrations — hand-written API
+    integrations are skipped here.
     """
-    configured: dict = getattr(settings, "AI_SDK_INTEGRATIONS", {})
-    mcp_types = (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig, OAuthMCPIntegrationConfig)
-    return {name: value for name, value in configured.items() if isinstance(value, mcp_types)}
+    from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+    from django_ai_sdk.integrations.registry import get_all_integrations
+
+    return {
+        name: svc.config
+        for name, svc in (await get_all_integrations()).items()
+        if isinstance(svc, MCPIntegration)
+    }
 
 
 # ============================================================================
@@ -58,7 +60,7 @@ def _get_mcp_servers() -> dict:
 
 async def list_connections(*, user: UserType) -> list[ConnectionOut]:
     """List all MCP servers with connection status for the user."""
-    all_servers = _get_mcp_servers()
+    all_servers = await _get_mcp_servers()
     if not all_servers:
         return []
 
@@ -74,7 +76,7 @@ async def list_connections(*, user: UserType) -> list[ConnectionOut]:
             exc_info=True,
         )
 
-    integrations = get_integrations(list(all_servers))
+    integrations = await get_integrations(list(all_servers))
 
     result = []
     for server_name, server_config in all_servers.items():
@@ -119,7 +121,7 @@ async def reconnect(server_name: str, *, user: UserType) -> IntegrationStatus | 
     so the caller gets the actual outcome rather than a blind promise — resetting the
     state doesn't mean the underlying problem (e.g. a still-wrong URL) is fixed. Returns
     None if the server isn't configured."""
-    integration = get_integrations([server_name]).get(server_name)
+    integration = (await get_integrations([server_name])).get(server_name)
     if integration is None:
         return None
     await integration.reconnect(user=user)
@@ -176,7 +178,7 @@ async def get_or_register_client(
 
     Returns (client_id, client_secret).
     """
-    server = _get_mcp_servers().get(server_name)
+    server = (await _get_mcp_servers()).get(server_name)
     if not server or server.type != "oauth":
         raise ValueError(f"Server {server_name!r} not found or not OAuth type")
 
@@ -290,7 +292,7 @@ async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthT
     except MCPOAuthToken.DoesNotExist:
         raise ValueError(f"No token for server {server_name!r}") from None
 
-    server = _get_mcp_servers().get(server_name)
+    server = (await _get_mcp_servers()).get(server_name)
     if not server or server.type != "oauth":
         raise ValueError(f"Server {server_name!r} not found or not OAuth type")
 
@@ -308,7 +310,7 @@ async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthT
 
 async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
     """Get OAuth discovery for a server (static endpoints if configured, else RFC 9728)."""
-    server = _get_mcp_servers().get(server_name)
+    server = (await _get_mcp_servers()).get(server_name)
     if not server or server.type != "oauth":
         raise ValueError(f"Server {server_name!r} not found or not OAuth type")
 

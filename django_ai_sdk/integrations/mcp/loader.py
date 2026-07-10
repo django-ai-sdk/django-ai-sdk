@@ -9,31 +9,45 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from django.conf import settings
+from pydantic import SecretStr, ValidationError
 
-from django_ai_sdk.integrations.base import Integration, IntegrationStatus, ResilientCache
+from django_ai_sdk.integrations.base import (
+    IntegrationNotConnectable,
+    IntegrationService,
+    IntegrationStatus,
+    ResilientCache,
+)
 from django_ai_sdk.integrations.mcp.schemas import (
     OAuthMCPIntegrationConfig,
     StaticMCPIntegrationConfig,
     TokenMCPIntegrationConfig,
+    UserTokenMCPIntegrationConfig,
 )
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
+    from django.http import HttpRequest
 
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
 logger = logging.getLogger(__name__)
 
+# Session-key templates for PKCE state during the OAuth redirect dance.
+_K_STATE = "mcp_oauth_state_{}"
+_K_VERIFIER = "mcp_oauth_verifier_{}"
+_K_TOKEN_ENDPOINT = "mcp_oauth_token_endpoint_{}"  # noqa: S105
 
-class MCPIntegration(Integration):
+
+class MCPIntegration(IntegrationService):
     """One configured MCP server, exposed through the Integration contract.
 
     Static/token servers cache by server name only — the tool list doesn't vary per
@@ -53,7 +67,12 @@ class MCPIntegration(Integration):
     def __init__(
         self,
         name: str,
-        config: StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
+        config: StaticMCPIntegrationConfig
+        | TokenMCPIntegrationConfig
+        | UserTokenMCPIntegrationConfig
+        | OAuthMCPIntegrationConfig,
+        *,
+        needs_setup: str | None = None,
     ) -> None:
         self.name = name
         self._timeout = getattr(settings, "AI_SDK_INTEGRATION_TIMEOUT", 5)
@@ -64,10 +83,31 @@ class MCPIntegration(Integration):
         )
         self.label = config.label or name.title()
         self.config = config
+        # OAuth: redirect flow. User-token: submit-a-secret flow. Static/token: none.
+        self.supports_connect = isinstance(
+            config, (OAuthMCPIntegrationConfig, UserTokenMCPIntegrationConfig)
+        )
+        # A required secret was missing at config-build time (see build_mcp_config_safe)
+        # — the integration is registered (so it shows up, e.g. in admin/settings) but
+        # reports DISCONNECTED and contributes no tools until configured, rather than
+        # crashing app boot.
+        self._needs_setup = needs_setup
 
     @property
     def kind(self) -> str:
         return self.config.type
+
+    @property
+    def connect_kind(self) -> str | None:
+        if isinstance(self.config, OAuthMCPIntegrationConfig):
+            return "oauth"
+        if isinstance(self.config, UserTokenMCPIntegrationConfig):
+            return "credential"
+        return None
+
+    @property
+    def detail(self) -> str | None:
+        return self._needs_setup
 
     async def get_tool_names(
         self, user: AbstractBaseUser | AnonymousUser | None = None
@@ -79,12 +119,14 @@ class MCPIntegration(Integration):
         something else in the same request (e.g. get_status()) already primed it,
         and otherwise the same bounded live fetch get_tools() always pays anyway —
         never a second, additional cost beyond what discovery already costs."""
+        if self._needs_setup:
+            return []
         if self.config.tools:
             return self.config.tools
         return [t.name for t in await self.get_tools(user)]
 
     def _cache_key(self, user: AbstractBaseUser | AnonymousUser | None) -> Any:
-        if isinstance(self.config, OAuthMCPIntegrationConfig):
+        if isinstance(self.config, (OAuthMCPIntegrationConfig, UserTokenMCPIntegrationConfig)):
             user_id = getattr(user, "pk", None)
             if user_id is None:
                 return None
@@ -100,6 +142,8 @@ class MCPIntegration(Integration):
         # `assistant`/`thread_id` are unused here — MCP tools are discovered from
         # the remote server as-is, with no per-call model/context to inject.
         # Accepted only for signature consistency with the Integration ABC.
+        if self._needs_setup:
+            return []
         key = self._cache_key(user)
         if key is None:
             return []
@@ -118,7 +162,17 @@ class MCPIntegration(Integration):
         just guarantees "active" always means "the last real attempt succeeded",
         never "we simply never checked".
         """
-        if not isinstance(self.config, OAuthMCPIntegrationConfig):
+        if self._needs_setup:
+            return IntegrationStatus.DISCONNECTED
+
+        if isinstance(self.config, (StaticMCPIntegrationConfig, TokenMCPIntegrationConfig)):
+            await self.get_tools(user)
+            return self._cache.status_for(self._cache_key(user))
+
+        if isinstance(self.config, UserTokenMCPIntegrationConfig):
+            token = await self._get_oauth_token(user)
+            if token is None:
+                return IntegrationStatus.DISCONNECTED
             await self.get_tools(user)
             return self._cache.status_for(self._cache_key(user))
 
@@ -149,11 +203,108 @@ class MCPIntegration(Integration):
         if key is not None:
             await self._cache.invalidate(key)
 
-    async def warm(self) -> None:
-        """Eagerly populate the cache for static/token servers at process startup."""
-        if isinstance(self.config, OAuthMCPIntegrationConfig):
-            return  # no per-user variance to warm without a specific user
-        await self._cache.warm(self.name, lambda: self._fetch(None))
+    async def disconnect(self, user: AbstractBaseUser | AnonymousUser | None = None) -> bool:
+        """Revoke the user's stored OAuth/credential token for this server.
+
+        No-op for static/token (shared-secret) servers — there's no per-user
+        connection to drop.
+        """
+        if user is None or not isinstance(
+            self.config, (OAuthMCPIntegrationConfig, UserTokenMCPIntegrationConfig)
+        ):
+            return False
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+        deleted, _ = await MCPOAuthToken.objects.filter(user=user, server_name=self.name).adelete()
+        await self.reconnect(user)
+        return deleted > 0
+
+    async def store_credential(
+        self, user: AbstractBaseUser | AnonymousUser | None, secret: str
+    ) -> None:
+        """Store a user-submitted token for a ``user_token`` server.
+
+        Stored the same way an OAuth access token is (via ``MCPOAuthToken``), with no
+        refresh token or expiry — there's nothing to refresh for a user-supplied secret.
+        """
+        if not isinstance(self.config, UserTokenMCPIntegrationConfig):
+            raise IntegrationNotConnectable(f"{self.name!r} does not accept a stored credential")
+        if self._needs_setup:
+            raise IntegrationNotConnectable(f"{self.name!r} is not configured: {self._needs_setup}")
+        if user is None:
+            raise ValueError("store_credential() requires a user")
+        if not secret:
+            raise ValueError("secret must not be empty")
+
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+        token_obj, _ = await MCPOAuthToken.objects.aget_or_create(user=user, server_name=self.name)
+        token_obj.set_tokens({"access_token": secret})
+        await token_obj.asave()
+        await self.reconnect(user)
+
+    async def refresh(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
+        """Refresh OAuth tokens (the recurring ``refresh_integrations`` task).
+
+        With a ``user``, refresh that user's token. Without, proactively refresh every
+        stored token for this server expiring within
+        ``AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES`` (default 10). No-op for non-OAuth
+        servers."""
+        if not isinstance(self.config, OAuthMCPIntegrationConfig):
+            return
+        from django.utils import timezone
+
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+        qs = MCPOAuthToken.objects.filter(server_name=self.name)
+        if user is not None:
+            qs = qs.filter(user=user)
+        else:
+            threshold = getattr(settings, "AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES", 10)
+            qs = qs.filter(expires_at__lte=timezone.now() + timedelta(minutes=threshold))
+        async for token_obj in qs:
+            await refresh_oauth_token(token_obj, self.config)
+
+    async def connect(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        request: HttpRequest | None = None,
+        redirect_uri: str = "",
+    ) -> dict[str, Any]:
+        """Begin the OAuth 2.1 + PKCE flow. Stores PKCE state in the session and
+        returns ``{"redirect_url": <authorization_url>}`` for the client to follow."""
+        if not isinstance(self.config, OAuthMCPIntegrationConfig):
+            raise IntegrationNotConnectable(f"{self.name!r} is not an OAuth integration")
+        if self._needs_setup:
+            raise IntegrationNotConnectable(f"{self.name!r} is not configured: {self._needs_setup}")
+        if request is None:
+            raise ValueError("connect() for an OAuth integration requires the request")
+
+        from asgiref.sync import sync_to_async
+
+        from django_ai_sdk.integrations.mcp import services as mcp_service
+
+        discovery = await mcp_service.get_oauth_discovery(self.name)
+        client_id, _secret = await mcp_service.get_or_register_client(
+            self.name, redirect_uri, discovery
+        )
+        verifier, challenge, state = mcp_service.build_pkce_params()
+
+        request.session[_K_STATE.format(self.name)] = state
+        request.session[_K_VERIFIER.format(self.name)] = verifier
+        request.session[_K_TOKEN_ENDPOINT.format(self.name)] = discovery.token_endpoint
+        await sync_to_async(request.session.save)()
+
+        auth_url = mcp_service.build_auth_url(
+            discovery=discovery,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            state=state,
+            challenge=challenge,
+            scope=self.config.scope,
+        )
+        return {"redirect_url": auth_url}
 
     async def _fetch(self, user: AbstractBaseUser | AnonymousUser | None) -> list[Any]:
         if isinstance(self.config, StaticMCPIntegrationConfig):
@@ -167,7 +318,22 @@ class MCPIntegration(Integration):
                 tools=self.config.tools or None,
                 timeout=self._timeout,
             )
+        if isinstance(self.config, UserTokenMCPIntegrationConfig):
+            return await self._fetch_user_token(user)
         return await self._fetch_oauth(user)
+
+    async def _fetch_user_token(self, user: AbstractBaseUser | AnonymousUser | None) -> list[Any]:
+        assert isinstance(self.config, UserTokenMCPIntegrationConfig)
+
+        token_obj = await self._get_oauth_token(user)
+        if token_obj is None:
+            return []
+        access_token = token_obj.get_access_token()
+        if not access_token:
+            return []
+        return await _connect(
+            self.config.url, access_token, self.config.tools or None, timeout=self._timeout
+        )
 
     async def _get_oauth_token(
         self, user: AbstractBaseUser | AnonymousUser | None
@@ -206,6 +372,134 @@ class MCPIntegration(Integration):
         logger.info("Connecting to OAuth MCP server %r for user %s", self.name, user.pk)
         return await _connect(
             self.config.url, access_token, self.config.tools or None, timeout=self._timeout
+        )
+
+
+def build_mcp_config_safe(
+    *,
+    auth: str,
+    url: str,
+    label: str,
+    tools: list[str],
+    scope: str = "",
+    client_id: str = "",
+    client_secret: str = "",
+    oauth_discovery_url: str = "",
+    authorization_endpoint: str = "",
+    token_endpoint: str = "",
+    token: str = "",
+) -> tuple[
+    StaticMCPIntegrationConfig
+    | TokenMCPIntegrationConfig
+    | UserTokenMCPIntegrationConfig
+    | OAuthMCPIntegrationConfig,
+    str | None,
+]:
+    """Build an MCP config for ``auth``, never raising.
+
+    A misconfigured integration (e.g. ``auth="token"`` with no token set) must not
+    crash app boot — the config's own validators (e.g. ``TokenMCPIntegrationConfig``
+    requiring a non-empty token) would otherwise raise from deep inside ``ready()``.
+    Instead, returns ``(config, needs_setup_reason)``: on success ``needs_setup_reason``
+    is ``None``; on failure (missing url, missing required secret, …) it's a
+    human-readable reason and ``config`` is a harmless static placeholder that never
+    connects (``get_tools``/``get_status`` on the owning ``MCPIntegration`` are
+    already short-circuited by ``needs_setup`` before this placeholder is ever used).
+    """
+    if not url:
+        return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
+            "missing required `url`"
+        )
+    try:
+        if auth == "oauth":
+            config = OAuthMCPIntegrationConfig(
+                url=url,
+                label=label,
+                tools=tools,
+                scope=scope,
+                client_id=client_id,
+                client_secret=SecretStr(client_secret),
+                oauth_discovery_url=oauth_discovery_url,
+                authorization_endpoint=authorization_endpoint,
+                token_endpoint=token_endpoint,
+            )
+        elif auth == "token":
+            config = TokenMCPIntegrationConfig(
+                url=url, label=label, tools=tools, token=SecretStr(token)
+            )
+        elif auth == "user_token":
+            config = UserTokenMCPIntegrationConfig(url=url, label=label, tools=tools)
+        else:
+            config = StaticMCPIntegrationConfig(url=url, label=label, tools=tools)
+    except ValidationError as e:
+        reason = "; ".join(err["msg"] for err in e.errors()) or str(e)
+        return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), reason
+    return config, None
+
+
+class MCPIntegrationService(MCPIntegration):
+    """Thin base for a known MCP server shipped as its own SDK/product app.
+
+    Subclasses declare the server statically as class attributes and read
+    per-deployment params (secrets, tool allow-list, URL overrides) from their
+    ``AI_SDK_<NAME>`` settings slice — being in ``INSTALLED_APPS`` is what enables
+    them, the slice only feeds credentials/params::
+
+        class NotionService(MCPIntegrationService):
+            name = "notion"
+            label = "Notion"
+            url = "https://mcp.notion.com/mcp"
+            auth = "oauth"
+            default_tools = ["notion-search"]
+
+    ``AI_SDK_NOTION = {"tools": [...], "client_id": ..., "client_secret": ...}``
+
+    A missing required secret (e.g. ``auth="token"`` with no token configured) never
+    crashes boot — the integration registers but reports itself as needing setup
+    (``detail`` explains why) until the settings slice is filled in.
+    """
+
+    url: str = ""
+    auth: str = "static"  # "static" | "token" | "user_token" | "oauth"
+    default_tools: list[str] = []
+    scope: str = ""
+    #: Settings key holding this integration's params; defaults to ``AI_SDK_<NAME>``.
+    settings_key: str = ""
+
+    def __init__(self) -> None:
+        if not self.name:
+            raise ValueError(f"{type(self).__name__} must set a non-empty `name`")
+        params = self._get_params()
+        config, needs_setup = self._build_config(params)
+        super().__init__(self.name, config, needs_setup=needs_setup)
+        if needs_setup:
+            logger.warning("Integration %r needs setup: %s", self.name, needs_setup)
+
+    def _get_params(self) -> dict[str, Any]:
+        key = self.settings_key or f"AI_SDK_{self.name.upper()}"
+        return dict(getattr(settings, key, {}) or {})
+
+    def _build_config(
+        self, params: dict[str, Any]
+    ) -> tuple[
+        StaticMCPIntegrationConfig
+        | TokenMCPIntegrationConfig
+        | UserTokenMCPIntegrationConfig
+        | OAuthMCPIntegrationConfig,
+        str | None,
+    ]:
+        return build_mcp_config_safe(
+            auth=self.auth,
+            url=params.get("url", self.url),
+            label=params.get("label") or self.label or self.name.title(),
+            tools=list(params.get("tools", self.default_tools)),
+            scope=params.get("scope", self.scope),
+            client_id=params.get("client_id", ""),
+            client_secret=params.get("client_secret", ""),
+            oauth_discovery_url=params.get("oauth_discovery_url", ""),
+            authorization_endpoint=params.get("authorization_endpoint", ""),
+            token_endpoint=params.get("token_endpoint", ""),
+            token=params.get("token", ""),
         )
 
 
@@ -253,7 +547,7 @@ async def refresh_oauth_token(
     """The single refresh_token grant. Returns the updated token_obj, or None on failure.
 
     Every refresh in the codebase (the loader's own lazy refresh, the OAuth views,
-    and the refresh_mcp_tokens command) funnels through here.
+    and the refresh_integrations command) funnels through here.
     """
     refresh_token = token_obj.get_refresh_token()
     if not refresh_token:
@@ -275,7 +569,7 @@ async def refresh_oauth_token(
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
     # Two callers can redeem the same refresh_token concurrently (a live request
-    # racing the refresh_mcp_tokens cron, or two overlapping cron runs). Only persist
+    # racing the refresh_integrations cron, or two overlapping cron runs). Only persist
     # our result if the row still holds the refresh_token we read — otherwise we lost
     # the race and must not clobber the winner's tokens with our own.
     stale_refresh_token = token_obj.refresh_token
