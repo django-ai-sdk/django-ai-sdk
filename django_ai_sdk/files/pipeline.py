@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -13,7 +12,16 @@ if TYPE_CHECKING:
 @dataclass
 class PipelineResult:
     content: str
-    data: dict = field(default_factory=dict)
+    data: dict | list = field(default_factory=dict)
+
+
+def parse_data(data: Any) -> dict | list:
+    """Normalize transform output for storage"""
+    if hasattr(data, "model_dump"):
+        return data.model_dump()
+    if isinstance(data, (dict, list)):
+        return data
+    return {}
 
 
 class FilePipeline:
@@ -56,17 +64,9 @@ class FilePipeline:
         if data is None:
             return None
 
+        content = data
+
         for transform in self.transforms:
             data = await transform.run(data, assistant=assistant)
 
-        content = (
-            data if isinstance(data, str) else json.dumps(data, default=str, ensure_ascii=False)
-        )
-        if not isinstance(data, str) and hasattr(data, "model_dump"):
-            structured = data.model_dump()
-        elif isinstance(data, dict):
-            structured = data
-        else:
-            structured = {}
-
-        return PipelineResult(content=content, data=structured)
+        return PipelineResult(content=content, data=parse_data(data))
