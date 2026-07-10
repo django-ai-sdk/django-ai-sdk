@@ -125,12 +125,12 @@ class MCPIntegration(IntegrationService):
             return self.config.tools
         return [t.name for t in await self.get_tools(user)]
 
-    def _cache_key(self, user: AbstractBaseUser | AnonymousUser | None) -> Any:
+    def _cache_key(self, user: AbstractBaseUser | AnonymousUser | None) -> str | None:
         if isinstance(self.config, (OAuthMCPIntegrationConfig, UserTokenMCPIntegrationConfig)):
             user_id = getattr(user, "pk", None)
             if user_id is None:
                 return None
-            return (self.name, user_id)
+            return f"{self.name}:{user_id}"
         return self.name
 
     async def get_tools(
@@ -249,7 +249,14 @@ class MCPIntegration(IntegrationService):
         With a ``user``, refresh that user's token. Without, proactively refresh every
         stored token for this server expiring within
         ``AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES`` (default 10). No-op for non-OAuth
-        servers."""
+        servers.
+
+        A successful refresh invalidates this user's cached tool list immediately —
+        Haystack's ``MCPToolset`` captures the bearer token at construction, so
+        without this the already-cached toolset would keep serving the pre-refresh
+        (soon-to-expire) token until the tool cache's own TTL happens to roll over,
+        rather than picking up the new one right away.
+        """
         if not isinstance(self.config, OAuthMCPIntegrationConfig):
             return
         from django.utils import timezone
@@ -263,7 +270,9 @@ class MCPIntegration(IntegrationService):
             threshold = getattr(settings, "AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES", 10)
             qs = qs.filter(expires_at__lte=timezone.now() + timedelta(minutes=threshold))
         async for token_obj in qs:
-            await refresh_oauth_token(token_obj, self.config)
+            refreshed = await refresh_oauth_token(token_obj, self.config)
+            if refreshed is not None:
+                await self._cache.invalidate(f"{self.name}:{token_obj.user_id}")
 
     async def connect(
         self,

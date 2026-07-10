@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -313,8 +314,14 @@ class ResilientCache:
         version (e.g. ``early:v2:v:{k}``), so the value match uses a leading wildcard
         rather than hard-coding that version marker; the breaker keys live under the
         stable ``circuit_breaker:`` prefix.
+
+        ``delete_match`` treats its pattern as a regex (only ``*`` is special-cased,
+        into ``.*``), so ``k`` is ``re.escape``d first — a tuple key like
+        ``(name, user_id)`` stringifies with parens/quotes/commas, which regex would
+        otherwise treat as syntax, silently matching nothing and deleting nothing.
         """
         k = self._norm(key)
-        await self._cache.delete_match(f"*:v:{k}")
-        await self._cache.delete_match(f"circuit_breaker:cb:{k}:*")
+        escaped = re.escape(k)
+        await self._cache.delete_match(f"*:v:{escaped}")
+        await self._cache.delete_match(f"circuit_breaker:cb:{escaped}:*")
         self._last_ok.pop(k, None)

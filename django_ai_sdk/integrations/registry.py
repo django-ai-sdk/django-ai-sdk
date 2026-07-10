@@ -14,8 +14,7 @@ A name registered both ways is served from the app (code wins); a warning is log
 ``get_all_integrations``/``get_integrations`` are async because the DB-declared source
 does a real query — matching this codebase's convention of async ORM access
 (``aget``/``async for``) everywhere a lookup runs inside a request/async call chain.
-The one legitimate synchronous caller (the ``manage.py check`` system check) bridges
-with ``asgiref.sync.async_to_sync``.
+A synchronous caller can bridge with ``asgiref.sync.async_to_sync``.
 """
 
 from __future__ import annotations
