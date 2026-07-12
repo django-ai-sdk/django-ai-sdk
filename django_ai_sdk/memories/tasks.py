@@ -14,7 +14,7 @@ PIPELINE_TIMEOUT_SECONDS = getattr(settings, "AI_SDK_FILE_PIPELINE_TIMEOUT", 900
 
 
 class _Cancelled(Exception):
-    """Raised internally when a step boundary notices cancelled_on is set."""
+    """Raised internally when a step boundary notices cancelled_at is set."""
 
 
 @task(queue_name="default")
@@ -68,7 +68,7 @@ async def run_file_pipeline(
             status=EntryDocument.ProcessingStatus.CANCELLED, error="Cancelled by user"
         )
 
-    if entry_doc.cancelled_on is not None:
+    if entry_doc.cancelled_at is not None:
         # Cancelled while still queued
         return
 
@@ -77,7 +77,7 @@ async def run_file_pipeline(
 
     async def _on_step(step: str | None) -> None:
         updated = await EntryDocument.objects.filter(
-            id=entry_doc.id, cancelled_on__isnull=True
+            id=entry_doc.id, cancelled_at__isnull=True
         ).aupdate(processing_step=step, updated_at=timezone.now())
         if not updated:
             raise _Cancelled

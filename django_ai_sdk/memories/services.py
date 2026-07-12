@@ -83,8 +83,6 @@ async def _fail_orphaned_processing_document(
             error = "Task finished without updating the document"
     else:
         reference_time = (task_status.started_at if task_status else None) or entry_doc.updated_at
-        if reference_time is None:
-            return
         stale_after = reference_time + timedelta(seconds=STALE_PROCESSING_DEADLINE_SECONDS)
         if timezone.now() < stale_after:
             return
@@ -946,13 +944,13 @@ class MemoryService(PermissionsMixin):
         entry_doc.processing_status = EntryDocument.ProcessingStatus.PENDING
         entry_doc.processing_error = ""
         entry_doc.processing_step = None
-        entry_doc.cancelled_on = None
+        entry_doc.cancelled_at = None
         await entry_doc.asave(
             update_fields=[
                 "processing_status",
                 "processing_error",
                 "processing_step",
-                "cancelled_on",
+                "cancelled_at",
                 "updated_at",
             ]
         )
@@ -978,7 +976,7 @@ class MemoryService(PermissionsMixin):
     async def cancel_document(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
         """Cancel a pending or in-progress document.
 
-        Sets ``cancelled_on`` so a still-running pipeline stops at its next
+        Sets ``cancelled_at`` so a still-running pipeline stops at its next
         step boundary (cooperative — it won't interrupt a step already in
         flight) and marks the document ``CANCELLED`` immediately so the
         caller sees it right away.
@@ -995,11 +993,6 @@ class MemoryService(PermissionsMixin):
         if memory is None:
             raise ValueError("Document has no associated memory")
 
-        if entry_doc.processing_status not in _CANCELLABLE:
-            raise ValueError(
-                f"Document cannot be cancelled in status {entry_doc.processing_status!r}."
-            )
-
         thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
         if thread is not None:
             assistant_id = thread.metadata.get("assistant_id")
@@ -1015,23 +1008,22 @@ class MemoryService(PermissionsMixin):
         else:
             await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
 
-        # Re-check status at write time in case the worker finished meanwhile.
-        cancelled_on = timezone.now()
+        now = timezone.now()
         updated = await EntryDocument.objects.filter(
             id=entry_doc.id, processing_status__in=_CANCELLABLE
         ).aupdate(
-            cancelled_on=cancelled_on,
+            cancelled_at=now,
             processing_status=EntryDocument.ProcessingStatus.CANCELLED,
             processing_error="Cancelled by user",
             processing_step=None,
-            updated_at=timezone.now(),
+            updated_at=now,
         )
         if not updated:
             await entry_doc.arefresh_from_db(fields=["processing_status"])
             raise ValueError(
                 f"Document cannot be cancelled in status {entry_doc.processing_status!r}."
             )
-        entry_doc.cancelled_on = cancelled_on
+        entry_doc.cancelled_at = now
         entry_doc.processing_status = EntryDocument.ProcessingStatus.CANCELLED
         entry_doc.processing_error = "Cancelled by user"
         entry_doc.processing_step = None

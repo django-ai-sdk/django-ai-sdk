@@ -226,7 +226,7 @@ class EntryDocument(models.Model):
     # Checked cooperatively at each pipeline step boundary (see
     # memories/tasks.py); cancellation only takes effect between steps, not
     # mid-call. Null means not cancelled.
-    cancelled_on = models.DateTimeField(null=True, blank=True, default=None)
+    cancelled_at = models.DateTimeField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
