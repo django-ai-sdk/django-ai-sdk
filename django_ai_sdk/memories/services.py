@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.db.models import Count, QuerySet
+from django.utils import timezone
 
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
@@ -28,7 +30,7 @@ from django_ai_sdk.memories.schemas import (
     MemoryUserOut,
     ThreadMemoryOut,
 )
-from django_ai_sdk.memories.tasks import process_document_upload
+from django_ai_sdk.memories.tasks import PIPELINE_TIMEOUT_SECONDS, process_document_upload
 from django_ai_sdk.permissions import (
     ConflictError,
     Operation,
@@ -37,7 +39,11 @@ from django_ai_sdk.permissions import (
     get_assistant_permissions,
     has_perms,
 )
-from django_ai_sdk.tasks import aget_task_status
+from django_ai_sdk.tasks import TaskStatus, aget_task_status
+
+# Catches the worker dying outright (nothing left to hit PIPELINE_TIMEOUT_SECONDS'
+# own except block), so this can only ever fire after that would already have.
+STALE_PROCESSING_DEADLINE_SECONDS = PIPELINE_TIMEOUT_SECONDS + 60
 
 if TYPE_CHECKING:
     from typing import Any
@@ -55,6 +61,60 @@ async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
         return await qs.aget(**lookup)
     except ObjectDoesNotExist:
         raise ValueError(f"{qs.model.__name__} not found") from None
+
+
+async def _fail_orphaned_processing_document(
+    entry_doc: EntryDocument, task_status: TaskStatus | None
+) -> None:
+    """Mark a stuck PROCESSING document FAILED: either its task already
+    finished without us noticing, or it's been RUNNING too long (dead worker).
+    """
+    if entry_doc.processing_status != EntryDocument.ProcessingStatus.PROCESSING:
+        return
+
+    task_finished = task_status.status in ("FAILED", "SUCCESSFUL") if task_status else False
+
+    if task_finished:
+        if task_status.errors:
+            task_error = task_status.errors[0]
+            tb_lines = task_error.traceback.strip().splitlines()
+            error = tb_lines[-1] if tb_lines else task_error.type
+        else:
+            error = "Task finished without updating the document"
+    else:
+        reference_time = (task_status.started_at if task_status else None) or entry_doc.updated_at
+        if reference_time is None:
+            return
+        stale_after = reference_time + timedelta(seconds=STALE_PROCESSING_DEADLINE_SECONDS)
+        if timezone.now() < stale_after:
+            return
+        error = "Processing did not complete and the worker never reported back"
+
+    # Only writes if still PROCESSING, so a concurrent finish/cancel wins.
+    updated = await EntryDocument.objects.filter(
+        id=entry_doc.id, processing_status=EntryDocument.ProcessingStatus.PROCESSING
+    ).aupdate(
+        processing_status=EntryDocument.ProcessingStatus.FAILED,
+        processing_error=error,
+        processing_step=None,
+        updated_at=timezone.now(),
+    )
+    if updated:
+        entry_doc.processing_status = EntryDocument.ProcessingStatus.FAILED
+        entry_doc.processing_error = error
+        entry_doc.processing_step = None
+
+
+def _document_status_out(
+    entry_doc: EntryDocument, task_status: TaskStatus | None
+) -> DocumentStatusOut:
+    return DocumentStatusOut(
+        id=str(entry_doc.id),
+        status=entry_doc.processing_status,
+        error=entry_doc.processing_error,
+        processing_step=entry_doc.processing_step,
+        task=task_status,
+    )
 
 
 class MemoryService(PermissionsMixin):
@@ -440,7 +500,9 @@ class MemoryService(PermissionsMixin):
             processing_status=EntryDocument.ProcessingStatus.PROCESSING,
         )
 
-        return DocumentUploadResponse(id=str(entry_doc.id), status="processing")
+        return DocumentUploadResponse(
+            id=str(entry_doc.id), status="processing", task_id=str(task_result.id)
+        )
 
     @classmethod
     async def list_documents(cls, memory_id: str, *, user: UserType) -> list[DocumentOut]:
@@ -718,7 +780,9 @@ class MemoryService(PermissionsMixin):
             processing_status=EntryDocument.ProcessingStatus.PROCESSING,
         )
 
-        return DocumentUploadResponse(id=str(entry_doc.id), status="processing")
+        return DocumentUploadResponse(
+            id=str(entry_doc.id), status="processing", task_id=str(task_result.id)
+        )
 
     @classmethod
     async def list_thread_files(cls, thread_id: str, *, user: UserType) -> list[DocumentOut]:
@@ -804,12 +868,32 @@ class MemoryService(PermissionsMixin):
                 task_status = await aget_task_status(entry_doc.task_id)
             except Exception:
                 pass
-        return DocumentStatusOut(
-            id=str(entry_doc.id),
-            status=entry_doc.processing_status,
-            error=entry_doc.processing_error,
-            task=task_status,
+        await _fail_orphaned_processing_document(entry_doc, task_status)
+        return _document_status_out(entry_doc, task_status)
+
+    @classmethod
+    async def get_task_status(cls, task_id: str, *, user: UserType) -> DocumentStatusOut:
+        """Return processing status for a document, looked up by its task id.
+
+        Same permission model and response shape as ``get_document_status`` — this
+        is just an alternate lookup key for consumers that only have a ``task_id``
+        (e.g. straight off ``DocumentUploadResponse``), not a ``doc_id``.
+        """
+        entry_doc = await _aget_or_not_found(
+            EntryDocument.objects.select_related("memory"), task_id=task_id
         )
+        if entry_doc.memory_id is not None:
+            await cls.has_perms(
+                user,
+                Operation.VIEW_DOCUMENT,
+                entry_doc.memory,
+            )
+        try:
+            task_status = await aget_task_status(task_id)
+        except Exception:
+            task_status = None
+        await _fail_orphaned_processing_document(entry_doc, task_status)
+        return _document_status_out(entry_doc, task_status)
 
     @classmethod
     async def retry_document(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
@@ -827,6 +911,7 @@ class MemoryService(PermissionsMixin):
         _RETRYABLE = {
             EntryDocument.ProcessingStatus.FAILED,
             EntryDocument.ProcessingStatus.PENDING,
+            EntryDocument.ProcessingStatus.CANCELLED,
         }
 
         entry_doc = await _aget_or_not_found(
@@ -860,7 +945,17 @@ class MemoryService(PermissionsMixin):
 
         entry_doc.processing_status = EntryDocument.ProcessingStatus.PENDING
         entry_doc.processing_error = ""
-        await entry_doc.asave(update_fields=["processing_status", "processing_error", "updated_at"])
+        entry_doc.processing_step = None
+        entry_doc.cancelled_on = None
+        await entry_doc.asave(
+            update_fields=[
+                "processing_status",
+                "processing_error",
+                "processing_step",
+                "cancelled_on",
+                "updated_at",
+            ]
+        )
 
         task_result = await process_document_upload.aenqueue(
             str(entry_doc.id), str(memory.id), assistant_id
@@ -875,14 +970,72 @@ class MemoryService(PermissionsMixin):
         # Re-read to return the actual persisted state — the conditional aupdate above
         # may have been skipped if the worker already advanced past PENDING.
         await entry_doc.arefresh_from_db(
-            fields=["processing_status", "processing_error", "task_id"]
+            fields=["processing_status", "processing_error", "processing_step", "task_id"]
         )
-        return DocumentStatusOut(
-            id=str(entry_doc.id),
-            status=entry_doc.processing_status,
-            error=entry_doc.processing_error,
-            task=None,
+        return _document_status_out(entry_doc, None)
+
+    @classmethod
+    async def cancel_document(cls, doc_id: str, *, user: UserType) -> DocumentStatusOut:
+        """Cancel a pending or in-progress document.
+
+        Sets ``cancelled_on`` so a still-running pipeline stops at its next
+        step boundary (cooperative — it won't interrupt a step already in
+        flight) and marks the document ``CANCELLED`` immediately so the
+        caller sees it right away.
+        """
+        _CANCELLABLE = {
+            EntryDocument.ProcessingStatus.PENDING,
+            EntryDocument.ProcessingStatus.PROCESSING,
+        }
+
+        entry_doc = await _aget_or_not_found(
+            EntryDocument.objects.select_related("memory"), id=doc_id
         )
+        memory = entry_doc.memory
+        if memory is None:
+            raise ValueError("Document has no associated memory")
+
+        if entry_doc.processing_status not in _CANCELLABLE:
+            raise ValueError(
+                f"Document cannot be cancelled in status {entry_doc.processing_status!r}."
+            )
+
+        thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
+        if thread is not None:
+            assistant_id = thread.metadata.get("assistant_id")
+            if assistant_id is None:
+                raise ValueError("Thread has no assistant")
+            assistant = await AssistantService.get(assistant_id)
+            await has_perms(
+                user,
+                Operation.UPLOAD_FILE,
+                thread,
+                permissions=get_assistant_permissions(assistant),
+            )
+        else:
+            await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
+
+        # Re-check status at write time in case the worker finished meanwhile.
+        cancelled_on = timezone.now()
+        updated = await EntryDocument.objects.filter(
+            id=entry_doc.id, processing_status__in=_CANCELLABLE
+        ).aupdate(
+            cancelled_on=cancelled_on,
+            processing_status=EntryDocument.ProcessingStatus.CANCELLED,
+            processing_error="Cancelled by user",
+            processing_step=None,
+            updated_at=timezone.now(),
+        )
+        if not updated:
+            await entry_doc.arefresh_from_db(fields=["processing_status"])
+            raise ValueError(
+                f"Document cannot be cancelled in status {entry_doc.processing_status!r}."
+            )
+        entry_doc.cancelled_on = cancelled_on
+        entry_doc.processing_status = EntryDocument.ProcessingStatus.CANCELLED
+        entry_doc.processing_error = "Cancelled by user"
+        entry_doc.processing_step = None
+        return _document_status_out(entry_doc, None)
 
     @classmethod
     async def get_chunk_content(
@@ -943,6 +1096,7 @@ class MemoryService(PermissionsMixin):
             file_extension=entry_doc.file_extension,
             status=entry_doc.processing_status,
             error=entry_doc.processing_error,
+            processing_step=entry_doc.processing_step,
             created_at=entry_doc.created_at.isoformat(),
             updated_at=entry_doc.updated_at.isoformat(),
         )
@@ -975,7 +1129,9 @@ upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_document_status = async_to_sync(MemoryService.get_document_status)
+get_task_status = async_to_sync(MemoryService.get_task_status)
 retry_document = async_to_sync(MemoryService.retry_document)
+cancel_document = async_to_sync(MemoryService.cancel_document)
 get_chunk_content = async_to_sync(MemoryService.get_chunk_content)
 list_memory_users = async_to_sync(MemoryService.list_memory_users)
 add_memory_user = async_to_sync(MemoryService.add_memory_user)
