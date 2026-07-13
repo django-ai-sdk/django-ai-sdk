@@ -2,28 +2,36 @@ from __future__ import annotations
 
 from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult, parse_data
 from django_ai_sdk.files.processors import (
+    BaseBinaryFileProcessor,
     BaseFileProcessor,
     CSVFileProcessor,
+    DocxFileProcessor,
     JSONFileProcessor,
+    PptxFileProcessor,
     TextFileProcessor,
+    XlsxFileProcessor,
 )
 from django_ai_sdk.files.transforms import (
     BaseTransform,
-    CSVParseTransform,
-    JSONParseTransform,
-    ToTextTransform,
+    CSVTransform,
+    JSONTransform,
+    TextTransform,
 )
 
 __all__ = [
+    "BaseBinaryFileProcessor",
     "BaseFileProcessor",
     "BaseTransform",
     "CSVFileProcessor",
-    "CSVParseTransform",
+    "CSVTransform",
+    "DocxFileProcessor",
     "FilePipeline",
     "JSONFileProcessor",
-    "JSONParseTransform",
+    "JSONTransform",
     "parse_data",
     "PipelineResult",
+    "PptxFileProcessor",
     "TextFileProcessor",
-    "ToTextTransform",
+    "TextTransform",
+    "XlsxFileProcessor",
 ]

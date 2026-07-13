@@ -48,7 +48,7 @@ Issues = "https://github.com/django-ai-sdk/django-ai-sdk/issues"
 Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
-all = ["django-ai-sdk[haystack,restframework,mcp]"]
+all = ["django-ai-sdk[haystack,restframework,mcp,files]"]
 haystack = [
   "chroma-haystack>=4.3.0",
   "fastembed-haystack>=2.3.0",
@@ -59,6 +59,7 @@ haystack = [
 ]
 mcp = ["mcp>=1.27.2", "mcp-haystack>=1.3.0"]
 restframework = ["djangorestframework>=3.17.1"]
+files = ["python-docx>=1.1.2", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 [dependency-groups]
 dev = [
   "django-stubs>=6.0.5",
