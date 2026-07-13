@@ -1,8 +1,10 @@
+from __future__ import annotations
+
+import hashlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from django.core.files.base import ContentFile
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -188,8 +190,7 @@ class TestUploadDocumentEnqueues:
 
     async def test_enqueues_task_not_runs_pipeline(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
-
-        from django_ai_sdk.memories.models import EntryDocument, Memory
+        from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
 
@@ -218,7 +219,6 @@ class TestUploadDocumentEnqueues:
 
     async def test_returns_document_upload_response(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
-
         from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.memories.schemas import DocumentUploadResponse
         from django_ai_sdk.memories.services import MemoryService
@@ -241,7 +241,6 @@ class TestUploadDocumentEnqueues:
     async def test_entry_doc_saved_before_task_enqueued(self):
         """EntryDocument must be in DB before task is enqueued (task needs the ID)."""
         from django.core.files.uploadedfile import SimpleUploadedFile
-
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.services import MemoryService
         from tests.mocks.permissions import memory_permissions
@@ -266,6 +265,103 @@ class TestUploadDocumentEnqueues:
             await MemoryService.upload_document(str(memory.id), uploaded, user=None)
 
         assert captured_args[0][1] is True  # doc existed in DB when enqueue was called
+
+
+# ---------------------------------------------------------------------------
+# Deduplication — same hash, same memory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestUploadDocumentDedup:
+    @pytest.fixture(autouse=True)
+    def tmp_media(self, tmp_path, settings):
+        settings.MEDIA_ROOT = str(tmp_path / "media")
+
+    async def test_duplicate_file_raises_conflict(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import ConflictError
+        from tests.mocks.permissions import memory_permissions
+
+        memory = await Memory.objects.acreate(name="dedup-conflict")
+        uploaded = SimpleUploadedFile("doc.txt", b"same content", content_type="text/plain")
+
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-1"))
+            await MemoryService.upload_document(str(memory.id), uploaded, user=None)
+
+        uploaded2 = SimpleUploadedFile("doc.txt", b"same content", content_type="text/plain")
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            pytest.raises(ConflictError, match="File already exists"),
+        ):
+            await MemoryService.upload_document(str(memory.id), uploaded2, user=None)
+
+    async def test_duplicate_file_different_memory_allowed(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        memory_a = await Memory.objects.acreate(name="dedup-mem-a")
+        memory_b = await Memory.objects.acreate(name="dedup-mem-b")
+        uploaded = SimpleUploadedFile("doc.txt", b"cross memory", content_type="text/plain")
+
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-1"))
+            await MemoryService.upload_document(str(memory_a.id), uploaded, user=None)
+
+        uploaded2 = SimpleUploadedFile("doc.txt", b"cross memory", content_type="text/plain")
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-2"))
+            result = await MemoryService.upload_document(str(memory_b.id), uploaded2, user=None)
+
+        assert result.status == "processing"
+
+    async def test_duplicate_after_failed_allows_retry(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django_ai_sdk.memories.models import EntryDocument, Memory
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        memory = await Memory.objects.acreate(name="dedup-retry")
+        uploaded = SimpleUploadedFile("doc.txt", b"retry content", content_type="text/plain")
+
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-1"))
+            result = await MemoryService.upload_document(str(memory.id), uploaded, user=None)
+
+        # Manually mark the first doc as FAILED
+        doc = await EntryDocument.objects.aget(id=result.id)
+        doc.processing_status = EntryDocument.ProcessingStatus.FAILED
+        await doc.asave(update_fields=["processing_status"])
+
+        # Re-upload with same content — should succeed
+        uploaded2 = SimpleUploadedFile("doc.txt", b"retry content", content_type="text/plain")
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-2"))
+            result2 = await MemoryService.upload_document(str(memory.id), uploaded2, user=None)
+
+        assert result2.status == "processing"
+        assert result2.id != result.id
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +411,7 @@ class TestGetDocumentStatus:
         assert result.task.id == "task-status-1"
 
     async def test_returns_status_without_task_when_no_task_id(self):
-        from django_ai_sdk.memories.models import EntryDocument, Memory
+        from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.memories.services import MemoryService
 
         memory = await Memory.objects.acreate(name="status-no-task")
@@ -346,3 +442,44 @@ class TestGetDocumentStatus:
 
         assert result.status == "failed"
         assert result.error == "File type not supported"
+
+
+# ---------------------------------------------------------------------------
+# compute_file_hash
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFileHash:
+    def test_bytes_input(self):
+        from django_ai_sdk.files.common import compute_file_hash
+
+        result = compute_file_hash(b"hello world")
+        assert result == hashlib.sha256(b"hello world").hexdigest()
+        assert len(result) == 64
+
+    def test_io_input_resets_pointer(self):
+        from io import BytesIO
+
+        from django_ai_sdk.files.common import compute_file_hash
+
+        data = b"some file content"
+        stream = BytesIO(data)
+        result = compute_file_hash(stream)
+        assert result == hashlib.sha256(data).hexdigest()
+        # pointer should be reset to 0
+        assert stream.tell() == 0
+        assert stream.read() == data
+
+    def test_empty_bytes(self):
+        from django_ai_sdk.files.common import compute_file_hash
+
+        result = compute_file_hash(b"")
+        assert result == hashlib.sha256(b"").hexdigest()
+        assert len(result) == 64
+
+    def test_large_content_chunking(self):
+        from django_ai_sdk.files.common import compute_file_hash
+
+        big_data = b"x" * 200000  # > 64KB
+        result = compute_file_hash(big_data)
+        assert result == hashlib.sha256(big_data).hexdigest()

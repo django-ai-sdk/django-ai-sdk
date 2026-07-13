@@ -10,6 +10,7 @@ from django.db.models import Count, QuerySet
 from django_ai_sdk.assistants.registry import registry
 from django_ai_sdk.assistants.services import AssistantService
 from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.files.common import compute_file_hash
 from django_ai_sdk.memories.models import (
     Entry,
     EntryDocument,
@@ -29,6 +30,7 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.tasks import process_document_upload
 from django_ai_sdk.permissions import (
+    ConflictError,
     Operation,
     PermissionDomain,
     PermissionsMixin,
@@ -402,12 +404,27 @@ class MemoryService(PermissionsMixin):
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
+        file_hash = compute_file_hash(file)
+
+        dup = (
+            await EntryDocument.objects.filter(
+                memory=memory,
+                file_hash=file_hash,
+            )
+            .exclude(
+                processing_status=EntryDocument.ProcessingStatus.FAILED,
+            )
+            .afirst()
+        )
+        if dup is not None:
+            raise ConflictError("File already exists in this memory")
 
         entry_doc = await EntryDocument.objects.acreate(
             entry=None,
             memory=memory,
             file=file,
             file_name=file_name,
+            file_hash=file_hash,
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),
@@ -663,12 +680,27 @@ class MemoryService(PermissionsMixin):
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
+        file_hash = compute_file_hash(file)
+
+        dup = (
+            await EntryDocument.objects.filter(
+                memory=memory,
+                file_hash=file_hash,
+            )
+            .exclude(
+                processing_status=EntryDocument.ProcessingStatus.FAILED,
+            )
+            .afirst()
+        )
+        if dup is not None:
+            raise ConflictError("File already exists in this memory")
 
         entry_doc = await EntryDocument.objects.acreate(
             entry=None,
             memory=memory,
             file=file,
             file_name=file_name,
+            file_hash=file_hash,
             file_size=file.size or 0,
             content_type=getattr(file, "content_type", "") or "",
             file_extension=ext.lstrip("."),

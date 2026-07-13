@@ -26,6 +26,14 @@ class PermissionDenied(Exception):
         super().__init__(self.message)
 
 
+class ConflictError(Exception):
+    """Raised when an operation conflicts with existing state."""
+
+    def __init__(self, message: str = "Conflict") -> None:
+        self.message = message
+        super().__init__(self.message)
+
+
 class Operation(StrEnum):
     CHAT = "chat"
     VIEW_HISTORY = "view_history"
