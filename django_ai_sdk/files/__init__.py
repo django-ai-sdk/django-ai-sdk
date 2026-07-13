@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult
+from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult, parse_data
 from django_ai_sdk.files.processors import (
     BaseFileProcessor,
     CSVFileProcessor,
@@ -22,6 +22,7 @@ __all__ = [
     "FilePipeline",
     "JSONFileProcessor",
     "JSONParseTransform",
+    "parse_data",
     "PipelineResult",
     "TextFileProcessor",
     "ToTextTransform",
