@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
+from typing import Any
 
 from django_tasks import default_task_backend
+from django_tasks.base import TaskResultStatus
 from pydantic import BaseModel, Field
 
 
@@ -18,6 +20,7 @@ class TaskStatus(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     errors: list[TaskError] = Field(default_factory=list)
+    return_value: Any | None = None
 
 
 async def aget_task_status(task_id: str) -> TaskStatus:
@@ -33,4 +36,7 @@ async def aget_task_status(task_id: str) -> TaskStatus:
             TaskError(type=e.exception_class_path, traceback=e.traceback)
             for e in (result.errors or [])
         ],
+        # `.return_value` raises unless the task actually succeeded — only
+        # SUCCESSFUL tasks have one.
+        return_value=result.return_value if result.status == TaskResultStatus.SUCCESSFUL else None,
     )

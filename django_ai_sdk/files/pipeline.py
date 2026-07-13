@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,8 @@ if TYPE_CHECKING:
     from django_ai_sdk.assistant import Assistant
     from django_ai_sdk.files.processors import FileProcessor
     from django_ai_sdk.files.transforms import BaseTransform
+
+OnStep = Callable[[str | None], Awaitable[None]]
 
 
 @dataclass
@@ -53,13 +56,26 @@ class FilePipeline:
     async def accepts(self, file: Any) -> bool:
         return await self.file_processor.is_valid(file)
 
-    async def run(self, file: Any, *, assistant: Assistant | None = None) -> PipelineResult | None:
+    async def run(
+        self,
+        file: Any,
+        *,
+        assistant: Assistant | None = None,
+        on_step: OnStep | None = None,
+    ) -> PipelineResult | None:
         """Run processor then all transforms in sequence.
         Processor runs in a thread to avoid blocking the event loop.
+
+        ``on_step``, if given, is awaited before the processor and before each
+        transform, passing that component's ``step`` name (or ``None``). It's
+        the pipeline's only checkpoint, so callers can also use it to raise
+        and cancel the run, whether or not that boundary has a step name.
         """
         if not await self.accepts(file):
             return None
 
+        if on_step:
+            await on_step(self.file_processor.step)
         data: Any = await self.file_processor.run(file)
         if data is None:
             return None
@@ -67,6 +83,8 @@ class FilePipeline:
         content = data
 
         for transform in self.transforms:
+            if on_step:
+                await on_step(transform.step)
             data = await transform.run(data, assistant=assistant)
 
         return PipelineResult(content=content, data=parse_data(data))

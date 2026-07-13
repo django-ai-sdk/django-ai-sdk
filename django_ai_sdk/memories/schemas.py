@@ -117,6 +117,7 @@ class DocumentOut(BaseModel):
     file_extension: str
     status: str
     error: str = ""
+    processing_step: str | None = None
     created_at: str
     updated_at: str
 
@@ -143,6 +144,8 @@ class DocumentUploadResponse(BaseModel):
 
     id: str
     status: str
+    processing_step: str | None = None
+    task_id: str | None = None
 
 
 class DocumentStatusOut(BaseModel):
@@ -151,6 +154,7 @@ class DocumentStatusOut(BaseModel):
     id: str
     status: str
     error: str = ""
+    processing_step: str | None = None
     task: TaskStatus | None = None
 
 

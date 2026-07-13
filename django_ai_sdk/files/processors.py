@@ -79,6 +79,7 @@ async def get_mime_type(file: FileSource) -> str | None:
 
 class FileProcessor(Protocol):
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
+    step: ClassVar[str | None] = None
 
     async def is_valid(self, file: FileSource) -> bool:
         pass
@@ -91,6 +92,7 @@ class BaseFileProcessor:
     """Shared MIME validation for concrete file processors."""
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = ()
+    step: ClassVar[str | None] = None
 
     async def is_valid(self, file: FileSource) -> bool:
         mime_type = await get_mime_type(file)

@@ -3,10 +3,12 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 
 class BaseTransform:
+    step: ClassVar[str | None] = None
+
     async def run(self, data: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 

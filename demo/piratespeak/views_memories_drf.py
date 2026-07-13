@@ -109,12 +109,15 @@ class SourceContentSerializer(serializers.Serializer):
 class DocumentUploadResponseSerializer(serializers.Serializer):
     id = serializers.CharField()
     status = serializers.CharField()
+    processing_step = serializers.CharField(allow_null=True, required=False)
+    task_id = serializers.CharField(allow_null=True, required=False)
 
 
 class DocumentStatusOutSerializer(serializers.Serializer):
     id = serializers.CharField()
     status = serializers.CharField()
     error = serializers.CharField()
+    processing_step = serializers.CharField(allow_null=True, required=False)
     task = serializers.DictField(allow_null=True, required=False)
 
 
