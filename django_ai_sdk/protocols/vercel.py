@@ -121,6 +121,13 @@ class SourceDocumentPart(Schema):
     source_id: str = Field(validation_alias="source_id", serialization_alias="sourceId")
     media_type: str = Field(validation_alias="media_type", serialization_alias="mediaType")
     title: str
+    # Carries the citation index so the client can map an inline citation to
+    # the right source by index rather than emission order (which is retrieval,
+    # not index, order). providerMetadata is the only extra channel the Vercel
+    # AI SDK preserves on a source-document part.
+    provider_metadata: dict[str, Any] | None = Field(
+        default=None, serialization_alias="providerMetadata"
+    )
 
 
 # === File Part ===
@@ -301,6 +308,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                             "sourceId": source.get("source_id") or str(source.get("index", "")),
                             "mediaType": "file",
                             "title": source.get("title", ""),
+                            "providerMetadata": {"citation": {"index": source.get("index")}},
                         }
                     )
 
@@ -461,6 +469,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         source_id=src.source_id,
                         media_type=src.media_type,
                         title=src.title,
+                        provider_metadata={"citation": {"index": src.index}},
                     )
 
                 case "error":

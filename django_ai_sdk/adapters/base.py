@@ -377,12 +377,13 @@ class Stream:
                 source_id = self.get_source_id(src)
                 if source_id is None:
                     continue
+                # Reference fields only - deliberately no chunk `content`:
+                # readers resolve it fresh by source_id, so inlining it just
+                # duplicated multi-KB chunks into every message row.
                 sources_list.append(
                     {
                         "index": src.index,
                         "title": src.title,
-                        "content": src.content,
-                        "metadata": src.metadata,
                         "source_id": source_id,
                         "memory_id": src.memory_id,
                         "page_number": src.page_number,
