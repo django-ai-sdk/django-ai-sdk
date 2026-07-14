@@ -22,7 +22,7 @@ from pydantic import Field
 from tenacity import (
     Retrying,
     retry_if_exception,
-    stop_after_attempt,
+    stop_after_delay,
     wait_exponential,
 )
 
@@ -87,18 +87,16 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             os.makedirs(storage.persist_path, exist_ok=True)
 
             for attempt in Retrying(
-                stop=stop_after_attempt(5),
-                wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
+                stop=stop_after_delay(300),
+                wait=wait_exponential(multiplier=1, min=1, max=30),
                 retry=retry_if_exception(
                     lambda e: isinstance(e, RuntimeError) and "already accessed" in str(e)
                 ),
                 reraise=True,
                 before_sleep=lambda rs: logger.warning(
-                    "Qdrant store at {} locked by another process, "
-                    "retrying in {:.1f}s (attempt {}/5)",
+                    "Qdrant store at {} locked by another process, retrying in {:.1f}s",
                     storage.persist_path,
                     rs.next_action.sleep if rs.next_action else 0,
-                    rs.attempt_number,
                 ),
             ):
                 with attempt:
