@@ -708,14 +708,14 @@ class MemoryService(PermissionsMixin):
             Thread.objects.select_related("file_memory"), id=thread_id
         )
         if not thread.file_memory:
-            memory = await Memory.objects.acreate(
+            memory, created = await Memory.objects.aget_or_create(
                 name=f"thread_files_{thread_id}",
-                description="Thread file uploads",
-                is_hidden=True,
+                defaults={"description": "Thread file uploads", "is_hidden": True},
             )
             thread.file_memory = memory
             await thread.asave(update_fields=["file_memory", "updated_at"])
-            await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
+            if created:
+                await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
         return thread.file_memory
 
     @classmethod
