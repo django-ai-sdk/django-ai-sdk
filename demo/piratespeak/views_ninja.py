@@ -42,6 +42,7 @@ class AssistantItem(Schema):
     id: str
     name: str | None = None
     model: str | None = None
+    file_upload: bool = False
 
 
 class AssistantsListResponse(Schema):

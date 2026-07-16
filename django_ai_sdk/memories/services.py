@@ -72,9 +72,7 @@ async def _fail_orphaned_processing_document(
     if entry_doc.processing_status != EntryDocument.ProcessingStatus.PROCESSING:
         return
 
-    task_finished = task_status.status in ("FAILED", "SUCCESSFUL") if task_status else False
-
-    if task_finished:
+    if task_status is not None and task_status.status in ("FAILED", "SUCCESSFUL"):
         if task_status.errors:
             task_error = task_status.errors[0]
             tb_lines = task_error.traceback.strip().splitlines()

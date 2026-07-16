@@ -27,7 +27,7 @@ async def _ensure_adapter(
 
     try:
         if callable(adapter):
-            factory = cast("Callable[[], Coroutine[None, None, Streamable]], adapter")
+            factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
     except Exception:
         logger.error("Adapter initialization failed", exc_info=True)
