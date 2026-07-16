@@ -186,6 +186,9 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
+# Default vector store server url
+AI_SDK_VECTOR_STORE_URL = "http://qdrant:6333"
+
 AI_SDK_MCP_SERVERS = {
     "linear": TokenMCPServer(
         label="Linear",
