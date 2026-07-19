@@ -10,7 +10,7 @@ from django.conf import settings
 from haystack import AsyncPipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import StreamingChunk
+from haystack.dataclasses import ImageContent, StreamingChunk
 
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.common import (
@@ -88,6 +88,22 @@ def get_error_chunk(e: Exception) -> MessageChunk:
     )
 
 
+def build_user_message(message: ChatMessage) -> HaystackChatMessage:
+    """Build a Haystack user message, multimodal when the message has images.
+
+    Text-only messages take the plain ``from_user(content)`` path; messages with
+    images are sent as ``content_parts`` (text first, then each image) so
+    vision-capable models receive the pixels from the inline base64 payload.
+    """
+    if not message.images:
+        return HaystackChatMessage.from_user(message.content)
+
+    content_parts: list[Any] = [message.content] if message.content else []
+    for image in message.images:
+        content_parts.append(ImageContent(base64_image=image.data, mime_type=image.media_type))
+    return HaystackChatMessage.from_user(content_parts=content_parts)
+
+
 class Run:
     """
     Runnable Haystack adapter.
@@ -112,7 +128,7 @@ class Run:
         converted: list[HaystackChatMessage] = []
         for msg in conversation:
             if msg.role == "user":
-                converted.append(HaystackChatMessage.from_user(msg.content))  # type: ignore[arg-type]
+                converted.append(build_user_message(msg))
             elif msg.role == "assistant":
                 converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
         return converted
@@ -204,15 +220,19 @@ class Stream:
         converted_messages: list[HaystackChatMessage] = []
 
         if self.merge_messages:
-            filtered_messages = merge_messages(conversation)
+            # Merging collapses messages to (role, text) tuples; images are not
+            # carried through this path (merge is off by default).
+            for role, content in merge_messages(conversation):
+                if role == "user":
+                    converted_messages.append(HaystackChatMessage.from_user(content))
+                elif role == "assistant":
+                    converted_messages.append(HaystackChatMessage.from_assistant(content))
         else:
-            filtered_messages = [(msg.role, msg.content) for msg in conversation]
-
-        for role, content in filtered_messages:
-            if role == "user":
-                converted_messages.append(HaystackChatMessage.from_user(content))
-            elif role == "assistant":
-                converted_messages.append(HaystackChatMessage.from_assistant(content))
+            for msg in conversation:
+                if msg.role == "user":
+                    converted_messages.append(build_user_message(msg))
+                elif msg.role == "assistant":
+                    converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
 
         # Ensure we have at least one message
         # TODO: we now return a system message instead of a user message, this is a temporary fix

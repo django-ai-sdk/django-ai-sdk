@@ -22,6 +22,19 @@ def prompt(text: str) -> Prompt:
     return Prompt(dedent(text))
 
 
+class ImageAttachment(BaseModel):
+    """An image sent inline with a user message.
+
+    Carried as base64 (``data``, WITHOUT the ``data:<mime>;base64,`` prefix) and
+    handed to the model's vision input at message-build time. Images are inline
+    only by design: the SDK never fetches a client-supplied URL server-side
+    (that would be an SSRF vector for consumers who deploy this library).
+    """
+
+    media_type: str  # e.g. "image/jpeg"
+    data: str  # base64, no "data:" prefix
+
+
 class ChatMessage(BaseModel):
     """Internal SDK representation of a chat message."""
 
@@ -30,6 +43,9 @@ class ChatMessage(BaseModel):
     content: str = ""
     reasoning: str | None = None
     id: str = ""
+
+    # Inline image attachments (multimodal user turns)
+    images: list[ImageAttachment] = Field(default_factory=list)
 
     # Rich metadata
     tool_calls: list[dict] = Field(default_factory=list)

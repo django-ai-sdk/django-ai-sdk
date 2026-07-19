@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 class MessagePart(BaseModel):
     type: str
     text: str | None = None
+    # File/image parts (Vercel AI SDK): media_type + a data: URL.
+    media_type: str | None = Field(default=None, validation_alias="mediaType")
+    url: str | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class Message(BaseModel):

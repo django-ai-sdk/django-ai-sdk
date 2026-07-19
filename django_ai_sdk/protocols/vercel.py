@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import ChatMessage, ImageAttachment
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
@@ -30,6 +30,25 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger(__name__)
+
+
+def _parse_image_data_url(url: str | None) -> tuple[str, str] | None:
+    """Split a ``data:<mime>;base64,<payload>`` image URL into (media_type, base64).
+
+    Returns None for non-data / non-image / non-base64 URLs (e.g. remote http
+    URLs), which the caller skips — we only carry inline base64 images.
+    """
+    if not url or not url.startswith("data:"):
+        return None
+    try:
+        header, payload = url[len("data:") :].split(",", 1)
+    except ValueError:
+        return None
+    media_type, _, encoding = header.partition(";")
+    if encoding != "base64" or not media_type.startswith("image/"):
+        return None
+    return media_type, payload
+
 
 # === Base Schema Classes ===
 
@@ -279,8 +298,23 @@ class VercelProtocolHandler(BaseProtocolHandler):
             # Extract text content from parts using list comprehension
             content = " ".join(part.text for part in msg.parts if part.type == "text" and part.text)
 
-            if content:
-                messages.append(ChatMessage(role=msg.role, content=content))
+            # Collect images from inline-base64 file parts (data: URLs). Remote
+            # URLs are deliberately ignored: fetching a client-supplied URL
+            # server-side would be an SSRF vector.
+            images: list[ImageAttachment] = []
+            for part in msg.parts:
+                if part.type not in ("file", "image"):
+                    continue
+                parsed = _parse_image_data_url(getattr(part, "url", None))
+                if parsed is None:
+                    continue
+                media_type, data = parsed
+                part_media_type = getattr(part, "media_type", None)
+                images.append(ImageAttachment(media_type=part_media_type or media_type, data=data))
+
+            # Keep image-only messages (empty text) — the image is the payload.
+            if content or images:
+                messages.append(ChatMessage(role=msg.role, content=content, images=images))
 
         return messages
 
@@ -292,6 +326,16 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.content:
                 parts.append({"type": "text", "text": chat_message.content})
+
+            # Re-emit images as inline file parts so reloaded threads render them.
+            for image in chat_message.images:
+                parts.append(
+                    {
+                        "type": "file",
+                        "mediaType": image.media_type,
+                        "url": f"data:{image.media_type};base64,{image.data}",
+                    }
+                )
 
             if chat_message.sources:
                 for source in chat_message.sources:
