@@ -27,6 +27,7 @@ class AssistantSettings(models.Model):
     title_generation = models.BooleanField(default=True)
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
+    supports_images = models.BooleanField(default=False)
     active = models.BooleanField(default=True, db_index=True)
 
     # Reverse relation type hints

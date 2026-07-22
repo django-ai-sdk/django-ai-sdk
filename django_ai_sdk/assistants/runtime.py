@@ -44,6 +44,7 @@ class RuntimeAssistant(Assistant):
         self.title_generation = config.title_generation
         self.max_history = config.max_history
         self.file_upload = config.file_upload
+        self.supports_images = config.supports_images
         if config.suggestion_enabled:
             self.suggestion_generator = DefaultSuggestionGenerator
 
@@ -65,7 +66,7 @@ class RuntimeAssistant(Assistant):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Run:
-        return Run(generator=self._build_generator())
+        return Run(generator=self._build_generator(), supports_images=self.supports_images)
 
     async def get_pipeline_adapter(
         self,
@@ -91,6 +92,7 @@ class RuntimeAssistant(Assistant):
             pipeline=tool_agent.pipeline(),
             generator=generator,
             storage_adapter=storage_adapter,
+            supports_images=self.supports_images,
         )
 
     async def get_tools(

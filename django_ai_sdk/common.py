@@ -29,6 +29,17 @@ class ImageAttachment(BaseModel):
     handed to the model's vision input at message-build time. Images are inline
     only by design: the SDK never fetches a client-supplied URL server-side
     (that would be an SSRF vector for consumers who deploy this library).
+
+    Notes for consumers:
+
+    - Requires the assistant's model to actually be vision-capable —
+      ``supports_images`` is a manual declaration, not auto-verified against the
+      model, so setting it ``True`` for a model that can't accept images will
+      still error on that call. Attached images are replayed to the model for
+      every user turn still inside the history window (``max_history``).
+    - The SDK sets no size or count cap on inline images; the effective limit is
+      Django's ``DATA_UPLOAD_MAX_MEMORY_SIZE`` on the request body. Raise or lower
+      that (or cap client-side) to taste.
     """
 
     media_type: str  # e.g. "image/jpeg"

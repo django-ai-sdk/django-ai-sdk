@@ -117,6 +117,16 @@ class TestBuildUserMessage:
         hm = build_user_message(ChatMessage(role="user", content="hello"))
         assert hm.images == []
 
+    def test_images_dropped_when_supports_images_false(self):
+        cm = ChatMessage(
+            role="user",
+            content="describe",
+            images=[ImageAttachment(media_type="image/jpeg", data="QUJD")],
+        )
+        hm = build_user_message(cm, supports_images=False)
+        assert hm.images == []
+        assert hm.text == "describe"
+
 
 class TestPersistenceRoundTrip:
     def test_images_survive_model_dump_and_validate(self):

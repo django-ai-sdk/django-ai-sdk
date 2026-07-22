@@ -38,6 +38,8 @@ class AssistantSummary(TypedDict):
     id: str
     name: str | None
     model: str | None
+    file_upload: bool
+    supports_images: bool
 
 
 class AssistantCreateData(TypedDict, total=False):
@@ -53,6 +55,7 @@ class AssistantCreateData(TypedDict, total=False):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    supports_images: bool
 
 
 class AssistantUpdateData(TypedDict, total=False):
@@ -67,6 +70,7 @@ class AssistantUpdateData(TypedDict, total=False):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    supports_images: bool
     active: bool
 
 
@@ -166,7 +170,15 @@ class AssistantService(PermissionsMixin):
         for aid, assistant in registry.visible().items():
             try:
                 await cls.has_perms(user, Operation.VIEW_ASSISTANT, assistant=assistant)
-                result.append(AssistantSummary(id=aid, name=assistant.name, model=assistant.model))
+                result.append(
+                    AssistantSummary(
+                        id=aid,
+                        name=assistant.name,
+                        model=assistant.model,
+                        file_upload=getattr(assistant, "file_upload", False),
+                        supports_images=getattr(assistant, "supports_images", False),
+                    )
+                )
             except PermissionDenied:
                 continue
 
@@ -187,7 +199,15 @@ class AssistantService(PermissionsMixin):
                 await cls.has_perms(user, Operation.VIEW_ASSISTANT, obj=config, assistant=assistant)
             except PermissionDenied:
                 continue
-            result.append(AssistantSummary(id=str(config.id), name=config.name, model=config.model))
+            result.append(
+                AssistantSummary(
+                    id=str(config.id),
+                    name=config.name,
+                    model=config.model,
+                    file_upload=config.file_upload,
+                    supports_images=config.supports_images,
+                )
+            )
 
         return result
 
@@ -524,6 +544,7 @@ class AssistantService(PermissionsMixin):
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),
             file_upload=data.get("file_upload", False),
+            supports_images=data.get("supports_images", False),
         )
         await config.asave()
         if user is not None and bool(user.is_authenticated):

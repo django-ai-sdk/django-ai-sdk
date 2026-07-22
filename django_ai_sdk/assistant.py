@@ -138,6 +138,10 @@ class Assistant(ABC, AssistantInfoMixin):
     # Enable file upload UI for this assistant's threads
     file_upload: bool = False
 
+    # Whether the assistant's model accepts inline images; enforced in
+    # build_user_message (set True only for a vision-capable model).
+    supports_images: bool = False
+
     # Declare one FilePipeline per supported file type.
     # First pipeline whose processor accepts the uploaded file is used.
     # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).

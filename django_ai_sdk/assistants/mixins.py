@@ -18,6 +18,7 @@ class AssistantInfo(BaseModel):
         class_name: Python class name of the assistant
         description: Optional description of the assistant's purpose
         file_upload: Whether this assistant supports file uploads in threads
+        supports_images: Whether this assistant's model accepts inline image input
     """
 
     id: str
@@ -26,6 +27,7 @@ class AssistantInfo(BaseModel):
     class_name: str
     description: str | None = None
     file_upload: bool = False
+    supports_images: bool = False
 
 
 # Namespace for deterministic UUID generation (arbitrary but fixed)
@@ -53,6 +55,7 @@ class AssistantInfoMixin:
             class_name=self.__class__.__name__,
             description=getattr(self, "description", None),
             file_upload=getattr(self, "file_upload", False),
+            supports_images=getattr(self, "supports_images", False),
         )
 
     @property

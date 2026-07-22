@@ -88,14 +88,27 @@ def get_error_chunk(e: Exception) -> MessageChunk:
     )
 
 
-def build_user_message(message: ChatMessage) -> HaystackChatMessage:
+def build_user_message(
+    message: ChatMessage, *, supports_images: bool = True
+) -> HaystackChatMessage:
     """Build a Haystack user message, multimodal when the message has images.
 
     Text-only messages take the plain ``from_user(content)`` path; messages with
     images are sent as ``content_parts`` (text first, then each image) so
     vision-capable models receive the pixels from the inline base64 payload.
+
+    If ``supports_images`` is False, images are dropped (with a warning logged)
+    since the assistant's configured model can't accept them; the text is still sent.
     """
     if not message.images:
+        return HaystackChatMessage.from_user(message.content)
+
+    if not supports_images:
+        logger.warning(
+            "Dropping %d image(s) from user message: assistant's model does not "
+            "support images (supports_images=False).",
+            len(message.images),
+        )
         return HaystackChatMessage.from_user(message.content)
 
     content_parts: list[Any] = [message.content] if message.content else []
@@ -117,10 +130,12 @@ class Run:
         generator: Any,
         model: str | None = None,
         instructions: str | None = None,
+        supports_images: bool = True,
     ) -> None:
         self.generator = generator
         self.model = model
         self.instructions = instructions
+        self.supports_images = supports_images
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Quick conversion."""
@@ -128,7 +143,7 @@ class Run:
         converted: list[HaystackChatMessage] = []
         for msg in conversation:
             if msg.role == "user":
-                converted.append(build_user_message(msg))
+                converted.append(build_user_message(msg, supports_images=self.supports_images))
             elif msg.role == "assistant":
                 converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
         return converted
@@ -187,6 +202,7 @@ class Stream:
         storage_adapter: BaseStorageAdapter | None = None,
         citation_registry: CitationRegistry | None = None,
         suggestion_generator: SuggestionGenerator | None = None,
+        supports_images: bool = True,
     ) -> None:
         self.pipeline = pipeline
         if not isinstance(pipeline, AsyncPipeline):
@@ -199,6 +215,7 @@ class Stream:
         self.storage_adapter = storage_adapter
         self.citation_registry = citation_registry
         self.suggestion_generator = suggestion_generator
+        self.supports_images = supports_images
         self._sources_emitted = 0
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
@@ -230,7 +247,9 @@ class Stream:
         else:
             for msg in conversation:
                 if msg.role == "user":
-                    converted_messages.append(build_user_message(msg))
+                    converted_messages.append(
+                        build_user_message(msg, supports_images=self.supports_images)
+                    )
                 elif msg.role == "assistant":
                     converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
 
