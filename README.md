@@ -76,6 +76,20 @@ async def chat(request, payload: ChatRequest):
 - **Conversation Storage**: Automatic message persistence. Thread-based history out of the box.
 - **Tool Calling**: MCP, memory, and custom tools — all managed by your Assistant.
 - **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
+- **Vision Input**: Send inline images to vision-capable models. Opt in per assistant with `supports_images`.
+
+## Vision (image input)
+
+Vision-capable assistants can read images sent inline with a user message. Opt in on the assistant — the flag gates image handling, so leave it off for text-only models:
+
+```python
+class HelpDeskAssistant(Assistant):
+    name = "Help Desk"
+    model = "gpt-4o"          # must be a vision-capable model
+    supports_images = True
+```
+
+Images arrive as inline base64 (`data:` URLs, e.g. from the Vercel AI SDK file parts) and are handed straight to the model — the SDK never fetches a remote, client-supplied URL server-side (that would be an SSRF vector). Per message, images are capped by `AI_SDK_MAX_IMAGE_BYTES` (default 20 MiB each) and `AI_SDK_MAX_IMAGES_PER_MESSAGE` (default 10); set either to `None` to disable. When `supports_images` is `False`, any attached images are dropped (with a warning) and the text is still sent.
 
 ## Documentation
 

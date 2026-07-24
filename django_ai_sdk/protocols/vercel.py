@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from django.conf import settings
 from pydantic import BaseModel, Field
 
 from django_ai_sdk.common import ChatMessage, ImageAttachment
@@ -44,10 +45,22 @@ def _parse_image_data_url(url: str | None) -> tuple[str, str] | None:
         header, payload = url[len("data:") :].split(",", 1)
     except ValueError:
         return None
-    media_type, _, encoding = header.partition(";")
-    if encoding != "base64" or not media_type.startswith("image/"):
+    media_type, *params = header.split(";")
+    # base64 need not be the last param (e.g. "image/jpeg;charset=utf-8;base64").
+    if "base64" not in params or not media_type.startswith("image/"):
         return None
     return media_type, payload
+
+
+# Defensive caps on inline images. Both accept an int (limit) or None (no limit),
+# overridable via Django settings for consumers that want to raise/lower them.
+DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MiB per image (decoded)
+DEFAULT_MAX_IMAGES_PER_MESSAGE = 10
+
+
+def _estimate_base64_bytes(payload: str) -> int:
+    """Approximate the decoded byte size of a base64 payload (4 chars -> 3 bytes)."""
+    return len(payload) * 3 // 4
 
 
 # === Base Schema Classes ===
@@ -293,6 +306,11 @@ class VercelProtocolHandler(BaseProtocolHandler):
         protocol_messages: list[Any],
     ) -> list[ChatMessage]:
         """Convert Vercel Message objects to internal ChatMessage format."""
+        max_bytes = getattr(settings, "AI_SDK_MAX_IMAGE_BYTES", DEFAULT_MAX_IMAGE_BYTES)
+        max_count = getattr(
+            settings, "AI_SDK_MAX_IMAGES_PER_MESSAGE", DEFAULT_MAX_IMAGES_PER_MESSAGE
+        )
+
         messages = []
         for msg in protocol_messages:
             # Extract text content from parts using list comprehension
@@ -309,6 +327,19 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 if parsed is None:
                     continue
                 media_type, data = parsed
+                if max_count is not None and len(images) >= max_count:
+                    logger.warning(
+                        "Dropping image(s): message exceeds AI_SDK_MAX_IMAGES_PER_MESSAGE (%d).",
+                        max_count,
+                    )
+                    break
+                if max_bytes is not None and _estimate_base64_bytes(data) > max_bytes:
+                    logger.warning(
+                        "Dropping image (~%d bytes): exceeds AI_SDK_MAX_IMAGE_BYTES (%d).",
+                        _estimate_base64_bytes(data),
+                        max_bytes,
+                    )
+                    continue
                 part_media_type = getattr(part, "media_type", None)
                 images.append(ImageAttachment(media_type=part_media_type or media_type, data=data))
 

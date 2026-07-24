@@ -26,6 +26,13 @@ class TestParseImageDataUrl:
     def test_none(self):
         assert _parse_image_data_url(None) is None
 
+    def test_extra_params_before_base64(self):
+        # base64 need not be the only/last param.
+        assert _parse_image_data_url("data:image/jpeg;charset=utf-8;base64,QUJD") == (
+            "image/jpeg",
+            "QUJD",
+        )
+
 
 class TestToChatMessages:
     def setup_method(self):
@@ -82,6 +89,41 @@ class TestToChatMessages:
         [cm] = self.handler.to_chat_messages([msg])
         assert cm.content == "hi"
         assert cm.images == []
+
+    def test_image_count_cap(self, settings):
+        settings.AI_SDK_MAX_IMAGES_PER_MESSAGE = 1
+        msg = Message(
+            role="user",
+            parts=[
+                MessagePart(type="file", url="data:image/png;base64,AA"),
+                MessagePart(type="file", url="data:image/png;base64,BB"),
+            ],
+        )
+        [cm] = self.handler.to_chat_messages([msg])
+        assert len(cm.images) == 1
+
+    def test_image_byte_cap(self, settings):
+        settings.AI_SDK_MAX_IMAGE_BYTES = 1  # ~0 bytes allowed
+        msg = Message(
+            role="user",
+            parts=[
+                MessagePart(type="text", text="hi"),
+                MessagePart(type="file", url=JPEG_URL),
+            ],
+        )
+        [cm] = self.handler.to_chat_messages([msg])
+        assert cm.images == []
+        assert cm.content == "hi"
+
+    def test_caps_disabled_with_none(self, settings):
+        settings.AI_SDK_MAX_IMAGE_BYTES = None
+        settings.AI_SDK_MAX_IMAGES_PER_MESSAGE = None
+        msg = Message(
+            role="user",
+            parts=[MessagePart(type="file", url=JPEG_URL)],
+        )
+        [cm] = self.handler.to_chat_messages([msg])
+        assert len(cm.images) == 1
 
     def test_camelcase_media_type_alias(self):
         # Vercel AI SDK sends `mediaType`; the schema alias must accept it.
