@@ -111,9 +111,18 @@ def build_user_message(
         )
         return HaystackChatMessage.from_user(message.content)
 
+    # Only images with resolved bytes can be sent; an image carrying just a
+    # storage reference (data unresolved) is skipped rather than sent empty.
+    image_parts = [
+        ImageContent(base64_image=image.data, mime_type=image.media_type)
+        for image in message.images
+        if image.data
+    ]
+    if not image_parts:
+        return HaystackChatMessage.from_user(message.content)
+
     content_parts: list[Any] = [message.content] if message.content else []
-    for image in message.images:
-        content_parts.append(ImageContent(base64_image=image.data, mime_type=image.media_type))
+    content_parts.extend(image_parts)
     return HaystackChatMessage.from_user(content_parts=content_parts)
 
 
@@ -239,6 +248,11 @@ class Stream:
         if self.merge_messages:
             # Merging collapses messages to (role, text) tuples; images are not
             # carried through this path (merge is off by default).
+            if any(m.images for m in conversation):
+                logger.warning(
+                    "Dropping image(s): merge_messages is enabled, which collapses "
+                    "messages to text and cannot carry inline images."
+                )
             for role, content in merge_messages(conversation):
                 if role == "user":
                     converted_messages.append(HaystackChatMessage.from_user(content))

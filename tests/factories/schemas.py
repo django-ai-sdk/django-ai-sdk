@@ -52,6 +52,7 @@ class ChatMessageFactory(ModelFactory[ChatMessage]):
     finish_reason = "stop"
     tool_calls = []
     sources = []
+    images = []
     reasoning = None
     errors = []
     usage = {}

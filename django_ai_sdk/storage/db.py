@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, models
@@ -9,7 +9,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH
-from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
+from django_ai_sdk.conversation.models import Message, MessageFeedback, MessageImage, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
@@ -224,10 +224,62 @@ class DbStorageAdapter(BaseStorageAdapter):
             chat_message = msg.to_chat_message()
             chat_message.id = str(msg.id)
             chat_message.metadata["feedbacks"] = all_feedbacks.get(msg.id, [])
+            await self._rehydrate_images(chat_message)
             messages.append(chat_message)
 
         logger.debug(f"Retrieved {len(messages)} messages with feedbacks from database")
         return messages
+
+    @staticmethod
+    async def _rehydrate_images(chat_message: ChatMessage) -> None:
+        """Load persisted image bytes from storage back into ``data`` (base64).
+
+        Message rows store only an image reference (``id``); the actual bytes live
+        in the storage backend. Repopulate ``data`` so display and the client
+        round-trip (which re-emit inline base64) keep working.
+        """
+        for image in chat_message.images:
+            if image.id and not image.data:
+                b64 = await MessageImage.load_base64(image.id)
+                if b64 is None:
+                    logger.warning("Image %s missing from storage; skipping.", image.id)
+                    continue
+                image.data = b64
+
+    @staticmethod
+    async def _persist_message(thread: Thread, chat_message: ChatMessage) -> Message:
+        """Create a Message, offloading any inline image bytes to the storage backend.
+
+        Base64 payloads are written to storage as ``MessageImage`` rows; only the
+        row ``id`` (never the base64) is stored in ``Message.result``. The incoming
+        ``chat_message`` is left untouched so an in-flight object can still be sent
+        to the model in the same request.
+        """
+        message = Message.from_chat_message(thread, chat_message)
+
+        if not chat_message.images:
+            await message.asave()
+            return message
+
+        # Build references (id only, no base64) before the row ever hits the DB.
+        refs: list[dict[str, str]] = []
+        pending: list[tuple[str, Any]] = []
+        for image in chat_message.images:
+            if image.id and not image.data:
+                # Already persisted (e.g. reloaded history) — keep the reference.
+                refs.append({"media_type": image.media_type, "id": image.id})
+                continue
+            image_id = str(uuid.uuid4())
+            refs.append({"media_type": image.media_type, "id": image_id})
+            pending.append((image_id, image))
+
+        message.result = {**message.result, "images": refs}
+        await message.asave()
+
+        for image_id, image in pending:
+            await MessageImage.offload(image_id, str(message.id), image)
+
+        return message
 
     async def store_chat_message(self, chat_message: ChatMessage) -> str:
         """
@@ -243,8 +295,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             f"Direct message storage: role={chat_message.role}, content_length={len(chat_message.content)}"
         )
         thread = await self.load_thread()
-        message = Message.from_chat_message(thread, chat_message)
-        await message.asave()
+        message = await self._persist_message(thread, chat_message)
         logger.debug(f"Message saved directly with ID: {message.id}")
         return str(message.id)
 
@@ -259,10 +310,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             thread = await self.load_thread()
             logger.debug(f"Thread loaded: id={thread.id}, title={thread.title}")
 
-            message = Message.from_chat_message(thread, chat_message)
-            logger.debug(f"Creating message: thread_id={message.thread_id}, thread.id={thread.id}")
-
-            await message.asave()
+            message = await self._persist_message(thread, chat_message)
             logger.debug(f"Message saved: id={message.id}, thread={message.thread_id}")
             return str(message.id)
         except DatabaseError:

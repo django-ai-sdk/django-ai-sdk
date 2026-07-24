@@ -359,7 +359,10 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 parts.append({"type": "text", "text": chat_message.content})
 
             # Re-emit images as inline file parts so reloaded threads render them.
+            # Skip any whose bytes could not be resolved (empty data).
             for image in chat_message.images:
+                if not image.data:
+                    continue
                 parts.append(
                     {
                         "type": "file",

@@ -178,5 +178,5 @@ class TestPersistenceRoundTrip:
             images=[ImageAttachment(media_type="image/png", data="ZZ")],
         )
         dumped = cm.model_dump()
-        assert dumped["images"] == [{"media_type": "image/png", "data": "ZZ"}]
+        assert dumped["images"] == [{"media_type": "image/png", "data": "ZZ", "id": ""}]
         assert ChatMessage.model_validate(dumped).images == cm.images

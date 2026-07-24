@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import mimetypes
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import models
 from django.utils import timezone
 
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage
+from django_ai_sdk.logger import get_logger
 
 from .managers import MessageManager, ThreadManager
+
+if TYPE_CHECKING:
+    from django_ai_sdk.common import ImageAttachment
+
+logger = get_logger(__name__)
 
 
 class Thread(models.Model):
@@ -178,3 +189,66 @@ class MessageFeedback(models.Model):
 
     def __str__(self) -> str:
         return f"Feedback on message {self.message_id}: {self.rating}"
+
+
+class MessageImage(models.Model):
+    """An image attached to a message, stored outside the database.
+
+    The bytes live in Django's storage backend (local filesystem, or S3/GCS via
+    django-storages by configuring ``STORAGES["default"]``); the ``Message.result``
+    JSON keeps only this row's ``id`` as a reference. This mirrors the
+    ``MemoryDocument`` pattern and keeps base64 blobs out of message rows.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="images")
+    file = models.FileField(upload_to="chat/images/")
+    media_type = models.CharField(max_length=100)
+    file_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    file_size = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    # Type hints for related fields
+    message_id: str
+
+    class Meta:
+        db_table = "django_ai_sdk_message_images"
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"Image {self.id} ({self.media_type}) on message {self.message_id}"
+
+    @classmethod
+    async def offload(cls, image_id: str, message_id: str, image: ImageAttachment) -> MessageImage:
+        """Decode a base64 attachment and persist its bytes to the storage backend."""
+        raw = base64.b64decode(image.data)
+        ext = mimetypes.guess_extension(image.media_type) or ".bin"
+        return await cls.objects.acreate(
+            id=image_id,
+            message_id=message_id,
+            file=ContentFile(raw, name=f"{image_id}{ext}"),
+            media_type=image.media_type,
+            file_hash=hashlib.sha256(raw).hexdigest(),
+            file_size=len(raw),
+        )
+
+    @classmethod
+    async def load_base64(cls, image_id: str) -> str | None:
+        """Read persisted bytes back as base64, or None if the row/file is gone."""
+        try:
+            image = await cls.objects.aget(id=image_id)
+        except cls.DoesNotExist:
+            return None
+
+        def _read() -> bytes:
+            image.file.open("rb")
+            try:
+                return image.file.read()
+            finally:
+                image.file.close()
+
+        try:
+            raw = await sync_to_async(_read)()
+        except (FileNotFoundError, ValueError):
+            return None
+        return base64.b64encode(raw).decode()

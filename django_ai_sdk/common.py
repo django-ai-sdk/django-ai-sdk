@@ -30,6 +30,12 @@ class ImageAttachment(BaseModel):
     only by design: the SDK never fetches a client-supplied URL server-side
     (that would be an SSRF vector for consumers who deploy this library).
 
+    An attachment holds ``data`` (base64, in-flight from the client or rehydrated
+    from storage) and/or ``id`` (a reference to a persisted ``MessageImage`` row).
+    The database storage adapter offloads the bytes to Django's storage backend
+    and keeps only ``id`` in the DB, so base64 blobs never bloat message rows; the
+    bytes are rehydrated into ``data`` on read. See ``MessageImage``.
+
     Notes for consumers:
 
     - Requires the assistant's model to actually be vision-capable —
@@ -37,13 +43,16 @@ class ImageAttachment(BaseModel):
       model, so setting it ``True`` for a model that can't accept images will
       still error on that call. Attached images are replayed to the model for
       every user turn still inside the history window (``max_history``).
-    - The SDK sets no size or count cap on inline images; the effective limit is
-      Django's ``DATA_UPLOAD_MAX_MEMORY_SIZE`` on the request body. Raise or lower
-      that (or cap client-side) to taste.
+    - Inline images are capped per message by ``AI_SDK_MAX_IMAGE_BYTES`` (default
+      20 MiB each, decoded) and ``AI_SDK_MAX_IMAGES_PER_MESSAGE`` (default 10);
+      over-limit images are dropped with a warning. Set either to ``None`` to
+      disable. The request body is additionally bounded by Django's
+      ``DATA_UPLOAD_MAX_MEMORY_SIZE``.
     """
 
     media_type: str  # e.g. "image/jpeg"
-    data: str  # base64, no "data:" prefix
+    data: str = ""  # base64, no "data:" prefix (in-flight or rehydrated)
+    id: str = ""  # MessageImage reference once persisted to storage
 
 
 class ChatMessage(BaseModel):
