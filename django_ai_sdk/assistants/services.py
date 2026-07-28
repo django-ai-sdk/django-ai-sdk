@@ -47,7 +47,7 @@ class AssistantCreateData(TypedDict, total=False):
     model: str
     system_prompt: str
     tools: list[str]
-    integrations: dict[str, list[str] | None]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -61,7 +61,7 @@ class AssistantUpdateData(TypedDict, total=False):
     model: str
     system_prompt: str
     tools: list[str]
-    integrations: dict[str, list[str] | None]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -226,8 +226,6 @@ class AssistantService(PermissionsMixin):
         """
         await cls.has_perms(user, Operation.VIEW_ASSISTANT, assistant=assistant)
 
-        # `assistant.integrations` may be a flat list or a {name: tool-subset} dict —
-        # iterating either yields the names, which is all this endpoint needs.
         integration_names: list[str] = list(getattr(assistant, "integrations", []) or [])
         if not integration_names:
             return []
@@ -509,7 +507,7 @@ class AssistantService(PermissionsMixin):
             model=data.get("model", "gpt-4o"),
             system_prompt=data.get("system_prompt", ""),
             tools=data.get("tools", []),
-            integrations=data.get("integrations", {}),
+            integrations=data.get("integrations", []),
             memories=data.get("memories", []),
             suggestion_enabled=data.get("suggestion_enabled", False),
             title_generation=data.get("title_generation", True),

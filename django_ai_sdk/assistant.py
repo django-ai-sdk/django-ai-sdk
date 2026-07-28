@@ -515,10 +515,10 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
-    #: Either a flat list of integration names (`["linear"]` — every tool that
-    #: integration exposes) or a dict mapping name to a tool-name subset
-    #: (`{"linear": ["list_issues"]}` — only those tools reach this assistant).
-    integrations: list[str] | dict[str, list[str] | None] = []
+    #: Flat list of integration names (`["linear"]`) — every tool that integration
+    #: exposes reaches this assistant. Per-assistant tool subsets are not supported;
+    #: see docs/integrations.md's "Not included (yet)" section.
+    integrations: list[str] = []
 
     async def _get_integration_tools(
         self,
@@ -531,33 +531,21 @@ class Assistant(ABC, AssistantInfoMixin):
         integration app on startup, plus any DB-declared MCP servers) and skips any
         the user isn't permitted to use, so an unauthorized integration's tools never
         reach the model. Runs the remaining integrations concurrently — each one's
-        get_tools() is individually bounded. When `self.integrations` is a dict, an
-        integration whose entry is a non-empty list is filtered to just those tool
-        names; `None`/an empty list means "all tools", same as the flat-list form.
+        get_tools() is individually bounded.
         """
         if not self.integrations:
             return []
 
         from django_ai_sdk.permissions import Operation
 
-        subsets: dict[str, list[str]] = (
-            {name: tools for name, tools in self.integrations.items() if tools}
-            if isinstance(self.integrations, dict)
-            else {}
-        )
-
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:
-                tools = await integration.get_tools(user, assistant=self, thread_id=thread_id)
+                return await integration.get_tools(user, assistant=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []
-            subset = subsets.get(integration.name)
-            if subset:
-                tools = [t for t in tools if getattr(t, "name", None) in subset]
-            return tools
 
-        services = (await get_integrations(list(self.integrations))).values()
+        services = (await get_integrations(self.integrations)).values()
         allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
         results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
         return [tool for tools in results for tool in tools]
