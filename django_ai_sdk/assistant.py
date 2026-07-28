@@ -49,6 +49,28 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
+def _namespaced(integration_name: str, tool: Any) -> Any:
+    """Rename ``tool`` to ``{integration_name}_{tool.name}``.
+
+    Nothing stops two unrelated MCP servers from defining the same tool name (GitHub
+    and Linear both have ``list_issues``), and Haystack requires unique names across
+    everything handed to one agent — so without this, enabling two integrations that
+    happen to collide would fail assistant construction outright.
+    """
+    import dataclasses
+
+    try:
+        return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
+    except (TypeError, AttributeError):
+        logger.warning(
+            "Could not namespace tool %r from integration %r — left as-is, may "
+            "collide with another integration's tool.",
+            getattr(tool, "name", tool),
+            integration_name,
+        )
+        return tool
+
+
 class Assistant(ABC, AssistantInfoMixin):
     """
     Base class for AI assistants in the Django AI SDK.
@@ -540,10 +562,11 @@ class Assistant(ABC, AssistantInfoMixin):
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:
-                return await integration.get_tools(user, assistant=self, thread_id=thread_id)
+                tools = await integration.get_tools(user, assistant=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []
+            return [_namespaced(integration.name, tool) for tool in tools]
 
         services = (await get_integrations(self.integrations)).values()
         allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
