@@ -65,7 +65,7 @@ class Tool(Schema):
     children: list[Tool] = []
 
 
-class MCPServerStatus(Schema):
+class IntegrationStatusOut(Schema):
     server_name: str
     label: str
     type: str
@@ -76,7 +76,7 @@ class MCPServerStatus(Schema):
 
 class ToolsResponse(Schema):
     tools: list[Tool]
-    mcp: list[MCPServerStatus] = []
+    integrations: list[IntegrationStatusOut] = []
 
 
 class ThreadListItem(Schema):
@@ -468,23 +468,25 @@ async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
     except Exception:
         logger.exception("Failed to build tools for assistant %s", assistant_id)
 
-    mcp_data = []
+    integrations_data = []
     try:
-        mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
-        mcp_data = [
-            MCPServerStatus(
+        integration_status = await AssistantService.get_integration_status(
+            assistant, user=request.user
+        )
+        integrations_data = [
+            IntegrationStatusOut(
                 server_name=s.server_name,
                 label=s.label,
                 type=s.type,
                 status=s.status,
                 tool_names=s.tool_names,
             )
-            for s in mcp_status
+            for s in integration_status
         ]
     except Exception:
-        logger.exception("Failed to load MCP status for assistant %s", assistant_id)
+        logger.exception("Failed to load integration status for assistant %s", assistant_id)
 
-    return ToolsResponse(tools=tools_data, mcp=mcp_data)
+    return ToolsResponse(tools=tools_data, integrations=integrations_data)
 
 
 @router.post(
@@ -530,7 +532,7 @@ class AssistantSettingsOut(Schema):
     model: str
     system_prompt: str
     tools: list[str]
-    mcp_servers: list[str]
+    integrations: list[str]
     memories: list[str]
     suggestion_enabled: bool
     title_generation: bool
@@ -558,7 +560,7 @@ class AssistantSettingsCreateIn(Schema):
     model: str = "gpt-4o"
     system_prompt: str = ""
     tools: list[str] = []
-    mcp_servers: list[str] = []
+    integrations: list[str] = []
     memories: list[str] = []
     users: list[AssistantSettingsCreateUserEntry] = []
     groups: list[AssistantSettingsCreateGroupEntry] = []
@@ -574,7 +576,7 @@ class AssistantSettingsUpdateIn(Schema):
     model: str | None = None
     system_prompt: str | None = None
     tools: list[str] | None = None
-    mcp_servers: list[str] | None = None
+    integrations: list[str] | None = None
     memories: list[str] | None = None
     suggestion_enabled: bool | None = None
     title_generation: bool | None = None
@@ -647,7 +649,7 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
                 "model": payload.model,
                 "system_prompt": payload.system_prompt,
                 "tools": payload.tools,
-                "mcp_servers": payload.mcp_servers,
+                "integrations": payload.integrations,
                 "memories": payload.memories,
                 "suggestion_enabled": payload.suggestion_enabled,
                 "title_generation": payload.title_generation,

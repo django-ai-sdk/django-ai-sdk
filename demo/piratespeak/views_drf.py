@@ -134,7 +134,7 @@ class ToolSerializer(serializers.Serializer):
     description = serializers.CharField(allow_null=True, required=False)
 
 
-class MCPServerStatusSerializer(serializers.Serializer):
+class IntegrationStatusSerializer(serializers.Serializer):
     server_name = serializers.CharField()
     label = serializers.CharField()
     type = serializers.CharField()
@@ -144,7 +144,7 @@ class MCPServerStatusSerializer(serializers.Serializer):
 
 class ToolsResponseSerializer(serializers.Serializer):
     tools = ToolSerializer(many=True)
-    mcp = MCPServerStatusSerializer(many=True, default=[])
+    integrations = IntegrationStatusSerializer(many=True, default=[])
 
 
 class ReindexResponseSerializer(serializers.Serializer):
@@ -377,10 +377,12 @@ class AssistantToolsAPIView(APIView):
         except Exception:
             logger.exception("Failed to build tools for assistant %s", assistant_id)
 
-        mcp_data = []
+        integrations_data = []
         try:
-            mcp_status = await AssistantService.get_mcp_server_status(assistant, user=request.user)
-            mcp_data = [
+            integration_status = await AssistantService.get_integration_status(
+                assistant, user=request.user
+            )
+            integrations_data = [
                 {
                     "server_name": s.server_name,
                     "label": s.label,
@@ -388,12 +390,14 @@ class AssistantToolsAPIView(APIView):
                     "status": s.status,
                     "tool_names": s.tool_names,
                 }
-                for s in mcp_status
+                for s in integration_status
             ]
         except Exception:
-            logger.exception("Failed to load MCP status for assistant %s", assistant_id)
+            logger.exception("Failed to load integration status for assistant %s", assistant_id)
 
-        return Response(ToolsResponseSerializer({"tools": tools_data, "mcp": mcp_data}).data)
+        return Response(
+            ToolsResponseSerializer({"tools": tools_data, "integrations": integrations_data}).data
+        )
 
 
 class ReindexAssistantAPIView(APIView):
@@ -519,7 +523,7 @@ class AssistantSettingsSerializer(serializers.Serializer):
     model = serializers.CharField()
     system_prompt = serializers.CharField(allow_blank=True)
     tools = serializers.ListField(child=serializers.CharField(), default=list)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    integrations = serializers.ListField(child=serializers.CharField(), default=list)
     suggestion_enabled = serializers.BooleanField(default=False)
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
@@ -536,7 +540,7 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     model = serializers.CharField(default="gpt-4o")
     system_prompt = serializers.CharField(allow_blank=True, default="")
     tools = serializers.ListField(child=serializers.CharField(), default=list)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), default=list)
+    integrations = serializers.ListField(child=serializers.CharField(), default=list)
     users = AssistantUserInSerializer(many=True, required=False)
     groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(default=False)
@@ -551,7 +555,7 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     model = serializers.CharField(required=False)
     system_prompt = serializers.CharField(allow_blank=True, required=False)
     tools = serializers.ListField(child=serializers.CharField(), required=False)
-    mcp_servers = serializers.ListField(child=serializers.CharField(), required=False)
+    integrations = serializers.ListField(child=serializers.CharField(), required=False)
     users = AssistantUserInSerializer(many=True, required=False)
     groups = AssistantGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(required=False)
