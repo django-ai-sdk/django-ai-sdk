@@ -22,7 +22,7 @@ class AssistantSettings(models.Model):
     assistant = models.CharField(max_length=255, blank=True, default="")
     tools = models.JSONField(default=list, blank=True)
     memories = models.JSONField(default=list, blank=True)
-    mcp_servers = models.JSONField(default=list, blank=True)
+    integrations = models.JSONField(default=list, blank=True)
     suggestion_enabled = models.BooleanField(default=False)
     title_generation = models.BooleanField(default=True)
     max_history = models.PositiveIntegerField(null=True, blank=True)

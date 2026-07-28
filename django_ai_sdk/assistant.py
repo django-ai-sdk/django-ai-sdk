@@ -5,7 +5,6 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from django.conf import settings
 from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -17,8 +16,8 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
     AllowAll,
     BasePermission,
@@ -350,6 +349,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
+        result.extend(await self._get_integration_tools(user, thread_id=thread_id))
         return result
 
     async def get_rag_tools(
@@ -515,23 +515,52 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
-    mcp_servers: list[str] = []
+    #: Either a flat list of integration names (`["linear"]` — every tool that
+    #: integration exposes) or a dict mapping name to a tool-name subset
+    #: (`{"linear": ["list_issues"]}` — only those tools reach this assistant).
+    integrations: list[str] | dict[str, list[str] | None] = []
 
-    async def get_mcp_tools(
-        self, user: AbstractBaseUser | AnonymousUser | None = None
+    async def _get_integration_tools(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
-        """
-        Load MCP tool objects for this assistant.
+        """Load tool objects from every integration listed in `self.integrations`.
 
-        Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
-        in self.mcp_servers.
+        Resolves the names against the integrations registry (populated by each
+        integration app on startup, plus any DB-declared MCP servers) and skips any
+        the user isn't permitted to use, so an unauthorized integration's tools never
+        reach the model. Runs the remaining integrations concurrently — each one's
+        get_tools() is individually bounded. When `self.integrations` is a dict, an
+        integration whose entry is a non-empty list is filtered to just those tool
+        names; `None`/an empty list means "all tools", same as the flat-list form.
         """
-        if not self.mcp_servers:
+        if not self.integrations:
             return []
 
-        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-        selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-        return await load_mcp_tools(selected, user)
+        from django_ai_sdk.permissions import Operation
+
+        subsets: dict[str, list[str]] = (
+            {name: tools for name, tools in self.integrations.items() if tools}
+            if isinstance(self.integrations, dict)
+            else {}
+        )
+
+        async def _safe_get_tools(integration: Any) -> list[Any]:
+            try:
+                tools = await integration.get_tools(user, assistant=self, thread_id=thread_id)
+            except Exception:
+                logger.exception("Failed to load tools for integration %r", integration.name)
+                return []
+            subset = subsets.get(integration.name)
+            if subset:
+                tools = [t for t in tools if getattr(t, "name", None) in subset]
+            return tools
+
+        services = (await get_integrations(list(self.integrations))).values()
+        allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
+        results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
+        return [tool for tools in results for tool in tools]
 
     @abstractmethod
     async def get_pipeline_adapter(
