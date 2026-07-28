@@ -67,12 +67,15 @@ class Operation(StrEnum):
     CREATE_ASSISTANT = "create_assistant"
     UPDATE_ASSISTANT = "update_assistant"
     DELETE_ASSISTANT = "delete_assistant"
+    USE_INTEGRATION = "use_integration"
+    MANAGE_INTEGRATION = "manage_integration"
 
 
 class PermissionDomain(StrEnum):
     ASSISTANT = "assistant"
     THREAD = "thread"
     MEMORY = "memory"
+    INTEGRATIONS = "integrations"
 
 
 class BasePermission(ABC):
@@ -352,10 +355,22 @@ class AssistantDefaultPermission(BasePermission):
         return False
 
 
+class IntegrationDefaultPermission(BasePermission):
+    """Default permission for integrations: any authenticated user may use them.
+
+    Override per-integration via ``IntegrationService.permissions`` or globally via
+    ``AI_SDK_PERMISSIONS["integrations"]``.
+    """
+
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        return user is not None and bool(user.is_authenticated)
+
+
 DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.ASSISTANT: ["django_ai_sdk.permissions.AssistantDefaultPermission"],
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
+    PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
 }
 
 
@@ -449,6 +464,19 @@ def get_assistant_permissions(assistant: Assistant | None) -> list[type[BasePerm
     if perms is not None:
         return perms
     return get_domain_permissions(PermissionDomain.ASSISTANT)
+
+
+def get_integration_permissions(service: Any) -> list[type[BasePermission] | BasePermission]:
+    """Resolve perms for an integration service.
+
+    Resolution:
+    1. ``service.permissions`` if non-empty (per-integration override)
+    2. Domain default for INTEGRATIONS (fallback)
+    """
+    perms = getattr(service, "permissions", None)
+    if perms:
+        return perms
+    return get_domain_permissions(PermissionDomain.INTEGRATIONS)
 
 
 async def has_perms(
