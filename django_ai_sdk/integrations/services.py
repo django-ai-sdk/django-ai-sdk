@@ -117,7 +117,9 @@ class IntegrationService:
         return await svc.connect(user, request=request, redirect_uri=redirect_uri)
 
     @classmethod
-    async def disconnect(cls, name: str, user: AbstractBaseUser | AnonymousUser | None) -> bool | None:
+    async def disconnect(
+        cls, name: str, user: AbstractBaseUser | AnonymousUser | None
+    ) -> bool | None:
         """Drop ``user``'s stored connection for ``name``. None if unknown, raises if forbidden."""
         svc = await cls.get(name)
         if svc is None:
