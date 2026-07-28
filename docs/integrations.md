@@ -28,13 +28,14 @@ class SupportAssistant(Assistant):
     integrations = ["notion", "weather"]
 ```
 
-To expose the HTTP surface, mount the router and (for MCP OAuth) the redirect views:
+To expose the HTTP surface, include both URLconfs — plain Django views, no
+`django-ninja` or other API framework required:
 
 ```python
 INSTALLED_APPS = [..., "django_ai_sdk.integrations.mcp"]
 
-api.add_router("/integrations", integrations_router)   # django_ai_sdk.integrations.views
 urlpatterns += [
+    path("api/integrations/", include("django_ai_sdk.integrations.urls")),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
 ]
 ```
@@ -99,7 +100,7 @@ DISCONNECTED, and explains itself through `detail`.
 
 ### Something else entirely
 
-Implement `IntegrationService` directly. Only `get_tools()` and `get_status()` are
+Implement `Integration` directly. Only `get_tools()` and `get_status()` are
 abstract; the connection lifecycle methods have sensible no-op defaults.
 
 ## Status values
@@ -166,15 +167,21 @@ Permissions are checked *before* tools are handed to the model, not after.
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/integrations/` | Every integration the user may use, with status and capability flags. |
-| `POST /api/integrations/{name}/connect` | Begin connecting (returns a redirect URL). |
+| `POST /api/integrations/{name}/connect` | Begin connecting; returns `{"redirect_url": ...}` for OAuth. |
 | `POST /api/integrations/{name}/disconnect` | Drop the user's stored credential. |
 | `POST /api/integrations/{name}/reconnect` | Force a fresh attempt now; returns the real outcome. |
-| `GET /api/integrations/oauth/{name}/start/` | OAuth handoff (browser redirect). |
-| `GET /api/integrations/oauth/{name}/callback/` | OAuth return; stores the token. |
+| `GET /api/integrations/oauth/{name}/callback/` | OAuth return; exchanges the code and stores the token. |
 
 Clients decide what to offer from the capability flags (`supports_connect`,
 `connect_kind`, `supports_test`) rather than from `kind`, so a new integration kind needs
 no client change.
+
+For OAuth: the client calls `POST /{name}/connect` and navigates the browser to the
+`redirect_url` it gets back — there is no dedicated "start" URL. Only the callback has
+to live at a fixed URL, since the identity provider is the one redirecting the browser
+there; building the authorization URL is plain business logic on
+`Integration.connect()`, reachable through the same generic endpoint every
+integration kind uses.
 
 ## Not included (yet)
 

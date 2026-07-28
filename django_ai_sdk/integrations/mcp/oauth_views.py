@@ -1,10 +1,15 @@
-"""OAuth 2.1 + PKCE redirect views for MCP integrations.
+"""OAuth 2.1 + PKCE callback view for MCP integrations.
 
-These are browser-redirect endpoints (not JSON): ``start`` kicks off the flow via the
-integration service's ``connect()``, ``callback`` validates the IdP response, exchanges
-the code and stores the token. They live in the MCP toolkit and are wired under the
-integrations namespace by the host project's URLconf. Config is resolved from the
-integrations registry — there is no ``AI_SDK_INTEGRATIONS`` setting.
+A browser-redirect endpoint (not JSON): the identity provider redirects the browser
+here after the user approves the connection, so it must live at a fixed URL — unlike
+the *start* leg (building the authorization URL, PKCE, session state), which is plain
+business logic on ``Integration.connect()`` reached via the generic
+``POST /api/integrations/{name}/connect`` (see ``integrations/views.py``); the client
+navigates to that response's ``redirect_url`` itself, no dedicated start endpoint
+needed. This view validates the IdP response, exchanges the code, and stores the
+token. It lives in the MCP toolkit and is wired under the integrations namespace by
+the host project's URLconf. Config is resolved from the integrations registry — there
+is no ``AI_SDK_INTEGRATIONS`` setting.
 """
 
 from __future__ import annotations
@@ -19,7 +24,6 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponseRedirect, JsonResponse
 from django.utils.http import url_has_allowed_host_and_scheme
 
-from django_ai_sdk.integrations.base import IntegrationNotConnectable
 from django_ai_sdk.integrations.mcp import services as mcp_service
 from django_ai_sdk.integrations.mcp.discovery import discover
 from django_ai_sdk.integrations.mcp.loader import (
@@ -50,33 +54,6 @@ async def _get_oauth_config(server_name: str) -> OAuthMCPIntegrationConfig | Non
     if not isinstance(svc, MCPIntegration) or not isinstance(svc.config, OAuthMCPIntegrationConfig):
         return None
     return svc.config
-
-
-async def oauth_start(
-    request: HttpRequest, server_name: str
-) -> HttpResponseRedirect | JsonResponse:
-    """Initiate the OAuth 2.1 + PKCE flow for an MCP server."""
-    if not request.user.is_authenticated:
-        return JsonResponse({"error": "Not authenticated"}, status=HTTPStatus.UNAUTHORIZED)
-
-    from django_ai_sdk.integrations.registry import get_integrations
-
-    svc = (await get_integrations([server_name])).get(server_name)
-    if not isinstance(svc, MCPIntegration) or not svc.supports_connect:
-        return JsonResponse({"error": "Server not found or not OAuth type"}, status=404)
-
-    callback_path = request.path.removesuffix("/start/") + "/callback/"
-    redirect_uri = request.build_absolute_uri(callback_path)
-
-    try:
-        result = await svc.connect(request.user, request=request, redirect_uri=redirect_uri)
-    except IntegrationNotConnectable:
-        return JsonResponse({"error": "Server not found or not OAuth type"}, status=404)
-    except (httpx.HTTPError, ValueError, KeyError) as e:
-        logger.exception("OAuth start failed for %r", server_name)
-        return JsonResponse({"error": f"OAuth initialization failed: {e}"}, status=500)
-
-    return HttpResponseRedirect(result["redirect_url"])
 
 
 async def _validate_callback_params(

@@ -71,7 +71,6 @@ class IntegrationStatusOut(Schema):
     type: str
     status: str
     tool_names: list[str]
-    connect_url: str | None = None
 
 
 class ToolsResponse(Schema):

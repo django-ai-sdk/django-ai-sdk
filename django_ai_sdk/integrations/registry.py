@@ -1,7 +1,7 @@
 """Process-wide registry of integration services.
 
 Integrations are declared in code, as a mapping of registry name to the dotted path
-of an :class:`~django_ai_sdk.integrations.base.IntegrationService` subclass::
+of an :class:`~django_ai_sdk.integrations.base.Integration` subclass::
 
     AI_SDK_INTEGRATIONS = {
         "notion": "django_ai_sdk.integrations.defaults.NotionService",
@@ -9,7 +9,7 @@ of an :class:`~django_ai_sdk.integrations.base.IntegrationService` subclass::
         "weather": "myapp.integrations.WeatherService",
     }
 
-A value may also be a ready-made ``IntegrationService`` instance, for a service that
+A value may also be a ready-made ``Integration`` instance, for a service that
 needs constructor arguments (or in tests).
 
 Each is instantiated once, lazily, and cached for the life of the process — so each
@@ -38,20 +38,20 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 if TYPE_CHECKING:
-    from django_ai_sdk.integrations.base import IntegrationService
+    from django_ai_sdk.integrations.base import Integration
 
 logger = logging.getLogger(__name__)
 
 #: Explicitly registered services (see `register`), and instances built from
 #: AI_SDK_INTEGRATIONS. Keyed by registry name.
-_registry: dict[str, IntegrationService] = {}
+_registry: dict[str, Integration] = {}
 
 #: Names from AI_SDK_INTEGRATIONS that failed to build. Remembered so a broken entry
 #: is reported once rather than on every request, and never retried into a hot path.
 _broken: set[str] = set()
 
 
-def register(service: IntegrationService) -> None:
+def register(service: Integration) -> None:
     """Register (or replace) an integration service under its ``name``.
 
     Used by ``IntegrationAppConfig.ready()`` and by tests. Services declared in
@@ -62,7 +62,7 @@ def register(service: IntegrationService) -> None:
     _registry[service.name] = service
 
 
-def _configured() -> dict[str, str | IntegrationService]:
+def _configured() -> dict[str, str | Integration]:
     """The ``AI_SDK_INTEGRATIONS`` mapping of name → dotted path (or instance)."""
     configured = getattr(settings, "AI_SDK_INTEGRATIONS", {}) or {}
     if not isinstance(configured, dict):
@@ -73,11 +73,11 @@ def _configured() -> dict[str, str | IntegrationService]:
     return configured
 
 
-def _build(name: str, entry: str | IntegrationService) -> IntegrationService | None:
+def _build(name: str, entry: str | Integration) -> Integration | None:
     """Resolve one configured entry to a service. Returns None (and logs) on failure.
 
     ``entry`` is normally a dotted path, instantiated with no arguments. A ready-made
-    ``IntegrationService`` instance is also accepted, for the cases a dotted path can't
+    ``Integration`` instance is also accepted, for the cases a dotted path can't
     express — a service needing constructor arguments, or a test fixture.
 
     A misconfigured integration must not take down every other integration — nor the
@@ -103,9 +103,9 @@ def _build(name: str, entry: str | IntegrationService) -> IntegrationService | N
     return service
 
 
-async def get_all_integrations() -> dict[str, IntegrationService]:
+async def get_all_integrations() -> dict[str, Integration]:
     """Return every available integration service, keyed by name."""
-    result: dict[str, IntegrationService] = {}
+    result: dict[str, Integration] = {}
     for name, path in _configured().items():
         service = _registry.get(name)
         if service is None:
@@ -120,7 +120,7 @@ async def get_all_integrations() -> dict[str, IntegrationService]:
     return {**result, **_registry}
 
 
-async def get_integrations(names: list[str]) -> dict[str, IntegrationService]:
+async def get_integrations(names: list[str]) -> dict[str, Integration]:
     """Return the services named in ``names``. Unknown names are skipped."""
     all_integrations = await get_all_integrations()
     return {name: all_integrations[name] for name in names if name in all_integrations}

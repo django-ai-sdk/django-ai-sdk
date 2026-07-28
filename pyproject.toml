@@ -29,7 +29,6 @@ dependencies = [
   "daphne>=4.2.2",
   "django>=5.2.6,<6.1",
   "django-environ>=0.13.0",
-  "django-ninja>=1.6.2",
   "django-tasks>=0.12.0",
   "django-tasks-db>=0.12.0",
   "loguru>=0.7.3",
@@ -64,6 +63,7 @@ restframework = ["djangorestframework>=3.17.1"]
 files = ["python-docx>=1.1.2", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 [dependency-groups]
 dev = [
+  "django-ninja>=1.6.2", # demo app only — the SDK's own HTTP surfaces are plain Django
   "django-stubs>=6.0.5",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",

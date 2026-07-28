@@ -19,8 +19,8 @@ from django.conf import settings
 from pydantic import SecretStr, ValidationError
 
 from django_ai_sdk.integrations.base import (
+    Integration,
     IntegrationNotConnectable,
-    IntegrationService,
     IntegrationStatus,
     ResilientCache,
 )
@@ -46,7 +46,7 @@ _K_VERIFIER = "mcp_oauth_verifier_{}"
 _K_TOKEN_ENDPOINT = "mcp_oauth_token_endpoint_{}"  # noqa: S105
 
 
-class MCPIntegration(IntegrationService):
+class MCPIntegration(Integration):
     """One configured MCP server, exposed through the Integration contract.
 
     Static/token servers cache by server name only — the tool list doesn't vary per

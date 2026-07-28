@@ -189,7 +189,7 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-# Integrations: name -> dotted path to an IntegrationService. `linear` is shipped by
+# Integrations: name -> dotted path to an Integration. `linear` is shipped by
 # the SDK; `weather` is a local example (see piratespeak/integrations.py). Neither
 # needs an entry in INSTALLED_APPS.
 AI_SDK_INTEGRATIONS = {

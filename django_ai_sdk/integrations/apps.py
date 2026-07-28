@@ -5,7 +5,7 @@ registry builds them on first use (see ``registry.py``).
 
 This is the escape hatch for an integration that genuinely *is* a Django app — one
 shipping its own models, migrations, or admin. Subclass it, point ``service`` at the
-``IntegrationService``, and add the app to ``INSTALLED_APPS``; ``ready()`` registers
+``Integration``, and add the app to ``INSTALLED_APPS``; ``ready()`` registers
 the service into the same registry the settings mapping feeds::
 
     class WeatherConfig(IntegrationAppConfig):
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class IntegrationAppConfig(AppConfig):
     """Django wiring for one integration app. Subclasses set ``name`` and ``service``."""
 
-    #: Dotted path to this app's ``IntegrationService`` subclass.
+    #: Dotted path to this app's ``Integration`` subclass.
     service: str = ""
 
     def ready(self) -> None:

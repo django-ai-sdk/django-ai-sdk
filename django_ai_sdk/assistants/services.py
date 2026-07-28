@@ -230,20 +230,12 @@ class AssistantService(PermissionsMixin):
         if not integration_names:
             return []
 
-        from django_ai_sdk.integrations.base import IntegrationStatus
         from django_ai_sdk.integrations.registry import get_integrations
         from django_ai_sdk.integrations.schemas import AssistantIntegrationStatus
+        from django_ai_sdk.integrations.services import _safe_status_and_tools
 
         async def _status_for(name: str, integration: Any) -> AssistantIntegrationStatus:
-            # Isolate each integration: one that errors (a slow/dead server, a DB
-            # hiccup fetching an OAuth token) degrades its own row instead of failing
-            # the whole status response.
-            try:
-                status = await integration.get_status(user)
-                tool_names = await integration.get_tool_names(user)
-            except Exception:
-                _logger.exception("Failed to load status for integration %r", name)
-                status, tool_names = IntegrationStatus.DEGRADED, []
+            status, tool_names = await _safe_status_and_tools(name, integration, user)
             return AssistantIntegrationStatus(
                 server_name=name,
                 label=integration.label,

@@ -1,6 +1,6 @@
 """Refresh credentials for every registered integration, and warm its tool cache.
 
-Delegates to each ``IntegrationService.refresh()`` — a no-op for integrations without
+Delegates to each ``Integration.refresh()`` — a no-op for integrations without
 credentials, and (for MCP OAuth) a proactive refresh of tokens nearing expiry. Run on a
 schedule (cron / celery beat).
 

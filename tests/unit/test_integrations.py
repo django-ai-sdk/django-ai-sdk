@@ -5,10 +5,10 @@ Three things are under test, in order of how much they'd hurt if wrong:
 1. ``ResilientCache`` — the latency and failure guarantees the whole layer rests on.
    A dead integration must cost a bounded wait once and ~nothing after, and must be
    visible as DEGRADED rather than silently contributing no tools.
-2. The registry and the ``IntegrationService`` contract — a broken integration is
+2. The registry and the ``Integration`` contract — a broken integration is
    isolated, integrations load concurrently, and a third-party backend plugs in with
    no special-casing.
-3. The MCP OAuth flow — start, callback, code exchange, refresh, and the concurrent
+3. The MCP OAuth flow — connect, callback, code exchange, refresh, and the concurrent
    refresh race. This is shared infrastructure several consumers rely on, so it is
    covered here rather than only in whichever project happens to use it.
 """
@@ -22,10 +22,9 @@ import time
 import httpx
 import pytest
 from django.core.exceptions import ImproperlyConfigured
-
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.base import (
-    IntegrationService,
+    Integration,
     IntegrationStatus,
     ResilientCache,
 )
@@ -42,7 +41,6 @@ from django_ai_sdk.integrations.registry import (
     reset_registry,
 )
 from django_ai_sdk.permissions import AllowAll
-
 from tests.mocks.integrations import ExampleWeatherService, UnnamedService
 
 
@@ -716,7 +714,7 @@ class TestExtensibility:
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
     async def test_a_hand_rolled_service_satisfies_the_contract(self, settings):
-        class CustomBackendService(IntegrationService):
+        class CustomBackendService(Integration):
             name = "custom"
             label = "Custom"
 
@@ -891,10 +889,9 @@ class TestOAuthTokenRefresh:
         return token_obj
 
     async def test_refresh_success_persists_new_tokens(self, monkeypatch):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
         token_obj = await self._make_token(user)
@@ -920,10 +917,9 @@ class TestOAuthTokenRefresh:
         assert stored.get_access_token() == "new-access"
 
     async def test_refresh_returns_none_on_oauth_error(self, monkeypatch):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
         token_obj = await self._make_token(user)
@@ -945,9 +941,8 @@ class TestOAuthTokenRefresh:
     async def test_refresh_without_a_refresh_token_gives_up(self, monkeypatch):
         """Nothing to exchange — this must fail fast rather than call the token
         endpoint with an empty grant."""
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
         token_obj = await self._make_token(user, refresh_token="")
@@ -966,10 +961,9 @@ class TestOAuthTokenRefresh:
         rotated the row's refresh_token out from under us. Our conditional update must
         no-op, and the caller must get the winner's tokens — not silently overwrite
         them with our own."""
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
         token_obj = await self._make_token(user)
@@ -1068,8 +1062,10 @@ class TestExchangeToken:
 
 @pytest.mark.django_db
 class TestOAuthRedirectFlow:
-    """The browser-facing half of MCP OAuth: ``oauth_start`` hands the user off to the
-    provider, ``oauth_callback`` brings them back and persists the token.
+    """The browser-facing half of MCP OAuth: ``IntegrationService.connect()`` (via
+    the generic ``POST /{name}/connect``) hands the user off to the provider,
+    ``oauth_callback`` brings them back and persists the token. There is no dedicated
+    "start" URL — see ``TestNoStartUrl`` below.
 
     This path had no coverage at all before, which matters more now that it is shared
     SDK infrastructure rather than one project's local code — every consumer inherits
@@ -1077,7 +1073,7 @@ class TestOAuthRedirectFlow:
     """
 
     @staticmethod
-    def _request(user, path="/api/integrations/oauth/notion/start/", **params):
+    def _request(user, path="/api/integrations/notion/connect", **params):
         from django.contrib.sessions.backends.db import SessionStore
         from django.test import RequestFactory
 
@@ -1097,13 +1093,12 @@ class TestOAuthRedirectFlow:
             ),
         )
 
-    async def test_start_redirects_to_the_provider_and_stores_pkce_state(
+    async def test_connect_redirects_to_the_provider_and_stores_pkce_state(
         self, settings, monkeypatch
     ):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp import loader as loader_module
-        from django_ai_sdk.integrations.mcp import oauth_views
+        from django_ai_sdk.integrations.services import IntegrationService
+        from tests.factories.db import UserFactory
 
         settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
         _patch_discovery(monkeypatch)
@@ -1117,43 +1112,36 @@ class TestOAuthRedirectFlow:
 
         user = await UserFactory.acreate()
         request = self._request(user)
-        response = await oauth_views.oauth_start(request, "notion")
+        result = await IntegrationService.connect(
+            "notion",
+            user,
+            request=request,
+            redirect_uri="https://app.example.com/api/integrations/oauth/notion/callback/",
+        )
 
-        assert response.status_code == 302
-        assert response["Location"].startswith("https://auth.example.com/authorize?")
+        assert result["redirect_url"].startswith("https://auth.example.com/authorize?")
         # PKCE state must be held server-side; the callback compares against it.
         assert request.session[loader_module._K_STATE.format("notion")]
         assert request.session[loader_module._K_VERIFIER.format("notion")]
 
-    async def test_start_requires_authentication(self, settings):
-        from django.contrib.auth.models import AnonymousUser
-
-        from django_ai_sdk.integrations.mcp import oauth_views
-
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
-
-        response = await oauth_views.oauth_start(self._request(AnonymousUser()), "notion")
-
-        assert response.status_code == 401
-
-    async def test_start_rejects_an_unknown_server(self, settings):
+    async def test_connect_rejects_an_unknown_server(self, settings):
+        from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
-
-        from django_ai_sdk.integrations.mcp import oauth_views
 
         settings.AI_SDK_INTEGRATIONS = {}
         user = await UserFactory.acreate()
 
-        response = await oauth_views.oauth_start(self._request(user), "nope")
+        result = await IntegrationService.connect(
+            "nope", user, request=self._request(user), redirect_uri="https://app.example.com/cb"
+        )
 
-        assert response.status_code == 404
+        assert result is None
 
     async def test_callback_exchanges_the_code_and_persists_the_token(self, settings, monkeypatch):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
 
         settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
@@ -1195,11 +1183,10 @@ class TestOAuthRedirectFlow:
     async def test_callback_rejects_a_mismatched_state(self, settings, monkeypatch):
         """CSRF protection for the OAuth handshake: a code arriving with someone else's
         (or a forged) state must never be exchanged."""
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
 
         settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
 
@@ -1226,9 +1213,8 @@ class TestOAuthRedirectFlow:
     async def test_callback_reports_a_provider_error_without_exchanging(
         self, settings, monkeypatch
     ):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp import oauth_views
+        from tests.factories.db import UserFactory
 
         settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
 
@@ -1252,10 +1238,9 @@ class TestOAuthRedirectFlow:
     async def test_callback_refuses_an_off_site_success_redirect(self, settings, monkeypatch):
         """A misconfigured AI_SDK_MCP_OAUTH_SUCCESS_URL must not turn the callback into
         an open redirect — it falls back to "/"."""
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
+        from tests.factories.db import UserFactory
 
         settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "https://evil.example.com/steal"
@@ -1280,6 +1265,132 @@ class TestOAuthRedirectFlow:
 
         assert response.status_code == 302
         assert response["Location"].startswith("/?connected=notion")
+
+
+class TestNoStartUrl:
+    """There is no ``oauth-start`` URL: the generic router's ``POST /{name}/connect``
+    covers it. Only the callback must stay a fixed URL, since the identity provider is
+    the one redirecting the browser there."""
+
+    def test_oauth_start_no_longer_resolves(self):
+        from django.urls import NoReverseMatch, reverse
+
+        with pytest.raises(NoReverseMatch):
+            reverse("integrations_mcp:oauth-start", kwargs={"server_name": "notion"})
+
+    def test_oauth_callback_still_resolves(self):
+        from django.urls import reverse
+
+        assert reverse("integrations_mcp:oauth-callback", kwargs={"server_name": "notion"})
+
+
+@pytest.mark.django_db
+class TestIntegrationService:
+    """The facade views.py delegates to — mirrors AssistantService's shape (resolve by
+    name, permission-check, delegate to the instance)."""
+
+    async def test_list_for_user_drops_unpermitted_rows(self, settings):
+        from django_ai_sdk.integrations.services import IntegrationService
+        from tests.factories.db import UserFactory
+
+        class ForbiddenIntegration(APIIntegration):
+            name = "forbidden"
+            tools = []
+
+            async def has_perms(self, user, operation=None, *, raise_on_deny=False):
+                return False
+
+        class VisibleIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "visible"
+            tools = []
+
+        settings.AI_SDK_INTEGRATIONS = {
+            "forbidden": ForbiddenIntegration(),
+            "visible": VisibleIntegration(),
+        }
+        user = await UserFactory.acreate()
+
+        rows = await IntegrationService.list_for_user(user)
+
+        assert [r.name for r in rows] == ["visible"]
+
+    async def test_list_for_user_isolates_a_broken_integration(self, settings):
+        """One integration's get_status() raising must not drop the others, and must
+        report DEGRADED for itself rather than propagating."""
+        from django_ai_sdk.integrations.base import IntegrationStatus
+        from django_ai_sdk.integrations.services import IntegrationService
+        from tests.factories.db import UserFactory
+
+        class BrokenIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "broken"
+            tools = []
+
+            async def get_status(self, user=None, assistant=None):
+                raise RuntimeError("upstream is down")
+
+        class HealthyIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "healthy"
+            tools = []
+
+        settings.AI_SDK_INTEGRATIONS = {
+            "broken": BrokenIntegration(),
+            "healthy": HealthyIntegration(),
+        }
+        user = await UserFactory.acreate()
+
+        rows = {r.name: r for r in await IntegrationService.list_for_user(user)}
+
+        assert rows["broken"].status == IntegrationStatus.DEGRADED
+        assert rows["healthy"].status == IntegrationStatus.ACTIVE
+
+    async def test_connect_raises_permission_denied_without_manage_perm(self, settings):
+        from django_ai_sdk.integrations.services import IntegrationService
+        from django_ai_sdk.permissions import PermissionDenied
+        from tests.factories.db import UserFactory
+
+        class OnlyUsable(APIIntegration):
+            name = "only-usable"
+            tools = []
+            supports_connect = True
+
+            async def has_perms(self, user, operation=None, *, raise_on_deny=False):
+                from django_ai_sdk.permissions import Operation
+
+                return operation == Operation.USE_INTEGRATION
+
+        settings.AI_SDK_INTEGRATIONS = {"only-usable": OnlyUsable()}
+        user = await UserFactory.acreate()
+
+        with pytest.raises(PermissionDenied):
+            await IntegrationService.connect(
+                "only-usable", user, request=None, redirect_uri="https://app.example.com/cb"
+            )
+
+    async def test_connect_returns_none_for_an_unknown_integration(self, settings):
+        from django_ai_sdk.integrations.services import IntegrationService
+        from tests.factories.db import UserFactory
+
+        settings.AI_SDK_INTEGRATIONS = {}
+        user = await UserFactory.acreate()
+
+        result = await IntegrationService.connect(
+            "nope", user, request=None, redirect_uri="https://app.example.com/cb"
+        )
+
+        assert result is None
+
+    async def test_disconnect_and_reconnect_return_none_for_an_unknown_integration(self, settings):
+        from django_ai_sdk.integrations.services import IntegrationService
+        from tests.factories.db import UserFactory
+
+        settings.AI_SDK_INTEGRATIONS = {}
+        user = await UserFactory.acreate()
+
+        assert await IntegrationService.disconnect("nope", user) is None
+        assert await IntegrationService.reconnect("nope", user) is None
 
 
 class TestIntegrationPermissions:

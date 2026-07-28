@@ -358,7 +358,7 @@ class AssistantDefaultPermission(BasePermission):
 class IntegrationDefaultPermission(BasePermission):
     """Default permission for integrations: any authenticated user may use them.
 
-    Override per-integration via ``IntegrationService.permissions`` or globally via
+    Override per-integration via ``Integration.permissions`` or globally via
     ``AI_SDK_PERMISSIONS["integrations"]``.
     """
 

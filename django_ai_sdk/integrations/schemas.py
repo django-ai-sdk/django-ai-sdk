@@ -16,8 +16,9 @@ class IntegrationOut(BaseModel):
     """One integration's state for the generic ``GET /api/integrations`` list.
 
     Capability flags let the client decide which actions to offer without knowing the
-    integration's kind. ``connect_url`` is populated for integrations that connect via
-    a browser redirect (e.g. MCP OAuth).
+    integration's kind. When ``supports_connect``, the client calls
+    ``POST /{name}/connect`` to get the redirect URL — this list never carries one
+    itself, since building it needs the request (see ``integrations/views.py``).
     """
 
     name: str
@@ -26,14 +27,14 @@ class IntegrationOut(BaseModel):
     status: IntegrationStatus
     supports_connect: bool = False
     supports_test: bool = True
-    #: "oauth" (follow connect_url) | None. A string rather than a bool so another
-    #: flow can be added without changing this contract.
+    #: "oauth" (call POST /{name}/connect, then follow its redirect_url) | None. A
+    #: string rather than a bool so another flow can be added without changing this
+    #: contract.
     connect_kind: str | None = None
     #: Set when the integration needs setup (e.g. a missing secret) — human-readable,
     #: shown to the user instead of a blank/confusing DISCONNECTED status.
     detail: str | None = None
     connected: bool | None = None
-    connect_url: str | None = None
 
 
 class AssistantIntegrationStatus(BaseModel):

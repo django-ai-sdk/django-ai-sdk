@@ -1,6 +1,6 @@
 """Shared contract and caching for integrations.
 
-An ``IntegrationService`` wraps something an assistant plugs in — an MCP server, a
+An ``Integration`` wraps something an assistant plugs in — an MCP server, a
 hand-written API wrapper, etc. ``ResilientCache`` caches a backend's live-fetched
 data per key, with stale-while-revalidate refresh and a circuit breaker for repeated
 failures. The cache/breaker mechanics are provided by ``cashews`` (a maintained async
@@ -53,11 +53,11 @@ class IntegrationStatus(StrEnum):
     DISCONNECTED = "disconnected"  # never connected yet
 
 
-class IntegrationService(ABC):
+class Integration(ABC):
     """The single point of contact for one integration.
 
     Every integration — an MCP server, a hand-written API wrapper — is one
-    ``IntegrationService`` subclass, living in its app's ``services.py``. It owns the
+    ``Integration`` subclass, living in its app's ``services.py``. It owns the
     integration's tools, health, permissions, connection lifecycle and credential
     refresh, and is what the Assistant and the ``/api/integrations``
     endpoints talk to. An ``IntegrationAppConfig`` (see ``apps.py``) constructs it and
@@ -79,9 +79,9 @@ class IntegrationService(ABC):
     supports_test: bool = True
 
     #: How the client should let a user connect, when ``supports_connect`` is True.
-    #: ``"oauth"`` (follow ``connect_url``) is the only kind today; it exists as a
-    #: string rather than a bool so a second flow (e.g. submitting a per-user token)
-    #: can be added without changing the client contract.
+    #: ``"oauth"`` (call ``POST /{name}/connect``, then follow its ``redirect_url``) is
+    #: the only kind today; it exists as a string rather than a bool so a second flow
+    #: (e.g. submitting a per-user token) can be added without changing the contract.
     connect_kind: str | None = None
 
     #: Human-readable reason this integration can't run yet (e.g. a missing secret),

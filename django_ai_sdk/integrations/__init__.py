@@ -1,7 +1,7 @@
 """Integrations: the SDK's uniform capability layer for pluggable third-party
 functionality — MCP servers, hand-written API wrappers, and anything added later.
 
-Every integration is one ``IntegrationService`` (the contract in ``base.py``), declared
+Every integration is one ``Integration`` (the contract in ``base.py``), declared
 in ``AI_SDK_INTEGRATIONS`` as ``{name: "dotted.path.To.Service"}``. The assistant, the
 ``/api/integrations`` router and the status endpoints all talk to that one contract, so
 none of them know or care which kind an integration is.
@@ -34,8 +34,8 @@ from __future__ import annotations
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.apps import IntegrationAppConfig
 from django_ai_sdk.integrations.base import (
+    Integration,
     IntegrationNotConnectable,
-    IntegrationService,
     IntegrationStatus,
 )
 
@@ -43,6 +43,6 @@ __all__ = [
     "APIIntegration",
     "IntegrationAppConfig",
     "IntegrationNotConnectable",
-    "IntegrationService",
+    "Integration",
     "IntegrationStatus",
 ]

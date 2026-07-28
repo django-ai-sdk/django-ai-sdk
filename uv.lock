@@ -765,7 +765,6 @@ dependencies = [
     { name = "daphne" },
     { name = "django" },
     { name = "django-environ" },
-    { name = "django-ninja" },
     { name = "django-tasks" },
     { name = "django-tasks-db" },
     { name = "loguru" },
@@ -812,6 +811,7 @@ restframework = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "django-ninja" },
     { name = "django-stubs" },
     { name = "django-watchfiles" },
     { name = "factory-boy" },
@@ -836,7 +836,6 @@ requires-dist = [
     { name = "django", specifier = ">=5.2.6,<6.1" },
     { name = "django-ai-sdk", extras = ["files", "haystack", "mcp", "restframework"], marker = "extra == 'all'" },
     { name = "django-environ", specifier = ">=0.13.0" },
-    { name = "django-ninja", specifier = ">=1.6.2" },
     { name = "django-tasks", specifier = ">=0.12.0" },
     { name = "django-tasks-db", specifier = ">=0.12.0" },
     { name = "djangorestframework", marker = "extra == 'restframework'", specifier = ">=3.17.1" },
@@ -859,6 +858,7 @@ provides-extras = ["all", "haystack", "mcp", "restframework", "files"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "django-ninja", specifier = ">=1.6.2" },
     { name = "django-stubs", specifier = ">=6.0.5" },
     { name = "django-watchfiles", specifier = ">=1.4.0" },
     { name = "factory-boy", specifier = ">=3.3.3" },
