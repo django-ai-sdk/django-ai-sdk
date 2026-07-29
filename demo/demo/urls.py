@@ -64,6 +64,5 @@ urlpatterns = [
     path("api/", api.urls),
     path("api/v2/", include("piratespeak.views_drf")),
     path("api/v2/", include("piratespeak.views_memories_drf")),
-    path("api/integrations/", include("django_ai_sdk.integrations.urls")),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
 ]
