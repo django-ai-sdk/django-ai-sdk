@@ -108,7 +108,9 @@ async def oauth_callback(
     request: HttpRequest, server_name: str
 ) -> HttpResponseRedirect | JsonResponse:
     """Handle the OAuth 2.1 callback: validate, exchange the code, store the token."""
-    if not request.user.is_authenticated:
+    user = await request.auser()
+
+    if not user.is_authenticated:
         return JsonResponse({"error": "Not authenticated"}, status=HTTPStatus.UNAUTHORIZED)
 
     try:
@@ -132,7 +134,7 @@ async def oauth_callback(
                 client_secret=client_secret,
             )
             await mcp_service.store_token(
-                user=request.user, server_name=server_name, token_response=token_response
+                user=user, server_name=server_name, token_response=token_response
             )
         except (httpx.HTTPError, ValueError) as e:
             logger.exception("Token exchange/store failed for %r", server_name)
