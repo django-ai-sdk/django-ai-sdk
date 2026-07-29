@@ -45,11 +45,11 @@ async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
     belongs to a non-MCP integration simply reads as "not an OAuth server" rather than
     exploding on a missing attribute.
     """
-    from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+    from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
     from django_ai_sdk.integrations.registry import get_integrations
 
-    svc = (await get_integrations([server_name])).get(server_name)
-    return svc.config if isinstance(svc, MCPIntegration) else None
+    integration = (await get_integrations([server_name])).get(server_name)
+    return integration.config if isinstance(integration, DynamicMCPIntegration) else None
 
 
 # ============================================================================
@@ -116,7 +116,18 @@ async def get_or_register_client(
         defaults={"redirect_uri": redirect_uri},
     )
     if not created and oauth_client.client_id:
-        return oauth_client.client_id, oauth_client.get_client_secret()
+        if oauth_client.redirect_uri == redirect_uri:
+            return oauth_client.client_id, oauth_client.get_client_secret()
+        # The redirect_uri the IdP has on file for this client no longer matches
+        # what we'd send it (host/scheme/path change — e.g. a URLconf move or a
+        # new deployment domain). Re-registering is the only way to recover; the
+        # stale client_id would otherwise get "invalid redirect_uri" forever.
+        logger.info(
+            "Redirect URI changed for %r (%r -> %r) — re-registering OAuth client",
+            server_name,
+            oauth_client.redirect_uri,
+            redirect_uri,
+        )
 
     if not discovery.registration_endpoint:
         raise ValueError(
@@ -148,6 +159,7 @@ async def get_or_register_client(
 
     logger.info("Dynamically registered client for %r: client_id=%s", server_name, client_id)
     oauth_client.set_credentials(client_id, client_secret)
+    oauth_client.redirect_uri = redirect_uri
     await oauth_client.asave()
     return client_id, client_secret
 
