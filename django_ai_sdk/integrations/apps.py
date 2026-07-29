@@ -10,7 +10,7 @@ the service into the same registry the settings mapping feeds::
 
     class WeatherConfig(IntegrationAppConfig):
         name = "myapp.weather"
-        service = "myapp.weather.services.WeatherService"
+        service = "myapp.weather.services.WeatherIntegration"
 
 ``ready()`` does nothing but a dict write — no network I/O — so it is safe under
 ``migrate``/``test``/``shell`` with no command blocklist. Caches populate lazily on

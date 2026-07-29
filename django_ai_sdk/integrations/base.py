@@ -316,7 +316,7 @@ class ResilientCache:
     def status_for(self, key: Any) -> IntegrationStatus:
         """Return the status based on the last attempt for ``key``.
 
-        Callers MUST call ``get()`` for ``key`` first — ``MCPIntegration.get_status``
+        Callers MUST call ``get()`` for ``key`` first — ``DynamicMCPIntegration.get_status``
         and ``APIIntegration.get_status`` both do exactly that before calling this.
         This raises rather than guessing, so a subclass that skips the ``get()`` call
         fails loudly in development instead of silently reporting a false ACTIVE for

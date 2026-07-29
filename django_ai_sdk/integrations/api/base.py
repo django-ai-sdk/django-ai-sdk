@@ -66,10 +66,10 @@ class APIIntegration(Integration):
       ``def make_tool(user): ...`` and ``def make_tool(**kwargs): ...`` both work::
 
           def issue_tool(user):
-              return build_authed_tool(token=user.linear_token)
+              return build_authed_tool(token=user.tracker_token)
 
-          class LinearIntegration(APIIntegration):
-              name = "linear"
+          class IssueTrackerIntegration(APIIntegration):
+              name = "issue_tracker"
               tools = [issue_tool]
 
     ``get_status()`` reports ACTIVE unconditionally unless a subclass sets

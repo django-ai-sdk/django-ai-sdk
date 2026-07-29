@@ -40,15 +40,15 @@ class Command(BaseCommand):
     async def handle_async(self, name: str | None) -> int:
         integrations = await get_all_integrations()
         if name:
-            integrations = {n: svc for n, svc in integrations.items() if n == name}
+            integrations = {n: integration for n, integration in integrations.items() if n == name}
             if not integrations:
                 self.stdout.write(self.style.WARNING(f"No integration named {name!r}"))
                 return 0
 
         failed = 0
-        for n, svc in integrations.items():
+        for n, integration in integrations.items():
             try:
-                await svc.refresh()
+                await integration.refresh()
             except Exception as e:  # noqa: BLE001 — one integration must not stop the rest
                 self.stdout.write(self.style.ERROR(f"✗ Error refreshing {n!r}: {e}"))
                 logger.exception("Error refreshing integration %r", n)
@@ -59,7 +59,7 @@ class Command(BaseCommand):
             # expected (that's what the circuit breaker is for) and must not make a
             # scheduled run look like a credential failure, or exit non-zero.
             try:
-                status = await svc.get_status()
+                status = await integration.get_status()
                 self.stdout.write(self.style.SUCCESS(f"✓ Refreshed {n!r} (status: {status})"))
             except Exception as e:  # noqa: BLE001
                 self.stdout.write(

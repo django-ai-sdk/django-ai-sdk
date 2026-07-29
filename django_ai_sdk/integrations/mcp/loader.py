@@ -1,6 +1,6 @@
 """MCP-backed Integration — connects to a remote MCP server over Streamable HTTP.
 
-Each MCPIntegration owns a ResilientCache (stale-while-revalidate + circuit breaker —
+Each DynamicMCPIntegration owns a ResilientCache (stale-while-revalidate + circuit breaker —
 see django_ai_sdk.integrations.base) so discovery (connect + list_tools) never sits
 directly on the chat-request critical path.
 """
@@ -46,7 +46,7 @@ _K_VERIFIER = "mcp_oauth_verifier_{}"
 _K_TOKEN_ENDPOINT = "mcp_oauth_token_endpoint_{}"  # noqa: S105
 
 
-class MCPIntegration(Integration):
+class DynamicMCPIntegration(Integration):
     """One configured MCP server, exposed through the Integration contract.
 
     Static/token servers cache by server name only — the tool list doesn't vary per
@@ -56,7 +56,7 @@ class MCPIntegration(Integration):
 
     Each instance owns its own ResilientCache rather than sharing one process-wide
     global — safe because `django_ai_sdk.integrations.registry.get_all_integrations()`
-    already builds exactly one MCPIntegration per configured server name and caches
+    already builds exactly one DynamicMCPIntegration per configured server name and caches
     it for the life of the process, so instance-scoped state has the same effective
     lifetime and sharing as a module-level singleton would, with none of the hidden
     global-mutable-state downsides (e.g. tests that construct their own instances get
@@ -362,7 +362,7 @@ def build_mcp_config_safe(
     Instead, returns ``(config, needs_setup_reason)``: on success ``needs_setup_reason``
     is ``None``; on failure (missing url, missing required secret, …) it's a
     human-readable reason and ``config`` is a harmless static placeholder that never
-    connects (``get_tools``/``get_status`` on the owning ``MCPIntegration`` are
+    connects (``get_tools``/``get_status`` on the owning ``DynamicMCPIntegration`` are
     already short-circuited by ``needs_setup`` before this placeholder is ever used).
     """
     if not url:
@@ -394,7 +394,7 @@ def build_mcp_config_safe(
     return config, None
 
 
-class MCPIntegrationService(MCPIntegration):
+class MCPIntegration(DynamicMCPIntegration):
     """Thin base for a known MCP server shipped as its own SDK/product app.
 
     Subclasses declare the server statically as class attributes and read
@@ -402,7 +402,7 @@ class MCPIntegrationService(MCPIntegration):
     ``AI_SDK_<NAME>`` settings slice — being in ``INSTALLED_APPS`` is what enables
     them, the slice only feeds credentials/params::
 
-        class NotionService(MCPIntegrationService):
+        class NotionIntegration(MCPIntegration):
             name = "notion"
             label = "Notion"
             url = "https://mcp.notion.com/mcp"

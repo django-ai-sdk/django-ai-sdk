@@ -30,7 +30,7 @@ from django_ai_sdk.integrations.mcp.loader import (
     _K_STATE,
     _K_TOKEN_ENDPOINT,
     _K_VERIFIER,
-    MCPIntegration,
+    DynamicMCPIntegration,
     resolve_client_credentials,
 )
 from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
@@ -50,10 +50,10 @@ async def _get_oauth_config(server_name: str) -> OAuthMCPIntegrationConfig | Non
     """Resolve a registered OAuth MCP integration's config, or None."""
     from django_ai_sdk.integrations.registry import get_integrations
 
-    svc = (await get_integrations([server_name])).get(server_name)
-    if not isinstance(svc, MCPIntegration) or not isinstance(svc.config, OAuthMCPIntegrationConfig):
+    integration = (await get_integrations([server_name])).get(server_name)
+    if not isinstance(integration, DynamicMCPIntegration) or not isinstance(integration.config, OAuthMCPIntegrationConfig):
         return None
-    return svc.config
+    return integration.config
 
 
 async def _validate_callback_params(

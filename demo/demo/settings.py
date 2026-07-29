@@ -193,8 +193,8 @@ AI_SDK_VECTOR_STORE_PATH = "stores/"
 # the SDK; `weather` is a local example (see piratespeak/integrations.py). Neither
 # needs an entry in INSTALLED_APPS.
 AI_SDK_INTEGRATIONS = {
-    "linear": "django_ai_sdk.integrations.defaults.LinearService",
-    "weather": "piratespeak.integrations.WeatherService",
+    "linear": "django_ai_sdk.integrations.defaults.LinearIntegration",
+    "weather": "piratespeak.integrations.WeatherIntegration",
 }
 
 # Per-integration params/credentials, read by each service on construction. A missing

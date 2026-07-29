@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 
 import httpx
 import pytest
@@ -28,7 +29,7 @@ from django_ai_sdk.integrations.base import (
     IntegrationStatus,
     ResilientCache,
 )
-from django_ai_sdk.integrations.mcp.loader import MCPIntegration
+from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
 from django_ai_sdk.integrations.mcp.schemas import (
     OAuthMCPIntegrationConfig,
     StaticMCPIntegrationConfig,
@@ -232,7 +233,7 @@ class TestResilientCache:
 
     def test_never_attempted_key_raises_instead_of_guessing(self):
         """status_for() can't distinguish "never checked" from "healthy" on its own,
-        so it refuses to guess: callers (e.g. MCPIntegration.get_status()) must force
+        so it refuses to guess: callers (e.g. DynamicMCPIntegration.get_status()) must force
         a real attempt via get() first, or this raises rather than reporting a false
         ACTIVE for an integration nothing has actually checked yet."""
         cache = ResilientCache(ttl=60, timeout=1)
@@ -351,7 +352,7 @@ class TestResilientCacheRecovery:
 
 class TestMCPIntegrationCacheKeys:
     def test_static_config_key_ignores_user(self):
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear", StaticMCPIntegrationConfig(url="https://example.com/mcp")
         )
         user_a = type("U", (), {"pk": 1})()
@@ -364,7 +365,7 @@ class TestMCPIntegrationCacheKeys:
     def test_oauth_config_key_is_per_user(self):
         """Each user has their own token, so their discovered tool lists must not share
         a cache entry."""
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "notion", OAuthMCPIntegrationConfig(url="https://example.com/mcp")
         )
         user_a = type("U", (), {"pk": 1})()
@@ -380,8 +381,8 @@ class TestIntegrationDisplayMetadata:
     so they must stay cheap — no live I/O when config already answers the question."""
 
     async def test_mcp_integration_kind_reflects_config_type(self):
-        token = MCPIntegration("linear", TokenMCPIntegrationConfig(url="https://x", token="t"))
-        oauth = MCPIntegration("notion", OAuthMCPIntegrationConfig(url="https://x"))
+        token = DynamicMCPIntegration("linear", TokenMCPIntegrationConfig(url="https://x", token="t"))
+        oauth = DynamicMCPIntegration("notion", OAuthMCPIntegrationConfig(url="https://x"))
 
         assert token.kind == "token"
         assert oauth.kind == "oauth"
@@ -394,7 +395,7 @@ class TestIntegrationDisplayMetadata:
 
         monkeypatch.setattr(loader_module, "_connect", explodes_if_called)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear",
             TokenMCPIntegrationConfig(url="https://x", token="t", tools=["list_issues"]),
         )
@@ -419,7 +420,7 @@ class TestIntegrationDisplayMetadata:
 
         monkeypatch.setattr(loader_module, "_connect", fake_connect)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear", TokenMCPIntegrationConfig(url="https://x", token="t")
         )
 
@@ -443,7 +444,7 @@ class TestIntegrationDisplayMetadata:
 
         monkeypatch.setattr(loader_module, "_connect", fake_connect)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear", TokenMCPIntegrationConfig(url="https://x", token="t")
         )
 
@@ -492,7 +493,7 @@ class TestMCPIntegrationGetStatus:
 
         monkeypatch.setattr(loader_module, "_connect", fails)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear-wrong-token",
             TokenMCPIntegrationConfig(url="https://example.com/mcp", token="bad"),
         )
@@ -507,7 +508,7 @@ class TestMCPIntegrationGetStatus:
 
         monkeypatch.setattr(loader_module, "_connect", succeeds)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear-correct-token",
             TokenMCPIntegrationConfig(url="https://example.com/mcp", token="good"),
         )
@@ -524,7 +525,7 @@ class TestMCPIntegrationGetStatus:
 
         monkeypatch.setattr(loader_module, "_connect", fails)
 
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear-broken",
             TokenMCPIntegrationConfig(url="https://example.com/mcp", token="bad"),
         )
@@ -545,7 +546,7 @@ class TestMCPIntegrationGetStatus:
         config, needs_setup = build_mcp_config_safe(
             auth="token", url="https://example.com/mcp", label="Linear", tools=[], token=""
         )
-        integration = MCPIntegration(
+        integration = DynamicMCPIntegration(
             "linear", config, needs_setup=needs_setup, intended_kind="token"
         )
 
@@ -872,6 +873,48 @@ class TestIntegrationFailureIsolation:
         assert await FakeAssistant()._get_integration_tools() == []
 
 
+class TestIntegrationToolNamespacing:
+    """Two MCP servers can define the same tool name (GitHub and Linear both have
+    ``list_issues``) — nothing prevents it. Haystack requires unique names across
+    everything handed to one agent, so without namespacing this would fail assistant
+    construction outright as soon as both were enabled together."""
+
+    @dataclass
+    class FakeTool:
+        name: str
+
+    async def test_same_named_tools_from_two_integrations_do_not_collide(self, settings):
+        from django_ai_sdk.assistant import Assistant
+
+        class FirstIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "first"
+            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+
+        class SecondIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "second"
+            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+
+        class FakeAssistant(Assistant):
+            name = "Fake"
+            description = ""
+            model = "gpt-fake"
+            integrations = ["first", "second"]
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                raise NotImplementedError
+
+        settings.AI_SDK_INTEGRATIONS = {
+            "first": FirstIntegration(),
+            "second": SecondIntegration(),
+        }
+
+        tools = await FakeAssistant()._get_integration_tools()
+
+        assert {t.name for t in tools} == {"first_list_issues", "second_list_issues"}
+
+
 @pytest.mark.django_db
 class TestOAuthTokenRefresh:
     """refresh_oauth_token() goes through Authlib's AsyncOAuth2Client. These cover the
@@ -1084,7 +1127,7 @@ class TestOAuthRedirectFlow:
 
     @staticmethod
     def _oauth_integration(name="notion"):
-        return MCPIntegration(
+        return DynamicMCPIntegration(
             name,
             OAuthMCPIntegrationConfig(
                 url="https://mcp.example.com/mcp",

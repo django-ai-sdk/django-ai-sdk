@@ -4,9 +4,9 @@ Integrations are declared in code, as a mapping of registry name to the dotted p
 of an :class:`~django_ai_sdk.integrations.base.Integration` subclass::
 
     AI_SDK_INTEGRATIONS = {
-        "notion": "django_ai_sdk.integrations.defaults.NotionService",
-        "linear": "django_ai_sdk.integrations.defaults.LinearService",
-        "weather": "myapp.integrations.WeatherService",
+        "notion": "django_ai_sdk.integrations.defaults.NotionIntegration",
+        "linear": "django_ai_sdk.integrations.defaults.LinearIntegration",
+        "weather": "myapp.integrations.WeatherIntegration",
     }
 
 A value may also be a ready-made ``Integration`` instance, for a service that

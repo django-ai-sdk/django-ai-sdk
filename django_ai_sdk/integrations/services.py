@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 async def _safe_status_and_tools(
     name: str,
-    svc: Integration,
+    integration: Integration,
     user: AbstractBaseUser | AnonymousUser | None,
 ) -> tuple[IntegrationStatus, list[str]]:
     """One integration's (status, tool_names), isolated from the rest of a fan-out.
@@ -46,8 +46,8 @@ async def _safe_status_and_tools(
     failing whichever list it's part of.
     """
     try:
-        status = await svc.get_status(user)
-        tool_names = await svc.get_tool_names(user)
+        status = await integration.get_status(user)
+        tool_names = await integration.get_tool_names(user)
     except Exception:
         logger.exception("Failed to get status for integration %r", name)
         return IntegrationStatus.DEGRADED, []
@@ -74,23 +74,23 @@ class IntegrationService:
         """
         integrations = await get_all_integrations()
 
-        async def _row(name: str, svc: Integration) -> IntegrationOut | None:
-            if not await svc.has_perms(user, Operation.USE_INTEGRATION):
+        async def _row(name: str, integration: Integration) -> IntegrationOut | None:
+            if not await integration.has_perms(user, Operation.USE_INTEGRATION):
                 return None
-            status, _tool_names = await _safe_status_and_tools(name, svc, user)
+            status, _tool_names = await _safe_status_and_tools(name, integration, user)
             return IntegrationOut(
                 name=name,
-                label=svc.label,
-                kind=svc.kind,
+                label=integration.label,
+                kind=integration.kind,
                 status=status,
-                supports_connect=svc.supports_connect,
-                supports_test=svc.supports_test,
-                connect_kind=svc.connect_kind,
-                detail=svc.detail,
+                supports_connect=integration.supports_connect,
+                supports_test=integration.supports_test,
+                connect_kind=integration.connect_kind,
+                detail=integration.detail,
                 connected=status == IntegrationStatus.ACTIVE,
             )
 
-        rows = await asyncio.gather(*(_row(name, svc) for name, svc in integrations.items()))
+        rows = await asyncio.gather(*(_row(name, integration) for name, integration in integrations.items()))
         return [row for row in rows if row is not None]
 
     @classmethod
@@ -109,36 +109,36 @@ class IntegrationService:
         propagate for a capability mismatch (e.g. connect() on a non-OAuth server) —
         callers (the router) translate each into the matching HTTP status.
         """
-        svc = await cls.get(name)
-        if svc is None:
+        integration = await cls.get(name)
+        if integration is None:
             return None
-        if not await svc.has_perms(user, Operation.MANAGE_INTEGRATION):
+        if not await integration.has_perms(user, Operation.MANAGE_INTEGRATION):
             raise PermissionDenied(f"Not permitted to manage {name!r}")
-        return await svc.connect(user, request=request, redirect_uri=redirect_uri)
+        return await integration.connect(user, request=request, redirect_uri=redirect_uri)
 
     @classmethod
     async def disconnect(
         cls, name: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> bool | None:
         """Drop ``user``'s stored connection for ``name``. None if unknown, raises if forbidden."""
-        svc = await cls.get(name)
-        if svc is None:
+        integration = await cls.get(name)
+        if integration is None:
             return None
-        if not await svc.has_perms(user, Operation.MANAGE_INTEGRATION):
+        if not await integration.has_perms(user, Operation.MANAGE_INTEGRATION):
             raise PermissionDenied(f"Not permitted to manage {name!r}")
-        return await svc.disconnect(user)
+        return await integration.disconnect(user)
 
     @classmethod
     async def reconnect(
         cls, name: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> IntegrationStatus | None:
         """Force a fresh connection attempt for ``name`` and return the real outcome."""
-        svc = await cls.get(name)
-        if svc is None:
+        integration = await cls.get(name)
+        if integration is None:
             return None
-        if not await svc.has_perms(user, Operation.USE_INTEGRATION):
+        if not await integration.has_perms(user, Operation.USE_INTEGRATION):
             raise PermissionDenied(f"Not permitted to use {name!r}")
-        return await svc.test(user)
+        return await integration.test(user)
 
 
 __all__ = ["IntegrationService", "IntegrationNotConnectable"]
