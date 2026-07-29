@@ -90,7 +90,9 @@ class IntegrationService:
                 connected=status == IntegrationStatus.ACTIVE,
             )
 
-        rows = await asyncio.gather(*(_row(name, integration) for name, integration in integrations.items()))
+        rows = await asyncio.gather(
+            *(_row(name, integration) for name, integration in integrations.items())
+        )
         return [row for row in rows if row is not None]
 
     @classmethod

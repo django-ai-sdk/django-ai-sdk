@@ -51,7 +51,9 @@ async def _get_oauth_config(server_name: str) -> OAuthMCPIntegrationConfig | Non
     from django_ai_sdk.integrations.registry import get_integrations
 
     integration = (await get_integrations([server_name])).get(server_name)
-    if not isinstance(integration, DynamicMCPIntegration) or not isinstance(integration.config, OAuthMCPIntegrationConfig):
+    if not isinstance(integration, DynamicMCPIntegration) or not isinstance(
+        integration.config, OAuthMCPIntegrationConfig
+    ):
         return None
     return integration.config
 
