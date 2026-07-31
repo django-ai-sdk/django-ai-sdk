@@ -417,7 +417,7 @@ class Stream:
         except TimeoutError:
             logger.warning("Suggestion generation timed out, skipping")
         except Exception as e:
-            logger.error(f"Error generating suggestions: {e}", exc_info=True)
+            logger.error("Error generating suggestions: {}", e, exc_info=True)
         return None
 
     async def stream(
@@ -467,7 +467,10 @@ class Stream:
             try:
                 await self.get_pipeline_result(pipeline_task, stream_writer)
             except Exception as pipeline_error:
-                logger.error(f"Pipeline task failed: {pipeline_error}", exc_info=True)
+                # Don't f-string `pipeline_error`: its text can contain braces,
+                # which would crash this logging call itself (see suggestions
+                # generator for the same fix and rationale).
+                logger.error("Pipeline task failed: {}", pipeline_error, exc_info=True)
                 if stream_writer:
                     stream_writer.add_chunk(get_error_chunk(pipeline_error))
                     self.message_result = await stream_writer.finalize("error")
@@ -487,8 +490,13 @@ class Stream:
                 yield suggestion
 
         except Exception as critical_error:
+            # Don't f-string `critical_error`: its text can contain braces,
+            # which would crash this logging call itself (see suggestions
+            # generator for the same fix and rationale).
             logger.error(
-                f"Critical error in stream: {type(critical_error).__name__}: {critical_error}",
+                "Critical error in stream: {}: {}",
+                type(critical_error).__name__,
+                critical_error,
                 exc_info=True,
             )
             if stream_writer and not _finalize_called:
