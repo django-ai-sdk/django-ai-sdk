@@ -132,6 +132,32 @@ class TestAssistantGetRagTools:
         assert result[0] is tool_a
         assert result[1] is tool_b
 
+    async def test_colliding_tool_names_are_disambiguated(self):
+        # Both names truncate to the same tool name, which would be rejected as
+        # a duplicate for the whole tool list.
+        mem_a = await MemoryFactory.acreate(name="Product Documentation 2024")
+        mem_b = await MemoryFactory.acreate(name="Product Documentation 2025")
+        await Entry.objects.acreate(memory=mem_a, content="doc")
+        await Entry.objects.acreate(memory=mem_b, content="doc")
+        assert mem_a.tool_name == mem_b.tool_name
+
+        from django_ai_sdk.conversation.models import Thread
+
+        thread = await Thread.objects.acreate()
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem_a, active=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=mem_b, active=True)
+
+        assistant = RagToolsAssistant()
+        mock_provider = MagicMock()
+        mock_provider.get_tool = AsyncMock(side_effect=[MagicMock(), MagicMock()])
+        assistant.rag_provider = mock_provider
+
+        await assistant.get_rag_tools(thread_id=str(thread.id))
+
+        names = [call.kwargs["spec"].name for call in mock_provider.get_tool.await_args_list]
+        assert len(set(names)) == 2
+        assert names[0] == mem_a.tool_name
+
     async def test_mixed_active_inactive_and_empty(self):
         active = await MemoryFactory.acreate(name="Active")
         inactive = await MemoryFactory.acreate(name="Inactive")

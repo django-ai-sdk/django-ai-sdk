@@ -401,8 +401,19 @@ class Assistant(ABC, AssistantInfoMixin):
             user=user,
         )
 
+        used_names: set[str] = set()
+
         for memory in memories:
             spec = await memory.get_tool_spec()
+            if spec.name in used_names:
+                spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
+                logger.warning(
+                    "Tool name collision for memory '{}', renamed to '{}'",
+                    memory.name,
+                    spec.name,
+                )
+            used_names.add(spec.name)
+
             tool = await self.rag_provider.get_tool(
                 self,
                 str(memory.id),
