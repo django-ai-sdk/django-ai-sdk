@@ -14,8 +14,8 @@ from django_ai_sdk.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
-from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage, Prompt, prompt
-from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.common import ChatMessage, Prompt, prompt
+from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
@@ -318,11 +318,14 @@ class Assistant(ABC, AssistantInfoMixin):
     def get_title_generation_prompt(self) -> Prompt:
         """Return the system prompt used to generate a thread title.
 
-        Defaults to a prompt capped at the `Thread.title` column's
-        `max_length`, so the model is nudged to stay within the limit that
-        storage enforces anyway. Override to customize tone/format.
+        Defaults to a prompt capped at the title sanity limit, not the much
+        larger `Thread.title` column `max_length` - the column width is a
+        storage ceiling, not a reasonable target length for a title, and
+        quoting it here would let the model "correctly" produce something
+        long enough to fail `generate_thread_title`'s own sanity check.
+        Override to customize tone/format.
         """
-        return build_title_generation_prompt(THREAD_TITLE_MAX_LENGTH)
+        return build_title_generation_prompt(get_title_sanity_limit())
 
     def get_model(self) -> str:
         """Return the model identifier."""
@@ -729,7 +732,8 @@ class Assistant(ABC, AssistantInfoMixin):
                 title = await generate_thread_title(
                     assistant=self, messages=messages, thread_id=thread_id, user=user
                 )
-                await ThreadService.update_thread(thread_id, title=title, user=user)
+                if title:
+                    await ThreadService.update_thread(thread_id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
