@@ -101,6 +101,9 @@ class DefaultSuggestionGenerator:
 
             return result.follow_ups[:3] if isinstance(result, FollowUpSuggestions) else []
         except Exception as e:
-            logger.error(f"Error generating suggestions: {e}", exc_info=True)
+            # Don't f-string `e` in: its text can contain braces (e.g. malformed
+            # JSON from the model), which loguru's internal str.format() then
+            # chokes on, turning this already-handled failure into a crash.
+            logger.error("Error generating suggestions: {}", e, exc_info=True)
 
         return []
