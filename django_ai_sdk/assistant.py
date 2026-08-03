@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
@@ -50,12 +50,12 @@ logger = get_logger(__name__)
 
 
 def _namespaced(integration_name: str, tool: Any) -> Any:
-    """Rename ``tool`` to ``{integration_name}_{tool.name}``.
+    """Rename tool to {integration_name}_{tool.name}.
 
-    Nothing stops two unrelated MCP servers from defining the same tool name (GitHub
-    and Linear both have ``list_issues``), and Haystack requires unique names across
-    everything handed to one agent — so without this, enabling two integrations that
-    happen to collide would fail assistant construction outright.
+    Nothing stops two unrelated MCP servers from defining the same tool name
+    (GitHub and Linear both have list_issues), and Haystack requires unique names
+    across everything handed to one agent, so without this, enabling two
+    integrations that happen to collide would fail assistant construction outright.
     """
     import dataclasses
 
@@ -110,6 +110,11 @@ class Assistant(ABC, AssistantInfoMixin):
         class MyAssistant(Assistant):
             name = "My Bot"
             model = "gpt-4"
+
+    Every concrete subclass also auto-registers on definition (__init_subclass__),
+    so either method above is really just what gets the module imported. An
+    abstract shared base (abstract = True) is skipped regardless of how it's
+    reached — see AssistantRegistry.register().
 
     Usage:
         from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -584,22 +589,17 @@ class Assistant(ABC, AssistantInfoMixin):
         results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
         return [tool for tools in results for tool in tools]
 
-    @abstractmethod
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
-        """
-        Create and return pipeline adapter.
+        """Return the adapter used for streaming chat.
 
-        Args:
-            thread_id: Optional thread ID for conversation persistence.
-
-        Returns:
-            A pipeline adapter instance
+        Must be implemented by subclasses used in chat. A worker-only assistant
+        (hidden = True, called only via run()) can leave this unimplemented.
         """
-        pass
+        raise NotImplementedError(f"{self.__class__.__name__} must implement get_pipeline_adapter().")
 
     async def history(
         self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
