@@ -49,10 +49,11 @@ INSTALLED_APPS = [
     "django_tasks",
     "django_tasks_db",
     "django_ai_sdk",
-    # The MCP toolkit: OAuth token models + the OAuth redirect views. One app for
-    # every MCP integration -- integrations themselves are just classes listed in
-    # AI_SDK_INTEGRATIONS below, with no app of their own.
+    # The MCP toolkit: OAuth token models + the OAuth redirect views.
     "django_ai_sdk.integrations.mcp",
+    # Shipped default integrations: one MCP-backed, one API-backed.
+    "django_ai_sdk.integrations.linear",
+    "django_ai_sdk.integrations.weather",
     # local
     "piratespeak",
 ]
@@ -189,17 +190,10 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-# Integrations: name -> dotted path to an Integration. `linear` is shipped by
-# the SDK; `weather` is a local example (see piratespeak/integrations.py). Neither
-# needs an entry in INSTALLED_APPS.
-AI_SDK_INTEGRATIONS = {
-    "linear": "django_ai_sdk.integrations.defaults.LinearIntegration",
-    "weather": "piratespeak.integrations.WeatherIntegration",
-}
-
-# Per-integration params/credentials, read by each service on construction. A missing
-# secret doesn't crash boot -- the integration reports that it needs setup instead.
-AI_SDK_LINEAR = {"token": env("LINEAR_API_KEY", default="")}
+# Integrations are Django apps (see INSTALLED_APPS above) that register themselves
+# on ready(). Secrets resolve straight from the environment (LINEAR_TOKEN, etc.) --
+# no settings.py wiring needed. A missing one doesn't crash boot -- the integration
+# reports that it needs setup instead.
 
 
 # MCP OAuth discovery (RFC 9728)

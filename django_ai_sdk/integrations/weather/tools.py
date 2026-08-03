@@ -1,15 +1,10 @@
-"""Example integration app — a copy-me template.
-
-Built on Open-Meteo, which needs no API key, so it is runnable with zero credentials
-and exercises the whole contract: ``get_tools()``, invoking the tool, and a real
-``get_status()`` backed by a health probe.
+"""Weather tools, built on Open-Meteo — needs no API key, so this is runnable with
+zero credentials.
 """
 
 from __future__ import annotations
 
 import httpx
-from django_ai_sdk.integrations.api.base import APIIntegration
-from django_ai_sdk.integrations.apps import IntegrationAppConfig
 from haystack.tools import tool
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -64,22 +59,3 @@ async def check_weather_api() -> None:
 def get_current_weather(location: str) -> dict:
     """Get the current weather for a place name (e.g. 'Rotterdam' or 'Paris, France')."""
     return fetch_current_weather(location)
-
-
-class WeatherIntegration(APIIntegration):
-    """Minimal ``APIIntegration``: a ready-made tool plus a health probe.
-
-    ``health_check`` must be a ``staticmethod`` — a bare function assigned to the
-    attribute would be bound and wrongly receive ``self``.
-    """
-
-    name = "weather"
-    label = "Weather"
-    tools = [get_current_weather]
-    health_check = staticmethod(check_weather_api)
-
-
-class WeatherConfig(IntegrationAppConfig):
-    default = True
-    name = "piratespeak.integrations.weather"
-    integration = f"{__name__}.WeatherIntegration"

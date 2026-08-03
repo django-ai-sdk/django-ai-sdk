@@ -1,22 +1,21 @@
 """Django-app wiring for an integration.
 
 Every integration is its own Django app. Subclass this, point `integration` at the
-Integration subclass, and add the app to INSTALLED_APPS. For an integration with no
-models or extra logic, define both classes directly in apps.py — Django only requires
-the AppConfig to live there, not the Integration:
+Integration subclass, and add the app to INSTALLED_APPS:
 
-    class WeatherIntegration(APIIntegration):
-        name = "weather"
-        ...
-
-    class WeatherConfig(IntegrationAppConfig):
-        name = "myapp.integrations.weather"
-        integration = f"{__name__}.WeatherIntegration"
+    class ZendeskConfig(IntegrationAppConfig):
+        name = "myapp.integrations.zendesk"
+        integration = "myapp.integrations.zendesk.integration.ZendeskIntegration"
         default = True
 
-An integration with its own models, services, or background tasks still splits those
-into their usual modules; only the Integration subclass itself is free to live
-wherever's convenient.
+Keep the Integration subclass out of apps.py: the two classes have unrelated `name`
+semantics (this app's dotted Python path vs. the integration's registry key) and
+unrelated construction (Django instantiates the AppConfig itself, positionally,
+before ready() runs; the Integration is built with a bare `()` — by the registry,
+and directly in tests). Keeping them apart avoids the two contracts colliding in one
+class. The Integration subclass itself always lives in integration.py; hand-written
+@tool functions (when there are any — an MCP-backed integration has none) live
+alongside it in their own tools.py (see weather/).
 """
 
 from __future__ import annotations

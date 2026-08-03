@@ -11,8 +11,8 @@ integration is.
 Package layout, two tiers:
 
 - Framework (this directory's top-level modules): base.py (the contract plus
-  ResilientCache), registry.py, conf.py (per-integration config resolution), and
-  apps.py. Nothing here knows about MCP or any specific provider.
+  ResilientCache), registry.py, secrets.py (per-integration secret resolution),
+  and apps.py. Nothing here knows about MCP or any specific provider.
 - Kinds (api/, mcp/): base classes and shared infra for a category of integration.
   api.base.APIIntegration is the base for hand-written API wrappers. mcp/ is the MCP
   toolkit (OAuth token models, discovery/PKCE, the Haystack MCPToolset loader) for

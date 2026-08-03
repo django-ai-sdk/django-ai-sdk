@@ -405,7 +405,7 @@ class MCPIntegration(DynamicMCPIntegration):
     """Thin base for a known MCP server shipped as its own Django app.
 
     Subclasses declare the server as class attributes; credentials come from
-    get_integration_config (see conf.py):
+    get_integration_secret (see secrets.py):
 
         class NotionIntegration(MCPIntegration):
             name = "notion"
@@ -432,10 +432,10 @@ class MCPIntegration(DynamicMCPIntegration):
         if needs_setup:
             logger.warning("Integration %r needs setup: %s", self.name, needs_setup)
 
-    def _conf(self, key: str) -> str:
-        from django_ai_sdk.integrations.conf import get_integration_config
+    def _secret(self, key: str) -> str:
+        from django_ai_sdk.integrations.secrets import get_integration_secret
 
-        return get_integration_config(self.name, key)
+        return get_integration_secret(self.name, key)
 
     def _build_config(
         self,
@@ -449,12 +449,12 @@ class MCPIntegration(DynamicMCPIntegration):
             label=self.label or self.name.title(),
             tools=list(self.default_tools),
             scope=self.scope,
-            client_id=self._conf("client_id"),
-            client_secret=self._conf("client_secret"),
-            oauth_discovery_url=self._conf("oauth_discovery_url"),
-            authorization_endpoint=self._conf("authorization_endpoint"),
-            token_endpoint=self._conf("token_endpoint"),
-            token=self._conf("token"),
+            client_id=self._secret("client_id"),
+            client_secret=self._secret("client_secret"),
+            oauth_discovery_url=self._secret("oauth_discovery_url"),
+            authorization_endpoint=self._secret("authorization_endpoint"),
+            token_endpoint=self._secret("token_endpoint"),
+            token=self._secret("token"),
         )
 
 
