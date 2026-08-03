@@ -305,7 +305,7 @@ class TestAssistantInfoMixin:
 
         @auto_register
         class PropAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
@@ -321,7 +321,7 @@ class TestAssistantInfoMixin:
         # Create instance without going through registry
         @auto_register
         class FallbackAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         # Manually create instance (won't have _assistant_id cached yet)
@@ -345,7 +345,7 @@ class TestAssistantInfoMixin:
             def get_name(self):
                 return "Dynamic Name"
 
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         assistant_id = DynamicNameAssistant._assistant_id
@@ -363,7 +363,7 @@ class TestAssistantInfoMixin:
         class NoRagAssistant(Assistant):
             name = "No RAG"
 
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
@@ -382,7 +382,7 @@ class TestAssistantInfoMixin:
             name = "Has RAG"
             rag_provider = RAGProvider()
 
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
