@@ -1,8 +1,8 @@
-"""MCP-backed Integration — connects to a remote MCP server over Streamable HTTP.
+"""MCP-backed Integration: connects to a remote MCP server over Streamable HTTP.
 
-Each DynamicMCPIntegration owns a ResilientCache (stale-while-revalidate + circuit breaker —
-see django_ai_sdk.integrations.base) so discovery (connect + list_tools) never sits
-directly on the chat-request critical path.
+Each DynamicMCPIntegration owns a ResilientCache (stale-while-revalidate plus circuit
+breaker; see django_ai_sdk.integrations.base) so discovery (connect + list_tools)
+never sits directly on the chat-request critical path.
 """
 
 from __future__ import annotations
@@ -55,12 +55,13 @@ class DynamicMCPIntegration(Integration):
     gets no tools from this integration, rather than triggering a connect attempt.
 
     Each instance owns its own ResilientCache rather than sharing one process-wide
-    global — safe because `django_ai_sdk.integrations.registry.get_all_integrations()`
-    already builds exactly one DynamicMCPIntegration per configured server name and caches
-    it for the life of the process, so instance-scoped state has the same effective
-    lifetime and sharing as a module-level singleton would, with none of the hidden
-    global-mutable-state downsides (e.g. tests that construct their own instances get
-    a naturally isolated cache, with no risk of bleeding into another test's).
+    global. This is safe because
+    django_ai_sdk.integrations.registry.get_all_integrations() already builds exactly
+    one DynamicMCPIntegration per configured server name and caches it for the life
+    of the process, so instance-scoped state has the same effective lifetime and
+    sharing as a module-level singleton would, without the downsides of shared
+    mutable global state (e.g. tests that construct their own instances get a
+    naturally isolated cache, with no risk of bleeding into another test's).
     """
 
     def __init__(
@@ -113,13 +114,15 @@ class DynamicMCPIntegration(Integration):
     async def get_tool_names(
         self, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> list[str]:
-        """Explicit allow-list from config when one's set — free, no cache touch.
+        """Explicit allow-list from config when one's set, free, with no cache touch.
+
         With auto-discovery (no allow-list configured), there's no name to report
         without asking the server what it actually offers, so this falls back to
         the same cached get_tools() every other caller uses: a cache hit whenever
         something else in the same request (e.g. get_status()) already primed it,
-        and otherwise the same bounded live fetch get_tools() always pays anyway —
-        never a second, additional cost beyond what discovery already costs."""
+        and otherwise the same bounded live fetch get_tools() always pays anyway,
+        never a second, additional cost beyond what discovery already costs.
+        """
         if self._needs_setup:
             return []
         if self.config.tools:
@@ -140,9 +143,9 @@ class DynamicMCPIntegration(Integration):
         assistant: Assistant | None = None,
         thread_id: str = "",
     ) -> list[Any]:
-        # `assistant`/`thread_id` are unused here — MCP tools are discovered from
-        # the remote server as-is, with no per-call model/context to inject.
-        # Accepted only for signature consistency with the Integration ABC.
+        # assistant/thread_id are unused here: MCP tools are discovered from the
+        # remote server as-is, with no per-call model/context to inject. Accepted
+        # only for signature consistency with the Integration ABC.
         if self._needs_setup:
             return []
         key = self._cache_key(user)
@@ -155,13 +158,14 @@ class DynamicMCPIntegration(Integration):
         user: AbstractBaseUser | AnonymousUser | None = None,
         assistant: Assistant | None = None,
     ) -> IntegrationStatus:
-        """Report real, attempted status — a wrong/invalid token must show as
-        DEGRADED, not ACTIVE, even if nothing has connected to this server yet.
+        """Report real, attempted status.
 
-        Forces a real attempt via get_tools() when the cache doesn't already have
-        one on file for this key. That call is bounded/cached like any other — this
-        just guarantees "active" always means "the last real attempt succeeded",
-        never "we simply never checked".
+        A wrong or invalid token must show as DEGRADED, not ACTIVE, even if nothing
+        has connected to this server yet. Forces a real attempt via get_tools() when
+        the cache doesn't already have one on file for this key. That call is
+        bounded and cached like any other; this just guarantees that ACTIVE always
+        means the last real attempt succeeded, never that it was simply never
+        checked.
         """
         if self._needs_setup:
             return IntegrationStatus.DISCONNECTED
@@ -189,8 +193,8 @@ class DynamicMCPIntegration(Integration):
         """Reset this integration to a fresh, never-attempted state and retry now.
 
         A DEGRADED integration already recovers on its own (the breaker half-opens
-        after a cooldown), so this is an optional "retry immediately" — for a staff
-        action, a management command, or a "Reconnect" button — that clears the cached
+        after a cooldown), so this is an optional immediate retry, for a staff
+        action, a management command, or a Reconnect button, that clears the cached
         value and resets the breaker rather than waiting out the cooldown.
         """
         key = self._cache_key(user)
@@ -212,16 +216,16 @@ class DynamicMCPIntegration(Integration):
         return deleted > 0
 
     async def refresh(self, user: AbstractBaseUser | AnonymousUser | None = None) -> None:
-        """Refresh OAuth tokens (the recurring ``refresh_integrations`` task).
+        """Refresh OAuth tokens (the recurring refresh_integrations task).
 
-        With a ``user``, refresh that user's token. Without, proactively refresh every
+        With a user, refresh that user's token. Without, proactively refresh every
         stored token for this server expiring within
-        ``AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES`` (default 10). No-op for non-OAuth
+        AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES (default 10). No-op for non-OAuth
         servers.
 
-        A successful refresh invalidates this user's cached tool list immediately —
-        Haystack's ``MCPToolset`` captures the bearer token at construction, so
-        without this the already-cached toolset would keep serving the pre-refresh
+        A successful refresh invalidates this user's cached tool list immediately.
+        Haystack's MCPToolset captures the bearer token at construction, so without
+        this the already-cached toolset would keep serving the pre-refresh
         (soon-to-expire) token until the tool cache's own TTL happens to roll over,
         rather than picking up the new one right away.
         """
@@ -249,8 +253,11 @@ class DynamicMCPIntegration(Integration):
         request: HttpRequest | None = None,
         redirect_uri: str = "",
     ) -> dict[str, Any]:
-        """Begin the OAuth 2.1 + PKCE flow. Stores PKCE state in the session and
-        returns ``{"redirect_url": <authorization_url>}`` for the client to follow."""
+        """Begin the OAuth 2.1 + PKCE flow.
+
+        Stores PKCE state in the session and returns
+        {"redirect_url": <authorization_url>} for the client to follow.
+        """
         if not isinstance(self.config, OAuthMCPIntegrationConfig):
             raise IntegrationNotConnectable(f"{self.name!r} is not an OAuth integration")
         if self._needs_setup:
@@ -310,14 +317,14 @@ class DynamicMCPIntegration(Integration):
             return None
 
     async def _fetch_oauth(self, user: AbstractBaseUser | AnonymousUser | None) -> list[Any]:
-        # Only reached via _fetch() for an OAuth config; narrow it for both type-checking
-        # and a clear failure if that invariant is ever broken.
+        # Only reached via _fetch() for an OAuth config; narrow it for both
+        # type-checking and a clear failure if that invariant is ever broken.
         assert isinstance(self.config, OAuthMCPIntegrationConfig)
 
         token_obj = await self._get_oauth_token(user)
         if token_obj is None:
             # _get_oauth_token() returns None for a None user, so past this point
-            # `user` is guaranteed non-None.
+            # user is guaranteed non-None.
             return []
         assert user is not None
 
@@ -354,20 +361,20 @@ def build_mcp_config_safe(
     StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
     str | None,
 ]:
-    """Build an MCP config for ``auth``, never raising.
+    """Build an MCP config for auth, never raising.
 
-    A misconfigured integration (e.g. ``auth="token"`` with no token set) must not
-    crash app boot — the config's own validators (e.g. ``TokenMCPIntegrationConfig``
-    requiring a non-empty token) would otherwise raise from deep inside ``ready()``.
-    Instead, returns ``(config, needs_setup_reason)``: on success ``needs_setup_reason``
-    is ``None``; on failure (missing url, missing required secret, …) it's a
-    human-readable reason and ``config`` is a harmless static placeholder that never
-    connects (``get_tools``/``get_status`` on the owning ``DynamicMCPIntegration`` are
-    already short-circuited by ``needs_setup`` before this placeholder is ever used).
+    A misconfigured integration (e.g. auth="token" with no token set) must not
+    crash app boot; the config's own validators (e.g. TokenMCPIntegrationConfig
+    requiring a non-empty token) would otherwise raise from deep inside ready().
+    Instead, returns (config, needs_setup_reason): on success needs_setup_reason is
+    None; on failure (missing url, missing required secret, etc.) it's a
+    human-readable reason and config is a harmless static placeholder that never
+    connects (get_tools/get_status on the owning DynamicMCPIntegration are already
+    short-circuited by needs_setup before this placeholder is ever used).
     """
     if not url:
         return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
-            "missing required `url`"
+            "missing required url"
         )
     try:
         if auth == "oauth":
@@ -395,12 +402,10 @@ def build_mcp_config_safe(
 
 
 class MCPIntegration(DynamicMCPIntegration):
-    """Thin base for a known MCP server shipped as its own SDK/product app.
+    """Thin base for a known MCP server shipped as its own Django app.
 
-    Subclasses declare the server statically as class attributes and read
-    per-deployment params (secrets, tool allow-list, URL overrides) from their
-    ``AI_SDK_<NAME>`` settings slice — being in ``INSTALLED_APPS`` is what enables
-    them, the slice only feeds credentials/params::
+    Subclasses declare the server as class attributes; credentials come from
+    get_integration_config (see conf.py):
 
         class NotionIntegration(MCPIntegration):
             name = "notion"
@@ -409,51 +414,47 @@ class MCPIntegration(DynamicMCPIntegration):
             auth = "oauth"
             default_tools = ["notion-search"]
 
-    ``AI_SDK_NOTION = {"tools": [...], "client_id": ..., "client_secret": ...}``
-
-    A missing required secret (e.g. ``auth="token"`` with no token configured) never
-    crashes boot — the integration registers but reports itself as needing setup
-    (``detail`` explains why) until the settings slice is filled in.
+    A missing required secret (e.g. auth="token" with no token configured) never
+    crashes boot; the integration registers but reports itself as needing setup
+    (detail explains why) until the config is filled in.
     """
 
     url: str = ""
     auth: str = "static"  # "static" | "token" | "oauth"
     default_tools: list[str] = []
     scope: str = ""
-    #: Settings key holding this integration's params; defaults to ``AI_SDK_<NAME>``.
-    settings_key: str = ""
 
     def __init__(self) -> None:
         if not self.name:
             raise ValueError(f"{type(self).__name__} must set a non-empty `name`")
-        params = self._get_params()
-        config, needs_setup = self._build_config(params)
+        config, needs_setup = self._build_config()
         super().__init__(self.name, config, needs_setup=needs_setup, intended_kind=self.auth)
         if needs_setup:
             logger.warning("Integration %r needs setup: %s", self.name, needs_setup)
 
-    def _get_params(self) -> dict[str, Any]:
-        key = self.settings_key or f"AI_SDK_{self.name.upper()}"
-        return dict(getattr(settings, key, {}) or {})
+    def _conf(self, key: str) -> str:
+        from django_ai_sdk.integrations.conf import get_integration_config
+
+        return get_integration_config(self.name, key)
 
     def _build_config(
-        self, params: dict[str, Any]
+        self,
     ) -> tuple[
         StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
         str | None,
     ]:
         return build_mcp_config_safe(
             auth=self.auth,
-            url=params.get("url", self.url),
-            label=params.get("label") or self.label or self.name.title(),
-            tools=list(params.get("tools", self.default_tools)),
-            scope=params.get("scope", self.scope),
-            client_id=params.get("client_id", ""),
-            client_secret=params.get("client_secret", ""),
-            oauth_discovery_url=params.get("oauth_discovery_url", ""),
-            authorization_endpoint=params.get("authorization_endpoint", ""),
-            token_endpoint=params.get("token_endpoint", ""),
-            token=params.get("token", ""),
+            url=self.url,
+            label=self.label or self.name.title(),
+            tools=list(self.default_tools),
+            scope=self.scope,
+            client_id=self._conf("client_id"),
+            client_secret=self._conf("client_secret"),
+            oauth_discovery_url=self._conf("oauth_discovery_url"),
+            authorization_endpoint=self._conf("authorization_endpoint"),
+            token_endpoint=self._conf("token_endpoint"),
+            token=self._conf("token"),
         )
 
 
@@ -464,7 +465,7 @@ async def resolve_client_credentials(
 
     A dynamically-registered client (RFC 7591, stored in MCPOAuthClient) takes
     precedence over static credentials configured on the integration. This is the
-    single source of truth for credential resolution — the OAuth start/refresh
+    single source of truth for credential resolution; the OAuth start and refresh
     paths all go through it.
     """
     from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
@@ -501,7 +502,7 @@ async def refresh_oauth_token(
     """The single refresh_token grant. Returns the updated token_obj, or None on failure.
 
     Every refresh in the codebase (the loader's own lazy refresh, the OAuth views,
-    and the refresh_integrations command) funnels through here.
+    and the refresh_integrations command) goes through here.
     """
     refresh_token = token_obj.get_refresh_token()
     if not refresh_token:
@@ -579,12 +580,12 @@ async def _connect(
 ) -> list[Any]:
     """Connect to an MCP server and return Haystack tool objects.
 
-    ``timeout`` is passed straight through as MCPToolset's own connection_timeout
-    (discovery only — tool *invocation* keeps MCPToolset's own 30s default, a
-    separate concern), rather than left at its 30s default: MCPToolset's connect
-    happens inside a plain blocking call on a background thread (via haystack's own
+    timeout is passed straight through as MCPToolset's own connection_timeout
+    (discovery only; tool invocation keeps MCPToolset's own 30s default, a separate
+    concern), rather than left at its 30s default: MCPToolset's connect happens
+    inside a plain blocking call on a background thread (via haystack's own
     AsyncExecutor), which our caller's asyncio-level timeout (ResilientCache) has no
-    power to interrupt — only MCPToolset's own internal timeout can actually abort
+    power to interrupt. Only MCPToolset's own internal timeout can actually abort
     and clean up the connection attempt. Keeping the two in sync avoids
     threads/connections lingering past the point where we've already given up and
     reported failure upstream.

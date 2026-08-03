@@ -1,22 +1,15 @@
-"""Example integrations for the demo app — a copy-me template.
+"""Example integration app — a copy-me template.
 
-An integration is just a class. There is no app to create, no ``INSTALLED_APPS`` entry,
-no migration: name it in ``AI_SDK_INTEGRATIONS`` and the registry builds it on first use.
-
-``WeatherIntegration`` below is the hand-written-API case (``APIIntegration``), deliberately
-built on Open-Meteo, which needs no API key — so it is genuinely runnable with zero
-credentials and exercises the whole contract: ``get_tools()``, invoking the tool, and a
-real ``get_status()`` backed by a health probe.
-
-For the MCP case there is nothing to write at all: point ``AI_SDK_INTEGRATIONS`` at
-``django_ai_sdk.integrations.defaults.LinearIntegration`` (see the demo settings), or
-subclass ``MCPIntegration`` with a url + auth for a server the SDK doesn't ship.
+Built on Open-Meteo, which needs no API key, so it is runnable with zero credentials
+and exercises the whole contract: ``get_tools()``, invoking the tool, and a real
+``get_status()`` backed by a health probe.
 """
 
 from __future__ import annotations
 
 import httpx
 from django_ai_sdk.integrations.api.base import APIIntegration
+from django_ai_sdk.integrations.apps import IntegrationAppConfig
 from haystack.tools import tool
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -84,3 +77,9 @@ class WeatherIntegration(APIIntegration):
     label = "Weather"
     tools = [get_current_weather]
     health_check = staticmethod(check_weather_api)
+
+
+class WeatherConfig(IntegrationAppConfig):
+    default = True
+    name = "piratespeak.integrations.weather"
+    integration = f"{__name__}.WeatherIntegration"

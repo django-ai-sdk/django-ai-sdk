@@ -1,12 +1,12 @@
 """OAuth callback endpoint for MCP integrations.
 
-Include this in the host project's URLconf, e.g.::
+Include this in the host project's URLconf, e.g.:
 
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
 
-so the reverse name resolves as ``integrations_mcp:oauth-callback``. There is no
-``oauth-start`` URL — the generic router's ``POST /api/integrations/{name}/connect``
-covers it (see ``integrations/views.py`` and ``integrations/mcp/oauth_views.py``).
+so the reverse name resolves as integrations_mcp:oauth-callback. There is no
+oauth-start URL; the generic router's POST /api/integrations/{name}/connect
+covers it (see integrations/views.py and integrations/mcp/oauth_views.py).
 """
 
 from __future__ import annotations

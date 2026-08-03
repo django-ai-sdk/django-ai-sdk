@@ -22,12 +22,6 @@ class ExampleWeatherService(APIIntegration):
     tools = [lambda **kwargs: fake_tool("get_current_weather")]
 
 
-class UnnamedService(APIIntegration):
-    """Declares no name — the registry backfills name and label from the settings key."""
-
-    tools = []
-
-
 class OpenService(APIIntegration):
     """Usable by anyone, including an anonymous/absent user.
 
