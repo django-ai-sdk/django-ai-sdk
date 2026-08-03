@@ -11,7 +11,7 @@ import pytest
 from django_ai_sdk.rags.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.schemas import RagDocument
-from tenacity import wait_none
+from tenacity import stop_after_delay as tenacity_stop_after_delay, wait_none
 
 
 class TestQdrantRAGInit:
@@ -244,13 +244,16 @@ class TestQdrantFileLockRetry:
         with patch(
             "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
             return_value=wait_none(),
+        ), patch(
+            "django_ai_sdk.rags.qdrant_hybrid.stop_after_delay",
+            return_value=tenacity_stop_after_delay(0.1),
         ):
             yield
 
     @pytest.fixture
     def rag(self, tmp_path):
         """Persistent-mode RAG instance backed by a temp directory."""
-        storage = QdrantStorageConfig(mode="persistent", persist_path=str(tmp_path))
+        storage = QdrantStorageConfig(backend="persistent", persist_path=str(tmp_path))
         config = QdrantBM25HybridRAGConfig(storage=storage)
         docs = [RagDocument(id="1", content="test", title="Test")]
         return QdrantBM25HybridRAG(documents=docs, config=config)
