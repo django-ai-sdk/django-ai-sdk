@@ -55,6 +55,8 @@ haystack = [
   "fastembed-haystack>=2.3.0",
   "haystack-ai>=2.30.0",
   "huggingface-hub>=1.17.0",
+  # Upper bound because json-repair is pre-1.0: minor releases may break API.
+  "json-repair>=0.30.0,<1.0",
   "qdrant-haystack>=10.3.0",
   "sentence-transformers>=5.5.1",
 ]

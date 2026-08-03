@@ -6,11 +6,13 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any, cast, overload
 
+import json_repair
 from django.conf import settings
 from haystack import AsyncPipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
+from pydantic import ValidationError
 
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.common import (
@@ -145,7 +147,33 @@ class Run:
                     }
                 },
             )
-            return response_format.model_validate_json(response["replies"][0].text)
+            reply = response["replies"][0]
+            text = reply.text
+            try:
+                return response_format.model_validate_json(text)
+            except ValidationError:
+                if (reply.meta or {}).get("finish_reason") == "length":
+                    # Truncated, not malformed. Repairing closes the structure
+                    # and drops whatever was cut, which validates cleanly and
+                    # hides the loss — the caller gets a complete-looking answer
+                    # built from an incomplete one. Fail instead, so the work
+                    # can be retried.
+                    logger.warning(
+                        "response_format output for {} was truncated; not repairing",
+                        response_format.__name__,
+                    )
+                    raise
+                # Some models (e.g. non-OpenAI ones used via a compatible
+                # endpoint) don't reliably honour strict JSON-schema output
+                # and can wrap/mangle the JSON (stray braces, etc). Repair it
+                # before giving up, instead of surfacing the malformed text
+                # as a hard failure.
+                logger.warning(
+                    "response_format JSON failed strict parse for {}, attempting repair: {!r}",
+                    response_format.__name__,
+                    text[:200],
+                )
+                return response_format.model_validate(json_repair.loads(text))
 
         response = self.generator.run(messages=user_messages)
         return response["replies"][0].text
