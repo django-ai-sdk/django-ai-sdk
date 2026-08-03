@@ -77,6 +77,11 @@ def _patch_oauth_transport(monkeypatch, transport: httpx.MockTransport) -> None:
     monkeypatch.setattr(loader_module, "build_oauth_client", wrapper)
 
 
+async def _coroutine(value):
+    """Wrap a value so it can stand in for an awaitable request attribute."""
+    return value
+
+
 def _patch_discovery(monkeypatch, token_endpoint: str = "https://auth.example.com/token") -> None:
     """Stub OAuth metadata discovery.
 
@@ -1122,6 +1127,9 @@ class TestOAuthRedirectFlow:
 
         request = RequestFactory().get(path, data=params)
         request.user = user
+        # RequestFactory skips middleware, so `auser` — which AuthenticationMiddleware
+        # attaches and every async view here awaits — is missing without this.
+        request.auser = lambda: _coroutine(user)
         request.session = SessionStore()
         return request
 
@@ -1222,6 +1230,64 @@ class TestOAuthRedirectFlow:
         assert stored.get_refresh_token() == "fresh-refresh"
         # One-shot PKCE material must not survive the exchange.
         assert loader_module._K_VERIFIER.format("notion") not in request.session
+
+    async def test_callback_clears_a_status_cached_before_the_token_existed(
+        self, settings, monkeypatch
+    ):
+        """Connecting must take effect immediately, not after the cache TTL.
+
+        The settings page checks status before the user connects, which caches
+        "no tools" for them. Without an invalidation on callback that entry
+        outlives the handshake by up to AI_SDK_INTEGRATION_CACHE_TTL (900s), so
+        the assistant keeps treating a freshly connected server as unconfigured.
+        """
+        from django_ai_sdk.integrations.mcp import loader as loader_module
+        from django_ai_sdk.integrations.mcp import oauth_views
+        from tests.factories.db import UserFactory
+
+        integration = self._oauth_integration()
+        settings.AI_SDK_INTEGRATIONS = {"notion": integration}
+        settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
+        _patch_oauth_transport(
+            monkeypatch,
+            _mock_transport(
+                {"access_token": "fresh-access", "refresh_token": "fresh-refresh"}
+            ),
+        )
+
+        user = await UserFactory.acreate()
+        key = integration._cache_key(user)
+
+        fetches = 0
+
+        async def fetch():
+            nonlocal fetches
+            fetches += 1
+            return []
+
+        # Stand in for the pre-connect status check, then prove it is cached.
+        await integration._cache.get(key, fetch)
+        await integration._cache.get(key, fetch)
+        assert fetches == 1
+
+        request = self._request(
+            user,
+            path="/api/integrations/oauth/notion/callback/",
+            code="auth-code",
+            state="the-state",
+        )
+        request.session[loader_module._K_STATE.format("notion")] = "the-state"
+        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
+        request.session[loader_module._K_TOKEN_ENDPOINT.format("notion")] = (
+            "https://auth.example.com/token"
+        )
+
+        response = await oauth_views.oauth_callback(request, "notion")
+        assert response.status_code == 302
+
+        # The stale entry is gone, so the next read goes back to the server.
+        await integration._cache.get(key, fetch)
+        assert fetches == 2
 
     async def test_callback_rejects_a_mismatched_state(self, settings, monkeypatch):
         """CSRF protection for the OAuth handshake: a code arriving with someone else's

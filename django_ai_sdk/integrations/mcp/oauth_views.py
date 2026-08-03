@@ -46,8 +46,8 @@ class OAuthCallbackError(Exception):
         self.http_status = http_status
 
 
-async def _get_oauth_config(server_name: str) -> OAuthMCPIntegrationConfig | None:
-    """Resolve a registered OAuth MCP integration's config, or None."""
+async def _get_oauth_integration(server_name: str) -> DynamicMCPIntegration | None:
+    """Resolve a registered OAuth MCP integration, or None."""
     from django_ai_sdk.integrations.registry import get_integrations
 
     integration = (await get_integrations([server_name])).get(server_name)
@@ -55,13 +55,13 @@ async def _get_oauth_config(server_name: str) -> OAuthMCPIntegrationConfig | Non
         integration.config, OAuthMCPIntegrationConfig
     ):
         return None
-    return integration.config
+    return integration
 
 
 async def _validate_callback_params(
     request: HttpRequest, server_name: str
-) -> tuple[str, str, str | None, OAuthMCPIntegrationConfig]:
-    """Validate the OAuth callback and extract (code, verifier, token_endpoint, config)."""
+) -> tuple[str, str, str | None, DynamicMCPIntegration]:
+    """Validate the OAuth callback and extract (code, verifier, token_endpoint, integration)."""
     if error := request.GET.get("error"):
         desc = request.GET.get("error_description", "")
         logger.error("OAuth error for %r: %s — %s", server_name, error, desc)
@@ -82,11 +82,11 @@ async def _validate_callback_params(
 
     token_endpoint = request.session.get(_K_TOKEN_ENDPOINT.format(server_name))
 
-    config = await _get_oauth_config(server_name)
-    if config is None:
+    integration = await _get_oauth_integration(server_name)
+    if integration is None:
         raise OAuthCallbackError("Server not found or not OAuth type", http_status=404)
 
-    return code, verifier, token_endpoint, config
+    return code, verifier, token_endpoint, integration
 
 
 async def _resolve_token_endpoint(
@@ -114,7 +114,10 @@ async def oauth_callback(
         return JsonResponse({"error": "Not authenticated"}, status=HTTPStatus.UNAUTHORIZED)
 
     try:
-        code, verifier, raw_endpoint, config = await _validate_callback_params(request, server_name)
+        code, verifier, raw_endpoint, integration = await _validate_callback_params(
+            request, server_name
+        )
+        config = integration.config
         client_id, client_secret = await resolve_client_credentials(server_name, config)
 
         for key_template in (_K_STATE, _K_VERIFIER, _K_TOKEN_ENDPOINT):
@@ -139,6 +142,13 @@ async def oauth_callback(
         except (httpx.HTTPError, ValueError) as e:
             logger.exception("Token exchange/store failed for %r", server_name)
             return JsonResponse({"error": f"Token exchange failed: {e}"}, status=500)
+
+        # A pre-connect status/tool check (e.g. the settings page) may have already
+        # cached "disconnected"/no-tools for this user before the token existed.
+        # Without this, that stale entry lives out its full TTL and the assistant
+        # keeps treating the integration as unconfigured until something else
+        # (e.g. the "Reconnect" button) happens to invalidate it.
+        await integration.reconnect(user)
 
         success_url = getattr(settings, "AI_SDK_MCP_OAUTH_SUCCESS_URL", "/")
         if not url_has_allowed_host_and_scheme(success_url, allowed_hosts={request.get_host()}):
