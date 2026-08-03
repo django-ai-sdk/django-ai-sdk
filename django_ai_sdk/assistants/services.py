@@ -39,6 +39,7 @@ class AssistantSummary(TypedDict):
     name: str | None
     model: str | None
     file_upload: bool
+    rag: bool
 
 
 class AssistantCreateData(TypedDict, total=False):
@@ -91,7 +92,12 @@ class AssistantService(PermissionsMixin):
     ) -> bool:
         perms = get_assistant_permissions(assistant)
         return await has_perms(
-            user, operation, obj, permissions=perms, raise_on_deny=raise_on_deny, **kwargs
+            user,
+            operation,
+            obj,
+            permissions=perms,
+            raise_on_deny=raise_on_deny,
+            **kwargs,
         )
 
     @classmethod
@@ -173,6 +179,7 @@ class AssistantService(PermissionsMixin):
                         name=assistant.name,
                         model=assistant.model,
                         file_upload=getattr(assistant, "file_upload", False),
+                        rag=True if getattr(assistant, "rag_provider", False) else False,
                     )
                 )
             except PermissionDenied:
@@ -201,6 +208,7 @@ class AssistantService(PermissionsMixin):
                     name=config.name,
                     model=config.model,
                     file_upload=getattr(assistant, "file_upload", False),
+                    rag=True if getattr(assistant, "rag_provider", None) else False,
                 )
             )
 

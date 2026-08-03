@@ -117,6 +117,7 @@ class AssistantInfoSerializer(serializers.Serializer):
     description = serializers.CharField(allow_null=True, required=False)
     instructions = serializers.CharField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(default=False)
+    rag = serializers.BooleanField(default=False)
 
 
 class ListAssistantsItemSerializer(serializers.Serializer):
@@ -348,6 +349,7 @@ class AssistantInfoAPIView(APIView):
                         "description": info.description,
                         "instructions": assistant.get_system_prompt(),
                         "file_upload": info.file_upload,
+                        "rag": info.rag,
                     }
                 ).data
             )
