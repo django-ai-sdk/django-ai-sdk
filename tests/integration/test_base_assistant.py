@@ -273,13 +273,13 @@ class TestTitleGenerationPrompt:
 
         return TestAssistant()
 
-    def test_default_prompt_mentions_column_max_length(self, assistant):
-        from django_ai_sdk.conversation.models import Thread
+    def test_default_prompt_mentions_sanity_limit(self, assistant):
+        from django_ai_sdk.conversation.utils import get_title_sanity_limit
 
-        max_length = Thread._meta.get_field("title").max_length
+        sanity_limit = get_title_sanity_limit()
         prompt = assistant.get_title_generation_prompt()
 
-        assert str(max_length) in prompt
+        assert str(sanity_limit) in prompt
 
     @pytest.mark.asyncio
     async def test_generate_thread_title_uses_overridden_prompt(self, assistant):
