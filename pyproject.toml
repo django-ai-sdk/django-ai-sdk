@@ -24,10 +24,8 @@ classifiers = [
 keywords = ["django", "ai", "assistant", "rag", "llm", "streaming", "sse"]
 dependencies = [
   "aiofiles>=25.1.0",
-  "authlib>=1.7.2", # MCP OAuth 2.1 client (token exchange + refresh)
-  "cashews>=7.5.0,<9", # stale-while-revalidate cache + circuit breaker (integrations)
   "daphne>=4.2.3",
-  "django>=6.0.7,<6.1",
+  "django>=5.2.6,<6.1",
   "django-environ>=0.14.0",
   "django-tasks>=0.12.0",
   "django-tasks-db>=0.12.0",
@@ -58,7 +56,7 @@ haystack = [
   "qdrant-haystack>=10.4.0",
   "sentence-transformers>=5.6.1",
 ]
-mcp = ["mcp>=2.0.0", "mcp-haystack>=1.4.1"]
+mcp = ["mcp-haystack>=1.4.1", "authlib>=1.7.2", "cashews>=7.5.0,<9"]
 restframework = ["djangorestframework>=3.17.1"]
 files = ["python-docx>=1.2.0", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 [dependency-groups]
