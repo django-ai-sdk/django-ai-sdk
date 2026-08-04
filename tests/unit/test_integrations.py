@@ -53,7 +53,9 @@ def _clean_registry():
     reset_registry()
 
 
-def _mock_transport(token_response: dict, status_code: int = 200) -> httpx.MockTransport:
+def _mock_transport(
+    token_response: dict, status_code: int = 200
+) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(status_code, json=token_response)
 
@@ -76,7 +78,14 @@ def _patch_oauth_transport(monkeypatch, transport: httpx.MockTransport) -> None:
     monkeypatch.setattr(loader_module, "build_oauth_client", wrapper)
 
 
-def _patch_discovery(monkeypatch, token_endpoint: str = "https://auth.example.com/token") -> None:
+async def _coroutine(value):
+    """Wrap a value so it can stand in for an awaitable request attribute."""
+    return value
+
+
+def _patch_discovery(
+    monkeypatch, token_endpoint: str = "https://auth.example.com/token"
+) -> None:
     """Stub OAuth metadata discovery.
 
     Patches every module that binds ``discover``, not just its home module: `services`
@@ -161,7 +170,9 @@ class TestResilientCache:
         assert result == []  # degrades to empty rather than hanging
         assert elapsed < 0.5  # bounded by `timeout`, not the 10s fetch
 
-    async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(self):
+    async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(
+        self,
+    ):
         cache = ResilientCache(ttl=60, timeout=1)
         calls = 0
 
@@ -380,13 +391,19 @@ class TestIntegrationDisplayMetadata:
     so they must stay cheap — no live I/O when config already answers the question."""
 
     async def test_mcp_integration_kind_reflects_config_type(self):
-        token = DynamicMCPIntegration("linear", TokenMCPIntegrationConfig(url="https://x", token="t"))
-        oauth = DynamicMCPIntegration("notion", OAuthMCPIntegrationConfig(url="https://x"))
+        token = DynamicMCPIntegration(
+            "linear", TokenMCPIntegrationConfig(url="https://x", token="t")
+        )
+        oauth = DynamicMCPIntegration(
+            "notion", OAuthMCPIntegrationConfig(url="https://x")
+        )
 
         assert token.kind == "token"
         assert oauth.kind == "oauth"
 
-    async def test_mcp_integration_tool_names_reads_config_without_connecting(self, monkeypatch):
+    async def test_mcp_integration_tool_names_reads_config_without_connecting(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def explodes_if_called(*args, **kwargs):
@@ -396,7 +413,9 @@ class TestIntegrationDisplayMetadata:
 
         integration = DynamicMCPIntegration(
             "linear",
-            TokenMCPIntegrationConfig(url="https://x", token="t", tools=["list_issues"]),
+            TokenMCPIntegrationConfig(
+                url="https://x", token="t", tools=["list_issues"]
+            ),
         )
 
         assert await integration.get_tool_names() == ["list_issues"]
@@ -474,15 +493,21 @@ class TestIntegrationDisplayMetadata:
             tools = [
                 lambda user: _fake_tool("only_user"),
                 lambda user, thread_id: _fake_tool("user_thread"),
-                lambda **kw: _fake_tool("kwargs_all" if "assistant" in kw else "kwargs_bad"),
+                lambda **kw: _fake_tool(
+                    "kwargs_all" if "assistant" in kw else "kwargs_bad"
+                ),
             ]
 
-        names = [t.name for t in await DummyIntegration().get_tools(user="u", thread_id="t")]
+        names = [
+            t.name for t in await DummyIntegration().get_tools(user="u", thread_id="t")
+        ]
         assert names == ["only_user", "user_thread", "kwargs_all"]
 
 
 class TestMCPIntegrationGetStatus:
-    async def test_wrong_static_token_reports_degraded_on_first_check(self, monkeypatch):
+    async def test_wrong_static_token_reports_degraded_on_first_check(
+        self, monkeypatch
+    ):
         """A token integration whose credential is simply wrong must not show as
         connected just because get_status() was never exercised by a chat turn yet."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
@@ -499,7 +524,9 @@ class TestMCPIntegrationGetStatus:
 
         assert await integration.get_status() == IntegrationStatus.DEGRADED
 
-    async def test_correct_static_token_reports_active_on_first_check(self, monkeypatch):
+    async def test_correct_static_token_reports_active_on_first_check(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def succeeds(*args, **kwargs):
@@ -543,7 +570,11 @@ class TestMCPIntegrationGetStatus:
         from django_ai_sdk.integrations.mcp.loader import build_mcp_config_safe
 
         config, needs_setup = build_mcp_config_safe(
-            auth="token", url="https://example.com/mcp", label="Linear", tools=[], token=""
+            auth="token",
+            url="https://example.com/mcp",
+            label="Linear",
+            tools=[],
+            token="",
         )
         integration = DynamicMCPIntegration(
             "linear", config, needs_setup=needs_setup, intended_kind="token"
@@ -856,12 +887,20 @@ class TestIntegrationToolNamespacing:
         class FirstIntegration(APIIntegration):
             permissions = [AllowAll]
             name = "first"
-            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+            tools = [
+                lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(
+                    name="list_issues"
+                )
+            ]
 
         class SecondIntegration(APIIntegration):
             permissions = [AllowAll]
             name = "second"
-            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+            tools = [
+                lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(
+                    name="list_issues"
+                )
+            ]
 
         class FakeAssistant(Assistant):
             name = "Fake"
@@ -886,12 +925,18 @@ class TestOAuthTokenRefresh:
     HTTP exchange plus the optimistic-concurrency guard against a concurrent refresh
     (another request, or an overlapping refresh_integrations run) landing first."""
 
-    async def _make_token(self, user, server_name="notion", refresh_token="old-refresh"):
+    async def _make_token(
+        self, user, server_name="notion", refresh_token="old-refresh"
+    ):
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
         token_obj = MCPOAuthToken(user=user, server_name=server_name)
         token_obj.set_tokens(
-            {"access_token": "old-access", "refresh_token": refresh_token, "expires_in": -10}
+            {
+                "access_token": "old-access",
+                "refresh_token": refresh_token,
+                "expires_in": -10,
+            }
         )
         await token_obj.asave()
         return token_obj
@@ -908,12 +953,18 @@ class TestOAuthTokenRefresh:
         _patch_oauth_transport(
             monkeypatch,
             _mock_transport(
-                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+                {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 3600,
+                }
             ),
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         result = await refresh_oauth_token(token_obj, config)
 
@@ -938,7 +989,9 @@ class TestOAuthTokenRefresh:
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         result = await refresh_oauth_token(token_obj, config)
 
@@ -956,7 +1009,9 @@ class TestOAuthTokenRefresh:
         token_obj = await self._make_token(user, refresh_token="")
 
         def explodes(request):
-            raise AssertionError("must not call the token endpoint without a refresh token")
+            raise AssertionError(
+                "must not call the token endpoint without a refresh token"
+            )
 
         _patch_discovery(monkeypatch)
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
@@ -964,7 +1019,9 @@ class TestOAuthTokenRefresh:
         config = OAuthMCPIntegrationConfig(url="https://mcp.example.com", client_id="c")
         assert await refresh_oauth_token(token_obj, config) is None
 
-    async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(self, monkeypatch):
+    async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(
+        self, monkeypatch
+    ):
         """By the time our refresh response comes back, a concurrent refresh has already
         rotated the row's refresh_token out from under us. Our conditional update must
         no-op, and the caller must get the winner's tokens — not silently overwrite
@@ -978,7 +1035,11 @@ class TestOAuthTokenRefresh:
 
         winner = MCPOAuthToken(user=user, server_name=token_obj.server_name)
         winner.set_tokens(
-            {"access_token": "winner-access", "refresh_token": "winner-refresh", "expires_in": 3600}
+            {
+                "access_token": "winner-access",
+                "refresh_token": "winner-refresh",
+                "expires_in": 3600,
+            }
         )
         await MCPOAuthToken.objects.filter(pk=token_obj.pk).aupdate(
             access_token=winner.access_token,
@@ -999,7 +1060,9 @@ class TestOAuthTokenRefresh:
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         # token_obj still holds the pre-race refresh_token in memory — exactly the stale
         # value a real caller would have if it read the row before the race.
@@ -1019,7 +1082,11 @@ class TestExchangeToken:
         _patch_oauth_transport(
             monkeypatch,
             _mock_transport(
-                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+                {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 3600,
+                }
             ),
         )
 
@@ -1087,6 +1154,9 @@ class TestOAuthRedirectFlow:
 
         request = RequestFactory().get(path, data=params)
         request.user = user
+        # RequestFactory skips middleware, so `auser` — which AuthenticationMiddleware
+        # attaches and every async view here awaits — is missing without this.
+        request.auser = lambda: _coroutine(user)
         request.session = SessionStore()
         return request
 
@@ -1101,7 +1171,9 @@ class TestOAuthRedirectFlow:
             ),
         )
 
-    async def test_connect_redirects_to_the_provider_and_stores_pkce_state(self, monkeypatch):
+    async def test_connect_redirects_to_the_provider_and_stores_pkce_state(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
@@ -1113,7 +1185,8 @@ class TestOAuthRedirectFlow:
             return "client-1", "secret-1"
 
         monkeypatch.setattr(
-            "django_ai_sdk.integrations.mcp.services.get_or_register_client", fake_register
+            "django_ai_sdk.integrations.mcp.services.get_or_register_client",
+            fake_register,
         )
 
         user = await UserFactory.acreate()
@@ -1137,12 +1210,17 @@ class TestOAuthRedirectFlow:
         user = await UserFactory.acreate()
 
         result = await IntegrationService.connect(
-            "nope", user, request=self._request(user), redirect_uri="https://app.example.com/cb"
+            "nope",
+            user,
+            request=self._request(user),
+            redirect_uri="https://app.example.com/cb",
         )
 
         assert result is None
 
-    async def test_callback_exchanges_the_code_and_persists_the_token(self, settings, monkeypatch):
+    async def test_callback_exchanges_the_code_and_persists_the_token(
+        self, settings, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
@@ -1185,6 +1263,64 @@ class TestOAuthRedirectFlow:
         # One-shot PKCE material must not survive the exchange.
         assert loader_module._K_VERIFIER.format("notion") not in request.session
 
+    async def test_callback_clears_a_status_cached_before_the_token_existed(
+        self, settings, monkeypatch
+    ):
+        """Connecting must take effect immediately, not after the cache TTL.
+
+        The settings page checks status before the user connects, which caches
+        "no tools" for them. Without an invalidation on callback that entry
+        outlives the handshake by up to AI_SDK_INTEGRATION_CACHE_TTL (900s), so
+        the assistant keeps treating a freshly connected server as unconfigured.
+        """
+        from django_ai_sdk.integrations.mcp import loader as loader_module
+        from django_ai_sdk.integrations.mcp import oauth_views
+        from tests.factories.db import UserFactory
+
+        integration = self._oauth_integration()
+        settings.AI_SDK_INTEGRATIONS = {"notion": integration}
+        settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
+        _patch_oauth_transport(
+            monkeypatch,
+            _mock_transport(
+                {"access_token": "fresh-access", "refresh_token": "fresh-refresh"}
+            ),
+        )
+
+        user = await UserFactory.acreate()
+        key = integration._cache_key(user)
+
+        fetches = 0
+
+        async def fetch():
+            nonlocal fetches
+            fetches += 1
+            return []
+
+        # Stand in for the pre-connect status check, then prove it is cached.
+        await integration._cache.get(key, fetch)
+        await integration._cache.get(key, fetch)
+        assert fetches == 1
+
+        request = self._request(
+            user,
+            path="/api/integrations/oauth/notion/callback/",
+            code="auth-code",
+            state="the-state",
+        )
+        request.session[loader_module._K_STATE.format("notion")] = "the-state"
+        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
+        request.session[loader_module._K_TOKEN_ENDPOINT.format("notion")] = (
+            "https://auth.example.com/token"
+        )
+
+        response = await oauth_views.oauth_callback(request, "notion")
+        assert response.status_code == 302
+
+        # The stale entry is gone, so the next read goes back to the server.
+        await integration._cache.get(key, fetch)
+        assert fetches == 2
+
     async def test_callback_rejects_a_mismatched_state(self, monkeypatch):
         """CSRF protection for the OAuth handshake: a code arriving with someone else's
         (or a forged) state must never be exchanged."""
@@ -1196,7 +1332,9 @@ class TestOAuthRedirectFlow:
         register(self._oauth_integration())
 
         def explodes(request):
-            raise AssertionError("must not reach the token endpoint on a state mismatch")
+            raise AssertionError(
+                "must not reach the token endpoint on a state mismatch"
+            )
 
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
 
@@ -1215,14 +1353,18 @@ class TestOAuthRedirectFlow:
         assert response.status_code == 400
         assert not await MCPOAuthToken.objects.filter(user=user).aexists()
 
-    async def test_callback_reports_a_provider_error_without_exchanging(self, monkeypatch):
+    async def test_callback_reports_a_provider_error_without_exchanging(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import oauth_views
         from tests.factories.db import UserFactory
 
         register(self._oauth_integration())
 
         def explodes(request):
-            raise AssertionError("must not reach the token endpoint after a provider error")
+            raise AssertionError(
+                "must not reach the token endpoint after a provider error"
+            )
 
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
 
@@ -1238,7 +1380,9 @@ class TestOAuthRedirectFlow:
 
         assert response.status_code == 400
 
-    async def test_callback_refuses_an_off_site_success_redirect(self, settings, monkeypatch):
+    async def test_callback_refuses_an_off_site_success_redirect(
+        self, settings, monkeypatch
+    ):
         """A misconfigured AI_SDK_MCP_OAUTH_SUCCESS_URL must not turn the callback into
         an open redirect — it falls back to "/"."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
@@ -1248,7 +1392,8 @@ class TestOAuthRedirectFlow:
         register(self._oauth_integration())
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "https://evil.example.com/steal"
         _patch_oauth_transport(
-            monkeypatch, _mock_transport({"access_token": "fresh-access", "expires_in": 3600})
+            monkeypatch,
+            _mock_transport({"access_token": "fresh-access", "expires_in": 3600}),
         )
 
         user = await UserFactory.acreate()
@@ -1284,7 +1429,9 @@ class TestNoStartUrl:
     def test_oauth_callback_still_resolves(self):
         from django.urls import reverse
 
-        assert reverse("integrations_mcp:oauth-callback", kwargs={"server_name": "notion"})
+        assert reverse(
+            "integrations_mcp:oauth-callback", kwargs={"server_name": "notion"}
+        )
 
 
 @pytest.mark.django_db
@@ -1365,7 +1512,10 @@ class TestIntegrationService:
 
         with pytest.raises(PermissionDenied):
             await IntegrationService.connect(
-                "only-usable", user, request=None, redirect_uri="https://app.example.com/cb"
+                "only-usable",
+                user,
+                request=None,
+                redirect_uri="https://app.example.com/cb",
             )
 
     async def test_connect_returns_none_for_an_unknown_integration(self):
@@ -1380,7 +1530,9 @@ class TestIntegrationService:
 
         assert result is None
 
-    async def test_disconnect_and_reconnect_return_none_for_an_unknown_integration(self):
+    async def test_disconnect_and_reconnect_return_none_for_an_unknown_integration(
+        self,
+    ):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
