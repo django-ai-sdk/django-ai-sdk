@@ -132,50 +132,55 @@ class Assistant(ABC, AssistantInfoMixin):
         return await assistant.as_view(protocol_messages)
     """
 
+    # Name of assistant.
     name: str
+
+    # Short description of assistant.
     description: str
+
+    # Model identifier for LLM backend.
     model: str
+
+    # System prompt instructions for the assistant.
     instructions: Prompt = prompt("You are a helpful assistant.")
 
     # Permission classes used to gate access to this assistant's operations.
     permissions: list[type[BasePermission]] = [AllowAll]
 
-    # Default list of connected memories
+    # Default list of connected memories.
     memories: list[str] = []
 
+    # Tools are callable from assistant.
     tools: list[str] = []
 
     # ArtifactSchema subclasses to register as tools in stream pipelines.
     artifacts: list[type[BaseModel]] = []
 
+    # Protocol handler class for converting protocol messages
     protocol = None
+
+    # Storage adapter class for persisting threads and messages
     storage: type[BaseStorageAdapter] | None = None
 
     # Set to an ArtifactSchema subclass to enable structured output for run() calls.
     response_format: type[BaseModel] | None = None
 
-    # If True, hide from registry.visible() (used for internal assistants)
+    # If True, hide from registry
     hidden: bool = False
 
-    # If True, this is a shared base meant only to be subclassed — it never enters the
-    # registry. Checked on the class's own __dict__, so it is never inherited and each
-    # concrete subclass registers normally without restating it.
-    #
-    # Distinct from `_skip_auto_register` (see assistants/runtime.py), which marks a
-    # class that is concrete and instantiated but built on demand rather than looked up
-    # by id. Both stay out of the registry, for unrelated reasons.
+    # If True, this is a shared base meant only to be subclassed.
     abstract: bool = False
 
-    # If Assistant should automatically warm up after initialization
+    # If Assistant should automatically warm up after initialization.
     warmup_on_init: bool = False
 
-    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG
+    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG.
     rag_provider: Any = None
 
-    # Maximum conversation history to send to LLM (None = unlimited)
+    # Maximum conversation history to send to LLM (None = unlimited).
     max_history: int | None = None
 
-    # Enable file upload UI for this assistant's threads
+    # Enable file upload UI for this assistant's threads.
     file_upload: bool = False
 
     # Declare one FilePipeline per supported file type.
@@ -183,10 +188,10 @@ class Assistant(ABC, AssistantInfoMixin):
     # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
     file_pipelines: list[FilePipeline] = []
 
-    # Enable automatic thread title generation based on chat messages
+    # Enable automatic thread title generation based on chat messages.
     title_generation: bool = True
 
-    # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories)
+    # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories).
     rag_document_limit: int = 10_000
 
     # Citation formatter used to render retrieved documents for the LLM.
@@ -610,8 +615,6 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         if not self.integrations:
             return []
-
-        from django_ai_sdk.permissions import Operation
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:

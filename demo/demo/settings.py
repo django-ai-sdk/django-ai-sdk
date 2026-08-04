@@ -58,10 +58,11 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_tasks",
     "django_tasks_db",
+    # sdk
     "django_ai_sdk",
-    # The MCP toolkit: OAuth token models + the OAuth redirect views.
+    # mcp integration
     "django_ai_sdk.integrations.mcp",
-    # Shipped default integrations: one MCP-backed, one API-backed.
+    # default integrations
     "django_ai_sdk.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
