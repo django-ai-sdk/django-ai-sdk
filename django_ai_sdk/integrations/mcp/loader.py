@@ -62,13 +62,10 @@ class DynamicMCPIntegration(Integration):
     gets no tools from this integration, rather than triggering a connect attempt.
 
     Each instance owns its own ResilientCache rather than sharing one process-wide
-    global. This is safe because
-    django_ai_sdk.integrations.registry.get_all_integrations() already builds exactly
-    one DynamicMCPIntegration per configured server name and caches it for the life
-    of the process, so instance-scoped state has the same effective lifetime and
-    sharing as a module-level singleton would, without the downsides of shared
-    mutable global state (e.g. tests that construct their own instances get a
-    naturally isolated cache, with no risk of bleeding into another test's).
+    global — registry.get_all_integrations() builds and caches one instance per
+    server name for the process lifetime, so this has the same effective lifetime
+    without shared mutable state (tests constructing their own instance get an
+    isolated cache for free).
     """
 
     def __init__(
