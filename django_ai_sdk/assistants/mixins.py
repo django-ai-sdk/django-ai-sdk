@@ -26,6 +26,7 @@ class AssistantInfo(BaseModel):
     class_name: str
     description: str | None = None
     file_upload: bool = False
+    rag: bool = True
 
 
 # Namespace for deterministic UUID generation (arbitrary but fixed)
@@ -53,6 +54,7 @@ class AssistantInfoMixin:
             class_name=self.__class__.__name__,
             description=getattr(self, "description", None),
             file_upload=getattr(self, "file_upload", False),
+            rag=True if getattr(self, "rag_provider", None) else False,
         )
 
     @property

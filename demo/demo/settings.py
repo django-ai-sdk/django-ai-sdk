@@ -190,6 +190,7 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
+
 # Integrations are Django apps (see INSTALLED_APPS above) that register themselves on
 # ready(). INSTALLED_APPS decides which exist; this dict configures them, keyed by
 # integration name, in the same shape as DATABASES or CACHES. A missing credential
