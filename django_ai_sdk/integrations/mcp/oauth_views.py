@@ -1,15 +1,17 @@
 """OAuth 2.1 + PKCE callback view for MCP integrations.
 
 A browser-redirect endpoint (not JSON): the identity provider redirects the browser
-here after the user approves the connection, so it must live at a fixed URL. This
-differs from the start leg (building the authorization URL, PKCE, session state),
-which is plain business logic on Integration.connect() reached via the generic
-POST /api/integrations/{name}/connect (see integrations/views.py); the client
-navigates to that response's redirect_url itself, with no dedicated start endpoint
-needed. This view validates the IdP response, exchanges the code, and stores the
-token. It lives in the MCP toolkit and is wired under the integrations namespace by
-the host project's URLconf. Config is resolved from the integrations registry;
-there is no AI_SDK_INTEGRATIONS setting.
+here after the user approves the connection, so it must live at a fixed URL. That is
+why this one leg ships with the SDK while the rest of the integrations HTTP surface
+does not.
+
+The start leg (building the authorization URL, PKCE, session state) is plain
+business logic on Integration.connect(), which the host project exposes through its
+own POST endpoint over IntegrationService.connect(); the client then navigates to
+that response's redirect_url itself, so no dedicated start URL is needed here. This
+view validates the IdP response, exchanges the code, and stores the token. Config is
+resolved from the integrations registry, which each integration app populates on
+ready().
 """
 
 from __future__ import annotations

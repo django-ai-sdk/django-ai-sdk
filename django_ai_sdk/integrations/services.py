@@ -3,9 +3,14 @@
 Integration (integrations/base.py) is the per-item business logic, one instance per
 configured integration, the role Assistant plays for assistants. IntegrationService
 resolves by name, permission-checks, and delegates to the instance, the role
-AssistantService plays for assistants. integrations/views.py and AssistantService
-are its two callers today; either could be replaced by a management command or
-another host app without duplicating this logic.
+AssistantService plays for assistants.
+
+This is the seam an HTTP layer sits on. The SDK deliberately ships no integrations
+router -- it doesn't pick the host's web framework -- so the host project builds
+list/connect/disconnect/reconnect endpoints over the four methods below;
+demo/piratespeak/views_integrations_ninja.py is a complete reference. Its other
+caller is AssistantService, and either could be replaced by a management command
+without duplicating this logic.
 
 There is no PermissionsMixin here (contrast AssistantService): every operation below
 already has a concrete Integration instance to delegate has_perms to, so there is no

@@ -16,9 +16,9 @@ class IntegrationOut(BaseModel):
     """One integration's state for the generic GET /api/integrations list.
 
     Capability flags let the client decide which actions to offer without knowing the
-    integration's kind. When supports_connect, the client calls POST
-    /{name}/connect to get the redirect URL. This list never carries one itself,
-    since building it needs the request (see integrations/views.py).
+    integration's kind. When supports_connect, the client calls the host project's
+    POST /{name}/connect endpoint to get the redirect URL. This list never carries
+    one itself, since building it needs the request.
     """
 
     name: str

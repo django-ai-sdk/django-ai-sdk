@@ -55,11 +55,11 @@ class Integration(ABC):
     """The single point of contact for one integration.
 
     Every integration, whether an MCP server or a hand-written API wrapper, is one
-    Integration subclass, living in its app's services.py. It owns the integration's
-    tools, health, permissions, connection lifecycle and credential refresh, and is
-    what the Assistant and the /api/integrations endpoints talk to. An
-    IntegrationAppConfig (see apps.py) constructs it and registers it into the
-    process registry on app ready().
+    Integration subclass, living in its app's integration.py. It owns the
+    integration's tools, health, permissions, connection lifecycle and credential
+    refresh, and is what the Assistant and the host project's integrations endpoints
+    talk to. An IntegrationAppConfig (see apps.py) constructs it and registers it
+    into the process registry on app ready().
     """
 
     name: str = ""
@@ -85,6 +85,42 @@ class Integration(ABC):
     #: Human-readable reason this integration can't run yet (e.g. a missing secret),
     #: or None when fully configured. Never raises; surfaced to the UI instead.
     detail: str | None = None
+
+    # -- configuration --
+
+    def secret(self, key: str, default: str = "") -> str:
+        """This integration's configured string value for `key`.
+
+        Reads AI_SDK_INTEGRATIONS[self.name][KEY] (see config.py), so an integration
+        named "zendesk" reads AI_SDK_INTEGRATIONS["zendesk"]["TOKEN"]. Returns
+        ``default`` when unset -- check it and set `detail` rather than raising, so a
+        missing credential degrades this integration instead of failing app boot.
+        """
+        value = self._config().get(key.upper())
+        if value is None:
+            return default
+        if not isinstance(value, str):
+            # Stringifying would turn a list into "['a']" and hand that to a remote
+            # server as a credential. Name the key, never the value -- this is a secret.
+            logger.warning(
+                "AI_SDK_INTEGRATIONS[%r][%r] must be a string, got %s; treating it as unset",
+                self.name,
+                key.upper(),
+                type(value).__name__,
+            )
+            return default
+        return value or default
+
+    def _config(self) -> dict[str, Any]:
+        """This integration's AI_SDK_INTEGRATIONS slice, with upper-cased keys.
+
+        Internal: subclasses read individual values through secret(), and MCPIntegration
+        reads its non-secret keys (URL, TOOLS, ...) here. Empty when the integration
+        isn't configured; never raises.
+        """
+        from django_ai_sdk.integrations.config import get_integration_config
+
+        return get_integration_config(self.name)
 
     @abstractmethod
     async def get_tools(

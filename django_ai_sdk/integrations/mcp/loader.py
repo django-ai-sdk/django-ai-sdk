@@ -40,6 +40,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: How an MCP server authenticates. "static" is no auth at all, "token" is one shared
+#: deployment secret, "oauth" is a per-user OAuth 2.1 + PKCE connection.
+AUTH_KINDS = frozenset({"static", "token", "oauth"})
+
+#: The toolkit app carrying the OAuth token models every MCP integration reuses.
+_MCP_APP = "django_ai_sdk.integrations.mcp"
+
 # Session-key templates for PKCE state during the OAuth redirect dance.
 _K_STATE = "mcp_oauth_state_{}"
 _K_VERIFIER = "mcp_oauth_verifier_{}"
@@ -376,6 +383,13 @@ def build_mcp_config_safe(
         return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
             "missing required url"
         )
+    # `auth` is deployer-supplied (AI_SDK_INTEGRATIONS[...]["AUTH"]), so a typo must be
+    # named rather than silently falling through to "static" -- which would look like a
+    # healthy server that never authenticates.
+    if auth not in AUTH_KINDS:
+        return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), (
+            f"unknown auth {auth!r}; expected one of {', '.join(sorted(AUTH_KINDS))}"
+        )
     try:
         if auth == "oauth":
             config = OAuthMCPIntegrationConfig(
@@ -404,8 +418,7 @@ def build_mcp_config_safe(
 class MCPIntegration(DynamicMCPIntegration):
     """Thin base for a known MCP server shipped as its own Django app.
 
-    Subclasses declare the server as class attributes; credentials come from
-    get_integration_secret (see secrets.py):
+    Subclasses declare the server as class attributes:
 
         class NotionIntegration(MCPIntegration):
             name = "notion"
@@ -414,9 +427,45 @@ class MCPIntegration(DynamicMCPIntegration):
             auth = "oauth"
             default_tools = ["notion-search"]
 
-    A missing required secret (e.g. auth="token" with no token configured) never
+    Credentials, and per-deployment overrides for the class attributes above, come
+    from this integration's AI_SDK_INTEGRATIONS slice (see config.py)::
+
+        AI_SDK_INTEGRATIONS = {
+            "notion": {
+                "CLIENT_ID": env("NOTION_CLIENT_ID"),
+                "CLIENT_SECRET": env("NOTION_CLIENT_SECRET"),
+            },
+        }
+
+    URL is overridable because it is the value that genuinely varies per environment
+    -- a self-hosted MCP server differs between staging and production, and having to
+    subclass for that would be absurd. TOOLS, LABEL and SCOPE follow for the same
+    reason. Class attributes remain the default, so a shipped integration works with
+    only its secrets supplied.
+
+    AUTH is overridable too, because several servers offer more than one mechanism and
+    which to use is the deployer's call, not the SDK's. GitHub's MCP server takes
+    either a shared PAT or per-user OAuth, so one shipped app serves both::
+
+        AI_SDK_INTEGRATIONS = {"github": {"TOKEN": env("GITHUB_MCP_TOKEN")}}
+
+        AI_SDK_INTEGRATIONS = {"github": {
+            "AUTH": "oauth",
+            "CLIENT_ID": env("GITHUB_OAUTH_CLIENT_ID"),
+            "CLIENT_SECRET": env("GITHUB_OAUTH_CLIENT_SECRET"),
+        }}
+
+    Note this is a behavioural switch, not just a credential one: "token" gives every
+    user one shared identity on the remote server, while "oauth" gives each user a
+    per-user connection, a per-user tool cache and a Connect step in the UI. Which
+    identity the model acts as changes with it. Everything downstream follows the
+    resulting config automatically -- supports_connect, connect_kind and kind are all
+    derived from it, never declared -- so no other attribute needs changing.
+
+    A missing required secret (e.g. auth="token" with no TOKEN configured) never
     crashes boot; the integration registers but reports itself as needing setup
-    (detail explains why) until the config is filled in.
+    (detail explains why) until the config is filled in. An unrecognised AUTH is
+    reported the same way rather than silently degrading to an unauthenticated server.
     """
 
     url: str = ""
@@ -424,18 +473,66 @@ class MCPIntegration(DynamicMCPIntegration):
     default_tools: list[str] = []
     scope: str = ""
 
+    #: Keys recognised in this integration's AI_SDK_INTEGRATIONS entry. Anything else is
+    #: a typo, and a silently-ignored one produces a misleading error downstream -- a
+    #: stray "TOKENS" reports "token must not be empty", which points at the wrong thing.
+    CONFIG_KEYS = frozenset(
+        {
+            "AUTH",
+            "URL",
+            "LABEL",
+            "TOOLS",
+            "SCOPE",
+            "TOKEN",
+            "CLIENT_ID",
+            "CLIENT_SECRET",
+            "OAUTH_DISCOVERY_URL",
+            "AUTHORIZATION_ENDPOINT",
+            "TOKEN_ENDPOINT",
+        }
+    )
+
     def __init__(self) -> None:
         if not self.name:
             raise ValueError(f"{type(self).__name__} must set a non-empty `name`")
+        self._warn_unknown_config_keys()
+        auth = self._auth()
         config, needs_setup = self._build_config()
-        super().__init__(self.name, config, needs_setup=needs_setup, intended_kind=self.auth)
+        if not needs_setup:
+            needs_setup = self._missing_mcp_app()
+        super().__init__(self.name, config, needs_setup=needs_setup, intended_kind=auth)
         if needs_setup:
             logger.warning("Integration %r needs setup: %s", self.name, needs_setup)
 
-    def _secret(self, key: str) -> str:
-        from django_ai_sdk.integrations.secrets import get_integration_secret
+    def _auth(self) -> str:
+        """The configured auth kind, falling back to the class attribute."""
+        return str(self._config().get("AUTH") or self.auth)
 
-        return get_integration_secret(self.name, key)
+    def _warn_unknown_config_keys(self) -> None:
+        """Name unrecognised keys instead of ignoring them. Never fatal: a key this
+        version doesn't know shouldn't stop a deploy."""
+        unknown = set(self._config()) - self.CONFIG_KEYS
+        if unknown:
+            logger.warning(
+                "AI_SDK_INTEGRATIONS[%r] has unrecognised keys %s; expected any of %s",
+                self.name,
+                ", ".join(sorted(unknown)),
+                ", ".join(sorted(self.CONFIG_KEYS)),
+            )
+
+    def _missing_mcp_app(self) -> str | None:
+        """Why this integration can't run without the MCP toolkit app installed.
+
+        Every MCP integration reuses that app's OAuth token models. Without it the
+        failure is deferred and obscure -- a token server appears to work until someone
+        calls disconnect(), then Django raises on an unregistered model. Reporting it as
+        needs_setup surfaces the real cause at boot instead.
+        """
+        from django.apps import apps as django_apps
+
+        if django_apps.is_installed(_MCP_APP):
+            return None
+        return f"add {_MCP_APP!r} to INSTALLED_APPS; MCP integrations need its models"
 
     def _build_config(
         self,
@@ -443,18 +540,19 @@ class MCPIntegration(DynamicMCPIntegration):
         StaticMCPIntegrationConfig | TokenMCPIntegrationConfig | OAuthMCPIntegrationConfig,
         str | None,
     ]:
+        config = self._config()
         return build_mcp_config_safe(
-            auth=self.auth,
-            url=self.url,
-            label=self.label or self.name.title(),
-            tools=list(self.default_tools),
-            scope=self.scope,
-            client_id=self._secret("client_id"),
-            client_secret=self._secret("client_secret"),
-            oauth_discovery_url=self._secret("oauth_discovery_url"),
-            authorization_endpoint=self._secret("authorization_endpoint"),
-            token_endpoint=self._secret("token_endpoint"),
-            token=self._secret("token"),
+            auth=self._auth(),
+            url=config.get("URL") or self.url,
+            label=config.get("LABEL") or self.label or self.name.title(),
+            tools=list(config.get("TOOLS") or self.default_tools),
+            scope=config.get("SCOPE") or self.scope,
+            client_id=self.secret("client_id"),
+            client_secret=self.secret("client_secret"),
+            oauth_discovery_url=self.secret("oauth_discovery_url"),
+            authorization_endpoint=self.secret("authorization_endpoint"),
+            token_endpoint=self.secret("token_endpoint"),
+            token=self.secret("token"),
         )
 
 

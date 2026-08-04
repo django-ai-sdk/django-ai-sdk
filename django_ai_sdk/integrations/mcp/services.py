@@ -2,9 +2,10 @@
 the authorization URL, the code exchange, token storage and refresh.
 
 Connection management (listing integrations, disconnect, reconnect) is kind-agnostic
-and lives in the generic /api/integrations router (integrations/views.py), which
-dispatches to the Integration contract. This module is only the MCP-specific OAuth
-plumbing those endpoints end up calling.
+and lives in the host project's integrations endpoints, built over
+IntegrationService (integrations/services.py), which dispatches to the Integration
+contract. This module is only the MCP-specific OAuth plumbing those endpoints end up
+calling.
 
 Plain module-level async functions (no class namespace). Synchronous aliases for the
 few functions used from sync contexts are defined at the bottom of the module.

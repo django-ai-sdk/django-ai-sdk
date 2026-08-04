@@ -80,6 +80,22 @@ class APIIntegration(Integration):
     ResilientCache (stale-while-revalidate plus circuit breaker; see
     django_ai_sdk.integrations.base) every other integration kind uses, so a down
     API shows up as DEGRADED instead of a false ACTIVE.
+
+    Credentials come from self.secret() on the Integration base, the same config
+    MCPIntegration reads (see config.py): an integration named "zendesk" reads
+    AI_SDK_INTEGRATIONS["zendesk"]["TOKEN"]. Read it in __init__ and record a missing
+    one in `detail` rather than raising -- app boot must survive an unconfigured
+    integration::
+
+        class ZendeskIntegration(APIIntegration):
+            name = "zendesk"
+            tools = [search_tickets]
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.token = self.secret("token")
+                if not self.token:
+                    self.detail = 'Set AI_SDK_INTEGRATIONS["zendesk"]["TOKEN"].'
     """
 
     name: str = ""
@@ -89,8 +105,8 @@ class APIIntegration(Integration):
 
     def __init__(self) -> None:
         # Derive a label from `name` only. Falling back to the class name would produce
-        # things like "Unnamedservice", and would also pre-empt the registry's better
-        # fallback (the settings key) for a service that declares no name.
+        # things like "Unnamedservice", which is worse than leaving it empty for a
+        # service that declares no name (register() rejects those anyway).
         if not self.label and self.name:
             self.label = self.name.title()
         # Decided once, from the class-level health_check — set it as a class

@@ -190,10 +190,14 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-# Integrations are Django apps (see INSTALLED_APPS above) that register themselves
-# on ready(). Secrets resolve straight from the environment (LINEAR_TOKEN, etc.) --
-# no settings.py wiring needed. A missing one doesn't crash boot -- the integration
-# reports that it needs setup instead.
+# Integrations are Django apps (see INSTALLED_APPS above) that register themselves on
+# ready(). INSTALLED_APPS decides which exist; this dict configures them, keyed by
+# integration name, in the same shape as DATABASES or CACHES. A missing credential
+# doesn't crash boot: the integration reports that it needs setup instead. `weather`
+# needs none at all, so it isn't listed here and still works out of the box.
+AI_SDK_INTEGRATIONS = {
+    "linear": {"TOKEN": env("LINEAR_API_KEY", default="")},
+}
 
 
 # MCP OAuth discovery (RFC 9728)
