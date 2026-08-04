@@ -466,7 +466,7 @@ def get_assistant_permissions(assistant: Assistant | None) -> list[type[BasePerm
     return get_domain_permissions(PermissionDomain.ASSISTANT)
 
 
-def get_integration_permissions(service: Any) -> list[type[BasePermission] | BasePermission]:
+def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
     """Resolve perms for an integration service.
 
     Resolution:
