@@ -120,6 +120,11 @@ async def oauth_callback(
             request, server_name
         )
         config = integration.config
+        if not isinstance(config, OAuthMCPIntegrationConfig):
+            return JsonResponse(
+                {"error": f"Server '{server_name}' is not an OAuth integration"},
+                status=HTTPStatus.BAD_REQUEST,
+            )
         client_id, client_secret = await resolve_client_credentials(server_name, config)
 
         for key_template in (_K_STATE, _K_VERIFIER, _K_TOKEN_ENDPOINT):

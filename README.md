@@ -47,6 +47,7 @@ Then run `python manage.py migrate`.
 # assistants.py
 from django_ai_sdk import Assistant
 
+
 class HelpDeskAssistant(Assistant):
     name = "Help Desk"
     model = "gpt-4o"
@@ -60,6 +61,7 @@ class HelpDeskAssistant(Assistant):
 from .assistants import HelpDeskAssistant
 
 assistant = HelpDeskAssistant()
+
 
 @router.post("/chat")
 async def chat(request, payload: ChatRequest):
@@ -80,7 +82,7 @@ Enable a shipped integration by installing its app and naming it on an assistant
 # settings.py
 INSTALLED_APPS = [
     "django_ai_sdk",
-    "django_ai_sdk.integrations.mcp",     # required by any MCP-backed integration
+    "django_ai_sdk.integrations.mcp",  # required by any MCP-backed integration
     "django_ai_sdk.integrations.github",  # also: .linear, .notion, .weather
 ]
 
@@ -112,8 +114,9 @@ Three files, no models and no migrations:
 # myapp/integrations/zendesk/apps.py
 from django_ai_sdk.integrations import IntegrationAppConfig
 
+
 class ZendeskConfig(IntegrationAppConfig):
-    default = True             # Django needs this to pick your AppConfig over the base
+    default = True  # Django needs this to pick your AppConfig over the base
     name = "myapp.integrations.zendesk"
     integration = "myapp.integrations.zendesk.integration.ZendeskIntegration"
 ```
@@ -122,12 +125,13 @@ class ZendeskConfig(IntegrationAppConfig):
 # myapp/integrations/zendesk/integration.py
 from django_ai_sdk.integrations import MCPIntegration
 
+
 class ZendeskIntegration(MCPIntegration):
-    name = "zendesk"           # registry key, and the AI_SDK_INTEGRATIONS key
+    name = "zendesk"  # registry key, and the AI_SDK_INTEGRATIONS key
     label = "Zendesk"
     url = "https://mcp.zendesk.example/mcp"
-    auth = "token"             # "static" | "token" | "oauth"
-    default_tools = []         # [] discovers every tool the server offers
+    auth = "token"  # "static" | "token" | "oauth"
+    default_tools = []  # [] discovers every tool the server offers
 ```
 
 Add `"myapp.integrations.zendesk"` to `INSTALLED_APPS`, add
@@ -150,7 +154,7 @@ list/connect/disconnect/reconnect over `IntegrationService`
 the OAuth callback, which must sit at a fixed URL:
 
 ```python
-path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
+(path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),)
 ```
 
 ## Features

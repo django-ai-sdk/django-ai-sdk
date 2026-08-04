@@ -10,7 +10,7 @@ from django_ai_sdk.logger import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from haystack import AsyncPipeline
+    from haystack import Pipeline
     from haystack.tools import ComponentTool
 
     from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
@@ -108,7 +108,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         return not self._is_warmed_up
 
     @abstractmethod
-    def build_pipeline(self) -> AsyncPipeline:
+    def build_pipeline(self) -> Pipeline:
         """
         Build and return the RAG pipeline (query side, cheap).
 

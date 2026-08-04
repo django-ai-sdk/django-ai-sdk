@@ -1278,7 +1278,7 @@ class TestOAuthRedirectFlow:
         from tests.factories.db import UserFactory
 
         integration = self._oauth_integration()
-        settings.AI_SDK_INTEGRATIONS = {"notion": integration}
+        register(integration)
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
         _patch_oauth_transport(
             monkeypatch,
