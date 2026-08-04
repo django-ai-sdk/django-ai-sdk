@@ -110,14 +110,15 @@ class AssistantRegistry:
         Skips classes marked abstract = True: a shared base meant only to be
         subclassed, not instantiated or exposed on its own.
 
+        The id is a UUID5 of the class's import path, so re-registering the same
+        class is a no-op and a redefinition of that path (a reloaded module) replaces
+        the previous entry rather than raising.
+
         Args:
             assistant_class: The Assistant subclass to register
 
         Returns:
             The registered class
-
-        Raises:
-            AssistantRegistrationError: If assistant_id collision detected
         """
         if assistant_class.__dict__.get("abstract", False):
             return assistant_class

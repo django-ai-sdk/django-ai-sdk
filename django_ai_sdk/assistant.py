@@ -152,6 +152,15 @@ class Assistant(ABC, AssistantInfoMixin):
     # If True, hide from registry.visible() (used for internal assistants)
     hidden: bool = False
 
+    # If True, this is a shared base meant only to be subclassed — it never enters the
+    # registry. Checked on the class's own __dict__, so it is never inherited and each
+    # concrete subclass registers normally without restating it.
+    #
+    # Distinct from `_skip_auto_register` (see assistants/runtime.py), which marks a
+    # class that is concrete and instantiated but built on demand rather than looked up
+    # by id. Both stay out of the registry, for unrelated reasons.
+    abstract: bool = False
+
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
 
@@ -554,8 +563,10 @@ class Assistant(ABC, AssistantInfoMixin):
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
     #: Flat list of integration names (`["linear"]`) — every tool that integration
-    #: exposes reaches this assistant. Per-assistant tool subsets are not supported;
-    #: see docs/integrations.md's "Not included (yet)" section.
+    #: exposes reaches this assistant. Names are registry keys, i.e. the `name` on
+    #: each Integration subclass. Narrowing an integration to a subset of its tools
+    #: per assistant is not supported: restrict it at the integration instead, via
+    #: an MCP integration's `default_tools` allow-list.
     integrations: list[str] = []
 
     async def _get_integration_tools(
@@ -599,7 +610,9 @@ class Assistant(ABC, AssistantInfoMixin):
         Must be implemented by subclasses used in chat. A worker-only assistant
         (hidden = True, called only via run()) can leave this unimplemented.
         """
-        raise NotImplementedError(f"{self.__class__.__name__} must implement get_pipeline_adapter().")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement get_pipeline_adapter()."
+        )
 
     async def history(
         self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
