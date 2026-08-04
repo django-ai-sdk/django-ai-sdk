@@ -189,6 +189,10 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
+# Default vector store server url
+AI_SDK_VECTOR_STORE_URL = "http://qdrant:6333"
+
+
 # Integrations: name -> dotted path to an Integration. `linear` is shipped by
 # the SDK; `weather` is a local example (see piratespeak/integrations.py). Neither
 # needs an entry in INSTALLED_APPS.
@@ -200,7 +204,6 @@ AI_SDK_INTEGRATIONS = {
 # Per-integration params/credentials, read by each service on construction. A missing
 # secret doesn't crash boot -- the integration reports that it needs setup instead.
 AI_SDK_LINEAR = {"token": env("LINEAR_API_KEY", default="")}
-
 
 # MCP OAuth discovery (RFC 9728)
 AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds

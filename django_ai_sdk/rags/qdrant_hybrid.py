@@ -82,9 +82,23 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
     def _create_document_store(self, recreate: bool = False) -> QdrantDocumentStore:
         """Create document store based on persistence configuration."""
         storage = self.config.storage
+        extra = storage.extra
+
+        if storage.is_server:
+            return QdrantDocumentStore(
+                location=storage.location,
+                recreate_index=recreate,
+                return_embedding=True,
+                use_sparse_embeddings=True,
+                embedding_dim=self.config.embedding_dim,
+                similarity=storage.similarity,
+                **extra,
+            )
 
         if storage.is_persistent and storage.persist_path:
             os.makedirs(storage.persist_path, exist_ok=True)
+
+            extra.setdefault("index", "documents")
 
             for attempt in Retrying(
                 stop=stop_after_delay(300),
@@ -102,13 +116,12 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 with attempt:
                     return QdrantDocumentStore(
                         path=storage.persist_path,
-                        index="documents",
                         recreate_index=recreate,
                         return_embedding=True,
                         use_sparse_embeddings=True,
                         embedding_dim=self.config.embedding_dim,
-                        on_disk=storage.qdrant_on_disk,
-                        similarity=storage.qdrant_similarity,
+                        similarity=storage.similarity,
+                        **extra,
                     )
             raise RuntimeError("Failed to create QdrantDocumentStore after retries")
         else:
@@ -122,7 +135,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
     def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
-        return document_store.count_documents() > 0
+        try:
+            return document_store.count_documents() > 0
+        except ValueError:
+            return False
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
         """Add documents to the existing Qdrant index."""
@@ -223,20 +239,39 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         storage = self.config.storage
         document_store = self._create_document_store(recreate=force_rebuild)
 
-        if not force_rebuild and storage.is_persistent and self._has_existing_index(document_store):
+        if (
+            not force_rebuild
+            and (storage.is_persistent or storage.is_server)
+            and self._has_existing_index(document_store)
+        ):
             existing_count = document_store.count_documents()
             self._cached_document_store = document_store
             self._is_warmed_up = True
-            logger.info(
-                f"Using existing Qdrant index from {storage.persist_path} with {existing_count} chunks"
-            )
+            if storage.is_server:
+                collection = storage.extra.get("index", "default")
+                logger.info(
+                    f"Using existing Qdrant index at {storage.location}/{collection} with {existing_count} chunks"
+                )
+            else:
+                logger.info(
+                    f"Using existing Qdrant index from {storage.persist_path} with {existing_count} chunks"
+                )
             return
 
-        logger.info(
-            f"Creating new Qdrant index for persistent storage at {storage.persist_path}"
-            if storage.is_persistent
-            else "Creating in-memory Qdrant index"
-        )
+        # If server collection was deleted externally, recreate the store
+        # so _index_documents has a collection to write into.
+        if not force_rebuild and storage.is_server and not self._has_existing_index(document_store):
+            document_store = self._create_document_store(recreate=True)
+
+        if storage.is_server:
+            collection = storage.extra.get("index", "default")
+            logger.info(f"Creating new Qdrant index at {storage.location}/{collection}")
+        elif storage.is_persistent:
+            logger.info(
+                f"Creating new Qdrant index for persistent storage at {storage.persist_path}"
+            )
+        else:
+            logger.info("Creating in-memory Qdrant index")
 
         # Convert RagDocuments to HaystackDocuments
         haystack_docs = self._convert_documents()
@@ -259,6 +294,12 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         if self._cached_document_store is not None:
             document_store = self._cached_document_store
+            if not self._has_existing_index(document_store):
+                logger.warning("Qdrant collection was deleted externally, rebuilding index...")
+                self._cached_document_store = None
+                self._is_warmed_up = False
+                self.warmup()
+                document_store = self._cached_document_store
         else:
             document_store = self._create_document_store(recreate=False)
 

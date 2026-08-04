@@ -305,7 +305,7 @@ class TestAssistantInfoMixin:
 
         @auto_register
         class PropAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
@@ -321,7 +321,7 @@ class TestAssistantInfoMixin:
         # Create instance without going through registry
         @auto_register
         class FallbackAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         # Manually create instance (won't have _assistant_id cached yet)
@@ -345,7 +345,7 @@ class TestAssistantInfoMixin:
             def get_name(self):
                 return "Dynamic Name"
 
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         assistant_id = DynamicNameAssistant._assistant_id
@@ -355,3 +355,38 @@ class TestAssistantInfoMixin:
         info = assistant.info()
         assert info.name == "Dynamic Name"
         assert is_valid_uuid(info.id)
+
+    def test_info_rag_false_without_provider(self):
+        """Test info().rag is False when no rag_provider set."""
+
+        @auto_register
+        class NoRagAssistant(Assistant):
+            name = "No RAG"
+
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
+                pass
+
+        registry.setup()
+        assistant = registry.get(NoRagAssistant._assistant_id)
+
+        info = assistant.info()
+        assert info.rag is False
+
+    def test_info_rag_true_with_provider(self):
+        """Test info().rag is True when rag_provider is set."""
+
+        from django_ai_sdk.rags.provider import RAGProvider
+
+        @auto_register
+        class RagAssistant(Assistant):
+            name = "Has RAG"
+            rag_provider = RAGProvider()
+
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
+                pass
+
+        registry.setup()
+        assistant = registry.get(RagAssistant._assistant_id)
+
+        info = assistant.info()
+        assert info.rag is True

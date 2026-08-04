@@ -76,17 +76,19 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         import os
         import shutil
 
-        if self.config.storage.is_persistent and self.config.storage.persist_path:
-            if recreate and os.path.exists(self.config.storage.persist_path):
-                shutil.rmtree(self.config.storage.persist_path)
-                logger.info(f"Deleted existing Chroma index at {self.config.storage.persist_path}")
-            os.makedirs(self.config.storage.persist_path, exist_ok=True)
+        storage = self.config.storage
+
+        if storage.is_persistent and storage.persist_path:
+            if recreate and os.path.exists(storage.persist_path):
+                shutil.rmtree(storage.persist_path)
+                logger.info(f"Deleted existing Chroma index at {storage.persist_path}")
+            os.makedirs(storage.persist_path, exist_ok=True)
             return ChromaDocumentStore(
-                persist_path=self.config.storage.persist_path,
-                distance=self.config.storage.chroma_distance,
+                persist_path=storage.persist_path,
+                **storage.extra,
             )
         else:
-            return ChromaDocumentStore()
+            return ChromaDocumentStore(**storage.extra)
 
     def _has_existing_index(self, document_store: ChromaDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
