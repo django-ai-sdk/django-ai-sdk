@@ -12,7 +12,7 @@ from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.permissions import IsAdminUser
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
-from haystack import AsyncPipeline
+from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
@@ -154,7 +154,7 @@ class AgentSwarmAssistant(Assistant):
         """Create Haystack agent swarm adapter."""
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        pipeline = AsyncPipeline()
+        pipeline = Pipeline()
 
         # Create triage agent
         triage_agent = HaystackAgent(

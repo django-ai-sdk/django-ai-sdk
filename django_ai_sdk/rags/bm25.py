@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from haystack import AsyncPipeline
+from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
@@ -131,7 +131,7 @@ class BM25QueryExpanderRAG(RAGBase):
             f"BM25QueryExpanderRAG warmup complete: {len(self.documents)} source docs -> {indexed_count} docs indexed"
         )
 
-    def build_pipeline(self) -> AsyncPipeline:
+    def build_pipeline(self) -> Pipeline:
         """Build the RAG pipeline with BM25."""
         logger.debug("Building BM25 RAG query pipeline")
 
@@ -161,7 +161,7 @@ class BM25QueryExpanderRAG(RAGBase):
             top_k=self.config.top_k,
         )
 
-        pipeline = AsyncPipeline()
+        pipeline = Pipeline()
         pipeline.add_component("expander", query_expander)
         pipeline.add_component("retriever", retriever)
 

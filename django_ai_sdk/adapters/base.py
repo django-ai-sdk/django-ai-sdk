@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast, overload
 
 from django.conf import settings
-from haystack import AsyncPipeline
+from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
@@ -153,7 +153,7 @@ class Run:
 
 class Stream:
     """
-    Adapter for Haystack AsyncPipelines that emits streaming events.
+    Adapter for Haystack Pipelines that emits streaming events.
     """
 
     model: str | None = None
@@ -173,10 +173,10 @@ class Stream:
         suggestion_generator: SuggestionGenerator | None = None,
     ) -> None:
         self.pipeline = pipeline
-        if not isinstance(pipeline, AsyncPipeline):
+        if not isinstance(pipeline, Pipeline):
             raise TypeError(
-                f"Stream requires an AsyncPipeline, got {type(pipeline).__name__}. "
-                "Construct your pipeline with AsyncPipeline() from haystack."
+                f"Stream requires an Pipeline, got {type(pipeline).__name__}. "
+                "Construct your pipeline with Pipeline() from haystack."
             )
         self.generator = generator
         self.store = store

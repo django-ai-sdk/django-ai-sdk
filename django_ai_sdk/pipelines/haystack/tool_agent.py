@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from haystack import AsyncPipeline
+from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
 from pydantic import BaseModel
 
@@ -40,7 +40,7 @@ class ToolAgent:
         self.generator = generator
         logger.debug(f"ToolAgent initialized with {len(config.tools)} tools")
 
-    def pipeline(self) -> AsyncPipeline:
+    def pipeline(self) -> Pipeline:
         """Build and return the fully connected pipeline."""
         logger.debug("Building ToolAgent pipeline")
 
@@ -51,7 +51,7 @@ class ToolAgent:
             exit_conditions=["text"],
         )
 
-        pipeline = AsyncPipeline()
+        pipeline = Pipeline()
         pipeline.add_component("agent", agent)
 
         logger.debug("ToolAgent pipeline built successfully")

@@ -193,15 +193,13 @@ class TestBaseAssistant:
         assert storage is None
 
     @pytest.mark.asyncio
-    async def test_stream_rejects_sync_pipeline(self):
-        """Stream.__init__ must raise TypeError if given a sync Pipeline."""
-        from haystack import Pipeline
+    async def test_stream_rejects_non_pipeline(self):
+        """Stream.__init__ must raise TypeError if given a non-Pipeline object."""
         from django_ai_sdk.adapters.base import Stream
         from unittest.mock import MagicMock
 
-        sync_pipeline = Pipeline()
-        with pytest.raises(TypeError, match="AsyncPipeline"):
-            Stream(pipeline=sync_pipeline, generator=MagicMock())
+        with pytest.raises(TypeError, match="Pipeline"):
+            Stream(pipeline="not a pipeline", generator=MagicMock())
 
 
 @pytest.mark.django_db

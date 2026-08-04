@@ -4,7 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from haystack import AsyncPipeline, Pipeline
+from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
@@ -289,7 +289,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             f"QdrantBM25HybridRAG warmup complete: {len(self.documents)} source docs → {indexed_count} chunks indexed"
         )
 
-    def build_pipeline(self) -> AsyncPipeline:
+    def build_pipeline(self) -> Pipeline:
         logger.debug("Building Qdrant Hybrid RAG query pipeline")
 
         if self._cached_document_store is not None:
@@ -319,7 +319,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             prompt_template=self.config.expander_prompt,
         )
 
-        query_pipeline = AsyncPipeline()
+        query_pipeline = Pipeline()
         query_pipeline.add_component("expander", query_expander)
         query_pipeline.add_component(
             "retriever",
