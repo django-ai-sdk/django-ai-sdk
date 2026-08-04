@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from abc import ABC
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -57,8 +58,6 @@ def _namespaced(integration_name: str, tool: Any) -> Any:
     across everything handed to one agent, so without this, enabling two
     integrations that happen to collide would fail assistant construction outright.
     """
-    import dataclasses
-
     try:
         return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
     except (TypeError, AttributeError):
