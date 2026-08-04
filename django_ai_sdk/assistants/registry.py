@@ -105,17 +105,24 @@ class AssistantRegistry:
         self._initialized = False
 
     def register(self, assistant_class: type[T]) -> type[T]:
-        """Register an Assistant class
+        """Register an Assistant class.
+
+        Skips classes marked abstract = True: a shared base meant only to be
+        subclassed, not instantiated or exposed on its own.
+
+        The id is a UUID5 of the class's import path, so re-registering the same
+        class is a no-op and a redefinition of that path (a reloaded module) replaces
+        the previous entry rather than raising.
 
         Args:
             assistant_class: The Assistant subclass to register
 
         Returns:
             The registered class
-
-        Raises:
-            AssistantRegistrationError: If assistant_id collision detected
         """
+        if assistant_class.__dict__.get("abstract", False):
+            return assistant_class
+
         # Generate deterministic UUID v5 from full class path
         class_path = f"{assistant_class.__module__}.{assistant_class.__name__}"
         assistant_id = str(uuid.uuid5(ASSISTANT_NAMESPACE, class_path))

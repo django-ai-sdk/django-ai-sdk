@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -48,12 +49,26 @@ class Memory(models.Model):
                 self.slug = slug
         super().save(*args, **kwargs)
 
+    @property
+    def tool_name(self) -> str:
+        """Provider-safe function name for this memory's RAG tool.
+
+        Function names are restricted to ``[a-zA-Z0-9_-]``; anything else is
+        rejected for the whole request. Names that sanitise to nothing (e.g.
+        non-Latin scripts) fall back to the memory id.
+
+        Truncation means this is not unique on its own — ``get_rag_tools``
+        de-duplicates across the memories active on a thread.
+        """
+        slug = re.sub(r"[^a-z0-9]+", "_", self.name.lower()).strip("_")[:20].strip("_")
+        return f"search_{slug}" if slug else f"search_memory_{str(self.id).replace('-', '')[:8]}"
+
     async def get_tool_spec(self) -> ToolSpec:
         """Generate ToolSpec for this memory."""
         doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
-            name=f"search_{self.name.lower().replace(' ', '_')[:20]}",
+            name=self.tool_name,
             description=(
                 f"Search knowledge base: {self.name}. "
                 f"Contains {doc_count} entries. "

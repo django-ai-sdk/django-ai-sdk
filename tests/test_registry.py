@@ -305,7 +305,7 @@ class TestAssistantInfoMixin:
 
         @auto_register
         class PropAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
@@ -321,7 +321,7 @@ class TestAssistantInfoMixin:
         # Create instance without going through registry
         @auto_register
         class FallbackAssistant(Assistant):
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         # Manually create instance (won't have _assistant_id cached yet)
@@ -345,7 +345,7 @@ class TestAssistantInfoMixin:
             def get_name(self):
                 return "Dynamic Name"
 
-            async def get_pipeline_adapter(self, thread_id=None):
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         assistant_id = DynamicNameAssistant._assistant_id
@@ -355,3 +355,98 @@ class TestAssistantInfoMixin:
         info = assistant.info()
         assert info.name == "Dynamic Name"
         assert is_valid_uuid(info.id)
+
+    def test_info_rag_false_without_provider(self):
+        """Test info().rag is False when no rag_provider set."""
+
+        @auto_register
+        class NoRagAssistant(Assistant):
+            name = "No RAG"
+
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
+                pass
+
+        registry.setup()
+        assistant = registry.get(NoRagAssistant._assistant_id)
+
+        info = assistant.info()
+        assert info.rag is False
+
+    def test_info_rag_true_with_provider(self):
+        """Test info().rag is True when rag_provider is set."""
+
+        from django_ai_sdk.rags.provider import RAGProvider
+
+        @auto_register
+        class RagAssistant(Assistant):
+            name = "Has RAG"
+            rag_provider = RAGProvider()
+
+            async def get_pipeline_adapter(self, thread_id=None, run_id=None):
+                pass
+
+        registry.setup()
+        assistant = registry.get(RagAssistant._assistant_id)
+
+        info = assistant.info()
+        assert info.rag is True
+
+
+class TestAbstractAssistants:
+    """`abstract = True` marks a shared base meant only to be subclassed. It exists so
+    a project can factor common config (model, permissions, storage) into a base class
+    without that base showing up as a usable assistant.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_registry(self):
+        registry._reset()
+        yield
+        registry._reset()
+
+    def test_an_abstract_base_is_not_registered(self):
+        class SharedBase(Assistant):
+            abstract = True
+            name = "Shared Base"
+
+        # register() never ran, so the class-level default is untouched.
+        assert SharedBase._assistant_id == ""
+        assert SharedBase not in registry._classes.values()
+
+    def test_a_concrete_subclass_of_an_abstract_base_is_registered(self):
+        """`abstract` is read off the class's own __dict__, so subclasses don't inherit
+        it and don't have to restate `abstract = False`."""
+
+        class SharedBase(Assistant):
+            abstract = True
+            name = "Shared Base"
+
+        class RealBot(SharedBase):
+            name = "Real Bot"
+
+        assert RealBot._assistant_id
+        assert registry._classes[RealBot._assistant_id] is RealBot
+
+    def test_abstract_also_blocks_explicit_registration(self):
+        """Checked in register() rather than __init_subclass__, so @auto_register and
+        AI_SDK_ASSISTANTS skip it too — one rule, every path."""
+
+        @auto_register
+        class DecoratedBase(Assistant):
+            abstract = True
+            name = "Decorated Base"
+
+        assert DecoratedBase not in registry._classes.values()
+
+    def test_setup_does_not_instantiate_an_abstract_base(self):
+        class SharedBase(Assistant):
+            abstract = True
+            name = "Shared Base"
+
+        class RealBot(SharedBase):
+            name = "Real Bot"
+
+        registry.setup()
+
+        assert [type(i) for i in registry._instances.values()] == [RealBot]
+ 

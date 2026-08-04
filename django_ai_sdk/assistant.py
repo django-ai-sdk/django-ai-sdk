@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
@@ -14,8 +15,8 @@ from django_ai_sdk.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
-from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage, Prompt, prompt
-from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.common import ChatMessage, Prompt, prompt
+from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
@@ -50,15 +51,13 @@ logger = get_logger(__name__)
 
 
 def _namespaced(integration_name: str, tool: Any) -> Any:
-    """Rename ``tool`` to ``{integration_name}_{tool.name}``.
+    """Rename tool to {integration_name}_{tool.name}.
 
-    Nothing stops two unrelated MCP servers from defining the same tool name (GitHub
-    and Linear both have ``list_issues``), and Haystack requires unique names across
-    everything handed to one agent — so without this, enabling two integrations that
-    happen to collide would fail assistant construction outright.
+    Nothing stops two unrelated MCP servers from defining the same tool name
+    (GitHub and Linear both have list_issues), and Haystack requires unique names
+    across everything handed to one agent, so without this, enabling two
+    integrations that happen to collide would fail assistant construction outright.
     """
-    import dataclasses
-
     try:
         return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
     except (TypeError, AttributeError):
@@ -111,6 +110,11 @@ class Assistant(ABC, AssistantInfoMixin):
             name = "My Bot"
             model = "gpt-4"
 
+    Every concrete subclass also auto-registers on definition (__init_subclass__),
+    so either method above is really just what gets the module imported. An
+    abstract shared base (abstract = True) is skipped regardless of how it's
+    reached — see AssistantRegistry.register().
+
     Usage:
         from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 
@@ -146,6 +150,15 @@ class Assistant(ABC, AssistantInfoMixin):
 
     # If True, hide from registry.visible() (used for internal assistants)
     hidden: bool = False
+
+    # If True, this is a shared base meant only to be subclassed — it never enters the
+    # registry. Checked on the class's own __dict__, so it is never inherited and each
+    # concrete subclass registers normally without restating it.
+    #
+    # Distinct from `_skip_auto_register` (see assistants/runtime.py), which marks a
+    # class that is concrete and instantiated but built on demand rather than looked up
+    # by id. Both stay out of the registry, for unrelated reasons.
+    abstract: bool = False
 
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
@@ -318,11 +331,14 @@ class Assistant(ABC, AssistantInfoMixin):
     def get_title_generation_prompt(self) -> Prompt:
         """Return the system prompt used to generate a thread title.
 
-        Defaults to a prompt capped at the `Thread.title` column's
-        `max_length`, so the model is nudged to stay within the limit that
-        storage enforces anyway. Override to customize tone/format.
+        Defaults to a prompt capped at the title sanity limit, not the much
+        larger `Thread.title` column `max_length` - the column width is a
+        storage ceiling, not a reasonable target length for a title, and
+        quoting it here would let the model "correctly" produce something
+        long enough to fail `generate_thread_title`'s own sanity check.
+        Override to customize tone/format.
         """
-        return build_title_generation_prompt(THREAD_TITLE_MAX_LENGTH)
+        return build_title_generation_prompt(get_title_sanity_limit())
 
     def get_model(self) -> str:
         """Return the model identifier."""
@@ -401,8 +417,19 @@ class Assistant(ABC, AssistantInfoMixin):
             user=user,
         )
 
+        used_names: set[str] = set()
+
         for memory in memories:
             spec = await memory.get_tool_spec()
+            if spec.name in used_names:
+                spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
+                logger.warning(
+                    "Tool name collision for memory '{}', renamed to '{}'",
+                    memory.name,
+                    spec.name,
+                )
+            used_names.add(spec.name)
+
             tool = await self.rag_provider.get_tool(
                 self,
                 str(memory.id),
@@ -538,8 +565,10 @@ class Assistant(ABC, AssistantInfoMixin):
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
     #: Flat list of integration names (`["linear"]`) — every tool that integration
-    #: exposes reaches this assistant. Per-assistant tool subsets are not supported;
-    #: see docs/integrations.md's "Not included (yet)" section.
+    #: exposes reaches this assistant. Names are registry keys, i.e. the `name` on
+    #: each Integration subclass. Narrowing an integration to a subset of its tools
+    #: per assistant is not supported: restrict it at the integration instead, via
+    #: an MCP integration's `default_tools` allow-list.
     integrations: list[str] = []
 
     async def _get_integration_tools(
@@ -573,22 +602,19 @@ class Assistant(ABC, AssistantInfoMixin):
         results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
         return [tool for tools in results for tool in tools]
 
-    @abstractmethod
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
-        """
-        Create and return pipeline adapter.
+        """Return the adapter used for streaming chat.
 
-        Args:
-            thread_id: Optional thread ID for conversation persistence.
-
-        Returns:
-            A pipeline adapter instance
+        Must be implemented by subclasses used in chat. A worker-only assistant
+        (hidden = True, called only via run()) can leave this unimplemented.
         """
-        pass
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement get_pipeline_adapter()."
+        )
 
     async def history(
         self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
@@ -729,7 +755,8 @@ class Assistant(ABC, AssistantInfoMixin):
                 title = await generate_thread_title(
                     assistant=self, messages=messages, thread_id=thread_id, user=user
                 )
-                await ThreadService.update_thread(thread_id, title=title, user=user)
+                if title:
+                    await ThreadService.update_thread(thread_id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 

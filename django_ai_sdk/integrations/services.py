@@ -1,15 +1,20 @@
-"""Service-layer facade for integrations — the ``AssistantService`` counterpart.
+"""Service-layer facade for integrations, the AssistantService counterpart.
 
-``Integration`` (``integrations/base.py``) is the per-item business logic, one
-instance per configured integration — the role ``Assistant`` plays for assistants.
-``IntegrationService`` resolves by name, permission-checks, and delegates to the
-instance — the role ``AssistantService`` plays for assistants. ``integrations/views.py``
-and ``AssistantService`` are its two callers today; either could be replaced by a
-management command or another host app without duplicating this logic.
+Integration (integrations/base.py) is the per-item business logic, one instance per
+configured integration, the role Assistant plays for assistants. IntegrationService
+resolves by name, permission-checks, and delegates to the instance, the role
+AssistantService plays for assistants.
 
-No ``PermissionsMixin`` here (contrast ``AssistantService``): every operation below
-already has a concrete ``Integration`` instance to delegate ``has_perms`` to,
-so there is no domain-level check that needs to run without one.
+This is the seam an HTTP layer sits on. The SDK deliberately ships no integrations
+router -- it doesn't pick the host's web framework -- so the host project builds
+list/connect/disconnect/reconnect endpoints over the four methods below;
+demo/piratespeak/views_integrations_ninja.py is a complete reference. Its other
+caller is AssistantService, and either could be replaced by a management command
+without duplicating this logic.
+
+There is no PermissionsMixin here (contrast AssistantService): every operation below
+already has a concrete Integration instance to delegate has_perms to, so there is no
+domain-level check that needs to run without one.
 """
 
 from __future__ import annotations
@@ -40,8 +45,8 @@ async def _safe_status_and_tools(
 ) -> tuple[IntegrationStatus, list[str]]:
     """One integration's (status, tool_names), isolated from the rest of a fan-out.
 
-    Shared by ``IntegrationService.list_for_user`` and
-    ``AssistantService.get_integration_status`` — a slow/broken integration (a dead
+    Shared by IntegrationService.list_for_user and
+    AssistantService.get_integration_status. A slow or broken integration (a dead
     server, a DB hiccup fetching an OAuth token) degrades to DEGRADED/[] instead of
     failing whichever list it's part of.
     """
@@ -66,11 +71,11 @@ class IntegrationService:
     async def list_for_user(
         cls, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[IntegrationOut]:
-        """Every integration ``user`` may use, with real (not guessed) status.
+        """Every integration user may use, with real (not guessed) status.
 
-        Concurrent, not sequential — one cold/dead integration must not make the whole
-        settings page pay N x its timeout (each ``get_status()``/``get_tool_names()``
-        is individually bounded by its own ``ResilientCache``).
+        Concurrent, not sequential: one cold or dead integration must not make the
+        whole settings page pay N times its timeout (each get_status()/
+        get_tool_names() call is individually bounded by its own ResilientCache).
         """
         integrations = await get_all_integrations()
 
@@ -104,12 +109,12 @@ class IntegrationService:
         request: HttpRequest,
         redirect_uri: str,
     ) -> dict[str, Any] | None:
-        """Begin connecting ``name`` for ``user``.
+        """Begin connecting name for user.
 
-        Returns None for an unknown integration, raises ``PermissionDenied`` when the
-        user isn't allowed to manage it, and lets ``IntegrationNotConnectable``
-        propagate for a capability mismatch (e.g. connect() on a non-OAuth server) —
-        callers (the router) translate each into the matching HTTP status.
+        Returns None for an unknown integration, raises PermissionDenied when the
+        user isn't allowed to manage it, and lets IntegrationNotConnectable
+        propagate for a capability mismatch (e.g. connect() on a non-OAuth server).
+        Callers (the router) translate each into the matching HTTP status.
         """
         integration = await cls.get(name)
         if integration is None:
@@ -122,7 +127,7 @@ class IntegrationService:
     async def disconnect(
         cls, name: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> bool | None:
-        """Drop ``user``'s stored connection for ``name``. None if unknown, raises if forbidden."""
+        """Drop user's stored connection for name. None if unknown, raises if forbidden."""
         integration = await cls.get(name)
         if integration is None:
             return None
@@ -134,7 +139,7 @@ class IntegrationService:
     async def reconnect(
         cls, name: str, user: AbstractBaseUser | AnonymousUser | None
     ) -> IntegrationStatus | None:
-        """Force a fresh connection attempt for ``name`` and return the real outcome."""
+        """Force a fresh connection attempt for name and return the real outcome."""
         integration = await cls.get(name)
         if integration is None:
             return None

@@ -22,7 +22,6 @@ from dataclasses import dataclass
 
 import httpx
 import pytest
-from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.base import (
     Integration,
@@ -42,7 +41,7 @@ from django_ai_sdk.integrations.registry import (
     reset_registry,
 )
 from django_ai_sdk.permissions import AllowAll
-from tests.mocks.integrations import ExampleWeatherService, UnnamedService
+from tests.mocks.integrations import ExampleWeatherService
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +53,9 @@ def _clean_registry():
     reset_registry()
 
 
-def _mock_transport(token_response: dict, status_code: int = 200) -> httpx.MockTransport:
+def _mock_transport(
+    token_response: dict, status_code: int = 200
+) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(status_code, json=token_response)
 
@@ -82,7 +83,9 @@ async def _coroutine(value):
     return value
 
 
-def _patch_discovery(monkeypatch, token_endpoint: str = "https://auth.example.com/token") -> None:
+def _patch_discovery(
+    monkeypatch, token_endpoint: str = "https://auth.example.com/token"
+) -> None:
     """Stub OAuth metadata discovery.
 
     Patches every module that binds ``discover``, not just its home module: `services`
@@ -167,7 +170,9 @@ class TestResilientCache:
         assert result == []  # degrades to empty rather than hanging
         assert elapsed < 0.5  # bounded by `timeout`, not the 10s fetch
 
-    async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(self):
+    async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(
+        self,
+    ):
         cache = ResilientCache(ttl=60, timeout=1)
         calls = 0
 
@@ -386,13 +391,19 @@ class TestIntegrationDisplayMetadata:
     so they must stay cheap — no live I/O when config already answers the question."""
 
     async def test_mcp_integration_kind_reflects_config_type(self):
-        token = DynamicMCPIntegration("linear", TokenMCPIntegrationConfig(url="https://x", token="t"))
-        oauth = DynamicMCPIntegration("notion", OAuthMCPIntegrationConfig(url="https://x"))
+        token = DynamicMCPIntegration(
+            "linear", TokenMCPIntegrationConfig(url="https://x", token="t")
+        )
+        oauth = DynamicMCPIntegration(
+            "notion", OAuthMCPIntegrationConfig(url="https://x")
+        )
 
         assert token.kind == "token"
         assert oauth.kind == "oauth"
 
-    async def test_mcp_integration_tool_names_reads_config_without_connecting(self, monkeypatch):
+    async def test_mcp_integration_tool_names_reads_config_without_connecting(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def explodes_if_called(*args, **kwargs):
@@ -402,7 +413,9 @@ class TestIntegrationDisplayMetadata:
 
         integration = DynamicMCPIntegration(
             "linear",
-            TokenMCPIntegrationConfig(url="https://x", token="t", tools=["list_issues"]),
+            TokenMCPIntegrationConfig(
+                url="https://x", token="t", tools=["list_issues"]
+            ),
         )
 
         assert await integration.get_tool_names() == ["list_issues"]
@@ -480,15 +493,21 @@ class TestIntegrationDisplayMetadata:
             tools = [
                 lambda user: _fake_tool("only_user"),
                 lambda user, thread_id: _fake_tool("user_thread"),
-                lambda **kw: _fake_tool("kwargs_all" if "assistant" in kw else "kwargs_bad"),
+                lambda **kw: _fake_tool(
+                    "kwargs_all" if "assistant" in kw else "kwargs_bad"
+                ),
             ]
 
-        names = [t.name for t in await DummyIntegration().get_tools(user="u", thread_id="t")]
+        names = [
+            t.name for t in await DummyIntegration().get_tools(user="u", thread_id="t")
+        ]
         assert names == ["only_user", "user_thread", "kwargs_all"]
 
 
 class TestMCPIntegrationGetStatus:
-    async def test_wrong_static_token_reports_degraded_on_first_check(self, monkeypatch):
+    async def test_wrong_static_token_reports_degraded_on_first_check(
+        self, monkeypatch
+    ):
         """A token integration whose credential is simply wrong must not show as
         connected just because get_status() was never exercised by a chat turn yet."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
@@ -505,7 +524,9 @@ class TestMCPIntegrationGetStatus:
 
         assert await integration.get_status() == IntegrationStatus.DEGRADED
 
-    async def test_correct_static_token_reports_active_on_first_check(self, monkeypatch):
+    async def test_correct_static_token_reports_active_on_first_check(
+        self, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
 
         async def succeeds(*args, **kwargs):
@@ -549,7 +570,11 @@ class TestMCPIntegrationGetStatus:
         from django_ai_sdk.integrations.mcp.loader import build_mcp_config_safe
 
         config, needs_setup = build_mcp_config_safe(
-            auth="token", url="https://example.com/mcp", label="Linear", tools=[], token=""
+            auth="token",
+            url="https://example.com/mcp",
+            label="Linear",
+            tools=[],
+            token="",
         )
         integration = DynamicMCPIntegration(
             "linear", config, needs_setup=needs_setup, intended_kind="token"
@@ -620,77 +645,19 @@ class TestAPIIntegrationGetStatus:
 
 
 class TestRegistry:
-    """Integrations are declared as ``{name: dotted.path}``; a bad entry must degrade
-    to "that one is unavailable" rather than breaking every other integration."""
+    """Each integration app registers its service from ``ready()``; the registry
+    itself is a plain dict fed only by ``register()``."""
 
-    async def test_dotted_path_is_imported_and_instantiated(self, settings):
-        settings.AI_SDK_INTEGRATIONS = {"weather": "tests.mocks.integrations.ExampleWeatherService"}
-
-        integrations = await get_all_integrations()
-
-        assert list(integrations) == ["weather"]
-        assert isinstance(integrations["weather"], ExampleWeatherService)
-
-    async def test_instance_entries_are_used_as_is(self, settings):
+    async def test_registered_service_is_returned(self):
         instance = ExampleWeatherService()
-        settings.AI_SDK_INTEGRATIONS = {"weather": instance}
+        register(instance)
 
         assert (await get_all_integrations())["weather"] is instance
 
-    async def test_service_is_built_once_and_reused(self, settings):
-        """Each service owns its ResilientCache and breaker state, so rebuilding it per
-        lookup would silently discard the health it just learned."""
-        settings.AI_SDK_INTEGRATIONS = {"weather": "tests.mocks.integrations.ExampleWeatherService"}
-
-        first = (await get_all_integrations())["weather"]
-        second = (await get_all_integrations())["weather"]
-
-        assert first is second
-
-    async def test_name_and_label_are_backfilled_from_the_settings_key(self, settings):
-        settings.AI_SDK_INTEGRATIONS = {"my-weather": "tests.mocks.integrations.UnnamedService"}
-
-        service = (await get_all_integrations())["my-weather"]
-
-        assert service.name == "my-weather"  # the key is authoritative
-        assert service.label == "My-Weather"
-
-    async def test_a_broken_entry_does_not_hide_the_others(self, settings, caplog):
-        settings.AI_SDK_INTEGRATIONS = {
-            "broken": "tests.unit.does.not.Exist",
-            "weather": "tests.mocks.integrations.ExampleWeatherService",
-        }
-
-        integrations = await get_all_integrations()
-
-        assert list(integrations) == ["weather"]
-        assert "broken" in caplog.text
-
-    async def test_a_broken_entry_is_only_reported_once(self, settings, caplog):
-        """The first lookup may well be a chat request; a broken entry must not re-run
-        a failing import on every subsequent one."""
-        settings.AI_SDK_INTEGRATIONS = {"broken": "tests.unit.does.not.Exist"}
-
-        await get_all_integrations()
-        first_count = caplog.text.count("Could not load integration")
-        await get_all_integrations()
-
-        assert first_count == 1
-        assert caplog.text.count("Could not load integration") == 1
-
-    async def test_get_integrations_skips_unknown_names(self, settings):
-        settings.AI_SDK_INTEGRATIONS = {"weather": "tests.mocks.integrations.ExampleWeatherService"}
+    async def test_get_integrations_skips_unknown_names(self):
+        register(ExampleWeatherService())
 
         assert list(await get_integrations(["weather", "nope"])) == ["weather"]
-
-    async def test_explicitly_registered_service_wins_over_settings(self, settings):
-        """The app-based escape hatch and the settings mapping share one registry;
-        a deliberately constructed service takes precedence."""
-        settings.AI_SDK_INTEGRATIONS = {"weather": "tests.mocks.integrations.ExampleWeatherService"}
-        explicit = ExampleWeatherService()
-        register(explicit)
-
-        assert (await get_all_integrations())["weather"] is explicit
 
     def test_register_rejects_a_nameless_service(self):
         class Nameless(APIIntegration):
@@ -699,11 +666,41 @@ class TestRegistry:
         with pytest.raises(ValueError, match="non-empty `name`"):
             register(Nameless())
 
-    async def test_non_dict_settings_is_a_configuration_error(self, settings):
-        settings.AI_SDK_INTEGRATIONS = ["weather"]
+    async def test_reset_registry_clears_everything(self):
+        register(ExampleWeatherService())
+        reset_registry()
 
-        with pytest.raises(ImproperlyConfigured, match="must be a dict"):
-            await get_all_integrations()
+        assert await get_all_integrations() == {}
+
+
+class TestIntegrationAppConfig:
+    """``ready()`` is the only path a service takes into the registry."""
+
+    async def test_ready_registers_the_configured_integration(self):
+        import tests as tests_module
+        from django_ai_sdk.integrations.apps import IntegrationAppConfig
+
+        class WeatherConfig(IntegrationAppConfig):
+            name = "tests"
+            integration = "tests.mocks.integrations.ExampleWeatherService"
+
+        config = WeatherConfig("tests", tests_module)
+        config.ready()
+
+        service = (await get_all_integrations())["weather"]
+        assert isinstance(service, ExampleWeatherService)
+
+    def test_ready_warns_and_registers_nothing_without_an_integration_set(self, caplog):
+        import tests as tests_module
+        from django_ai_sdk.integrations.apps import IntegrationAppConfig
+
+        class EmptyConfig(IntegrationAppConfig):
+            name = "tests"
+
+        config = EmptyConfig("tests", tests_module)
+        config.ready()
+
+        assert "no `integration` set" in caplog.text
 
 
 class TestExtensibility:
@@ -719,7 +716,7 @@ class TestExtensibility:
         assert await integration.get_tools() == []
         assert await integration.get_status() == IntegrationStatus.ACTIVE
 
-    async def test_a_hand_rolled_service_satisfies_the_contract(self, settings):
+    async def test_a_hand_rolled_service_satisfies_the_contract(self):
         class CustomBackendService(Integration):
             name = "custom"
             label = "Custom"
@@ -731,14 +728,14 @@ class TestExtensibility:
                 return IntegrationStatus.ACTIVE
 
         instance = CustomBackendService()
-        settings.AI_SDK_INTEGRATIONS = {"custom": instance}
+        register(instance)
 
         resolved = (await get_all_integrations())["custom"]
         assert resolved is instance
         assert await resolved.get_tools() == ["custom-tool"]
         assert resolved.kind == "api"  # the contract's default, no MCP assumptions
 
-    async def test_assistant_get_tools_threads_assistant_into_factory(self, settings):
+    async def test_assistant_get_tools_threads_assistant_into_factory(self):
         """A tool factory that runs its own LLM call (e.g. translation) needs the
         calling assistant's model — that's why `assistant` is in the contract."""
         from django_ai_sdk.assistant import Assistant
@@ -763,7 +760,7 @@ class TestExtensibility:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {"model-aware": ModelAwareIntegration()}
+        register(ModelAwareIntegration())
 
         assistant = FakeAssistant()
         await assistant._get_integration_tools()
@@ -777,7 +774,7 @@ class TestIntegrationFailureIsolation:
     serialize with it either — the guarantee _get_integration_tools makes via
     asyncio.gather plus a per-integration try/except."""
 
-    async def test_one_failing_integration_does_not_drop_others_tools(self, settings):
+    async def test_one_failing_integration_does_not_drop_others_tools(self):
         from django_ai_sdk.assistant import Assistant
 
         class BrokenIntegration(APIIntegration):
@@ -802,14 +799,12 @@ class TestIntegrationFailureIsolation:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {
-            "broken": BrokenIntegration(),
-            "healthy": HealthyIntegration(),
-        }
+        register(BrokenIntegration())
+        register(HealthyIntegration())
 
         assert await FakeAssistant()._get_integration_tools() == ["healthy-tool"]
 
-    async def test_integrations_are_awaited_concurrently_not_serially(self, settings):
+    async def test_integrations_are_awaited_concurrently_not_serially(self):
         """If a slow integration and another were awaited one at a time, total
         wall-clock time would be additive. Assert it isn't."""
         from django_ai_sdk.assistant import Assistant
@@ -841,10 +836,8 @@ class TestIntegrationFailureIsolation:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {
-            "slow": SlowIntegration(),
-            "other-slow": OtherSlowIntegration(),
-        }
+        register(SlowIntegration())
+        register(OtherSlowIntegration())
 
         start = time.monotonic()
         tools = await FakeAssistant()._get_integration_tools()
@@ -853,7 +846,7 @@ class TestIntegrationFailureIsolation:
         assert set(tools) == {"slow-tool", "other-slow-tool"}
         assert elapsed < delay * 2
 
-    async def test_an_unpermitted_integration_contributes_no_tools(self, settings):
+    async def test_an_unpermitted_integration_contributes_no_tools(self):
         """Permissions are enforced before tools reach the model, not after."""
         from django_ai_sdk.assistant import Assistant
 
@@ -873,7 +866,7 @@ class TestIntegrationFailureIsolation:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {"forbidden": ForbiddenIntegration()}
+        register(ForbiddenIntegration())
 
         assert await FakeAssistant()._get_integration_tools() == []
 
@@ -888,18 +881,26 @@ class TestIntegrationToolNamespacing:
     class FakeTool:
         name: str
 
-    async def test_same_named_tools_from_two_integrations_do_not_collide(self, settings):
+    async def test_same_named_tools_from_two_integrations_do_not_collide(self):
         from django_ai_sdk.assistant import Assistant
 
         class FirstIntegration(APIIntegration):
             permissions = [AllowAll]
             name = "first"
-            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+            tools = [
+                lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(
+                    name="list_issues"
+                )
+            ]
 
         class SecondIntegration(APIIntegration):
             permissions = [AllowAll]
             name = "second"
-            tools = [lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(name="list_issues")]
+            tools = [
+                lambda **kwargs: TestIntegrationToolNamespacing.FakeTool(
+                    name="list_issues"
+                )
+            ]
 
         class FakeAssistant(Assistant):
             name = "Fake"
@@ -910,10 +911,8 @@ class TestIntegrationToolNamespacing:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {
-            "first": FirstIntegration(),
-            "second": SecondIntegration(),
-        }
+        register(FirstIntegration())
+        register(SecondIntegration())
 
         tools = await FakeAssistant()._get_integration_tools()
 
@@ -926,12 +925,18 @@ class TestOAuthTokenRefresh:
     HTTP exchange plus the optimistic-concurrency guard against a concurrent refresh
     (another request, or an overlapping refresh_integrations run) landing first."""
 
-    async def _make_token(self, user, server_name="notion", refresh_token="old-refresh"):
+    async def _make_token(
+        self, user, server_name="notion", refresh_token="old-refresh"
+    ):
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
         token_obj = MCPOAuthToken(user=user, server_name=server_name)
         token_obj.set_tokens(
-            {"access_token": "old-access", "refresh_token": refresh_token, "expires_in": -10}
+            {
+                "access_token": "old-access",
+                "refresh_token": refresh_token,
+                "expires_in": -10,
+            }
         )
         await token_obj.asave()
         return token_obj
@@ -948,12 +953,18 @@ class TestOAuthTokenRefresh:
         _patch_oauth_transport(
             monkeypatch,
             _mock_transport(
-                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+                {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 3600,
+                }
             ),
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         result = await refresh_oauth_token(token_obj, config)
 
@@ -978,7 +989,9 @@ class TestOAuthTokenRefresh:
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         result = await refresh_oauth_token(token_obj, config)
 
@@ -996,7 +1009,9 @@ class TestOAuthTokenRefresh:
         token_obj = await self._make_token(user, refresh_token="")
 
         def explodes(request):
-            raise AssertionError("must not call the token endpoint without a refresh token")
+            raise AssertionError(
+                "must not call the token endpoint without a refresh token"
+            )
 
         _patch_discovery(monkeypatch)
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
@@ -1004,7 +1019,9 @@ class TestOAuthTokenRefresh:
         config = OAuthMCPIntegrationConfig(url="https://mcp.example.com", client_id="c")
         assert await refresh_oauth_token(token_obj, config) is None
 
-    async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(self, monkeypatch):
+    async def test_refresh_loses_race_reloads_winner_instead_of_clobbering_it(
+        self, monkeypatch
+    ):
         """By the time our refresh response comes back, a concurrent refresh has already
         rotated the row's refresh_token out from under us. Our conditional update must
         no-op, and the caller must get the winner's tokens — not silently overwrite
@@ -1018,7 +1035,11 @@ class TestOAuthTokenRefresh:
 
         winner = MCPOAuthToken(user=user, server_name=token_obj.server_name)
         winner.set_tokens(
-            {"access_token": "winner-access", "refresh_token": "winner-refresh", "expires_in": 3600}
+            {
+                "access_token": "winner-access",
+                "refresh_token": "winner-refresh",
+                "expires_in": 3600,
+            }
         )
         await MCPOAuthToken.objects.filter(pk=token_obj.pk).aupdate(
             access_token=winner.access_token,
@@ -1039,7 +1060,9 @@ class TestOAuthTokenRefresh:
         )
 
         config = OAuthMCPIntegrationConfig(
-            url="https://mcp.example.com", client_id="client-1", client_secret="secret-1"
+            url="https://mcp.example.com",
+            client_id="client-1",
+            client_secret="secret-1",
         )
         # token_obj still holds the pre-race refresh_token in memory — exactly the stale
         # value a real caller would have if it read the row before the race.
@@ -1059,7 +1082,11 @@ class TestExchangeToken:
         _patch_oauth_transport(
             monkeypatch,
             _mock_transport(
-                {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+                {
+                    "access_token": "new-access",
+                    "refresh_token": "new-refresh",
+                    "expires_in": 3600,
+                }
             ),
         )
 
@@ -1145,20 +1172,21 @@ class TestOAuthRedirectFlow:
         )
 
     async def test_connect_redirects_to_the_provider_and_stores_pkce_state(
-        self, settings, monkeypatch
+        self, monkeypatch
     ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
+        register(self._oauth_integration())
         _patch_discovery(monkeypatch)
 
         async def fake_register(*args, **kwargs):
             return "client-1", "secret-1"
 
         monkeypatch.setattr(
-            "django_ai_sdk.integrations.mcp.services.get_or_register_client", fake_register
+            "django_ai_sdk.integrations.mcp.services.get_or_register_client",
+            fake_register,
         )
 
         user = await UserFactory.acreate()
@@ -1175,26 +1203,30 @@ class TestOAuthRedirectFlow:
         assert request.session[loader_module._K_STATE.format("notion")]
         assert request.session[loader_module._K_VERIFIER.format("notion")]
 
-    async def test_connect_rejects_an_unknown_server(self, settings):
+    async def test_connect_rejects_an_unknown_server(self):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {}
         user = await UserFactory.acreate()
 
         result = await IntegrationService.connect(
-            "nope", user, request=self._request(user), redirect_uri="https://app.example.com/cb"
+            "nope",
+            user,
+            request=self._request(user),
+            redirect_uri="https://app.example.com/cb",
         )
 
         assert result is None
 
-    async def test_callback_exchanges_the_code_and_persists_the_token(self, settings, monkeypatch):
+    async def test_callback_exchanges_the_code_and_persists_the_token(
+        self, settings, monkeypatch
+    ):
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
+        register(self._oauth_integration())
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
         _patch_oauth_transport(
             monkeypatch,
@@ -1289,7 +1321,7 @@ class TestOAuthRedirectFlow:
         await integration._cache.get(key, fetch)
         assert fetches == 2
 
-    async def test_callback_rejects_a_mismatched_state(self, settings, monkeypatch):
+    async def test_callback_rejects_a_mismatched_state(self, monkeypatch):
         """CSRF protection for the OAuth handshake: a code arriving with someone else's
         (or a forged) state must never be exchanged."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
@@ -1297,10 +1329,12 @@ class TestOAuthRedirectFlow:
         from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
+        register(self._oauth_integration())
 
         def explodes(request):
-            raise AssertionError("must not reach the token endpoint on a state mismatch")
+            raise AssertionError(
+                "must not reach the token endpoint on a state mismatch"
+            )
 
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
 
@@ -1320,15 +1354,17 @@ class TestOAuthRedirectFlow:
         assert not await MCPOAuthToken.objects.filter(user=user).aexists()
 
     async def test_callback_reports_a_provider_error_without_exchanging(
-        self, settings, monkeypatch
+        self, monkeypatch
     ):
         from django_ai_sdk.integrations.mcp import oauth_views
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
+        register(self._oauth_integration())
 
         def explodes(request):
-            raise AssertionError("must not reach the token endpoint after a provider error")
+            raise AssertionError(
+                "must not reach the token endpoint after a provider error"
+            )
 
         _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
 
@@ -1344,17 +1380,20 @@ class TestOAuthRedirectFlow:
 
         assert response.status_code == 400
 
-    async def test_callback_refuses_an_off_site_success_redirect(self, settings, monkeypatch):
+    async def test_callback_refuses_an_off_site_success_redirect(
+        self, settings, monkeypatch
+    ):
         """A misconfigured AI_SDK_MCP_OAUTH_SUCCESS_URL must not turn the callback into
         an open redirect — it falls back to "/"."""
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {"notion": self._oauth_integration()}
+        register(self._oauth_integration())
         settings.AI_SDK_MCP_OAUTH_SUCCESS_URL = "https://evil.example.com/steal"
         _patch_oauth_transport(
-            monkeypatch, _mock_transport({"access_token": "fresh-access", "expires_in": 3600})
+            monkeypatch,
+            _mock_transport({"access_token": "fresh-access", "expires_in": 3600}),
         )
 
         user = await UserFactory.acreate()
@@ -1390,7 +1429,9 @@ class TestNoStartUrl:
     def test_oauth_callback_still_resolves(self):
         from django.urls import reverse
 
-        assert reverse("integrations_mcp:oauth-callback", kwargs={"server_name": "notion"})
+        assert reverse(
+            "integrations_mcp:oauth-callback", kwargs={"server_name": "notion"}
+        )
 
 
 @pytest.mark.django_db
@@ -1398,7 +1439,7 @@ class TestIntegrationService:
     """The facade views.py delegates to — mirrors AssistantService's shape (resolve by
     name, permission-check, delegate to the instance)."""
 
-    async def test_list_for_user_drops_unpermitted_rows(self, settings):
+    async def test_list_for_user_drops_unpermitted_rows(self):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
@@ -1414,17 +1455,15 @@ class TestIntegrationService:
             name = "visible"
             tools = []
 
-        settings.AI_SDK_INTEGRATIONS = {
-            "forbidden": ForbiddenIntegration(),
-            "visible": VisibleIntegration(),
-        }
+        register(ForbiddenIntegration())
+        register(VisibleIntegration())
         user = await UserFactory.acreate()
 
         rows = await IntegrationService.list_for_user(user)
 
         assert [r.name for r in rows] == ["visible"]
 
-    async def test_list_for_user_isolates_a_broken_integration(self, settings):
+    async def test_list_for_user_isolates_a_broken_integration(self):
         """One integration's get_status() raising must not drop the others, and must
         report DEGRADED for itself rather than propagating."""
         from django_ai_sdk.integrations.base import IntegrationStatus
@@ -1444,10 +1483,8 @@ class TestIntegrationService:
             name = "healthy"
             tools = []
 
-        settings.AI_SDK_INTEGRATIONS = {
-            "broken": BrokenIntegration(),
-            "healthy": HealthyIntegration(),
-        }
+        register(BrokenIntegration())
+        register(HealthyIntegration())
         user = await UserFactory.acreate()
 
         rows = {r.name: r for r in await IntegrationService.list_for_user(user)}
@@ -1455,7 +1492,7 @@ class TestIntegrationService:
         assert rows["broken"].status == IntegrationStatus.DEGRADED
         assert rows["healthy"].status == IntegrationStatus.ACTIVE
 
-    async def test_connect_raises_permission_denied_without_manage_perm(self, settings):
+    async def test_connect_raises_permission_denied_without_manage_perm(self):
         from django_ai_sdk.integrations.services import IntegrationService
         from django_ai_sdk.permissions import PermissionDenied
         from tests.factories.db import UserFactory
@@ -1470,19 +1507,21 @@ class TestIntegrationService:
 
                 return operation == Operation.USE_INTEGRATION
 
-        settings.AI_SDK_INTEGRATIONS = {"only-usable": OnlyUsable()}
+        register(OnlyUsable())
         user = await UserFactory.acreate()
 
         with pytest.raises(PermissionDenied):
             await IntegrationService.connect(
-                "only-usable", user, request=None, redirect_uri="https://app.example.com/cb"
+                "only-usable",
+                user,
+                request=None,
+                redirect_uri="https://app.example.com/cb",
             )
 
-    async def test_connect_returns_none_for_an_unknown_integration(self, settings):
+    async def test_connect_returns_none_for_an_unknown_integration(self):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {}
         user = await UserFactory.acreate()
 
         result = await IntegrationService.connect(
@@ -1491,11 +1530,12 @@ class TestIntegrationService:
 
         assert result is None
 
-    async def test_disconnect_and_reconnect_return_none_for_an_unknown_integration(self, settings):
+    async def test_disconnect_and_reconnect_return_none_for_an_unknown_integration(
+        self,
+    ):
         from django_ai_sdk.integrations.services import IntegrationService
         from tests.factories.db import UserFactory
 
-        settings.AI_SDK_INTEGRATIONS = {}
         user = await UserFactory.acreate()
 
         assert await IntegrationService.disconnect("nope", user) is None
@@ -1503,7 +1543,7 @@ class TestIntegrationService:
 
 
 class TestIntegrationPermissions:
-    async def test_no_user_gets_no_integration_tools_by_default(self, settings):
+    async def test_no_user_gets_no_integration_tools_by_default(self):
         """The INTEGRATIONS domain default requires an authenticated user, so a system
         or anonymous context contributes no integration tools at all. Documented because
         it's easy to mistake for a registry miss when writing a test."""
@@ -1522,6 +1562,6 @@ class TestIntegrationPermissions:
             async def get_pipeline_adapter(self, thread_id=None, user=None):
                 raise NotImplementedError
 
-        settings.AI_SDK_INTEGRATIONS = {"default-perms": DefaultPermsIntegration()}
+        register(DefaultPermsIntegration())
 
         assert await FakeAssistant()._get_integration_tools(user=None) == []

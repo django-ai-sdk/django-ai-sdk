@@ -43,6 +43,7 @@ class AssistantItem(Schema):
     name: str | None = None
     model: str | None = None
     file_upload: bool = False
+    rag: bool = False
 
 
 class AssistantsListResponse(Schema):
@@ -57,6 +58,7 @@ class AssistantInfoResponse(Schema):
     description: str | None = None
     instructions: str | None = None
     file_upload: bool = False
+    rag: bool = False
 
 
 class Tool(Schema):
@@ -436,6 +438,7 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
             description=info.description,
             instructions=assistant.get_system_prompt(),
             file_upload=info.file_upload,
+            rag=info.rag,
         )
     except PermissionDenied as e:
         return 403, Error(message=str(e))

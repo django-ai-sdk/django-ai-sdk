@@ -1,6 +1,6 @@
 """Generic, integration-kind-agnostic output schemas.
 
-These describe integrations to the ``/api/integrations`` surface and to the
+These describe integrations to the /api/integrations surface and to the
 per-assistant status endpoint, regardless of whether an integration is MCP-backed or
 a hand-written API wrapper.
 """
@@ -13,12 +13,12 @@ from django_ai_sdk.integrations.base import IntegrationStatus
 
 
 class IntegrationOut(BaseModel):
-    """One integration's state for the generic ``GET /api/integrations`` list.
+    """One integration's state for the generic GET /api/integrations list.
 
     Capability flags let the client decide which actions to offer without knowing the
-    integration's kind. When ``supports_connect``, the client calls
-    ``POST /{name}/connect`` to get the redirect URL — this list never carries one
-    itself, since building it needs the request (see ``integrations/views.py``).
+    integration's kind. When supports_connect, the client calls the host project's
+    POST /{name}/connect endpoint to get the redirect URL. This list never carries
+    one itself, since building it needs the request.
     """
 
     name: str

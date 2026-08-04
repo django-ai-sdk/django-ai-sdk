@@ -1,14 +1,15 @@
 """Refresh credentials for every registered integration, and warm its tool cache.
 
-Delegates to each ``Integration.refresh()`` — a no-op for integrations without
-credentials, and (for MCP OAuth) a proactive refresh of tokens nearing expiry. Run on a
-schedule (cron / celery beat).
+Delegates to each Integration.refresh(): a no-op for integrations without
+credentials, and (for MCP OAuth) a proactive refresh of tokens nearing expiry. Run on
+a schedule (cron / celery beat).
 
-It then calls ``get_status()``, which primes the cached tool list as a side effect. That
-is the difference between a user's first message after a deploy paying a live MCP connect
-and paying nothing. It only helps integrations whose cache key isn't per-user
-(static/token servers) — an OAuth server's tools are cached per user and can't be warmed
-without acting as that user — but those are exactly the ones every user shares.
+It then calls get_status(), which primes the cached tool list as a side effect. That
+is the difference between a user's first message after a deploy paying a live MCP
+connect and paying nothing. It only helps integrations whose cache key isn't
+per-user (static/token servers), since an OAuth server's tools are cached per user
+and can't be warmed without acting as that user, but those are exactly the ones
+every user shares.
 """
 
 from __future__ import annotations
