@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=82.0.1", "setuptools-scm>=10.0.5"]
+requires = ["setuptools>=83.0.0", "setuptools-scm>=10.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -26,9 +26,9 @@ dependencies = [
   "aiofiles>=25.1.0",
   "authlib>=1.7.2", # MCP OAuth 2.1 client (token exchange + refresh)
   "cashews>=7.5.0,<9", # stale-while-revalidate cache + circuit breaker (integrations)
-  "daphne>=4.2.2",
-  "django>=5.2.6,<6.1",
-  "django-environ>=0.13.0",
+  "daphne>=4.2.3",
+  "django>=6.0.7,<6.1",
+  "django-environ>=0.14.0",
   "django-tasks>=0.12.0",
   "django-tasks-db>=0.12.0",
   "loguru>=0.7.3",
@@ -51,31 +51,31 @@ Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 [project.optional-dependencies]
 all = ["django-ai-sdk[haystack,restframework,mcp,files]"]
 haystack = [
-  "chroma-haystack>=4.3.0",
-  "fastembed-haystack>=2.3.0",
-  "haystack-ai>=2.30.0",
-  "huggingface-hub>=1.17.0",
-  "qdrant-haystack>=10.3.0",
-  "sentence-transformers>=5.5.1",
+  "chroma-haystack>=4.4.0",
+  "fastembed-haystack>=2.4.0",
+  "haystack-ai>=3.0.0",
+  "huggingface-hub>=1.26.0",
+  "qdrant-haystack>=10.4.0",
+  "sentence-transformers>=5.6.1",
 ]
-mcp = ["mcp>=1.27.2", "mcp-haystack>=1.3.0"]
+mcp = ["mcp>=2.0.0", "mcp-haystack>=1.4.1"]
 restframework = ["djangorestframework>=3.17.1"]
-files = ["python-docx>=1.1.2", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
+files = ["python-docx>=1.2.0", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 [dependency-groups]
 dev = [
   "django-ninja>=1.6.2", # demo app only — the SDK's own HTTP surfaces are plain Django
-  "django-stubs>=6.0.5",
+  "django-stubs>=6.0.7",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
-  "pytest>=9.0.3",
+  "pytest>=9.1.1",
   "pytest-asyncio>=1.4.0",
   "pytest-django>=4.12.0",
   "pytest-mock>=3.15.1",
-  "ruff>=0.15.15",
-  "lefthook>=2.1.9",
+  "ruff>=0.16.1",
+  "lefthook>=2.1.10",
   "django-watchfiles>=1.4.0",
   "polyfactory>=3.3.0",
-  "ty>=0.0.49",
+  "ty>=0.0.65",
 ]
 
 [tool.pytest.ini_options]
