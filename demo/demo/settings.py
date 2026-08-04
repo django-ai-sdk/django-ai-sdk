@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import environ
-from django_ai_sdk.mcp.schemas import TokenMCPServer
 
 env = environ.Env(
     # set casting, default value
@@ -50,6 +49,11 @@ INSTALLED_APPS = [
     "django_tasks",
     "django_tasks_db",
     "django_ai_sdk",
+    # The MCP toolkit: OAuth token models + the OAuth redirect views.
+    "django_ai_sdk.integrations.mcp",
+    # Shipped default integrations: one MCP-backed, one API-backed.
+    "django_ai_sdk.integrations.linear",
+    "django_ai_sdk.integrations.weather",
     # local
     "piratespeak",
 ]
@@ -186,23 +190,28 @@ AI_SDK_PERMISSIONS = {
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
 
-# Default vector store server url
-AI_SDK_VECTOR_STORE_URL = "http://qdrant:6333"
 
-AI_SDK_MCP_SERVERS = {
-    "linear": TokenMCPServer(
-        label="Linear",
-        url="https://mcp.linear.app/mcp",
-        token=env("LINEAR_API_KEY", default=None),
-        tools=["list_issues"],
-    )
+# Integrations are Django apps (see INSTALLED_APPS above) that register themselves on
+# ready(). INSTALLED_APPS decides which exist; this dict configures them, keyed by
+# integration name, in the same shape as DATABASES or CACHES. A missing credential
+# doesn't crash boot: the integration reports that it needs setup instead. `weather`
+# needs none at all, so it isn't listed here and still works out of the box.
+AI_SDK_INTEGRATIONS = {
+    "linear": {"TOKEN": env("LINEAR_API_KEY", default="")},
 }
 
 
-# MCP discovery configuration
+# MCP OAuth discovery (RFC 9728)
 AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
 AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
-AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/mcp"
+AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
+
+# Integration caching, timeouts and circuit breaker (see
+# django_ai_sdk.integrations.base.ResilientCache). Together these bound the worst case
+# a slow or dead integration can add to a chat response.
+AI_SDK_INTEGRATION_CACHE_TTL = 900  # seconds a discovered tool list stays fresh
+AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
+AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
 
 
 # Allowed upload filetypes

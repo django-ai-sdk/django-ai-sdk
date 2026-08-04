@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from django.conf import settings
 from pydantic import BaseModel
 
 from django_ai_sdk.assistants.mixins import AssistantInfoMixin
@@ -17,8 +17,8 @@ from django_ai_sdk.citations import (
 )
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title
+from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.mcp.loader import load_mcp_tools
 from django_ai_sdk.permissions import (
     AllowAll,
     BasePermission,
@@ -48,6 +48,26 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
+
+
+def _namespaced(integration_name: str, tool: Any) -> Any:
+    """Rename tool to {integration_name}_{tool.name}.
+
+    Nothing stops two unrelated MCP servers from defining the same tool name
+    (GitHub and Linear both have list_issues), and Haystack requires unique names
+    across everything handed to one agent, so without this, enabling two
+    integrations that happen to collide would fail assistant construction outright.
+    """
+    try:
+        return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
+    except (TypeError, AttributeError):
+        logger.warning(
+            "Could not namespace tool %r from integration %r — left as-is, may "
+            "collide with another integration's tool.",
+            getattr(tool, "name", tool),
+            integration_name,
+        )
+        return tool
 
 
 class Assistant(ABC, AssistantInfoMixin):
@@ -90,6 +110,11 @@ class Assistant(ABC, AssistantInfoMixin):
             name = "My Bot"
             model = "gpt-4"
 
+    Every concrete subclass also auto-registers on definition (__init_subclass__),
+    so either method above is really just what gets the module imported. An
+    abstract shared base (abstract = True) is skipped regardless of how it's
+    reached — see AssistantRegistry.register().
+
     Usage:
         from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 
@@ -125,6 +150,15 @@ class Assistant(ABC, AssistantInfoMixin):
 
     # If True, hide from registry.visible() (used for internal assistants)
     hidden: bool = False
+
+    # If True, this is a shared base meant only to be subclassed — it never enters the
+    # registry. Checked on the class's own __dict__, so it is never inherited and each
+    # concrete subclass registers normally without restating it.
+    #
+    # Distinct from `_skip_auto_register` (see assistants/runtime.py), which marks a
+    # class that is concrete and instantiated but built on demand rather than looked up
+    # by id. Both stay out of the registry, for unrelated reasons.
+    abstract: bool = False
 
     # If Assistant should automatically warm up after initialization
     warmup_on_init: bool = False
@@ -350,6 +384,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
+        result.extend(await self._get_integration_tools(user, thread_id=thread_id))
         return result
 
     async def get_rag_tools(
@@ -379,8 +414,19 @@ class Assistant(ABC, AssistantInfoMixin):
             user=user,
         )
 
+        used_names: set[str] = set()
+
         for memory in memories:
             spec = await memory.get_tool_spec()
+            if spec.name in used_names:
+                spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
+                logger.warning(
+                    "Tool name collision for memory '{}', renamed to '{}'",
+                    memory.name,
+                    spec.name,
+                )
+            used_names.add(spec.name)
+
             tool = await self.rag_provider.get_tool(
                 self,
                 str(memory.id),
@@ -515,40 +561,57 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
-    mcp_servers: list[str] = []
+    #: Flat list of integration names (`["linear"]`) — every tool that integration
+    #: exposes reaches this assistant. Names are registry keys, i.e. the `name` on
+    #: each Integration subclass. Narrowing an integration to a subset of its tools
+    #: per assistant is not supported: restrict it at the integration instead, via
+    #: an MCP integration's `default_tools` allow-list.
+    integrations: list[str] = []
 
-    async def get_mcp_tools(
-        self, user: AbstractBaseUser | AnonymousUser | None = None
+    async def _get_integration_tools(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        thread_id: str = "",
     ) -> list[Any]:
-        """
-        Load MCP tool objects for this assistant.
+        """Load tool objects from every integration listed in `self.integrations`.
 
-        Reads AI_SDK_MCP_SERVERS from settings and filters to the servers listed
-        in self.mcp_servers.
+        Resolves the names against the integrations registry (populated by each
+        integration app on startup, plus any DB-declared MCP servers) and skips any
+        the user isn't permitted to use, so an unauthorized integration's tools never
+        reach the model. Runs the remaining integrations concurrently — each one's
+        get_tools() is individually bounded.
         """
-        if not self.mcp_servers:
+        if not self.integrations:
             return []
 
-        all_servers = getattr(settings, "AI_SDK_MCP_SERVERS", {})
-        selected = {k: v for k, v in all_servers.items() if k in self.mcp_servers}
-        return await load_mcp_tools(selected, user)
+        from django_ai_sdk.permissions import Operation
 
-    @abstractmethod
+        async def _safe_get_tools(integration: Any) -> list[Any]:
+            try:
+                tools = await integration.get_tools(user, assistant=self, thread_id=thread_id)
+            except Exception:
+                logger.exception("Failed to load tools for integration %r", integration.name)
+                return []
+            return [_namespaced(integration.name, tool) for tool in tools]
+
+        services = (await get_integrations(self.integrations)).values()
+        allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
+        results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
+        return [tool for tools in results for tool in tools]
+
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
-        """
-        Create and return pipeline adapter.
+        """Return the adapter used for streaming chat.
 
-        Args:
-            thread_id: Optional thread ID for conversation persistence.
-
-        Returns:
-            A pipeline adapter instance
+        Must be implemented by subclasses used in chat. A worker-only assistant
+        (hidden = True, called only via run()) can leave this unimplemented.
         """
-        pass
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement get_pipeline_adapter()."
+        )
 
     async def history(
         self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None

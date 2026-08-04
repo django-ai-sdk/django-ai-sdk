@@ -69,12 +69,98 @@ async def chat(request, payload: ChatRequest):
     )
 ```
 
+## Integrations
+
+An integration gives an assistant tools from a third party — an MCP server, or an API
+you wrap yourself. Each one is a small Django app that registers itself on `ready()`.
+
+Enable a shipped integration by installing its app and naming it on an assistant:
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    "django_ai_sdk",
+    "django_ai_sdk.integrations.mcp",     # required by any MCP-backed integration
+    "django_ai_sdk.integrations.github",  # also: .linear, .notion, .weather
+]
+
+# INSTALLED_APPS decides which integrations exist; this configures them — the same
+# shape as DATABASES or CACHES, keyed by integration name.
+AI_SDK_INTEGRATIONS = {
+    "github": {"TOKEN": env("GITHUB_MCP_TOKEN")},
+}
+```
+
+```python
+class HelpDeskAssistant(Assistant):
+    integrations = ["github"]
+```
+
+A missing credential never breaks boot: the integration reports that it needs setup
+and contributes no tools. Alongside secrets, each entry accepts `URL`, `TOOLS`,
+`LABEL`, `SCOPE` and `AUTH`, so a self-hosted server, a narrower tool allow-list, or
+per-user OAuth instead of a shared token is a settings change rather than a subclass.
+
+It's an ordinary dict, so pulling values from a vault or an ini file needs no hook —
+call whatever you like inside it.
+
+### Adding your own
+
+Three files, no models and no migrations:
+
+```python
+# myapp/integrations/zendesk/apps.py
+from django_ai_sdk.integrations import IntegrationAppConfig
+
+class ZendeskConfig(IntegrationAppConfig):
+    default = True             # Django needs this to pick your AppConfig over the base
+    name = "myapp.integrations.zendesk"
+    integration = "myapp.integrations.zendesk.integration.ZendeskIntegration"
+```
+
+```python
+# myapp/integrations/zendesk/integration.py
+from django_ai_sdk.integrations import MCPIntegration
+
+class ZendeskIntegration(MCPIntegration):
+    name = "zendesk"           # registry key, and the AI_SDK_INTEGRATIONS key
+    label = "Zendesk"
+    url = "https://mcp.zendesk.example/mcp"
+    auth = "token"             # "static" | "token" | "oauth"
+    default_tools = []         # [] discovers every tool the server offers
+```
+
+Add `"myapp.integrations.zendesk"` to `INSTALLED_APPS`, add
+`"zendesk": {"TOKEN": env("ZENDESK_API_TOKEN")}` to `AI_SDK_INTEGRATIONS`,
+and list `"zendesk"` on an assistant. For an API you wrap by hand, subclass
+`APIIntegration` and set `tools` to `@haystack.tools.tool`-decorated functions —
+`django_ai_sdk/integrations/weather/` is a complete, credential-free example, and
+`github/`, `linear/` and `notion/` cover token and OAuth MCP servers.
+
+Tools are namespaced per integration (`zendesk_search_tickets`), so two servers
+exposing the same tool name don't collide. Tool lists are cached
+stale-while-revalidate behind a per-integration circuit breaker, so a slow or dead
+server costs one bounded wait and then reports itself as degraded.
+
+### HTTP endpoints
+
+The SDK ships no integrations router — it doesn't pick your web framework. Build
+list/connect/disconnect/reconnect over `IntegrationService`
+(`demo/piratespeak/views_integrations_ninja.py` is a working reference), and include
+the OAuth callback, which must sit at a fixed URL:
+
+```python
+path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
+```
+
 ## Features
 
 - **RAG Pipelines**: BM25, ChromaDB, and Qdrant hybrid search with query expansion.
 - **Streaming Responses**: Built-in SSE streaming. Works with Vercel AI SDK protocol.
 - **Conversation Storage**: Automatic message persistence. Thread-based history out of the box.
 - **Tool Calling**: MCP, memory, and custom tools — all managed by your Assistant.
+- **Integrations**: Third-party tools as self-registering Django apps, with caching,
+  circuit breaking and OAuth built in. See [Integrations](#integrations).
 - **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
 
 ## Documentation

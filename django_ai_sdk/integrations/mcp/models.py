@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_fernet() -> Fernet:
-    """Derive a Fernet key from Django's SECRET_KEY via SHA-256."""
+    """Derive the Fernet key used to encrypt/decrypt integration credentials
+    from Django's SECRET_KEY, so there's no second secret to configure."""
     secret = settings.SECRET_KEY
     if isinstance(secret, str):
         secret = secret.encode()

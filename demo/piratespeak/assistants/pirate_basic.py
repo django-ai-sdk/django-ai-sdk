@@ -74,7 +74,10 @@ class PirateBasicAssistant(Assistant):
     rag_provider = RAGProvider()
 
     tools: list = [get_today, get_memory_files]
-    mcp_servers: list[str] = ["linear"]
+    #: Registry keys of installed integration apps. `weather` needs no credentials, so
+    #: it works out of the box; `linear` reports "needs setup" until LINEAR_API_KEY
+    #: reaches AI_SDK_INTEGRATIONS, rather than breaking this assistant.
+    integrations: list[str] = ["linear", "weather"]
 
     citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
@@ -190,10 +193,6 @@ class PirateBasicAssistant(Assistant):
                 user=user,
             )
             tools.extend(rag_tools)
-
-        # MCP tools
-        mcp_tools = await self.get_mcp_tools(user)
-        tools.extend(mcp_tools)
 
         # Build tool agent with all tools
         tool_agent = ToolAgent(

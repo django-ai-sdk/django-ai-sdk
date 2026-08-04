@@ -23,7 +23,9 @@ Registration Methods:
        class MyAssistant(Assistant):
            pass
 
-Both methods can be combined, a class will only be registered once.
+Both methods can be combined, a class will only be registered once. Either way,
+every app's assistants.py is also autodiscovered on startup (see
+DjangoAISDKConfig.ready()), so putting a class there is enough on its own.
 """
 
 from __future__ import annotations

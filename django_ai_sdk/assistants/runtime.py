@@ -39,7 +39,7 @@ class RuntimeAssistant(Assistant):
         self.name = config.name
         self.model = config.model
         self.instructions = prompt(config.system_prompt or "You are a helpful assistant.")
-        self.mcp_servers = list(config.mcp_servers or [])
+        self.integrations = list(config.integrations or [])
         self.memories = list(config.memories or [])
         self.title_generation = config.title_generation
         self.max_history = config.max_history
@@ -75,8 +75,6 @@ class RuntimeAssistant(Assistant):
         generator = self._build_generator()
         storage_adapter = await self.get_storage_adapter(thread_id)
         tools = await self.get_tools(thread_id=thread_id or "", user=user)
-        mcp_tools = await self.get_mcp_tools(user)
-        tools.extend(mcp_tools)
 
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
