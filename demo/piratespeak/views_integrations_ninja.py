@@ -33,7 +33,7 @@ router = Router()
     response={200: list[IntegrationOut]},
 )
 async def list_integrations(request: HttpRequest) -> list[IntegrationOut]:
-    """Return upload constraints for the frontend."""
+    """List every integration this user may use, with its real current status."""
     return await IntegrationService.list_for_user(request.user)
 
 

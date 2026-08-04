@@ -25,6 +25,7 @@ from django.urls import include, path
 from django_ai_sdk.permissions import PermissionDenied
 from ninja import NinjaAPI
 
+from piratespeak.views_integrations_ninja import router as integrations_router
 from piratespeak.views_memories_ninja import router as memories_router
 from piratespeak.views_ninja import router as piratespeak_router
 
@@ -37,8 +38,11 @@ api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
 
 api.add_router("/", piratespeak_router)
 api.add_router("/memories", memories_router)
-# Integrations are plain Django views (django_ai_sdk.integrations.urls), not a ninja
-# router — included in urlpatterns below alongside the MCP OAuth callback.
+# The SDK ships no integrations router — HTTP surfaces are the host project's, so it
+# doesn't pick your web framework. views_integrations_ninja builds one over
+# IntegrationService; the OAuth *callback* is the one leg the SDK does ship, since it
+# must sit at a fixed URL (included in urlpatterns below).
+api.add_router("/integrations", integrations_router)
 
 
 # Global safety net so service-layer errors never surface as 500s.

@@ -1,22 +1,10 @@
-"""Example integrations for the demo app — a copy-me template.
-
-An integration is just a class. There is no app to create, no ``INSTALLED_APPS`` entry,
-no migration: name it in ``AI_SDK_INTEGRATIONS`` and the registry builds it on first use.
-
-``WeatherIntegration`` below is the hand-written-API case (``APIIntegration``), deliberately
-built on Open-Meteo, which needs no API key — so it is genuinely runnable with zero
-credentials and exercises the whole contract: ``get_tools()``, invoking the tool, and a
-real ``get_status()`` backed by a health probe.
-
-For the MCP case there is nothing to write at all: point ``AI_SDK_INTEGRATIONS`` at
-``django_ai_sdk.integrations.defaults.LinearIntegration`` (see the demo settings), or
-subclass ``MCPIntegration`` with a url + auth for a server the SDK doesn't ship.
+"""Weather tools, built on Open-Meteo — needs no API key, so this is runnable with
+zero credentials.
 """
 
 from __future__ import annotations
 
 import httpx
-from django_ai_sdk.integrations.api.base import APIIntegration
 from haystack.tools import tool
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -71,16 +59,3 @@ async def check_weather_api() -> None:
 def get_current_weather(location: str) -> dict:
     """Get the current weather for a place name (e.g. 'Rotterdam' or 'Paris, France')."""
     return fetch_current_weather(location)
-
-
-class WeatherIntegration(APIIntegration):
-    """Minimal ``APIIntegration``: a ready-made tool plus a health probe.
-
-    ``health_check`` must be a ``staticmethod`` — a bare function assigned to the
-    attribute would be bound and wrongly receive ``self``.
-    """
-
-    name = "weather"
-    label = "Weather"
-    tools = [get_current_weather]
-    health_check = staticmethod(check_weather_api)

@@ -1,10 +1,11 @@
 """OAuth 2.1 + PKCE mechanics for MCP servers: discovery, dynamic client registration,
 the authorization URL, the code exchange, token storage and refresh.
 
-Connection *management* (listing integrations, disconnect, reconnect) is deliberately
-not here — that is kind-agnostic and lives in the generic ``/api/integrations`` router
-(``integrations/views.py``), which dispatches to the ``Integration`` contract.
-This module is only the MCP-specific OAuth plumbing those endpoints end up calling.
+Connection management (listing integrations, disconnect, reconnect) is kind-agnostic
+and lives in the host project's integrations endpoints, built over
+IntegrationService (integrations/services.py), which dispatches to the Integration
+contract. This module is only the MCP-specific OAuth plumbing those endpoints end up
+calling.
 
 Plain module-level async functions (no class namespace). Synchronous aliases for the
 few functions used from sync contexts are defined at the bottom of the module.
@@ -60,8 +61,8 @@ async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
 def build_pkce_params() -> tuple[str, str, str]:
     """Generate PKCE parameters: (verifier, challenge, state).
 
-    Verifier/challenge come from the mcp SDK's ``PKCEParameters``; ``state`` is
-    generated here (the SDK's PKCE model doesn't cover it).
+    Verifier and challenge come from the mcp SDK's PKCEParameters; state is
+    generated here since the SDK's PKCE model doesn't cover it.
     """
     pkce = PKCEParameters.generate()
     return pkce.code_verifier, pkce.code_challenge, secrets.token_urlsafe(32)
@@ -212,8 +213,8 @@ async def store_token(user: UserType, server_name: str, token_response: dict) ->
 async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
     """Refresh a user's stored OAuth access token.
 
-    A thin wrapper over the single refresh path in ``loader.refresh_oauth_token`` —
-    it just resolves the stored token and server config for this (user, server).
+    A thin wrapper over the single refresh path in loader.refresh_oauth_token: it
+    just resolves the stored token and server config for this (user, server).
 
     Raises:
         ValueError: no token, server not configured/OAuth, or the refresh failed.

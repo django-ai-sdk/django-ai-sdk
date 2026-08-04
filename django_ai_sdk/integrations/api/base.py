@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
 
 def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Filter ``context`` to the keys ``factory`` actually accepts.
+    """Filter context to the keys factory actually accepts.
 
-    Lets a tool factory declare only the request context it needs — ``def f(user)``,
-    ``def f(user, thread_id)``, or ``def f(**kwargs)`` all work — instead of being
-    forced to accept every argument.
+    Lets a tool factory declare only the request context it needs: def f(user), def
+    f(user, thread_id), and def f(**kwargs) all work, instead of being forced to
+    accept every argument.
     """
     params = inspect.signature(factory).parameters
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
@@ -39,11 +39,11 @@ def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> di
 class APIIntegration(Integration):
     """Base for integrations backed by a hand-written API client, not MCP.
 
-    Each entry in ``tools`` is either:
+    Each entry in tools is either:
 
-    - a ready-made Haystack ``Tool`` — the simple, common case. Decorate a plain
-      typed function with ``@haystack.tools.tool`` and the schema is inferred from
-      its type hints and docstring; no factory, no hand-written parameter schema::
+    - a ready-made Haystack Tool, the simple, common case. Decorate a plain typed
+      function with @haystack.tools.tool and the schema is inferred from its type
+      hints and docstring; no factory, no hand-written parameter schema:
 
           @tool
           def get_current_weather(location: str) -> dict:
@@ -54,16 +54,16 @@ class APIIntegration(Integration):
               name = "weather"
               tools = [get_current_weather]
 
-      Plain type hints work fine under ``from __future__ import annotations``. Only
-      per-parameter descriptions via ``Annotated[str, "..."]`` need the hints to be
-      real objects — for those, either pass an explicit ``parameters=`` schema or
-      define the tool in a module without the ``__future__`` import.
+      Plain type hints work fine under from __future__ import annotations. Only
+      per-parameter descriptions via Annotated[str, "..."] need the hints to be real
+      objects; for those, either pass an explicit parameters= schema or define the
+      tool in a module without the __future__ import.
 
-    - a *factory* callable returning a Tool or list of Tools (optionally ``async``) —
-      for tools that must be built per request, e.g. one carrying the current user's
-      API token. A factory is passed only the arguments it declares: any subset of
-      ``user``, ``assistant``, ``thread_id`` (or all of them via ``**kwargs``). So
-      ``def make_tool(user): ...`` and ``def make_tool(**kwargs): ...`` both work::
+    - a factory callable returning a Tool or list of Tools (optionally async), for
+      tools that must be built per request, e.g. one carrying the current user's API
+      token. A factory is passed only the arguments it declares: any subset of
+      user, assistant, thread_id (or all of them via **kwargs). So def
+      make_tool(user): ... and def make_tool(**kwargs): ... both work:
 
           def issue_tool(user):
               return build_authed_tool(token=user.tracker_token)
@@ -72,14 +72,30 @@ class APIIntegration(Integration):
               name = "issue_tracker"
               tools = [issue_tool]
 
-    ``get_status()`` reports ACTIVE unconditionally unless a subclass sets
-    ``health_check`` — an async, no-arg callable that raises on failure. Assign it as a
-    ``staticmethod`` (``health_check = staticmethod(check_api)``) or as an
-    ``async def health_check(self)`` method; a bare function assigned to the attribute
-    would be bound and wrongly receive ``self``. When set, it's run through the same
-    ResilientCache (stale-while-revalidate + circuit breaker; see
-    ``django_ai_sdk.integrations.base``) every other integration kind uses, so a down
+    get_status() reports ACTIVE unconditionally unless a subclass sets
+    health_check, an async, no-arg callable that raises on failure. Assign it as a
+    staticmethod (health_check = staticmethod(check_api)) or as an async def
+    health_check(self) method; a bare function assigned to the attribute would be
+    bound and wrongly receive self. When set, it's run through the same
+    ResilientCache (stale-while-revalidate plus circuit breaker; see
+    django_ai_sdk.integrations.base) every other integration kind uses, so a down
     API shows up as DEGRADED instead of a false ACTIVE.
+
+    Credentials come from self.secret() on the Integration base, the same config
+    MCPIntegration reads (see config.py): an integration named "zendesk" reads
+    AI_SDK_INTEGRATIONS["zendesk"]["TOKEN"]. Read it in __init__ and record a missing
+    one in `detail` rather than raising -- app boot must survive an unconfigured
+    integration::
+
+        class ZendeskIntegration(APIIntegration):
+            name = "zendesk"
+            tools = [search_tickets]
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.token = self.secret("token")
+                if not self.token:
+                    self.detail = 'Set AI_SDK_INTEGRATIONS["zendesk"]["TOKEN"].'
     """
 
     name: str = ""
@@ -89,8 +105,8 @@ class APIIntegration(Integration):
 
     def __init__(self) -> None:
         # Derive a label from `name` only. Falling back to the class name would produce
-        # things like "Unnamedservice", and would also pre-empt the registry's better
-        # fallback (the settings key) for a service that declares no name.
+        # things like "Unnamedservice", which is worse than leaving it empty for a
+        # service that declares no name (register() rejects those anyway).
         if not self.label and self.name:
             self.label = self.name.title()
         # Decided once, from the class-level health_check — set it as a class

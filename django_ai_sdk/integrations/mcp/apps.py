@@ -7,13 +7,12 @@ class MCPConfig(AppConfig):
     """The MCP toolkit app — ships the OAuth token/client models, their migrations,
     and the OAuth redirect views.
 
-    It holds no integrations of its own. Concrete MCP integrations (notion, linear, …)
-    are ``MCPIntegration`` subclasses listed in ``AI_SDK_INTEGRATIONS``; they
-    reuse this app's models. Only this one app needs to be in ``INSTALLED_APPS`` —
-    there is no app per integration.
+    It holds no integrations of its own. Concrete MCP integrations (notion, linear, ...)
+    are MCPIntegration subclasses, each its own app; they reuse this app's models.
+    This app must be in INSTALLED_APPS alongside any MCP-backed integration.
 
-    ``ready()`` deliberately does nothing: no network warmup, no registration. Tool
-    lists populate lazily on first use via ``ResilientCache``.
+    ready() does nothing: no network warmup, no registration. Tool lists populate
+    lazily on first use via ResilientCache.
     """
 
     name = "django_ai_sdk.integrations.mcp"
