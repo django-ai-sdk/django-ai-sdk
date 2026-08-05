@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from uuid import uuid4
 
 from haystack.tools import Tool
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from django_ai_sdk.common import prompt
 
@@ -39,7 +39,17 @@ class ArtifactType(StrEnum):
     TASK = "task"
 
 
-class ArtifactSchema(BaseModel):
+class ArtifactModel(BaseModel):
+    """Shared base for all artifact data models.
+
+    Allows construction by both snake_case field names and camelCase aliases
+    so Python code uses PEP 8 names while LLM tool schemas expose camelCase.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ArtifactSchema(ArtifactModel):
     """Base class for structured artifacts."""
 
     artifact_type: ClassVar[ArtifactType]
@@ -95,20 +105,20 @@ class ArtifactSchema(BaseModel):
 # ── QuestionFlow ─────────────────────────────────────────────────────────────
 
 
-class QuestionFlowOption(BaseModel):
+class QuestionFlowOption(ArtifactModel):
     label: str
     value: str
 
 
-class QuestionFlowStep(BaseModel):
+class QuestionFlowStep(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     question: str
     description: str | None = None
     options: list[QuestionFlowOption] = Field(default_factory=list)
-    selectionMode: Literal["single", "multi"] | None = None
+    selection_mode: Literal["single", "multi"] | None = Field(default=None, alias="selectionMode")
 
 
-class QuestionFlowData(BaseModel):
+class QuestionFlowData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str
     steps: list[QuestionFlowStep]
@@ -131,20 +141,20 @@ class QuestionFlowArtifact(ArtifactSchema):
 # ── OptionList ───────────────────────────────────────────────────────────────
 
 
-class OptionListOption(BaseModel):
+class OptionListOption(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
     description: str = ""
     disabled: bool | None = None
 
 
-class OptionListData(BaseModel):
+class OptionListData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str
     options: list[OptionListOption]
-    selectionMode: Literal["multi", "single"] | None = None
-    minSelections: int | None = None
-    maxSelections: int | None = None
+    selection_mode: Literal["multi", "single"] | None = Field(default=None, alias="selectionMode")
+    min_selections: int | None = Field(default=None, alias="minSelections")
+    max_selections: int | None = Field(default=None, alias="maxSelections")
 
 
 class OptionListArtifact(ArtifactSchema):
@@ -163,12 +173,12 @@ class OptionListArtifact(ArtifactSchema):
 # ── DataTable ────────────────────────────────────────────────────────────────
 
 
-class DataTableColumn(BaseModel):
+class DataTableColumn(ArtifactModel):
     key: str
     label: str
 
 
-class DataTableData(BaseModel):
+class DataTableData(ArtifactModel):
     columns: list[DataTableColumn]
     rows: list[dict[str, str]]
 
@@ -187,20 +197,20 @@ class DataTableArtifact(ArtifactSchema):
 # ── ApprovalCard ─────────────────────────────────────────────────────────────
 
 
-class ApprovalCardMetadataItem(BaseModel):
+class ApprovalCardMetadataItem(ArtifactModel):
     label: str
     value: str
 
 
-class ApprovalCardData(BaseModel):
+class ApprovalCardData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str
     description: str | None = None
     icon: str | None = None
     metadata: list[ApprovalCardMetadataItem] = Field(default_factory=list)
     variant: Literal["default", "destructive"] | None = None
-    confirmLabel: str | None = None
-    cancelLabel: str | None = None
+    confirm_label: str | None = Field(default=None, alias="confirmLabel")
+    cancel_label: str | None = Field(default=None, alias="cancelLabel")
 
 
 class ApprovalCardArtifact(ArtifactSchema):
@@ -219,14 +229,14 @@ class ApprovalCardArtifact(ArtifactSchema):
 # ── Plan ─────────────────────────────────────────────────────────────────────
 
 
-class PlanTodo(BaseModel):
+class PlanTodo(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
     status: Literal["pending", "in_progress", "completed", "cancelled"]
     description: str | None = None
 
 
-class PlanData(BaseModel):
+class PlanData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str | None = None
     description: str | None = None
@@ -252,22 +262,22 @@ class PlanArtifact(ArtifactSchema):
 # ── ProgressTracker ───────────────────────────────────────────────────────────
 
 
-class ProgressStep(BaseModel):
+class ProgressStep(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
     status: Literal["pending", "in-progress", "completed", "failed"]
     description: str | None = None
 
 
-class ProgressTrackerChoice(BaseModel):
+class ProgressTrackerChoice(ArtifactModel):
     outcome: Literal["success", "partial", "failed", "cancelled"]
     summary: str
 
 
-class ProgressTrackerData(BaseModel):
+class ProgressTrackerData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     steps: list[ProgressStep]
-    elapsedTime: int | None = None
+    elapsed_time: int | None = Field(default=None, alias="elapsedTime")
     choice: ProgressTrackerChoice | None = None
 
 
@@ -293,16 +303,16 @@ class ProgressTrackerArtifact(ArtifactSchema):
 # ── Terminal ──────────────────────────────────────────────────────────────────
 
 
-class TerminalData(BaseModel):
+class TerminalData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     command: str
     stdout: str | None = None
     stderr: str | None = None
-    exitCode: int | None = None
-    durationMs: int | None = None
+    exit_code: int | None = Field(default=None, alias="exitCode")
+    duration_ms: int | None = Field(default=None, alias="durationMs")
     cwd: str | None = None
     truncated: bool | None = None
-    maxCollapsedLines: int | None = None
+    max_collapsed_lines: int | None = Field(default=None, alias="maxCollapsedLines")
 
 
 class TerminalArtifact(ArtifactSchema):
@@ -323,7 +333,7 @@ class TerminalArtifact(ArtifactSchema):
 # ── Confirmation ──────────────────────────────────────────────────────────────
 
 
-class ConfirmationData(BaseModel):
+class ConfirmationData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     message: str
     detail: str | None = None
@@ -343,14 +353,14 @@ class ConfirmationArtifact(ArtifactSchema):
 # ── ChainOfThought ────────────────────────────────────────────────────────────
 
 
-class ChainOfThoughtStep(BaseModel):
+class ChainOfThoughtStep(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str
     description: str | None = None
     status: Literal["complete", "active", "pending"] | None = None
 
 
-class ChainOfThoughtData(BaseModel):
+class ChainOfThoughtData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     steps: list[ChainOfThoughtStep]
 
@@ -371,12 +381,12 @@ class ChainOfThoughtArtifact(ArtifactSchema):
 # ── CodeBlock ─────────────────────────────────────────────────────────────────
 
 
-class CodeBlockData(BaseModel):
+class CodeBlockData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     code: str
     language: str
     filename: str | None = None
-    showLineNumbers: bool | None = None
+    show_line_numbers: bool | None = Field(default=None, alias="showLineNumbers")
 
 
 class CodeBlockArtifact(ArtifactSchema):
@@ -395,7 +405,7 @@ class CodeBlockArtifact(ArtifactSchema):
 # ── Snippet ───────────────────────────────────────────────────────────────────
 
 
-class SnippetData(BaseModel):
+class SnippetData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     code: str
     label: str | None = None
@@ -416,7 +426,7 @@ class SnippetArtifact(ArtifactSchema):
 # ── StackTrace ────────────────────────────────────────────────────────────────
 
 
-class StackTraceData(BaseModel):
+class StackTraceData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     trace: str
     open: bool | None = None
@@ -437,7 +447,7 @@ class StackTraceArtifact(ArtifactSchema):
 # ── SchemaDisplay ─────────────────────────────────────────────────────────────
 
 
-class SchemaParameter(BaseModel):
+class SchemaParameter(ArtifactModel):
     name: str
     type: str
     required: bool | None = None
@@ -445,7 +455,7 @@ class SchemaParameter(BaseModel):
     location: Literal["path", "query", "header", "cookie"] | None = None
 
 
-class SchemaProperty(BaseModel):
+class SchemaProperty(ArtifactModel):
     name: str
     type: str
     required: bool | None = None
@@ -457,14 +467,14 @@ class SchemaProperty(BaseModel):
 SchemaProperty.model_rebuild()
 
 
-class SchemaDisplayData(BaseModel):
+class SchemaDisplayData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
     path: str
     description: str | None = None
     parameters: list[SchemaParameter] | None = None
-    requestBody: list[SchemaProperty] | None = None
-    responseBody: list[SchemaProperty] | None = None
+    request_body: list[SchemaProperty] | None = Field(default=None, alias="requestBody")
+    response_body: list[SchemaProperty] | None = Field(default=None, alias="responseBody")
 
 
 class SchemaDisplayArtifact(ArtifactSchema):
@@ -487,16 +497,16 @@ class SchemaDisplayArtifact(ArtifactSchema):
 # ── TestResults ───────────────────────────────────────────────────────────────
 
 
-class TestCase(BaseModel):
+class TestCase(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     status: Literal["passed", "failed", "skipped"]
     duration: float | None = None
-    errorMessage: str | None = None
-    errorStack: str | None = None
+    error_message: str | None = Field(default=None, alias="errorMessage")
+    error_stack: str | None = Field(default=None, alias="errorStack")
 
 
-class TestSuite(BaseModel):
+class TestSuite(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     status: Literal["passed", "failed", "skipped"]
@@ -506,7 +516,7 @@ class TestSuite(BaseModel):
     skipped: int | None = None
 
 
-class TestResultsSummary(BaseModel):
+class TestResultsSummary(ArtifactModel):
     passed: int
     failed: int
     skipped: int
@@ -514,7 +524,7 @@ class TestResultsSummary(BaseModel):
     duration: float | None = None
 
 
-class TestResultsData(BaseModel):
+class TestResultsData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     suites: list[TestSuite]
     summary: TestResultsSummary | None = None
@@ -539,17 +549,17 @@ class TestResultsArtifact(ArtifactSchema):
 # ── Task ─────────────────────────────────────────────────────────────────────
 
 
-class TaskItem(BaseModel):
+class TaskItem(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     text: str
     files: list[str] | None = None
 
 
-class TaskData(BaseModel):
+class TaskData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     title: str
     items: list[TaskItem]
-    defaultOpen: bool | None = None
+    default_open: bool | None = Field(default=None, alias="defaultOpen")
 
 
 class TaskArtifact(ArtifactSchema):
@@ -569,11 +579,11 @@ class TaskArtifact(ArtifactSchema):
 # ── Image ─────────────────────────────────────────────────────────────────────
 
 
-class ImageData(BaseModel):
+class ImageData(ArtifactModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     url: str
     alt: str | None = None
-    mimeType: str | None = None
+    mime_type: str | None = Field(default=None, alias="mimeType")
     width: int | None = None
     height: int | None = None
 

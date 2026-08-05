@@ -4,6 +4,7 @@ from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,
     ApprovalCardData,
     ApprovalCardMetadataItem,
+    ArtifactModel,
     ArtifactSchema,
     ArtifactType,
     ChainOfThoughtArtifact,
@@ -45,6 +46,7 @@ from django_ai_sdk.artifacts.schemas import (
 )
 
 __all__ = [
+    "ArtifactModel",
     "ArtifactSchema",
     "ArtifactType",
     "_to_snake",
