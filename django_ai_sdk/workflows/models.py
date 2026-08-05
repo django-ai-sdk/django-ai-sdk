@@ -38,9 +38,9 @@ class WorkflowSettings(models.Model):
         return self.name
 
     def to_workflow_definition(self) -> WorkflowDefinition:
-        from django_ai_sdk.workflows.schemas import WorkflowDefinition as WD
+        from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
-        return WD.model_validate(self.definition)
+        return WorkflowDefinition.model_validate(self.definition)
 
     @classmethod
     def from_workflow_definition(
@@ -96,8 +96,8 @@ class WorkflowRun(models.Model):
         verbose_name_plural = "Workflow Runs"
 
     def __str__(self) -> str:
-        wf_id = str(getattr(self, "workflow_id", None) or "inline")
-        return f"{wf_id} — {self.status} — {self.created_at}"
+        workflow_id = str(getattr(self, "workflow_id", None) or "inline")
+        return f"{workflow_id} — {self.status} — {self.created_at}"
 
 
 class WorkflowRunStep(models.Model):
@@ -127,5 +127,5 @@ class WorkflowRunStep(models.Model):
         verbose_name_plural = "Workflow Run Steps"
 
     def __str__(self) -> str:
-        run_id = getattr(self, "run_id", "?")
+        run_id = getattr(self, "run_id", "unknown")
         return f"{run_id} step {self.sequence} ({self.output_key})"
