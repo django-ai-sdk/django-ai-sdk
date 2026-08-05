@@ -105,7 +105,8 @@ class TestArtifactSchema:
 
 @pytest.mark.django_db
 class TestArtifactToolDbWrite:
-    def test_tool_fn_creates_artifact(self):
+    @pytest.mark.asyncio
+    async def test_tool_fn_creates_artifact(self):
         from typing import ClassVar
 
         from pydantic import BaseModel
@@ -114,7 +115,7 @@ class TestArtifactToolDbWrite:
         from django_ai_sdk.artifacts.models import Artifact
         from django_ai_sdk.conversation.models import Thread
 
-        thread = Thread.objects.create(title="test")
+        thread = await Thread.objects.acreate(title="test")
 
         class Inner(BaseModel):
             summary: str
@@ -124,18 +125,19 @@ class TestArtifactToolDbWrite:
             data: Inner
 
         tool = MyArtifact.as_tool(thread_id=str(thread.id))
-        result = tool.function(summary="hello world")
+        result = await tool.invoke_async(summary="hello world")
 
         payload = json.loads(result)
         assert "artifact_id" in payload
 
-        artifact = Artifact.objects.get(id=payload["artifact_id"])
+        artifact = await Artifact.objects.aget(id=payload["artifact_id"])
         assert artifact.schema_name == "MyArtifact"
         assert artifact.artifact_type == "question_flow"
         assert artifact.data == {"summary": "hello world"}
         assert str(artifact.thread_id) == str(thread.id)
 
-    def test_tool_fn_anonymous_user_no_creator(self):
+    @pytest.mark.asyncio
+    async def test_tool_fn_anonymous_user_no_creator(self):
         from typing import ClassVar
 
         from pydantic import BaseModel
@@ -144,7 +146,7 @@ class TestArtifactToolDbWrite:
         from django_ai_sdk.artifacts.models import Artifact
         from django_ai_sdk.conversation.models import Thread
 
-        thread = Thread.objects.create(title="test")
+        thread = await Thread.objects.acreate(title="test")
 
         class Inner(BaseModel):
             title: str
@@ -156,8 +158,8 @@ class TestArtifactToolDbWrite:
         anon = MagicMock()
         anon.is_anonymous = True
         tool = MyArtifact.as_tool(thread_id=str(thread.id), user=anon)
-        result = tool.function(title="test card")
+        result = await tool.invoke_async(title="test card")
 
         payload = json.loads(result)
-        artifact = Artifact.objects.get(id=payload["artifact_id"])
+        artifact = await Artifact.objects.aget(id=payload["artifact_id"])
         assert artifact.created_by_id is None
