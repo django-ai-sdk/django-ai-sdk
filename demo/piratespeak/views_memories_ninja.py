@@ -48,31 +48,14 @@ class UploadSettingsOut(Schema):
     "/settings",
     response=UploadSettingsOut,
     operation_id="get_upload_settings",
-    auth=None,
 )
 async def get_upload_settings(request: HttpRequest) -> UploadSettingsOut:
-    from django.conf import settings as dj_settings
-    from django.utils.module_loading import import_string
+    from django_ai_sdk.files import get_upload_settings as _get_upload_settings
 
-    max_size = getattr(dj_settings, "AI_SDK_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
-
-    allowed: set[str] = set()
-    allowed_files = getattr(dj_settings, "AI_SDK_ALLOWED_FILES", {})
-    allowed.update(allowed_files.values())
-
-    pipeline_setting = getattr(dj_settings, "AI_SDK_MEMORY_FILE_PIPELINE", None)
-    if pipeline_setting:
-        paths = [pipeline_setting] if isinstance(pipeline_setting, str) else pipeline_setting
-        for path in paths:
-            try:
-                pipeline = import_string(path)()
-                allowed.update(pipeline.file_processor.ALLOWED_MIME_TYPES)
-            except Exception:
-                pass
-
+    result = _get_upload_settings()
     return UploadSettingsOut(
-        max_upload_size=max_size,
-        allowed_mime_types=sorted(allowed) if allowed else ["*/*"],
+        max_upload_size=result.max_upload_size,
+        allowed_mime_types=result.allowed_mime_types,
     )
 
 
