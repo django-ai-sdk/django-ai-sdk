@@ -183,9 +183,6 @@ class MemoryService(PermissionsMixin):
         return [
             MemoryUserOut(
                 user_id=str(o.user_id),
-                email=o.user.email,
-                first_name=o.user.first_name,
-                last_name=o.user.last_name,
                 can_manage=o.can_manage,
                 created_at=o.created_at.isoformat(),
             )
@@ -213,9 +210,6 @@ class MemoryService(PermissionsMixin):
         )
         return MemoryUserOut(
             user_id=str(ownership.user_id),
-            email=ownership.user.email,
-            first_name=ownership.user.first_name,
-            last_name=ownership.user.last_name,
             can_manage=ownership.can_manage,
             created_at=ownership.created_at.isoformat(),
         )
@@ -239,9 +233,6 @@ class MemoryService(PermissionsMixin):
         await ownership.asave(update_fields=["can_manage"])
         return MemoryUserOut(
             user_id=str(ownership.user_id),
-            email=ownership.user.email,
-            first_name=ownership.user.first_name,
-            last_name=ownership.user.last_name,
             can_manage=ownership.can_manage,
             created_at=ownership.created_at.isoformat(),
         )
