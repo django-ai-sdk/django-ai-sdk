@@ -123,6 +123,8 @@ required-imports = ["from __future__ import annotations"]
 runtime-evaluated-base-classes = [
     "ninja.Schema",
     "pydantic.BaseModel",
+    "django_ai_sdk.artifacts.schemas.ArtifactModel",
+    "django_ai_sdk.artifacts.schemas.ArtifactSchema",
 ]
 runtime-evaluated-decorators = [
     "ninja.Router.get",

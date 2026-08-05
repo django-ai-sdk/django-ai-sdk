@@ -68,7 +68,7 @@ class ArtifactSchema(ArtifactModel):
         artifact_type = str(cls.artifact_type)
         resolved_user = user if (user and not getattr(user, "is_anonymous", True)) else None
 
-        def submit(**kwargs: Any) -> str:
+        async def submit(**kwargs: Any) -> str:
             from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
 
             try:
@@ -76,7 +76,7 @@ class ArtifactSchema(ArtifactModel):
             except ValidationError as e:
                 return json.dumps({"error": str(e)})
 
-            artifact = Artifact.objects.create(
+            artifact = await Artifact.objects.acreate(
                 thread_id=thread_id,
                 schema_name=cls.__name__,
                 artifact_type=artifact_type,
@@ -98,7 +98,7 @@ class ArtifactSchema(ArtifactModel):
                 "describes what the data shows, do NOT repeat the data as text or markdown."
             ),
             parameters=schema,
-            function=submit,
+            async_function=submit,
         )
 
 
