@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from django.contrib.auth import get_user_model
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
@@ -12,15 +13,12 @@ from django_ai_sdk.assistants.services import (
     AssistantService,
     AssistantUpdateData,
     add_assistant_group,
-    add_assistant_user,
     get_assistant_info,
     list_assistant_groups,
-    list_assistant_users,
     list_assistants,
     remove_assistant_group,
-    remove_assistant_user,
-    update_assistant_user,
 )
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.permissions import PermissionDenied
@@ -171,7 +169,9 @@ class ChatRequestSerializer(serializers.Serializer):
 
 class ThreadListAPIView(APIView):
     def get(self, request: Request) -> Response:
-        threads = list_threads(user=request.user)
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
+        threads = list_threads(user=request.user, limit=limit, offset=offset)
         items = [
             {
                 "id": t.id,
@@ -327,8 +327,10 @@ class RestoreMessageAPIView(APIView):
 
 class ListAssistantsAPIView(APIView):
     def get(self, request: Request) -> Response:
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
         try:
-            items = list_assistants(user=request.user)
+            items = list_assistants(user=request.user, limit=limit, offset=offset)
             return Response(ListAssistantsSerializer({"assistants": items}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -549,6 +551,7 @@ class AssistantSettingsCreateSerializer(serializers.Serializer):
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(default=False)
+    users = AssistantUserInSerializer(many=True, required=False, default=list)
 
 
 class AssistantSettingsUpdateSerializer(serializers.Serializer):
@@ -565,6 +568,7 @@ class AssistantSettingsUpdateSerializer(serializers.Serializer):
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(required=False)
     active = serializers.BooleanField(required=False)
+    users = AssistantUserInSerializer(many=True, required=False)
 
 
 class RuntimeAssistantBasesAPIView(APIView):
@@ -687,75 +691,19 @@ class AddAssistantUserInSerializer(serializers.Serializer):
     can_manage = serializers.BooleanField(default=False)
 
 
-class UpdateAssistantUserInSerializer(serializers.Serializer):
-    can_manage = serializers.BooleanField()
-
-
-class AssistantUserListCreateAPIView(APIView):
-    def get(self, request: Request, runtime_id: str) -> Response:
-        try:
-            users = list_assistant_users(runtime_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(users, many=True).data)
-
-    def post(self, request: Request, runtime_id: str) -> Response:
-        serializer = AddAssistantUserInSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            entry = add_assistant_user(
-                runtime_id,
-                serializer.validated_data["user_id"],  # type: ignore[index]
-                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
-                user=request.user,
-            )
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(entry).data)
-
-
-class AssistantUserDetailAPIView(APIView):
-    def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        serializer = UpdateAssistantUserInSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            entry = update_assistant_user(
-                runtime_id,
-                user_id,
-                serializer.validated_data["can_manage"],  # type: ignore[index]
-                user=request.user,
-            )
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(AssistantUserOutSerializer(entry).data)
-
-    def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        try:
-            remove_assistant_user(runtime_id, user_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
-        return Response(status=204)
-
-
 # ── Assistant Groups ──────────────────────────────────────────────────────────
 
 
 class AssistantGroupOutSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
     group_name = serializers.CharField(source="group.name")
+    can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 
 
 class AddAssistantGroupInSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
+    can_manage = serializers.BooleanField(default=False)
 
 
 class AssistantGroupListCreateAPIView(APIView):
@@ -775,6 +723,7 @@ class AssistantGroupListCreateAPIView(APIView):
             entry = add_assistant_group(
                 runtime_id,
                 serializer.validated_data["group_id"],  # type: ignore[index]
+                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
                 user=request.user,
             )
         except PermissionDenied as e:
@@ -793,6 +742,372 @@ class AssistantGroupDetailAPIView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)}, status=404)
         return Response(status=204)
+
+
+# ============================================================================
+# Workflows
+# ============================================================================
+
+
+class WorkflowSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField()
+    definition = serializers.DictField()
+    active = serializers.BooleanField(default=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class WorkflowCreateSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    workflow = serializers.DictField()
+
+
+class WorkflowUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False)
+    workflow = serializers.DictField(required=False)
+    active = serializers.BooleanField(required=False)
+
+
+class WorkflowListCreateAPIView(APIView):
+    async def get(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        limit = int(request.query_params.get("limit", 100))
+        offset = int(request.query_params.get("offset", 0))
+        records = await WorkflowService.list_workflows(limit=limit, offset=offset)
+        return Response(WorkflowSerializer(records, many=True).data)
+
+    async def post(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+
+        serializer = WorkflowCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            workflow = WorkflowDefinition.model_validate(serializer.validated_data["workflow"])
+            record = await WorkflowService.create(
+                serializer.validated_data["name"], workflow, user=request.user
+            )
+            return Response(WorkflowSerializer(record).data, status=201)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+
+class WorkflowDetailAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        try:
+            record = await WorkflowService.get(workflow_id)
+            return Response(WorkflowSerializer(record).data)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+
+    async def patch(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        serializer = WorkflowUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            workflow_data = serializer.validated_data.get("workflow")
+            workflow = WorkflowDefinition.model_validate(workflow_data) if workflow_data else None
+            record = await WorkflowService.update(
+                workflow_id,
+                name=serializer.validated_data.get("name"),
+                workflow=workflow,
+                active=serializer.validated_data.get("active"),
+            )
+            return Response(WorkflowSerializer(record).data)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=400)
+
+    async def delete(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        try:
+            await WorkflowService.get(workflow_id)
+            await WorkflowService.delete(workflow_id)
+            return Response(status=204)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+
+
+class WorkflowRunStepSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    sequence = serializers.IntegerField()
+    step_name = serializers.CharField()
+    output_key = serializers.CharField()
+    output = serializers.DictField(allow_null=True, required=False)
+    status = serializers.CharField()
+    error = serializers.CharField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class WorkflowRunSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    workflow_id = serializers.UUIDField(allow_null=True)
+    status = serializers.CharField()
+    outputs = serializers.DictField(allow_null=True, required=False)
+    error = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+
+class WorkflowRunDetailSerializer(WorkflowRunSerializer):
+    steps = WorkflowRunStepSerializer(many=True, source="steps.all")
+
+
+class WorkflowRunAPIView(APIView):
+    async def post(self, request: Request) -> Response:
+        try:
+            from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+
+            workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
+            run = await WorkflowService.run(
+                workflow,
+                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                user=request.user,
+            )
+            return Response({"run_id": str(run.id), "status": run.status}, status=202)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunByIdAPIView(APIView):
+    async def post(self, request: Request, workflow_id: str) -> Response:
+        try:
+            from django_ai_sdk.workflows import WorkflowService
+            from django_ai_sdk.workflows.models import WorkflowSettings
+
+            run_id = request.data.get("run_id")
+            run = await WorkflowService.run_by_id(
+                workflow_id,
+                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                user=request.user,
+                run_id=run_id,
+            )
+            return Response({"run_id": str(run.id), "status": run.status}, status=202)
+        except WorkflowSettings.DoesNotExist:
+            return Response({"message": "Workflow not found"}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunListAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        limit = int(request.query_params.get("limit", 50))
+        offset = int(request.query_params.get("offset", 0))
+        try:
+            runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
+            return Response(WorkflowRunSerializer(runs, many=True).data)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowRunDetailAPIView(APIView):
+    async def get(self, request: Request, workflow_id: str, run_id: str) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        try:
+            run = await WorkflowService.get_run(run_id)
+            return Response(WorkflowRunDetailSerializer(run).data)
+        except WorkflowRun.DoesNotExist:
+            return Response({"message": "Run not found"}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class WorkflowActionsAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django_ai_sdk.workflows import WorkflowService
+
+        return Response(WorkflowService.list_actions())
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+
+class UserSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+
+
+class UserListAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        User = get_user_model()
+        qs = User.objects.order_by("first_name", "last_name")
+        q = request.query_params.get("q", "").strip()
+        if q:
+            from django.db.models import Q
+
+            qs = qs.filter(
+                Q(first_name__icontains=q)
+                | Q(last_name__icontains=q)
+                | Q(email__icontains=q)
+                | Q(username__icontains=q)
+            )
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+        serializer = UserSerializer(qs.values("id", "first_name", "last_name")[:limit], many=True)
+        return Response(serializer.data)
+
+
+class UserDetailSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    email = serializers.EmailField()
+
+
+class UserUpdateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False)
+    last_name = serializers.CharField(required=False)
+
+
+class GroupOutSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class GroupSearchAPIView(APIView):
+    def get(self, request: Request) -> Response:
+        from django.contrib.auth.models import Group
+
+        qs = Group.objects.order_by("name")
+        q = request.query_params.get("q", "").strip()
+        if q:
+            qs = qs.filter(name__icontains=q)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+        serializer = GroupOutSerializer(qs.values("id", "name")[:limit], many=True)
+        return Response(serializer.data)
+
+
+class UserSessionSerializer(serializers.Serializer):
+    session_key = serializers.CharField()
+    ip = serializers.CharField()
+    user_agent = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    last_seen_at = serializers.DateTimeField()
+
+
+class UserDetailAPIView(APIView):
+    def get(self, request: Request, user_id: str) -> Response:
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        return Response(UserDetailSerializer(user).data)
+
+    def patch(self, request: Request, user_id: str) -> Response:
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        serializer = UserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        update_fields = []
+        for field, value in serializer.validated_data.items():
+            setattr(user, field, value)
+            update_fields.append(field)
+        if update_fields:
+            user.save(update_fields=update_fields)
+        return Response(UserDetailSerializer(user).data)
+
+
+class UserSessionListAPIView(APIView):
+    def get(self, request: Request, user_id: str) -> Response:
+        from allauth.usersessions.models import UserSession
+
+        sessions = UserSession.objects.filter(user_id=user_id).order_by("-last_seen_at")
+        return Response(UserSessionSerializer(sessions, many=True).data)
+
+
+# ── Assistant Users ───────────────────────────────────────────────────────────
+
+
+class AssistantUserSerializer(serializers.Serializer):
+    user_id = serializers.CharField(source="user.id")
+    email = serializers.CharField(source="user.email")
+    first_name = serializers.CharField(source="user.first_name")
+    last_name = serializers.CharField(source="user.last_name")
+    can_manage = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+
+
+class AssistantUserAddSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    can_manage = serializers.BooleanField(default=False)
+
+
+class AssistantUserUpdateSerializer(serializers.Serializer):
+    can_manage = serializers.BooleanField()
+
+
+class AssistantUserListCreateAPIView(APIView):
+    async def get(self, request: Request, runtime_id: str) -> Response:
+        try:
+            users = await AssistantService.list_assistant_users(runtime_id, user=request.user)
+            return Response(AssistantUserSerializer(users, many=True).data)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+    async def post(self, request: Request, runtime_id: str) -> Response:
+        serializer = AssistantUserAddSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        try:
+            entry = await AssistantService.add_assistant_user(
+                runtime_id,
+                serializer.validated_data["user_id"],
+                serializer.validated_data["can_manage"],
+                user=request.user,
+            )
+            return Response(AssistantUserSerializer(entry).data, status=201)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+
+class AssistantUserDetailAPIView(APIView):
+    async def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        serializer = AssistantUserUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        try:
+            entry = await AssistantService.update_assistant_user(
+                runtime_id,
+                user_id,
+                serializer.validated_data["can_manage"],
+                user=request.user,
+            )
+            return Response(AssistantUserSerializer(entry).data)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
+
+    async def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
+        try:
+            await AssistantService.remove_assistant_user(runtime_id, user_id, user=request.user)
+            return Response(status=204)
+        except PermissionDenied as e:
+            return Response({"error": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=404)
 
 
 urlpatterns = [
@@ -896,4 +1211,27 @@ urlpatterns = [
         AssistantGroupDetailAPIView.as_view(),
         name="runtime-assistant-group-detail",
     ),
+    path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
+    path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
+    path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
+    path(
+        "workflows/<str:workflow_id>/runs/",
+        WorkflowRunListAPIView.as_view(),
+        name="workflow-run-list",
+    ),
+    path(
+        "workflows/<str:workflow_id>/runs/<str:run_id>/",
+        WorkflowRunDetailAPIView.as_view(),
+        name="workflow-run-detail",
+    ),
+    path("workflows/<str:workflow_id>/", WorkflowDetailAPIView.as_view(), name="workflow-detail"),
+    path(
+        "workflows/<str:workflow_id>/run/",
+        WorkflowRunByIdAPIView.as_view(),
+        name="workflow-run-by-id",
+    ),
+    path("users/", UserListAPIView.as_view(), name="user-list"),
+    path("users/<str:user_id>/", UserDetailAPIView.as_view(), name="user-detail"),
+    path("users/<str:user_id>/sessions/", UserSessionListAPIView.as_view(), name="user-sessions"),
+    path("accounts/groups/", GroupSearchAPIView.as_view(), name="group-search"),
 ]

@@ -33,6 +33,10 @@ class Memory(models.Model):
 
     class Meta:
         db_table = "django_ai_sdk_memories"
+        indexes = [
+            models.Index(fields=["is_hidden"]),
+            models.Index(fields=["is_public"]),
+        ]
 
     def __str__(self) -> str:
         return self.name
@@ -63,9 +67,10 @@ class Memory(models.Model):
         slug = re.sub(r"[^a-z0-9]+", "_", self.name.lower()).strip("_")[:20].strip("_")
         return f"search_{slug}" if slug else f"search_memory_{str(self.id).replace('-', '')[:8]}"
 
-    async def get_tool_spec(self) -> ToolSpec:
+    async def get_tool_spec(self, doc_count: int | None = None) -> ToolSpec:
         """Generate ToolSpec for this memory."""
-        doc_count = await Entry.objects.filter(memory_id=self.id).acount()
+        if doc_count is None:
+            doc_count = await Entry.objects.filter(memory_id=self.id).acount()
 
         return ToolSpec(
             name=self.tool_name,
@@ -95,6 +100,7 @@ class MemoryUser(models.Model):
     user_id: int
 
     class Meta:
+        app_label = "django_ai_sdk"
         unique_together = [["memory", "user"]]
         db_table = "django_ai_sdk_memory_users"
 
@@ -271,6 +277,9 @@ class ThreadMemory(models.Model):
         app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_thread_memories"
         unique_together = [["thread", "memory"]]
+        indexes = [
+            models.Index(fields=["thread", "active"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.thread} - {self.memory}"

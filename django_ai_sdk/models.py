@@ -1,9 +1,13 @@
 # Assistant Settings
 from __future__ import annotations
 
-from .assistants.models import AssistantGroup, AssistantSettings, AssistantUser
-
 # Conversation models from chats app
+from .artifacts.models import Artifact
+from .assistants.models import (
+    AssistantGroup,
+    AssistantSettings,
+    AssistantUser,
+)
 from .conversation.models import (
     Message,
     Thread,
@@ -19,8 +23,12 @@ from .memories.models import (
     ThreadMemory,
 )
 
+# Workflows
+from .workflows.models import WorkflowSettings
+
 __all__ = [
     # Conversation models
+    "Artifact",
     "Thread",
     "Message",
     # Memories models
@@ -34,4 +42,6 @@ __all__ = [
     "AssistantGroup",
     "AssistantSettings",
     "AssistantUser",
+    # Workflows
+    "WorkflowSettings",
 ]

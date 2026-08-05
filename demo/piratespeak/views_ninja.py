@@ -4,20 +4,29 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.http import HttpRequest
 from django_ai_sdk import Assistant
 from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import PermissionDenied
-from django_ai_sdk.storage.schemas import ThreadInfo
+from django_ai_sdk.permissions import ObjectPermissions, PermissionDenied
+from django_ai_sdk.storage.schemas import (
+    ThreadInfo,  # noqa: TC002 — needed at runtime for Pydantic schema
+)
 from django_ai_sdk.storage.services import (
     ThreadService,
     aget_thread_file_meta,
     aget_thread_history,
 )
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
+from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+from django_ai_sdk.workflows.models import WorkflowSettings
 from ninja import Router, Schema
+
+from piratespeak.views_permissions import assistant_permissions, thread_permissions
 
 router = Router()
 logger = get_logger(__name__)
@@ -59,6 +68,7 @@ class AssistantInfoResponse(Schema):
     instructions: str | None = None
     file_upload: bool = False
     rag: bool = False
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class Tool(Schema):
@@ -121,6 +131,7 @@ class ThreadMessage(Schema):
 class ThreadDetailResponse(Schema):
     thread: ThreadInfo
     messages: list[ThreadMessage]
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class ThreadFileMeta(Schema):
@@ -156,9 +167,9 @@ def health_check(request: HttpRequest) -> HealthResponse:
 @router.get(
     "/threads/", response={200: ThreadListResponse, 500: Error}, operation_id="list_threads"
 )
-async def list_threads(request: HttpRequest) -> Any:
+async def list_threads(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
     try:
-        all_threads = await ThreadService.threads(user=request.user)
+        all_threads = await ThreadService.threads(user=request.user, limit=limit, offset=offset)
         items = [
             ThreadListItem(
                 id=t.id,
@@ -219,7 +230,8 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
             message["feedback"] = user_feedback
             del message["feedbacks"]
 
-        return ThreadDetailResponse(**data)
+        perms = await thread_permissions(request.user, thread_id)
+        return ThreadDetailResponse(**data, permissions=perms)
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
@@ -404,121 +416,6 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
-
-
-@router.get(
-    "/assistants/",
-    response={200: AssistantsListResponse, 403: Error, 500: Error},
-    operation_id="list_assistants",
-)
-async def list_assistants(request: HttpRequest) -> Any:
-    try:
-        items = await AssistantService.list_assistants(user=request.user)
-        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except Exception as e:
-        return 500, Error(message=str(e))
-
-
-@router.get(
-    "/assistants/{assistant_id}/",
-    response={200: AssistantInfoResponse, 403: Error, 404: Error},
-    operation_id="get_assistant_info",
-)
-async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
-        return AssistantInfoResponse(
-            id=info.id,
-            name=info.name,
-            model=info.model,
-            class_name=info.class_name,
-            description=info.description,
-            instructions=assistant.get_system_prompt(),
-            file_upload=info.file_upload,
-            rag=info.rag,
-        )
-    except PermissionDenied as e:
-        return 403, Error(message=str(e))
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-
-@router.get(
-    "/assistants/{assistant_id}/tools/",
-    response={200: ToolsResponse, 404: Error},
-    operation_id="get_assistant_tools",
-)
-async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-    except ValueError as e:
-        return 404, Error(message=str(e))
-
-    tools_data = []
-    try:
-        tool_objs = await assistant.get_tools()
-        tools_data = [
-            Tool(
-                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
-                description=t.description or "",
-            )
-            for t in tool_objs
-        ]
-    except Exception:
-        logger.exception("Failed to build tools for assistant %s", assistant_id)
-
-    integrations_data = []
-    try:
-        integration_status = await AssistantService.get_integration_status(
-            assistant, user=request.user
-        )
-        integrations_data = [
-            IntegrationStatusOut(
-                server_name=s.server_name,
-                label=s.label,
-                type=s.type,
-                status=s.status,
-                tool_names=s.tool_names,
-            )
-            for s in integration_status
-        ]
-    except Exception:
-        logger.exception("Failed to load integration status for assistant %s", assistant_id)
-
-    return ToolsResponse(tools=tools_data, integrations=integrations_data)
-
-
-@router.post(
-    "/assistants/{assistant_id}/reindex/",
-    response={200: Success, 404: Error, 500: Error},
-    operation_id="reindex_assistant",
-)
-async def reindex_assistant(
-    request: HttpRequest,
-    assistant_id: str,
-    memory_id: str | None = None,
-    force_rebuild: bool = False,
-) -> Any:
-    try:
-        assistant = await AssistantService.get(assistant_id)
-        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
-
-        if not result:
-            return Success(success=False, message="No RAG provider configured for this assistant")
-
-        rebuild_msg = " (force rebuild)" if force_rebuild else ""
-        message = "RAG pipeline reindexed successfully" + rebuild_msg
-        if memory_id:
-            message += f" for memory {memory_id}"
-
-        return Success(success=True, message=message)
-    except ValueError as e:
-        return 404, Error(message=str(e))
-    except Exception as e:
-        return 500, Error(message=str(e))
 
 
 # ============================================================================
@@ -734,6 +631,9 @@ async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> An
 
 class AssistantUserOut(Schema):
     user_id: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
     can_manage: bool
     created_at: str
 
@@ -758,6 +658,9 @@ async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
         return [
             AssistantUserOut(
                 user_id=str(u.user_id),
+                email=u.user.email,
+                first_name=u.user.first_name,
+                last_name=u.user.last_name,
                 can_manage=u.can_manage,
                 created_at=u.created_at.isoformat() if u.created_at else "",
             )
@@ -784,6 +687,9 @@ async def add_assistant_user(
         )
         return AssistantUserOut(
             user_id=str(entry.user_id),
+            email=entry.user.email,
+            first_name=entry.user.first_name,
+            last_name=entry.user.last_name,
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
@@ -810,6 +716,9 @@ async def update_assistant_user(
         )
         return AssistantUserOut(
             user_id=str(entry.user_id),
+            email=entry.user.email,
+            first_name=entry.user.first_name,
+            last_name=entry.user.last_name,
             can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
@@ -840,11 +749,13 @@ async def delete_assistant_user(request: HttpRequest, runtime_id: UUID, user_id:
 class AssistantGroupOut(Schema):
     group_id: int
     group_name: str
+    can_manage: bool
     created_at: str
 
 
 class AddAssistantGroupIn(Schema):
     group_id: int
+    can_manage: bool = False
 
 
 @router.get(
@@ -859,6 +770,7 @@ async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
             AssistantGroupOut(
                 group_id=g.group_id,
                 group_name=g.group.name,
+                can_manage=g.can_manage,
                 created_at=g.created_at.isoformat() if g.created_at else "",
             )
             for g in groups
@@ -879,11 +791,13 @@ async def add_assistant_group(
         entry = await AssistantService.add_assistant_group(
             str(runtime_id),
             payload.group_id,
+            payload.can_manage,
             user=request.user,
         )
         return AssistantGroupOut(
             group_id=entry.group_id,
             group_name=entry.group.name,
+            can_manage=entry.can_manage,
             created_at=entry.created_at.isoformat() if entry.created_at else "",
         )
     except PermissionDenied as e:
@@ -905,3 +819,451 @@ async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_i
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/",
+    response={200: AssistantsListResponse, 403: Error, 500: Error},
+    operation_id="list_assistants",
+)
+async def list_assistants(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+    try:
+        items = await AssistantService.list_assistants(
+            user=request.user, limit=limit, offset=offset
+        )
+        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/{assistant_id}/",
+    response={200: AssistantInfoResponse, 403: Error, 404: Error},
+    operation_id="get_assistant_info",
+)
+async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
+        perms = await assistant_permissions(request.user, assistant_id)
+        return AssistantInfoResponse(
+            id=info.id,
+            name=info.name,
+            model=info.model,
+            class_name=info.class_name,
+            description=info.description,
+            instructions=assistant.get_system_prompt(),
+            file_upload=info.file_upload,
+            rag=info.rag,
+            permissions=perms,
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
+@router.get(
+    "/assistants/{assistant_id}/tools/",
+    response={200: ToolsResponse, 404: Error},
+    operation_id="get_assistant_tools",
+)
+async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+    tools_data = []
+    try:
+        tool_objs = await assistant.get_tools()
+        tools_data = [
+            Tool(
+                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
+                description=t.description or "",
+            )
+            for t in tool_objs
+        ]
+    except Exception:
+        logger.exception("Failed to build tools for assistant %s", assistant_id)
+
+    integrations_data = []
+    try:
+        integration_status = await AssistantService.get_integration_status(
+            assistant, user=request.user
+        )
+        integrations_data = [
+            IntegrationStatusOut(
+                server_name=s.server_name,
+                label=s.label,
+                type=s.type,
+                status=s.status,
+                tool_names=s.tool_names,
+            )
+            for s in integration_status
+        ]
+    except Exception:
+        logger.exception("Failed to load integration status for assistant %s", assistant_id)
+
+    return ToolsResponse(tools=tools_data, integrations=integrations_data)
+
+
+@router.post(
+    "/assistants/{assistant_id}/reindex/",
+    response={200: Success, 404: Error, 500: Error},
+    operation_id="reindex_assistant",
+)
+async def reindex_assistant(
+    request: HttpRequest,
+    assistant_id: str,
+    memory_id: str | None = None,
+    force_rebuild: bool = False,
+) -> Any:
+    try:
+        assistant = await AssistantService.get(assistant_id)
+        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
+
+        if not result:
+            return Success(success=False, message="No RAG provider configured for this assistant")
+
+        rebuild_msg = " (force rebuild)" if force_rebuild else ""
+        message = "RAG pipeline reindexed successfully" + rebuild_msg
+        if memory_id:
+            message += f" for memory {memory_id}"
+
+        return Success(success=True, message=message)
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+# ============================================================================
+# Workflows
+# ============================================================================
+
+
+class WorkflowRunRequest(Schema):
+    workflow: WorkflowDefinition
+    messages: list[ChatMessage] = []
+
+
+class WorkflowRunResponse(Schema):
+    run_id: str
+    status: str
+
+
+class WorkflowActionItem(Schema):
+    key: str
+    description: str
+
+
+class WorkflowRunStepOut(Schema):
+    id: str
+    sequence: int
+    step_name: str
+    output_key: str
+    output: dict | None = None
+    status: str
+    error: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class WorkflowRunOut(Schema):
+    id: str
+    workflow_id: str | None = None
+    status: str
+    outputs: dict | None = None
+    error: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class WorkflowRunDetailOut(WorkflowRunOut):
+    steps: list[WorkflowRunStepOut] = []
+
+
+@router.post(
+    "/workflows/run/",
+    response={202: WorkflowRunResponse, 400: Error, 500: Error},
+    operation_id="run_workflow",
+)
+async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
+    try:
+        run = await WorkflowService.run(payload.workflow, payload.messages, user=request.user)
+        return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/actions/",
+    response={200: list[WorkflowActionItem]},
+    operation_id="list_workflow_actions",
+)
+def list_workflow_actions(request: HttpRequest) -> list[WorkflowActionItem]:
+    return [WorkflowActionItem(**item) for item in WorkflowService.list_actions()]
+
+
+# Workflow CRUD schemas
+
+
+class WorkflowCreateRequest(Schema):
+    name: str
+    workflow: WorkflowDefinition
+
+
+class WorkflowUpdateRequest(Schema):
+    name: str | None = None
+    workflow: WorkflowDefinition | None = None
+    active: bool | None = None
+
+
+class WorkflowItem(Schema):
+    id: str
+    name: str
+    definition: dict
+    active: bool
+
+
+class WorkflowRunByIdRequest(Schema):
+    messages: list[ChatMessage] = []
+    run_id: str | None = None
+
+
+@router.get(
+    "/workflows/",
+    response={200: list[WorkflowItem]},
+    operation_id="list_workflows",
+)
+async def list_workflows(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+    records = await WorkflowService.list_workflows(limit=limit, offset=offset)
+    return [
+        WorkflowItem(id=str(r.id), name=r.name, definition=r.definition, active=r.active)
+        for r in records
+    ]
+
+
+@router.post(
+    "/workflows/",
+    response={201: WorkflowItem, 400: Error, 500: Error},
+    operation_id="create_workflow",
+)
+async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) -> Any:
+    try:
+        record = await WorkflowService.create(payload.name, payload.workflow, user=request.user)
+        return 201, WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/runs/",
+    response={200: list[WorkflowRunOut], 500: Error},
+    operation_id="list_workflow_runs",
+)
+async def list_workflow_runs(
+    request: HttpRequest, workflow_id: str, limit: int = 50, offset: int = 0
+) -> Any:
+    try:
+        runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
+        return [
+            WorkflowRunOut(
+                id=str(r.id),
+                workflow_id=str(r.workflow_id) if r.workflow_id else None,
+                status=r.status,
+                outputs=r.outputs,
+                error=r.error,
+                created_at=r.created_at.isoformat(),
+                started_at=r.started_at.isoformat() if r.started_at else None,
+                completed_at=r.completed_at.isoformat() if r.completed_at else None,
+            )
+            for r in runs
+        ]
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/runs/{run_id}/",
+    response={200: WorkflowRunDetailOut, 404: Error, 500: Error},
+    operation_id="get_workflow_run",
+)
+async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) -> Any:
+    from django_ai_sdk.workflows.models import WorkflowRun
+
+    try:
+        run = await WorkflowService.get_run(run_id)
+        steps = [
+            WorkflowRunStepOut(
+                id=str(s.id),
+                sequence=s.sequence,
+                step_name=s.step_name,
+                output_key=s.output_key,
+                output=s.output if isinstance(s.output, dict) else None,
+                status=s.status,
+                error=s.error,
+                started_at=s.started_at.isoformat() if s.started_at else None,
+                completed_at=s.completed_at.isoformat() if s.completed_at else None,
+            )
+            async for s in run.steps.all()
+        ]
+        return WorkflowRunDetailOut(
+            id=str(run.id),
+            workflow_id=str(run.workflow_id) if run.workflow_id else None,
+            status=run.status,
+            outputs=run.outputs,
+            error=run.error,
+            created_at=run.created_at.isoformat(),
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            completed_at=run.completed_at.isoformat() if run.completed_at else None,
+            steps=steps,
+        )
+    except WorkflowRun.DoesNotExist:
+        return 404, Error(message="Run not found")
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/workflows/{workflow_id}/",
+    response={200: WorkflowItem, 404: Error},
+    operation_id="get_workflow",
+)
+async def get_workflow(request: HttpRequest, workflow_id: str) -> Any:
+    try:
+        record = await WorkflowService.get(workflow_id)
+        return WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+
+
+@router.patch(
+    "/workflows/{workflow_id}/",
+    response={200: WorkflowItem, 404: Error, 500: Error},
+    operation_id="update_workflow",
+)
+async def update_workflow(
+    request: HttpRequest, workflow_id: str, payload: WorkflowUpdateRequest
+) -> Any:
+    try:
+        record = await WorkflowService.update(
+            workflow_id,
+            name=payload.name,
+            workflow=payload.workflow,
+            active=payload.active,
+        )
+        return WorkflowItem(
+            id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        )
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.delete(
+    "/workflows/{workflow_id}/",
+    response={204: None, 404: Error},
+    operation_id="delete_workflow",
+)
+async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
+    try:
+        await WorkflowService.get(workflow_id)
+        await WorkflowService.delete(workflow_id)
+        return 204, None
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+
+
+@router.post(
+    "/workflows/{workflow_id}/run/",
+    response={202: WorkflowRunResponse, 404: Error, 500: Error},
+    operation_id="run_workflow_by_id",
+)
+async def run_workflow_by_id(
+    request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
+) -> Any:
+    try:
+        run = await WorkflowService.run_by_id(
+            workflow_id, payload.messages, user=request.user, run_id=payload.run_id
+        )
+        return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+    except WorkflowSettings.DoesNotExist:
+        return 404, Error(message="Workflow not found")
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+class UserSchema(Schema):
+    id: Any
+    first_name: str
+    last_name: str
+
+
+class UserDetailSchema(Schema):
+    id: Any
+    first_name: str
+    last_name: str
+    email: str
+
+
+class UserUpdateSchema(Schema):
+    first_name: str | None = None
+    last_name: str | None = None
+
+
+@router.get("/users/", response=list[UserSchema], operation_id="list_users")
+def list_users(request: HttpRequest, q: str = "", limit: int = 10) -> Any:
+    User = get_user_model()
+    qs = User.objects.order_by("first_name", "last_name")
+    if q.strip():
+        qs = qs.filter(
+            Q(first_name__icontains=q)
+            | Q(last_name__icontains=q)
+            | Q(email__icontains=q)
+            | Q(username__icontains=q)
+        )
+    return list(qs.values("id", "first_name", "last_name")[: min(limit, 100)])
+
+
+@router.get("/users/me/", response=UserDetailSchema, operation_id="get_me")
+def get_me(request: HttpRequest) -> Any:
+    User = get_user_model()
+    return User.objects.get(pk=request.user.pk)
+
+
+@router.patch("/users/me/", response=UserDetailSchema, operation_id="update_me")
+def update_me(request: HttpRequest, payload: UserUpdateSchema) -> Any:
+    User = get_user_model()
+    user = User.objects.get(pk=request.user.pk)
+    update_fields = []
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(user, field, value)
+        update_fields.append(field)
+    if update_fields:
+        user.save(update_fields=update_fields)
+    return user
+
+
+class GroupOut(Schema):
+    id: int
+    name: str
+
+
+@router.get("/accounts/groups/", response=list[GroupOut], operation_id="search_groups")
+def search_groups(request: HttpRequest, q: str = "", limit: int = 10) -> Any:
+    from django.contrib.auth.models import Group
+
+    qs = Group.objects.order_by("name")
+    if q.strip():
+        qs = qs.filter(name__icontains=q)
+    return list(qs.values("id", "name")[: min(limit, 100)])

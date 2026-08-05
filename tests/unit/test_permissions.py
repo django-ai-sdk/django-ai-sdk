@@ -272,7 +272,7 @@ class TestMemoryDefaultPermission:
         contributor = await UserFactory.acreate()
         memory = await self._make_memory_user(contributor, can_manage=False)
 
-        for op in MemoryDefaultPermission.MANAGER:
+        for op in MemoryDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     contributor, op, memory, [MemoryDefaultPermission]
@@ -308,7 +308,7 @@ class TestMemoryDefaultPermission:
         memory = await self._make_memory_user(user, can_manage=False)
         await self._make_memory_group(user, can_manage=True, memory=memory)
 
-        for op in MemoryDefaultPermission.MANAGER:
+        for op in MemoryDefaultPermission.MANAGE:
             await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
@@ -324,7 +324,7 @@ class TestMemoryDefaultPermission:
         memory = await self._make_memory_user(user, can_manage=True)
         await self._make_memory_group(user, can_manage=False, memory=memory)
 
-        for op in MemoryDefaultPermission.MANAGER:
+        for op in MemoryDefaultPermission.MANAGE:
             await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_stranger_cannot_access_private_memory(self):
@@ -362,7 +362,7 @@ class TestMemoryDefaultPermission:
                 stranger, op, memory, [MemoryDefaultPermission]
             )
 
-        for op in MemoryDefaultPermission.WRITE | MemoryDefaultPermission.MANAGER:
+        for op in MemoryDefaultPermission.WRITE | MemoryDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     stranger, op, memory, [MemoryDefaultPermission]
@@ -494,7 +494,7 @@ class TestAssistantDefaultPermission:
         owner = await UserFactory.acreate()
         config = await self._make_assistant_user(owner, can_manage=False)
 
-        for op in AssistantDefaultPermission.MANAGER:
+        for op in AssistantDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     owner, op, config, [AssistantDefaultPermission]
@@ -562,7 +562,7 @@ class TestAssistantDefaultPermission:
         member = await UserFactory.acreate()
         config = await self._make_assistant_group(member, can_manage=False)
 
-        for op in AssistantDefaultPermission.MANAGER:
+        for op in AssistantDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     member, op, config, [AssistantDefaultPermission]
@@ -597,7 +597,7 @@ class TestAssistantDefaultPermission:
         config = await self._make_assistant_user(user, can_manage=False)
         await self._make_assistant_group(user, can_manage=True, assistant=config)
 
-        for op in AssistantDefaultPermission.MANAGER:
+        for op in AssistantDefaultPermission.MANAGE:
             await check_object_permissions(user, op, config, [AssistantDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
@@ -613,7 +613,7 @@ class TestAssistantDefaultPermission:
         config = await self._make_assistant_user(user, can_manage=True)
         await self._make_assistant_group(user, can_manage=False, assistant=config)
 
-        for op in AssistantDefaultPermission.MANAGER:
+        for op in AssistantDefaultPermission.MANAGE:
             await check_object_permissions(user, op, config, [AssistantDefaultPermission])
 
     async def test_anonymous_denied(self):
@@ -804,6 +804,264 @@ class TestIsOwner:
         await check_permissions(
             user, Operation.CREATE_THREAD, [IsOwner], obj=obj
         )
+
+
+# ============================================================================
+# ObjectPermissions schema and mixin
+# ============================================================================
+
+
+@pytest.mark.asyncio
+class TestObjectPermissionsSchema:
+    """Tests for the ObjectPermissions schema and ObjectPermsSchema mixin."""
+
+    async def test_default_values_all_false(self):
+        from piratespeak.views_permissions import ObjectPermissions
+
+        perms = ObjectPermissions()
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    async def test_custom_values(self):
+        from piratespeak.views_permissions import ObjectPermissions
+
+        perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
+        assert perms.can_read is True
+        assert perms.can_write is False
+        assert perms.can_manage is True
+
+    async def test_serializes_as_dict(self):
+        from piratespeak.views_permissions import ObjectPermissions
+
+        perms = ObjectPermissions(can_read=True, can_write=True, can_manage=False)
+        d = perms.model_dump()
+        assert d == {"can_read": True, "can_write": True, "can_manage": False}
+
+    async def test_memory_out_response_has_permissions_field(self):
+        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from django_ai_sdk.permissions import ObjectPermissions
+
+        instance = MemoryOutResponse(
+            id="mem-1",
+            name="Test",
+            slug="test",
+            description="",
+            is_public=False,
+            document_count=0,
+            created_at="2024-01-01",
+            updated_at="2024-01-01",
+        )
+        assert hasattr(instance, "permissions")
+        assert isinstance(instance.permissions, ObjectPermissions)
+        assert instance.permissions.can_read is False
+
+    async def test_memory_out_response_with_custom_permissions(self):
+        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from django_ai_sdk.permissions import ObjectPermissions
+
+        perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
+        instance = MemoryOutResponse(
+            id="mem-2",
+            name="Test",
+            slug="test",
+            description="",
+            is_public=False,
+            document_count=0,
+            created_at="2024-01-01",
+            updated_at="2024-01-01",
+            permissions=perms,
+        )
+        assert instance.permissions.can_read is True
+        assert instance.permissions.can_manage is True
+
+    async def test_multiple_inheritance_with_memory_out(self):
+        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from django_ai_sdk.permissions import ObjectPermissions
+
+        instance = MemoryOutResponse(
+            id="mem-1",
+            name="Test",
+            slug="test",
+            description="",
+            is_public=False,
+            document_count=0,
+            created_at="2024-01-01",
+            updated_at="2024-01-01",
+            permissions=ObjectPermissions(can_read=True, can_write=True, can_manage=True),
+        )
+        assert instance.id == "mem-1"
+        assert instance.permissions.can_read is True
+        assert instance.permissions.can_manage is True
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestObjectPermissionsCalculators:
+    """Integration tests for memory/thread/assistant permission calculators."""
+
+    async def _make_user(self):
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    # --- memory_permissions ---
+
+    async def test_memory_permissions_owner_gets_all(self):
+        from django_ai_sdk.memories.models import Memory, MemoryUser
+        from piratespeak.views_permissions import memory_permissions
+
+        user = await self._make_user()
+        memory = await Memory.objects.acreate(name="Owner Mem", is_public=False)
+        await MemoryUser.objects.acreate(user=user, memory=memory, can_manage=True)
+
+        perms = await memory_permissions(user, str(memory.id))
+        assert perms.can_read is True
+        assert perms.can_write is True
+        assert perms.can_manage is True
+
+    async def test_memory_permissions_stranger_on_public_only_read(self):
+        from django_ai_sdk.memories.models import Memory
+        from piratespeak.views_permissions import memory_permissions
+
+        user = await self._make_user()
+        memory = await Memory.objects.acreate(name="Public Mem", is_public=True)
+
+        perms = await memory_permissions(user, str(memory.id))
+        # Demo's AllowAnonymousMemoryPermission puts UPLOAD_DOCUMENT/DELETE_DOCUMENT
+        # in both READ and WRITE frozensets, so authenticated strangers can write
+        # to public memories but not manage them.
+        assert perms.can_read is True
+        assert perms.can_write is True
+        assert perms.can_manage is False
+
+    async def test_memory_permissions_stranger_on_private_gets_none(self):
+        from django_ai_sdk.memories.models import Memory
+        from piratespeak.views_permissions import memory_permissions
+
+        user = await self._make_user()
+        memory = await Memory.objects.acreate(name="Private Mem", is_public=False)
+
+        perms = await memory_permissions(user, str(memory.id))
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    async def test_memory_permissions_nonexistent_memory_returns_default(self):
+        from piratespeak.views_permissions import memory_permissions
+
+        user = await self._make_user()
+        perms = await memory_permissions(user, "nonexistent-id")
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    # --- thread_permissions ---
+
+    async def test_thread_permissions_owner_gets_all(self):
+        from uuid import uuid4
+
+        from django_ai_sdk.storage.db import DbStorageAdapter
+        from django_ai_sdk.storage.services import ThreadService
+        from piratespeak.views_permissions import thread_permissions
+
+        user = await self._make_user()
+        thread_id = str(uuid4())
+        await DbStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test"},
+            user=user,
+            thread_id=thread_id,
+        )
+
+        perms = await thread_permissions(user, thread_id)
+        assert perms.can_read is True
+        assert perms.can_write is True
+        assert perms.can_manage is True
+
+    async def test_thread_permissions_stranger_gets_none(self):
+        from uuid import uuid4
+
+        from django_ai_sdk.storage.db import DbStorageAdapter
+        from piratespeak.views_permissions import thread_permissions
+
+        owner = await self._make_user()
+        stranger = await self._make_user()
+        thread_id = str(uuid4())
+        await DbStorageAdapter.create_thread(
+            title="Test Thread",
+            metadata={"assistant_id": "test"},
+            user=owner,
+            thread_id=thread_id,
+        )
+
+        perms = await thread_permissions(stranger, thread_id)
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    async def test_thread_permissions_nonexistent_returns_default(self):
+        from piratespeak.views_permissions import thread_permissions
+
+        user = await self._make_user()
+        perms = await thread_permissions(user, "nonexistent-id")
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    # --- assistant_permissions ---
+
+    async def test_assistant_permissions_owner_gets_all(self):
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+        from piratespeak.views_permissions import assistant_permissions
+
+        user = await self._make_user()
+        config = await AssistantSettings.objects.acreate(
+            name="Test", slug="test-slug", assistant="test"
+        )
+        await AssistantUser.objects.acreate(assistant=config, user=user, can_manage=True)
+
+        perms = await assistant_permissions(user, "test-slug")
+        assert perms.can_read is True
+        assert perms.can_write is True
+        assert perms.can_manage is True
+
+    async def test_assistant_permissions_stranger_gets_none(self):
+        from django_ai_sdk.assistants.models import AssistantSettings
+        from piratespeak.views_permissions import assistant_permissions
+
+        stranger = await self._make_user()
+        await AssistantSettings.objects.acreate(
+            name="Private", slug="private-slug", assistant="test"
+        )
+
+        perms = await assistant_permissions(stranger, "private-slug")
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    async def test_assistant_permissions_nonexistent_returns_default(self):
+        from piratespeak.views_permissions import assistant_permissions
+
+        user = await self._make_user()
+        perms = await assistant_permissions(user, "nonexistent")
+        assert perms.can_read is False
+        assert perms.can_write is False
+        assert perms.can_manage is False
+
+    async def test_assistant_permissions_looks_up_by_id_fallback(self):
+        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+        from piratespeak.views_permissions import assistant_permissions
+
+        user = await self._make_user()
+        config = await AssistantSettings.objects.acreate(
+            name="By ID", slug="by-id-slug", assistant="test"
+        )
+        await AssistantUser.objects.acreate(assistant=config, user=user, can_manage=True)
+
+        perms = await assistant_permissions(user, str(config.id))
+        assert perms.can_read is True
+        assert perms.can_manage is True
 
 
 # ============================================================================

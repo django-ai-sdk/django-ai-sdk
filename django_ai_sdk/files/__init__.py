@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django_ai_sdk.files.common import UploadSettings, get_upload_settings
 from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult, parse_data
 from django_ai_sdk.files.processors import (
     BaseBinaryFileProcessor,
@@ -33,5 +34,7 @@ __all__ = [
     "PptxFileProcessor",
     "TextFileProcessor",
     "TextTransform",
+    "UploadSettings",
     "XlsxFileProcessor",
+    "get_upload_settings",
 ]

@@ -29,7 +29,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --extra all --group dev
 
       - name: Run tests
         run: uv run python -m pytest tests/ -x -q
@@ -54,7 +54,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        run: uv sync --extra all --group dev
 
       - name: Ruff lint
         run: uv run ruff check django_ai_sdk/ demo/

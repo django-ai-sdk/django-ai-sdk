@@ -168,17 +168,25 @@ class MemoryService(PermissionsMixin):
     # ============================================================================
 
     @classmethod
-    async def list_memory_users(cls, memory_id: str, *, user: UserType) -> list[MemoryUserOut]:
+    async def list_memory_users(
+        cls,
+        memory_id: str,
+        *,
+        user: UserType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[MemoryUserOut]:
         """List all users of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
+        qs = memory.memory_users.all().select_related("user")[offset : offset + limit]
         return [
             MemoryUserOut(
                 user_id=str(o.user_id),
                 can_manage=o.can_manage,
                 created_at=o.created_at.isoformat(),
             )
-            async for o in memory.memory_users.all().select_related("user")
+            async for o in qs
         ]
 
     @classmethod
@@ -298,14 +306,19 @@ class MemoryService(PermissionsMixin):
     # ============================================================================
 
     @classmethod
-    async def list_memories(cls, *, user: UserType) -> list[MemoryOut]:
+    async def list_memories(
+        cls, *, user: UserType, limit: int = 100, offset: int = 0
+    ) -> list[MemoryOut]:
         """List memories visible to the requesting user."""
         qs = cls.has_queryset_perms(
             user,
             Operation.VIEW_MEMORY,
             queryset=Memory.objects.filter(is_hidden=False),
         )
-        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")
+
+        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")[
+            offset : offset + limit
+        ]
 
         return [
             MemoryOut(
@@ -501,14 +514,21 @@ class MemoryService(PermissionsMixin):
         )
 
     @classmethod
-    async def list_documents(cls, memory_id: str, *, user: UserType) -> list[DocumentOut]:
+    async def list_documents(
+        cls,
+        memory_id: str,
+        *,
+        user: UserType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[DocumentOut]:
         """List all file-backed documents in a memory (all processing statuses)."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.LIST_DOCUMENTS, memory)
         entry_docs = (
             EntryDocument.objects.filter(memory_id=memory_id)
             .select_related("entry")
-            .order_by("-created_at")
+            .order_by("-created_at")[offset : offset + limit]
         )
         return [cls._entry_doc_to_out(ed) async for ed in entry_docs]
 
@@ -571,12 +591,20 @@ class MemoryService(PermissionsMixin):
         await link.adelete()
 
     @classmethod
-    async def list_thread_memories(cls, thread_id: str, *, user: UserType) -> list[ThreadMemoryOut]:
+    async def list_thread_memories(
+        cls,
+        thread_id: str,
+        *,
+        user: UserType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
         thread_memories = (
             ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
             .select_related("memory")
-            .annotate(document_count=Count("memory__entries"))
+            .prefetch_related("memory__memory_users")
+            .annotate(document_count=Count("memory__entries"))[offset : offset + limit]
         )
 
         memories = []
@@ -781,7 +809,14 @@ class MemoryService(PermissionsMixin):
         )
 
     @classmethod
-    async def list_thread_files(cls, thread_id: str, *, user: UserType) -> list[DocumentOut]:
+    async def list_thread_files(
+        cls,
+        thread_id: str,
+        *,
+        user: UserType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
@@ -804,7 +839,7 @@ class MemoryService(PermissionsMixin):
         entry_docs = (
             EntryDocument.objects.filter(memory_id=thread.file_memory_id)
             .select_related("entry")
-            .order_by("-created_at")
+            .order_by("-created_at")[offset : offset + limit]
         )
         return [cls._entry_doc_to_out(ed) async for ed in entry_docs]
 

@@ -132,44 +132,55 @@ class Assistant(ABC, AssistantInfoMixin):
         return await assistant.as_view(protocol_messages)
     """
 
+    # Name of assistant.
     name: str
+
+    # Short description of assistant.
     description: str
+
+    # Model identifier for LLM backend.
     model: str
+
+    # System prompt instructions for the assistant.
     instructions: Prompt = prompt("You are a helpful assistant.")
 
     # Permission classes used to gate access to this assistant's operations.
     permissions: list[type[BasePermission]] = [AllowAll]
 
-    # Default list of connected memories
+    # Default list of connected memories.
     memories: list[str] = []
 
+    # Tools are callable from assistant.
     tools: list[str] = []
 
+    # ArtifactSchema subclasses to register as tools in stream pipelines.
+    artifacts: list[type[BaseModel]] = []
+
+    # Protocol handler class for converting protocol messages
     protocol = None
+
+    # Storage adapter class for persisting threads and messages
     storage: type[BaseStorageAdapter] | None = None
 
-    # If True, hide from registry.visible() (used for internal assistants)
+    # Set to an ArtifactSchema subclass to enable structured output for run() calls.
+    response_format: type[BaseModel] | None = None
+
+    # If True, hide from registry
     hidden: bool = False
 
-    # If True, this is a shared base meant only to be subclassed — it never enters the
-    # registry. Checked on the class's own __dict__, so it is never inherited and each
-    # concrete subclass registers normally without restating it.
-    #
-    # Distinct from `_skip_auto_register` (see assistants/runtime.py), which marks a
-    # class that is concrete and instantiated but built on demand rather than looked up
-    # by id. Both stay out of the registry, for unrelated reasons.
+    # If True, this is a shared base meant only to be subclassed.
     abstract: bool = False
 
-    # If Assistant should automatically warm up after initialization
+    # If Assistant should automatically warm up after initialization.
     warmup_on_init: bool = False
 
-    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG
+    # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG.
     rag_provider: Any = None
 
-    # Maximum conversation history to send to LLM (None = unlimited)
+    # Maximum conversation history to send to LLM (None = unlimited).
     max_history: int | None = None
 
-    # Enable file upload UI for this assistant's threads
+    # Enable file upload UI for this assistant's threads.
     file_upload: bool = False
 
     # Declare one FilePipeline per supported file type.
@@ -177,8 +188,11 @@ class Assistant(ABC, AssistantInfoMixin):
     # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
     file_pipelines: list[FilePipeline] = []
 
-    # Enable automatic thread title generation based on chat messages
+    # Enable automatic thread title generation based on chat messages.
     title_generation: bool = True
+
+    # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories).
+    rag_document_limit: int = 10_000
 
     # Citation formatter used to render retrieved documents for the LLM.
     citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
@@ -272,10 +286,10 @@ class Assistant(ABC, AssistantInfoMixin):
         )
 
         if self.warmup_on_init and self.rag_provider is not None:
-            # Warmup RAG provider on init
-            # TODO: delegate this to background task and check status.
-            # for now this won't block the main thread, but it can become very slow.
-            asyncio.get_event_loop().run_until_complete(self.rag_provider.warmup(self, None))
+            try:
+                asyncio.get_running_loop().create_task(self.rag_provider.warmup(self, None))
+            except RuntimeError:
+                pass  # No running loop (e.g. management command) — warmup skipped
 
     async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
         """
@@ -379,6 +393,7 @@ class Assistant(ABC, AssistantInfoMixin):
           def get_my_tool(user_id="", **kwargs): ...
 
         """
+        # class-level tools
         tools = getattr(self.__class__, "tools", [])
         result = []
         for tool in tools:
@@ -387,8 +402,25 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
+
+        # integration tools
         result.extend(await self._get_integration_tools(user, thread_id=thread_id))
+
+        # artifact tools
+        result.extend(await self.get_artifact_tools(thread_id=thread_id, user=user))
+
         return result
+
+    async def get_artifact_tools(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Any]:
+        """Build artifact submission tools from the class-level `artifacts` list."""
+        return [
+            artifact_cls.as_tool(thread_id=thread_id, user=user)
+            for artifact_cls in getattr(self.__class__, "artifacts", [])
+        ]
 
     async def get_rag_tools(
         self,
@@ -467,10 +499,9 @@ class Assistant(ABC, AssistantInfoMixin):
         # implementation details.
         from django_ai_sdk.memories.models import Entry
 
+        fields = ("id", "content", "data", "name", "memory_id")
         if memory_id:
-            return Entry.objects.filter(memory_id=memory_id)
-        # No memory scope → retrieve nothing. Returning every Entry in the system
-        # would leak content across memories; callers always pass a memory_id.
+            return Entry.objects.filter(memory_id=memory_id).only(*fields).order_by("-updated_at")
         return Entry.objects.none()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:
@@ -526,11 +557,13 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         return None
 
+    _UNSET: Any = object()
+
     async def run(
         self,
         messages: list[ChatMessage],
         system_prompt: str | Prompt | None = None,
-        response_format: type[T] | None = None,
+        response_format: type[T] | None = _UNSET,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> T | str | None:
@@ -539,18 +572,21 @@ class Assistant(ABC, AssistantInfoMixin):
         Args:
             messages: Conversation messages
             system_prompt: Optional system prompt override
-            response_format: Optional Pydantic model for structured output
+            response_format: Optional Pydantic model for structured output. Pass None
+                explicitly to disable structured output even if the assistant has a
+                default response_format set.
             thread_id: Optional thread ID (forwarded to get_run_adapter)
             user: Optional user (forwarded to get_run_adapter)
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
         """
+        resolved = self.response_format if response_format is self._UNSET else response_format
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         return await adapter.run(
             messages=messages,
-            system_prompt=system_prompt,
-            response_format=response_format,
+            system_prompt=system_prompt if system_prompt is not None else self.get_system_prompt(),
+            response_format=resolved,
         )
 
     async def get_run_adapter(
@@ -586,8 +622,6 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         if not self.integrations:
             return []
-
-        from django_ai_sdk.permissions import Operation
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:

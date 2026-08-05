@@ -38,42 +38,45 @@ class TestChromaRAGInit:
 class TestChromaRAGWarmup:
     """Test Chroma RAG warmup (document indexing)."""
 
-    def test_warmup_creates_store(self):
+    @pytest.mark.asyncio
+    async def test_warmup_creates_store(self):
         """Test that warmup creates the document store."""
         docs = [RagDocument(id=f"doc-{i}", content=f"Content {i}") for i in range(3)]
         config = ChromaDBQueryExpanderRAGConfig()  # Uses in-memory by default
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         assert rag._is_warmed_up
         assert rag._cached_document_store is not None
         # Note: chunking may create more chunks than docs
         assert rag._cached_document_store.count_documents() >= 3
 
-    def test_warmup_skip_if_already_warmed(self):
+    @pytest.mark.asyncio
+    async def test_warmup_skip_if_already_warmed(self):
         """Test that warmup skips if already warmed up."""
         docs = [RagDocument(id="1", content="test")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
         assert rag._is_warmed_up
 
         # Store the current count
         count_before = rag._cached_document_store.count_documents()
 
         # Second warmup should skip (is_warmed_up remains True)
-        rag.warmup()
+        await rag.warmup()
         assert rag._is_warmed_up
         assert rag._cached_document_store.count_documents() == count_before
 
-    def test_warmup_with_chunking(self):
+    @pytest.mark.asyncio
+    async def test_warmup_with_chunking(self):
         """Test that warmup applies chunking."""
         # Create a long document that will be chunked
         long_content = "This is a test. " * 100
         docs = [RagDocument(id="1", content=long_content)]
         config = ChromaDBQueryExpanderRAGConfig(chunk_size=50, chunk_overlap=10)
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         # Should have more chunks than documents
         chunk_count = rag._cached_document_store.count_documents()
@@ -89,7 +92,7 @@ class TestChromaRAGAddDocuments:
         docs = [RagDocument(id="1", content="Original", title="Orig")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         original_count = rag._cached_document_store.count_documents()
 
@@ -104,7 +107,7 @@ class TestChromaRAGAddDocuments:
         docs = [RagDocument(id="1", content="Original")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         new_docs = [
             RagDocument(id="2", content="Second", title="S"),
@@ -120,7 +123,7 @@ class TestChromaRAGAddDocuments:
         docs = [RagDocument(id="1", content="Original")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()  # Warmup first!
+        await rag.warmup()  # Warmup first!
 
         new_docs = [RagDocument(id="2", content="New")]
         await rag.add_documents(new_docs)
@@ -132,7 +135,8 @@ class TestChromaRAGAddDocuments:
 class TestChromaRAGRemoveDocuments:
     """Test removing documents incrementally."""
 
-    def test_remove_documents(self):
+    @pytest.mark.asyncio
+    async def test_remove_documents(self):
         """Test removing documents by ID."""
         docs = [
             RagDocument(id="1", content="Keep", title="K"),
@@ -140,29 +144,29 @@ class TestChromaRAGRemoveDocuments:
         ]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         original_count = rag._cached_document_store.count_documents()
 
-        import asyncio
-        asyncio.run(rag.remove_documents(["2"]))
+        await rag.remove_documents(["2"])
 
         # Should have less documents now (or equal if chunking created multiple chunks for doc 1)
         assert rag._cached_document_store.count_documents() <= original_count
 
-    def test_remove_nonexistent(self):
+    @pytest.mark.asyncio
+    async def test_remove_nonexistent(self):
         """Test removing non-existent document (no error)."""
         docs = [RagDocument(id="1", content="Only")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
-        import asyncio
-        asyncio.run(rag.remove_documents(["nonexistent"]))  # Should not raise
+        await rag.remove_documents(["nonexistent"])  # Should not raise
 
         assert rag._cached_document_store.count_documents() >= 1
 
-    def test_remove_multiple(self):
+    @pytest.mark.asyncio
+    async def test_remove_multiple(self):
         """Test removing multiple documents."""
         docs = [
             RagDocument(id="1", content="First"),
@@ -171,12 +175,11 @@ class TestChromaRAGRemoveDocuments:
         ]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         original_count = rag._cached_document_store.count_documents()
 
-        import asyncio
-        asyncio.run(rag.remove_documents(["1", "3"]))
+        await rag.remove_documents(["1", "3"])
 
         # Should have fewer documents after removal
         assert rag._cached_document_store.count_documents() < original_count
@@ -185,29 +188,31 @@ class TestChromaRAGRemoveDocuments:
 class TestChromaRAGRefreshDocuments:
     """Test refreshing all documents."""
 
-    def test_refresh_documents(self):
+    @pytest.mark.asyncio
+    async def test_refresh_documents(self):
         """Test refreshing with completely new documents."""
         docs = [RagDocument(id="old", content="old", title="Old")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         new_docs = [RagDocument(id="new", content="new", title="New")]
-        rag.refresh_documents(new_docs)
+        await rag.refresh_documents(new_docs)
 
         assert rag._cached_document_store.count_documents() >= 1
 
-    def test_refresh_reuses_store(self):
+    @pytest.mark.asyncio
+    async def test_refresh_reuses_store(self):
         """Test that refresh reuses the cached store."""
         docs = [RagDocument(id="old", content="old")]
         config = ChromaDBQueryExpanderRAGConfig()
         rag = ChromaDBQueryExpanderRAG(documents=docs, config=config)
-        rag.warmup()
+        await rag.warmup()
 
         old_store = rag._cached_document_store
 
         new_docs = [RagDocument(id="new", content="new")]
-        rag.refresh_documents(new_docs)
+        await rag.refresh_documents(new_docs)
 
         # Should reuse the same store instance
         assert rag._cached_document_store is old_store

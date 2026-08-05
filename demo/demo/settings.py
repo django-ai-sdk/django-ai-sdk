@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
 
 env = environ.Env(
     # set casting, default value
@@ -30,6 +31,9 @@ SECRET_KEY = "django-insecure-bu5o)x@7lydjdtfn92=mtwc4sobt=7(*-l)pc_s@-pqqnj97(2
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG")
 
+if DEBUG:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 ALLOWED_HOSTS = []
 
 
@@ -43,15 +47,22 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # auth
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
+    "allauth.usersessions",
     # third-party
+    "corsheaders",
     "django_watchfiles",
     "rest_framework",
     "django_tasks",
     "django_tasks_db",
+    # sdk
     "django_ai_sdk",
-    # The MCP toolkit: OAuth token models + the OAuth redirect views.
+    # mcp integration
     "django_ai_sdk.integrations.mcp",
-    # Shipped default integrations: one MCP-backed, one API-backed.
+    # default integrations
     "django_ai_sdk.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
@@ -66,6 +77,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # auth
+    "allauth.account.middleware.AccountMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = "demo.urls"
@@ -84,7 +98,6 @@ TEMPLATES = [
         },
     },
 ]
-
 
 # ASGI application
 ASGI_APPLICATION = "demo.asgi.application"
@@ -132,6 +145,41 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Authentication
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+HEADLESS_ONLY = True
+
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": "http://localhost:3000/verify-email/{key}",
+    "account_reset_password_from_key": "http://localhost:3000/password/reset/key/{key}",
+    "account_signup": "http://localhost:3000/signup",
+}
+
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+
+# Accounts
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_LOGIN_METHODS = {"email"}
+
+
+# CORS
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-email-verification-key",
+    "x-password-reset-key",
+)
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -171,6 +219,12 @@ AI_SDK_RUNTIME_ASSISTANT_BASES = [
 # Tools selectable in runtime assistant configuration
 AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
     "get_today": "piratespeak.assistants.tools.get_today",
+    "get_memory_files": "piratespeak.assistants.tools.get_memory_files",
+}
+
+# Default Workflow actions
+AI_SDK_WORKFLOW_ACTIONS = {
+    "console_log": "piratespeak.actions.ConsoleLogAction",
 }
 
 # Default asssitants
@@ -214,6 +268,16 @@ AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
 AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
 
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
+}
+
 # Allowed upload filetypes
 AI_SDK_ALLOWED_FILES = {
     ".md": "text/markdown",
@@ -224,8 +288,4 @@ AI_SDK_ALLOWED_FILES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-}
-
-REST_FRAMEWORK = {
-    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
 }

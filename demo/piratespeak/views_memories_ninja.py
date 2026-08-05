@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from django.http import HttpRequest
 from django_ai_sdk.memories.schemas import (
+    AddMemoryGroupIn,
     AddMemoryUserIn,
     BulkConnectMemoriesIn,
     DocumentOut,
     DocumentStatusOut,
     DocumentUploadResponse,
+    MemoryGroupOut,
     MemoryIn,
     MemoryOut,
     MemoryUserOut,
@@ -15,11 +17,17 @@ from django_ai_sdk.memories.schemas import (
     UpdateMemoryUserIn,
 )
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import ConflictError, PermissionDenied
+from django_ai_sdk.permissions import ConflictError, ObjectPermissions, PermissionDenied
 from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 
+from piratespeak.views_permissions import memory_permissions
+
 router = Router()
+
+
+class MemoryOutResponse(MemoryOut):
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class SourceContentOut(Schema):
@@ -29,6 +37,26 @@ class SourceContentOut(Schema):
 class Error(Schema):
     message: str
     code: int | None = None
+
+
+class UploadSettingsOut(Schema):
+    max_upload_size: int
+    allowed_mime_types: list[str]
+
+
+@router.get(
+    "/settings",
+    response=UploadSettingsOut,
+    operation_id="get_upload_settings",
+)
+async def get_upload_settings(request: HttpRequest) -> UploadSettingsOut:
+    from django_ai_sdk.files import get_upload_settings as _get_upload_settings
+
+    result = _get_upload_settings()
+    return UploadSettingsOut(
+        max_upload_size=result.max_upload_size,
+        allowed_mime_types=result.allowed_mime_types,
+    )
 
 
 @router.post("", response={200: MemoryOut, 403: dict}, operation_id="create_memory")
@@ -45,18 +73,27 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> MemoryOut | 
         return 403, {"detail": str(e)}
 
 
-@router.get("", response={200: list[MemoryOut], 403: dict}, operation_id="list_memories")
-async def list_memories(request: HttpRequest) -> list[MemoryOut] | tuple[int, dict]:
+@router.get("", response={200: list[MemoryOutResponse], 403: dict}, operation_id="list_memories")
+async def list_memories(
+    request: HttpRequest, limit: int = 100, offset: int = 0
+) -> list[MemoryOutResponse] | tuple[int, dict]:
     try:
-        return await MemoryService.list_memories(user=request.user)
+        memories = await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
+        result = []
+        for m in memories:
+            perms = await memory_permissions(request.user, m.id)
+            result.append(MemoryOutResponse(**m.model_dump(), permissions=perms))
+        return result
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
 
-@router.get("/{memory_id}", response={200: MemoryOut, 403: dict}, operation_id="get_memory")
-async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOut | tuple[int, dict]:
+@router.get("/{memory_id}", response={200: MemoryOutResponse, 403: dict}, operation_id="get_memory")
+async def get_memory(request: HttpRequest, memory_id: str) -> MemoryOutResponse | tuple[int, dict]:
     try:
-        return await MemoryService.get_memory(memory_id, user=request.user)
+        memory = await MemoryService.get_memory(memory_id, user=request.user)
+        perms = await memory_permissions(request.user, memory_id)
+        return MemoryOutResponse(**memory.model_dump(), permissions=perms)
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -124,10 +161,12 @@ async def get_document_status(
     operation_id="list_documents",
 )
 async def list_documents(
-    request: HttpRequest, memory_id: str
+    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
 ) -> list[DocumentOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_documents(memory_id, user=request.user)
+        return await MemoryService.list_documents(
+            memory_id, user=request.user, limit=limit, offset=offset
+        )
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -193,10 +232,12 @@ async def unlink_thread(
     operation_id="list_thread_memories",
 )
 async def list_thread_memories(
-    request: HttpRequest, thread_id: str
+    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
 ) -> list[ThreadMemoryOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_thread_memories(thread_id, user=request.user)
+        return await MemoryService.list_thread_memories(
+            thread_id, user=request.user, limit=limit, offset=offset
+        )
     except PermissionDenied as e:
         return 403, {"detail": str(e)}
 
@@ -247,8 +288,12 @@ async def get_thread_file_status(
 @router.get(
     "/thread/{thread_id}/files", response=list[DocumentOut], operation_id="list_thread_files"
 )
-async def list_thread_files(request: HttpRequest, thread_id: str) -> list[DocumentOut]:
-    return await MemoryService.list_thread_files(thread_id, user=request.user)
+async def list_thread_files(
+    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
+) -> list[DocumentOut]:
+    return await MemoryService.list_thread_files(
+        thread_id, user=request.user, limit=limit, offset=offset
+    )
 
 
 @router.delete(
@@ -296,10 +341,12 @@ async def disconnect_memory_from_thread(
     operation_id="list_memory_users",
 )
 async def list_memory_users(
-    request: HttpRequest, memory_id: str
+    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
 ) -> list[MemoryUserOut] | tuple[int, dict]:
     try:
-        return await MemoryService.list_memory_users(memory_id, user=request.user)
+        return await MemoryService.list_memory_users(
+            memory_id, user=request.user, limit=limit, offset=offset
+        )
     except ValueError as e:
         return 404, {"detail": str(e)}
     except PermissionDenied as e:
@@ -352,6 +399,57 @@ async def remove_memory_user(
 ) -> tuple[int, None | dict]:
     try:
         await MemoryService.remove_memory_user(memory_id, user_id, user=request.user)
+        return 204, None
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.get(
+    "/{memory_id}/groups/",
+    response={200: list[MemoryGroupOut], 403: dict, 404: dict},
+    operation_id="list_memory_groups",
+)
+async def list_memory_groups(
+    request: HttpRequest, memory_id: str
+) -> list[MemoryGroupOut] | tuple[int, dict]:
+    try:
+        return await MemoryService.list_memory_groups(memory_id, user=request.user)
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.post(
+    "/{memory_id}/groups/",
+    response={200: MemoryGroupOut, 403: dict, 404: dict},
+    operation_id="add_memory_group",
+)
+async def add_memory_group(
+    request: HttpRequest, memory_id: str, payload: AddMemoryGroupIn
+) -> MemoryGroupOut | tuple[int, dict]:
+    try:
+        return await MemoryService.add_memory_group(
+            memory_id, payload.group_id, payload.can_manage, user=request.user
+        )
+    except ValueError as e:
+        return 404, {"detail": str(e)}
+    except PermissionDenied as e:
+        return 403, {"detail": str(e)}
+
+
+@router.delete(
+    "/{memory_id}/groups/{group_id}/",
+    response={204: None, 403: dict, 404: dict},
+    operation_id="remove_memory_group",
+)
+async def remove_memory_group(
+    request: HttpRequest, memory_id: str, group_id: int
+) -> tuple[int, None | dict]:
+    try:
+        await MemoryService.remove_memory_group(memory_id, group_id, user=request.user)
         return 204, None
     except ValueError as e:
         return 404, {"detail": str(e)}

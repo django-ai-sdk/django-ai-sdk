@@ -41,7 +41,7 @@ class AllowAnonymousMemoryPermission(BasePermission):
             Operation.DELETE_DOCUMENT,
         }
     )
-    MANAGER: frozenset[Operation] = frozenset(
+    MANAGE: frozenset[Operation] = frozenset(
         {
             Operation.UPDATE_MEMORY,
             Operation.DELETE_MEMORY,
@@ -76,7 +76,7 @@ class AllowAnonymousMemoryPermission(BasePermission):
             return False
 
         # Memory user: manager ops require can_manage=True
-        if operation in self.MANAGER:
+        if operation in self.MANAGE:
             return ownership.can_manage
         return True
 
@@ -91,10 +91,9 @@ class AllowAnonymousMemoryPermission(BasePermission):
 
         if not is_authenticated:
             return queryset.filter(is_public=True) if operation in self.READ else queryset.none()
-
         if operation in self.READ or operation in self.WRITE:
             return queryset.filter(is_public=True) | queryset.filter(memory_users__user=user)
-        if operation in self.MANAGER:
+        if operation in self.MANAGE:
             return queryset.filter(memory_users__user=user)
 
         return queryset.none()

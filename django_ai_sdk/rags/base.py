@@ -89,7 +89,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
     config: ConfigT
 
     @abstractmethod
-    def warmup(self, force_rebuild: bool = False) -> None:
+    async def warmup(self, force_rebuild: bool = False) -> None:
         """
         Warm up the RAG by building the indexed document store (expensive).
 
@@ -108,7 +108,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         return not self._is_warmed_up
 
     @abstractmethod
-    def build_pipeline(self) -> Pipeline:
+    async def build_pipeline(self) -> Pipeline:
         """
         Build and return the RAG pipeline (query side, cheap).
 
@@ -118,7 +118,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         pass
 
     @abstractmethod
-    def as_tool(self) -> ComponentTool:
+    async def as_tool(self) -> ComponentTool:
         """
         Return the RAG pipeline wrapped as a ComponentTool.
 
@@ -155,7 +155,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
             f"{self.__class__.__name__} does not support incremental remove, use refresh_documents()"
         )
 
-    def refresh_documents(self, documents: list[RagDocument]) -> None:
+    async def refresh_documents(self, documents: list[RagDocument]) -> None:
         """
         Fully refresh the index with a new set of documents.
 
@@ -170,7 +170,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         """
         logger.debug(f"Refreshing documents for {self.__class__.__name__}")
         self.documents = documents
-        self.warmup(force_rebuild=True)
+        await self.warmup(force_rebuild=True)
 
     async def get_chunk(self, chunk_id: str) -> str | None:
         """Return the content of a specific chunk by its Haystack document ID.
@@ -179,9 +179,9 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         """
         return None
 
-    def get_tool(self, spec: ToolSpec) -> ComponentTool:
+    async def get_tool(self, spec: ToolSpec) -> ComponentTool:
         """Get tool with custom specification."""
-        tool = self.as_tool()
+        tool = await self.as_tool()
         tool.name = spec.name
         tool.description = spec.description
         return tool
