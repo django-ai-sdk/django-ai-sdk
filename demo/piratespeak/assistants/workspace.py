@@ -104,13 +104,12 @@ class WorkspaceAssistant(Assistant):
         storage_adapter = await self.get_storage_adapter(thread_id)
 
         tools = await self.get_tools(thread_id=thread_id or "", user=user)
-        artifact_tools = await self.get_artifact_tools(thread_id=thread_id or "", user=user)
 
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
                 model=self.get_model(),
                 system_prompt=self.get_system_prompt(),
-                tools=[*tools, *artifact_tools],
+                tools=tools,
             ),
             generator=generator,
         )

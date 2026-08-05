@@ -393,6 +393,7 @@ class Assistant(ABC, AssistantInfoMixin):
           def get_my_tool(user_id="", **kwargs): ...
 
         """
+        # class-level tools
         tools = getattr(self.__class__, "tools", [])
         result = []
         for tool in tools:
@@ -401,7 +402,13 @@ class Assistant(ABC, AssistantInfoMixin):
                 result.extend(items)
             else:
                 result.append(items)
+
+        # integration tools
         result.extend(await self._get_integration_tools(user, thread_id=thread_id))
+
+        # artifact tools
+        result.extend(await self.get_artifact_tools(thread_id=thread_id, user=user))
+
         return result
 
     async def get_artifact_tools(
