@@ -152,7 +152,7 @@ async def oauth_callback(
 
         # A pre-connect status/tool check (e.g. the settings page) may have already
         # cached "disconnected"/no-tools for this user before the token existed.
-        # Without this, that stale entry lives out its full TTL and the assistant
+        # Without this, that stale entry lives out its full TTL and the agent
         # keeps treating the integration as unconfigured until something else
         # (e.g. the "Reconnect" button) happens to invalidate it.
         await integration.reconnect(user)

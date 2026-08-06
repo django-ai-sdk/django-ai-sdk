@@ -27,7 +27,7 @@ class TestMemoryStorageAdapter:
         MemoryStore.create_thread(
             storage.thread_id,
             title="Test Thread",
-            assistant_id="test_assistant",
+            agent_id="test_agent",
             model="gpt-4o-mini",
         )
         return storage
@@ -135,7 +135,7 @@ class TestMemoryStorageAdapter:
 
         assert thread is not None
         assert thread.title == "Test Thread"
-        assert thread.assistant_id == "test_assistant"
+        assert thread.agent_id == "test_agent"
         assert thread.model == "gpt-4o-mini"
 
 
@@ -150,7 +150,7 @@ class TestMemoryStore:
         thread = MemoryStore.create_thread(
             thread_id,
             title="My Thread",
-            assistant_id="my_assistant",
+            agent_id="my_agent",
             model="gpt-4",
             metadata={"custom": "value"},
         )

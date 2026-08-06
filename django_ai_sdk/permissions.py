@@ -13,7 +13,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
     from django_ai_sdk.memories.models import Memory
     from django_ai_sdk.storage.schemas import ThreadInfo
     from django_ai_sdk.types import UserType
@@ -64,16 +64,16 @@ class Operation(StrEnum):
     LIST_THREAD_MEMORIES = "list_thread_memories"
     LINK_MEMORY = "link_memory"
     UNLINK_MEMORY = "unlink_memory"
-    VIEW_ASSISTANT = "view_assistant"
-    CREATE_ASSISTANT = "create_assistant"
-    UPDATE_ASSISTANT = "update_assistant"
-    DELETE_ASSISTANT = "delete_assistant"
+    VIEW_AGENT = "view_agent"
+    CREATE_AGENT = "create_agent"
+    UPDATE_AGENT = "update_agent"
+    DELETE_AGENT = "delete_agent"
     USE_INTEGRATION = "use_integration"
     MANAGE_INTEGRATION = "manage_integration"
 
 
 class PermissionDomain(StrEnum):
-    ASSISTANT = "assistant"
+    AGENT = "agent"
     THREAD = "thread"
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
@@ -319,36 +319,36 @@ class MemoryDefaultPermission(BasePermission):
         return False
 
 
-class AssistantDefaultPermission(BasePermission):
-    """Three-tier permission for runtime assistants.
+class AgentDefaultPermission(BasePermission):
+    """Three-tier permission for runtime agents.
 
     - Manager (can_manage=True): full access to update/delete.
-    - Owner (can_manage=False): can view and use the assistant.
-    - Group members: can view and use the assistant.
-    - Anonymous: blocked for assistant ops, pass-through for everything else.
+    - Owner (can_manage=False): can view and use the agent.
+    - Group members: can view and use the agent.
+    - Anonymous: blocked for agent ops, pass-through for everything else.
     """
 
     READ: frozenset[Operation] = frozenset(
         {
-            Operation.VIEW_ASSISTANT,
+            Operation.VIEW_AGENT,
         }
     )
     WRITE: frozenset[Operation] = frozenset(
         {
-            Operation.CREATE_ASSISTANT,
+            Operation.CREATE_AGENT,
         }
     )
     MANAGE: frozenset[Operation] = frozenset(
         {
-            Operation.UPDATE_ASSISTANT,
-            Operation.DELETE_ASSISTANT,
+            Operation.UPDATE_AGENT,
+            Operation.DELETE_AGENT,
         }
     )
 
-    ASSISTANT_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
+    AGENT_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
-        if operation not in self.ASSISTANT_OPS:
+        if operation not in self.AGENT_OPS:
             return True
         return user is not None and bool(user.is_authenticated)
 
@@ -359,26 +359,26 @@ class AssistantDefaultPermission(BasePermission):
         obj: Any,
         **kwargs: Any,
     ) -> bool:
-        # Only handle AssistantSettings objects; pass through for everything else
-        from django_ai_sdk.assistants.models import AssistantSettings
+        # Only handle AgentSettings objects; pass through for everything else
+        from django_ai_sdk.agents.models import AgentSettings
 
-        if not isinstance(obj, AssistantSettings):
+        if not isinstance(obj, AgentSettings):
             return True
 
         if user is None or not bool(user.is_authenticated):
             return False
 
         # Check direct user membership
-        from django_ai_sdk.assistants.models import AssistantUser
+        from django_ai_sdk.agents.models import AgentUser
 
-        user_entry = await AssistantUser.objects.filter(assistant=obj, user=user).afirst()
+        user_entry = await AgentUser.objects.filter(agent=obj, user=user).afirst()
         if user_entry is not None and (operation not in self.MANAGE or user_entry.can_manage):
             return True
 
         # Check group membership
-        from django_ai_sdk.assistants.models import AssistantGroup
+        from django_ai_sdk.agents.models import AgentGroup
 
-        group_entry = await AssistantGroup.objects.filter(assistant=obj, group__user=user).afirst()
+        group_entry = await AgentGroup.objects.filter(agent=obj, group__user=user).afirst()
         if group_entry is not None and (operation not in self.MANAGE or group_entry.can_manage):
             return True
 
@@ -397,7 +397,7 @@ class IntegrationDefaultPermission(BasePermission):
 
 
 DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
-    PermissionDomain.ASSISTANT: ["django_ai_sdk.permissions.AssistantDefaultPermission"],
+    PermissionDomain.AGENT: ["django_ai_sdk.permissions.AgentDefaultPermission"],
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
@@ -515,17 +515,17 @@ def ensure_permission_instance(
     return perm() if isinstance(perm, type) else perm
 
 
-def get_assistant_permissions(assistant: Assistant | None) -> list[type[BasePermission]]:
-    """Resolve perms for an assistant.
+def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
+    """Resolve perms for an agent.
 
     Resolution:
-    1. assistant.permissions if set (per-assistant override)
-    2. Domain default for ASSISTANT (fallback)
+    1. agent.permissions if set (per-agent override)
+    2. Domain default for AGENT (fallback)
     """
-    perms = getattr(assistant, "permissions", None) if assistant is not None else None
+    perms = getattr(agent, "permissions", None) if agent is not None else None
     if perms is not None:
         return perms
-    return get_domain_permissions(PermissionDomain.ASSISTANT)
+    return get_domain_permissions(PermissionDomain.AGENT)
 
 
 def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
@@ -551,7 +551,7 @@ async def has_perms(
     **kwargs: Any,
 ) -> bool:
     if permissions is None:
-        permissions = get_domain_permissions(PermissionDomain.ASSISTANT)
+        permissions = get_domain_permissions(PermissionDomain.AGENT)
     ok = await check_permissions(
         user, operation, permissions, raise_on_deny=raise_on_deny, **kwargs
     )

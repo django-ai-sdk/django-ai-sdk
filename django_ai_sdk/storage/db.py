@@ -63,7 +63,7 @@ class DbStorageAdapter(BaseStorageAdapter):
 
         Args:
             title: Thread title
-            metadata: Should include assistant_id, model
+            metadata: Should include agent_id, model
             user: Optional user
             thread_id: Optional custom thread ID
 
@@ -92,7 +92,7 @@ class DbStorageAdapter(BaseStorageAdapter):
             return ThreadInfo(
                 id=str(thread.id),
                 title=thread.title,
-                assistant_id=thread.metadata.get("assistant_id", ""),
+                agent_id=thread.metadata.get("agent_id", ""),
                 model=thread.metadata.get("model", ""),
                 user_id=str(thread.user_id) if thread.user_id else None,
                 created_at=thread.created_at,
@@ -133,7 +133,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                 ThreadInfo(
                     id=str(thread.id),
                     title=thread.title,
-                    assistant_id=thread.metadata.get("assistant_id", ""),
+                    agent_id=thread.metadata.get("agent_id", ""),
                     model=thread.metadata.get("model", ""),
                     user_id=str(thread.user_id) if thread.user_id else None,
                     created_at=thread.created_at,
@@ -258,7 +258,7 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     async def storage_callback(self, chat_message: ChatMessage) -> str | None:
         """
-        Store assistant ChatMessage in database when called by StreamWriter.finalize().
+        Store agent ChatMessage in database when called by StreamWriter.finalize().
         """
         logger.debug(
             f"Storing message via callback: role={chat_message.role}, content_length={len(chat_message.content)}, tool_calls={len(chat_message.tool_calls)}"

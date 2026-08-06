@@ -35,7 +35,7 @@ def _now() -> datetime:
 class ThreadInfoFactory(ModelFactory[ThreadInfo]):
     id = "thread-1"
     title = "Test Thread"
-    assistant_id = "test-assistant"
+    agent_id = "test-agent"
     model = "gpt-4"
     user_id = None
     created_at = _now()

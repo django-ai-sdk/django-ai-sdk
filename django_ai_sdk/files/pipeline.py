@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
     from django_ai_sdk.files.processors import FileProcessor
     from django_ai_sdk.files.transforms import BaseTransform
 
@@ -31,7 +31,7 @@ class FilePipeline:
     """Composable file processing pipeline.
 
     Selects a file processor and chains transforms in sequence.
-    Each assistant can declare its own pipelines; the first one
+    Each agent can declare its own pipelines; the first one
     whose processor accepts the uploaded file is used.
 
     Example::
@@ -60,7 +60,7 @@ class FilePipeline:
         self,
         file: Any,
         *,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
         on_step: OnStep | None = None,
     ) -> PipelineResult | None:
         """Run processor then all transforms in sequence.
@@ -85,6 +85,6 @@ class FilePipeline:
         for transform in self.transforms:
             if on_step:
                 await on_step(transform.step)
-            data = await transform.run(data, assistant=assistant)
+            data = await transform.run(data, agent=agent)
 
         return PipelineResult(content=content, data=parse_data(data))

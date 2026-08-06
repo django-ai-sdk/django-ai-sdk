@@ -7,16 +7,16 @@ from django.contrib.auth import get_user_model
 from django.http import HttpRequest, StreamingHttpResponse
 from django.urls import path
 from django.views import View
-from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import (
-    AssistantCreateData,
-    AssistantService,
-    AssistantUpdateData,
-    add_assistant_group,
-    get_assistant_info,
-    list_assistant_groups,
-    list_assistants,
-    remove_assistant_group,
+from django_ai_sdk import Agent
+from django_ai_sdk.agents.services import (
+    AgentCreateData,
+    AgentService,
+    AgentUpdateData,
+    add_agent_group,
+    get_agent_info,
+    list_agent_groups,
+    list_agents,
+    remove_agent_group,
 )
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
@@ -51,7 +51,7 @@ logger = get_logger(__name__)
 class ThreadListItemSerializer(serializers.Serializer):
     id = serializers.CharField()
     title = serializers.CharField()
-    assistant_id = serializers.CharField()
+    agent_id = serializers.CharField()
     created_at = serializers.CharField()
     updated_at = serializers.CharField()
     message_count = serializers.IntegerField()
@@ -107,7 +107,7 @@ class DeleteAllThreadsResponseSerializer(serializers.Serializer):
     deleted_count = serializers.IntegerField()
 
 
-class AssistantInfoSerializer(serializers.Serializer):
+class AgentInfoSerializer(serializers.Serializer):
     id = serializers.CharField()
     name = serializers.CharField(allow_null=True)
     model = serializers.CharField(allow_null=True)
@@ -118,14 +118,14 @@ class AssistantInfoSerializer(serializers.Serializer):
     rag = serializers.BooleanField(default=False)
 
 
-class ListAssistantsItemSerializer(serializers.Serializer):
+class ListAgentsItemSerializer(serializers.Serializer):
     id = serializers.CharField()
     name = serializers.CharField()
     model = serializers.CharField()
 
 
-class ListAssistantsSerializer(serializers.Serializer):
-    assistants = ListAssistantsItemSerializer(many=True)
+class ListAgentsSerializer(serializers.Serializer):
+    agents = ListAgentsItemSerializer(many=True)
 
 
 class ToolSerializer(serializers.Serializer):
@@ -164,7 +164,7 @@ class MessageSerializer(serializers.Serializer):
 
 class ChatRequestSerializer(serializers.Serializer):
     messages = MessageSerializer(many=True)
-    assistant_id = serializers.CharField(required=False, default="")
+    agent_id = serializers.CharField(required=False, default="")
 
 
 class ThreadListAPIView(APIView):
@@ -176,7 +176,7 @@ class ThreadListAPIView(APIView):
             {
                 "id": t.id,
                 "title": t.title,
-                "assistant_id": t.assistant_id,
+                "agent_id": t.agent_id,
                 "created_at": t.created_at.isoformat(),
                 "updated_at": t.updated_at.isoformat(),
                 "message_count": t.message_count,
@@ -191,9 +191,9 @@ class ThreadCreateAPIView(APIView):
         try:
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            assistant_id = request.data.get("assistant_id", "")  # type: ignore[union-attr]
+            agent_id = request.data.get("agent_id", "")  # type: ignore[union-attr]
             thread_id = create_thread(
-                assistant_id=assistant_id,
+                agent_id=agent_id,
                 user=request.user,
                 # Initial messages are not persisted here; the chat/stream endpoint
                 # receives and stores the full message list.
@@ -232,18 +232,18 @@ class ThreadDetailAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
     def patch(self, request: Request, thread_id: str) -> Response:
-        assistant_id = request.data.get("assistant_id")  # type: ignore[union-attr]
-        if not assistant_id:
-            return Response({"message": "assistant_id required"}, status=400)
+        agent_id = request.data.get("agent_id")  # type: ignore[union-attr]
+        if not agent_id:
+            return Response({"message": "agent_id required"}, status=400)
         try:
-            AssistantService.from_registry(assistant_id)
+            AgentService.from_registry(agent_id)
             thread = get_thread(thread_id, user=request.user)
             if thread is None:
                 return Response({"message": "Thread not found"}, status=404)
-            if thread.assistant_id:
-                unlink_memories(thread.assistant_id, thread_id, user=request.user)
-            update_thread(thread_id, metadata={"assistant_id": assistant_id}, user=request.user)
-            link_memories(assistant_id, thread_id, user=request.user)
+            if thread.agent_id:
+                unlink_memories(thread.agent_id, thread_id, user=request.user)
+            update_thread(thread_id, metadata={"agent_id": agent_id}, user=request.user)
+            link_memories(agent_id, thread_id, user=request.user)
             return Response({"success": True})
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -325,31 +325,31 @@ class RestoreMessageAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
-class ListAssistantsAPIView(APIView):
+class ListAgentsAPIView(APIView):
     def get(self, request: Request) -> Response:
         limit = int(request.query_params.get("limit", 100))
         offset = int(request.query_params.get("offset", 0))
         try:
-            items = list_assistants(user=request.user, limit=limit, offset=offset)
-            return Response(ListAssistantsSerializer({"assistants": items}).data)
+            items = list_agents(user=request.user, limit=limit, offset=offset)
+            return Response(ListAgentsSerializer({"agents": items}).data)
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
 
 
-class AssistantInfoAPIView(APIView):
-    def get(self, request: Request, assistant_id: str) -> Response:
+class AgentInfoAPIView(APIView):
+    def get(self, request: Request, agent_id: str) -> Response:
         try:
-            assistant = AssistantService.from_registry(assistant_id)
-            info = get_assistant_info(assistant_id, user=request.user)
+            agent = AgentService.from_registry(agent_id)
+            info = get_agent_info(agent_id, user=request.user)
             return Response(
-                AssistantInfoSerializer(
+                AgentInfoSerializer(
                     {
                         "id": info.id,
                         "name": info.name,
                         "model": info.model,
                         "class_name": info.class_name,
                         "description": info.description,
-                        "instructions": assistant.get_system_prompt(),
+                        "instructions": agent.get_system_prompt(),
                         "file_upload": info.file_upload,
                         "rag": info.rag,
                     }
@@ -361,16 +361,16 @@ class AssistantInfoAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
-class AssistantToolsAPIView(APIView):
-    async def get(self, request: Request, assistant_id: str) -> Response:
+class AgentToolsAPIView(APIView):
+    async def get(self, request: Request, agent_id: str) -> Response:
         try:
-            assistant = await AssistantService.get(assistant_id)
+            agent = await AgentService.get(agent_id)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
         tools_data = []
         try:
-            tool_objs = await assistant.get_tools()
+            tool_objs = await agent.get_tools()
             tools_data = [
                 {
                     "label": getattr(t, "label", None) or t.name.replace("_", " ").title(),
@@ -379,13 +379,11 @@ class AssistantToolsAPIView(APIView):
                 for t in tool_objs
             ]
         except Exception:
-            logger.exception("Failed to build tools for assistant %s", assistant_id)
+            logger.exception("Failed to build tools for agent %s", agent_id)
 
         integrations_data = []
         try:
-            integration_status = await AssistantService.get_integration_status(
-                assistant, user=request.user
-            )
+            integration_status = await AgentService.get_integration_status(agent, user=request.user)
             integrations_data = [
                 {
                     "server_name": s.server_name,
@@ -397,27 +395,27 @@ class AssistantToolsAPIView(APIView):
                 for s in integration_status
             ]
         except Exception:
-            logger.exception("Failed to load integration status for assistant %s", assistant_id)
+            logger.exception("Failed to load integration status for agent %s", agent_id)
 
         return Response(
             ToolsResponseSerializer({"tools": tools_data, "integrations": integrations_data}).data
         )
 
 
-class ReindexAssistantAPIView(APIView):
-    def post(self, request: Request, assistant_id: str) -> Response:
+class ReindexAgentAPIView(APIView):
+    def post(self, request: Request, agent_id: str) -> Response:
         memory_id = request.data.get("memory_id")  # type: ignore[union-attr]
         force_rebuild = request.data.get("force_rebuild", False)  # type: ignore[union-attr]
         try:
-            assistant = AssistantService.from_registry(assistant_id)
-            result = Assistant.reindex(assistant, memory_id, force_rebuild)  # type: ignore[arg-type]
+            agent = AgentService.from_registry(agent_id)
+            result = Agent.reindex(agent, memory_id, force_rebuild)  # type: ignore[arg-type]
 
             if not result:
                 return Response(
                     ReindexResponseSerializer(
                         {
                             "success": False,
-                            "message": "No RAG provider configured for this assistant",
+                            "message": "No RAG provider configured for this agent",
                         }
                     ).data
                 )
@@ -432,17 +430,17 @@ class ReindexAssistantAPIView(APIView):
             return Response({"message": str(e)}, status=404)
 
 
-class AssistantStatelessRunAPIView(APIView):
+class AgentStatelessRunAPIView(APIView):
     """Stateless run"""
 
-    async def post(self, request: Request, assistant_id: str) -> Response:
+    async def post(self, request: Request, agent_id: str) -> Response:
         try:
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
-            assistant = await AssistantService.get(assistant_id)
-            chat_messages = assistant.protocol_handler.to_chat_messages(messages)
-            result = await assistant.run(chat_messages, user=request.user)
+            agent = await AgentService.get(agent_id)
+            chat_messages = agent.protocol_handler.to_chat_messages(messages)
+            result = await agent.run(chat_messages, user=request.user)
             return Response({"result": result, "thread_id": None})
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -454,17 +452,17 @@ class AssistantStatelessRunAPIView(APIView):
             return Response({"message": str(e)}, status=501)
 
 
-class AssistantRunAPIView(APIView):
-    """Synchronous JSON endpoint wrapping Assistant.run()"""
+class AgentRunAPIView(APIView):
+    """Synchronous JSON endpoint wrapping Agent.run()"""
 
     async def post(self, request: Request, thread_id: str) -> Response:
         try:
             serializer = ChatRequestSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
-            assistant = await AssistantService.get_assistant(thread_id, user=request.user)
-            chat_messages = assistant.protocol_handler.to_chat_messages(messages)
-            result = await assistant.run(chat_messages, thread_id=thread_id, user=request.user)
+            agent = await AgentService.get_agent(thread_id, user=request.user)
+            chat_messages = agent.protocol_handler.to_chat_messages(messages)
+            result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
             return Response({"result": result, "thread_id": thread_id})
         except PermissionDenied as e:
             return Response({"message": str(e)}, status=403)
@@ -478,14 +476,14 @@ class AssistantRunAPIView(APIView):
             return Response({"message": str(e)}, status=500)
 
 
-class AssistantAPIView(View):
+class AgentAPIView(View):
     async def post(self, request: HttpRequest, thread_id: str) -> StreamingHttpResponse:
         try:
             serializer = ChatRequestSerializer(data=json.loads(request.body))
             serializer.is_valid(raise_exception=True)
             messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
-            assistant = await AssistantService.get_assistant(thread_id, user=request.user)
-            return await assistant.as_view(messages, thread_id=thread_id, user=request.user)
+            agent = await AgentService.get_agent(thread_id, user=request.user)
+            return await agent.as_view(messages, thread_id=thread_id, user=request.user)
         except PermissionDenied as e:
             return self._error_response({"message": str(e)}, 403)
         except ValidationError as e:
@@ -505,25 +503,25 @@ class AssistantAPIView(View):
 
 
 # ============================================================================
-# Runtime Assistants (DB-configured)
+# Runtime Agents (DB-configured)
 # ============================================================================
 
 
-class AssistantUserInSerializer(serializers.Serializer):
+class AgentUserInSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     can_manage = serializers.BooleanField(default=False)
 
 
-class AssistantGroupInSerializer(serializers.Serializer):
+class AgentGroupInSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
     can_manage = serializers.BooleanField(default=False)
 
 
-class AssistantSettingsSerializer(serializers.Serializer):
+class AgentSettingsSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     name = serializers.CharField()
     slug = serializers.SlugField()
-    assistant = serializers.CharField(allow_blank=True, default="")
+    agent = serializers.CharField(allow_blank=True, default="")
     model = serializers.CharField()
     system_prompt = serializers.CharField(allow_blank=True)
     tools = serializers.ListField(child=serializers.CharField(), default=list)
@@ -537,79 +535,79 @@ class AssistantSettingsSerializer(serializers.Serializer):
     updated_at = serializers.DateTimeField(read_only=True)
 
 
-class AssistantSettingsCreateSerializer(serializers.Serializer):
+class AgentSettingsCreateSerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.SlugField(default="")
-    assistant = serializers.CharField(allow_blank=True, default="")
+    agent = serializers.CharField(allow_blank=True, default="")
     model = serializers.CharField(default="gpt-4o")
     system_prompt = serializers.CharField(allow_blank=True, default="")
     tools = serializers.ListField(child=serializers.CharField(), default=list)
     integrations = serializers.ListField(child=serializers.CharField(), default=list)
-    users = AssistantUserInSerializer(many=True, required=False)
-    groups = AssistantGroupInSerializer(many=True, required=False)
+    users = AgentUserInSerializer(many=True, required=False)
+    groups = AgentGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(default=False)
     title_generation = serializers.BooleanField(default=True)
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(default=False)
-    users = AssistantUserInSerializer(many=True, required=False, default=list)
+    users = AgentUserInSerializer(many=True, required=False, default=list)
 
 
-class AssistantSettingsUpdateSerializer(serializers.Serializer):
+class AgentSettingsUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(required=False)
-    assistant = serializers.CharField(allow_blank=True, required=False)
+    agent = serializers.CharField(allow_blank=True, required=False)
     model = serializers.CharField(required=False)
     system_prompt = serializers.CharField(allow_blank=True, required=False)
     tools = serializers.ListField(child=serializers.CharField(), required=False)
     integrations = serializers.ListField(child=serializers.CharField(), required=False)
-    users = AssistantUserInSerializer(many=True, required=False)
-    groups = AssistantGroupInSerializer(many=True, required=False)
+    users = AgentUserInSerializer(many=True, required=False)
+    groups = AgentGroupInSerializer(many=True, required=False)
     suggestion_enabled = serializers.BooleanField(required=False)
     title_generation = serializers.BooleanField(required=False)
     max_history = serializers.IntegerField(allow_null=True, required=False)
     file_upload = serializers.BooleanField(required=False)
     active = serializers.BooleanField(required=False)
-    users = AssistantUserInSerializer(many=True, required=False)
+    users = AgentUserInSerializer(many=True, required=False)
 
 
-class RuntimeAssistantBasesAPIView(APIView):
+class RuntimeAgentBasesAPIView(APIView):
     def get(self, request: Request) -> Response:
-        from django_ai_sdk.assistants.config import get_runtime_assistant_bases
+        from django_ai_sdk.agents.config import get_runtime_agent_bases
 
         data = [
             {"path": f"{cls.__module__}.{cls.__qualname__}", "name": cls.__name__}
-            for cls in get_runtime_assistant_bases()
+            for cls in get_runtime_agent_bases()
         ]
         return Response(data)
 
 
-class RuntimeAssistantToolsAPIView(APIView):
+class RuntimeAgentToolsAPIView(APIView):
     def get(self, request: Request) -> Response:
-        from django_ai_sdk.assistants.config import get_tool_registry
+        from django_ai_sdk.agents.config import get_tool_registry
 
         data = [{"key": k, "path": v} for k, v in get_tool_registry().items()]
         return Response(data)
 
 
-class RuntimeAssistantListCreateAPIView(APIView):
+class RuntimeAgentListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
-        configs = await AssistantService.list_runtime_assistants(user=request.user)
-        return Response(AssistantSettingsSerializer(configs, many=True).data)
+        configs = await AgentService.list_runtime_agents(user=request.user)
+        return Response(AgentSettingsSerializer(configs, many=True).data)
 
     async def post(self, request: Request) -> Response:
-        serializer = AssistantSettingsCreateSerializer(data=request.data)
+        serializer = AgentSettingsCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
-            config = await AssistantService.create_runtime_assistant(
-                cast("AssistantCreateData", data),
+            config = await AgentService.create_runtime_agent(
+                cast("AgentCreateData", data),
                 user=request.user,
             )
         except Exception as e:
             return Response({"message": str(e)}, status=400)
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
-                await AssistantService.add_assistant_user(
+                await AgentService.add_agent_user(
                     str(config.id),
                     entry["user_id"],
                     entry.get("can_manage", False),
@@ -619,7 +617,7 @@ class RuntimeAssistantListCreateAPIView(APIView):
                 pass
         for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
             try:
-                await AssistantService.add_assistant_group(
+                await AgentService.add_agent_group(
                     str(config.id),
                     entry["group_id"],
                     entry.get("can_manage", False),
@@ -627,26 +625,26 @@ class RuntimeAssistantListCreateAPIView(APIView):
                 )
             except Exception:
                 pass
-        return Response(AssistantSettingsSerializer(config).data)
+        return Response(AgentSettingsSerializer(config).data)
 
 
-class RuntimeAssistantDetailAPIView(APIView):
+class RuntimeAgentDetailAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantService.get_runtime_assistant(runtime_id, user=request.user)
-            return Response(AssistantSettingsSerializer(config).data)
+            config = await AgentService.get_runtime_agent(runtime_id, user=request.user)
+            return Response(AgentSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
     async def patch(self, request: Request, runtime_id: str) -> Response:
-        serializer = AssistantSettingsUpdateSerializer(data=request.data)
+        serializer = AgentSettingsUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
         try:
-            config = await AssistantService.update_runtime_assistant(
+            config = await AgentService.update_runtime_agent(
                 runtime_id,
-                cast("AssistantUpdateData", data),
+                cast("AgentUpdateData", data),
                 user=request.user,
             )
         except ValueError as e:
@@ -655,72 +653,72 @@ class RuntimeAssistantDetailAPIView(APIView):
             return Response({"message": str(e)}, status=400)
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
-                await AssistantService.add_assistant_user(
+                await AgentService.add_agent_user(
                     runtime_id, entry["user_id"], entry.get("can_manage", False), user=request.user
                 )
             except Exception:
                 pass
         for entry in serializer.validated_data.get("groups") or []:  # type: ignore[union-attr]
             try:
-                await AssistantService.add_assistant_group(
+                await AgentService.add_agent_group(
                     runtime_id, entry["group_id"], entry.get("can_manage", False), user=request.user
                 )
             except Exception:
                 pass
-        return Response(AssistantSettingsSerializer(config).data)
+        return Response(AgentSettingsSerializer(config).data)
 
     async def delete(self, request: Request, runtime_id: str) -> Response:
         try:
-            config = await AssistantService.delete_runtime_assistant(runtime_id, user=request.user)
-            return Response(AssistantSettingsSerializer(config).data)
+            config = await AgentService.delete_runtime_agent(runtime_id, user=request.user)
+            return Response(AgentSettingsSerializer(config).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
 
 
-# ── Assistant Users ───────────────────────────────────────────────────────────
+# ── Agent Users ───────────────────────────────────────────────────────────
 
 
-class AssistantUserOutSerializer(serializers.Serializer):
+class AgentUserOutSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 
 
-class AddAssistantUserInSerializer(serializers.Serializer):
+class AddAgentUserInSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     can_manage = serializers.BooleanField(default=False)
 
 
-# ── Assistant Groups ──────────────────────────────────────────────────────────
+# ── Agent Groups ──────────────────────────────────────────────────────────
 
 
-class AssistantGroupOutSerializer(serializers.Serializer):
+class AgentGroupOutSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
     group_name = serializers.CharField(source="group.name")
     can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 
 
-class AddAssistantGroupInSerializer(serializers.Serializer):
+class AddAgentGroupInSerializer(serializers.Serializer):
     group_id = serializers.IntegerField()
     can_manage = serializers.BooleanField(default=False)
 
 
-class AssistantGroupListCreateAPIView(APIView):
+class AgentGroupListCreateAPIView(APIView):
     def get(self, request: Request, runtime_id: str) -> Response:
         try:
-            groups = list_assistant_groups(runtime_id, user=request.user)
+            groups = list_agent_groups(runtime_id, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:
             return Response({"detail": str(e)}, status=404)
-        return Response(AssistantGroupOutSerializer(groups, many=True).data)
+        return Response(AgentGroupOutSerializer(groups, many=True).data)
 
     def post(self, request: Request, runtime_id: str) -> Response:
-        serializer = AddAssistantGroupInSerializer(data=request.data)
+        serializer = AddAgentGroupInSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            entry = add_assistant_group(
+            entry = add_agent_group(
                 runtime_id,
                 serializer.validated_data["group_id"],  # type: ignore[index]
                 serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
@@ -730,13 +728,13 @@ class AssistantGroupListCreateAPIView(APIView):
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:
             return Response({"detail": str(e)}, status=404)
-        return Response(AssistantGroupOutSerializer(entry).data)
+        return Response(AgentGroupOutSerializer(entry).data)
 
 
-class AssistantGroupDetailAPIView(APIView):
+class AgentGroupDetailAPIView(APIView):
     def delete(self, request: Request, runtime_id: str, group_id: int) -> Response:
         try:
-            remove_assistant_group(runtime_id, group_id, user=request.user)
+            remove_agent_group(runtime_id, group_id, user=request.user)
         except PermissionDenied as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:
@@ -1035,10 +1033,10 @@ class UserSessionListAPIView(APIView):
         return Response(UserSessionSerializer(sessions, many=True).data)
 
 
-# ── Assistant Users ───────────────────────────────────────────────────────────
+# ── Agent Users ───────────────────────────────────────────────────────────
 
 
-class AssistantUserSerializer(serializers.Serializer):
+class AgentUserSerializer(serializers.Serializer):
     user_id = serializers.CharField(source="user.id")
     email = serializers.CharField(source="user.email")
     first_name = serializers.CharField(source="user.first_name")
@@ -1047,54 +1045,54 @@ class AssistantUserSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
 
-class AssistantUserAddSerializer(serializers.Serializer):
+class AgentUserAddSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     can_manage = serializers.BooleanField(default=False)
 
 
-class AssistantUserUpdateSerializer(serializers.Serializer):
+class AgentUserUpdateSerializer(serializers.Serializer):
     can_manage = serializers.BooleanField()
 
 
-class AssistantUserListCreateAPIView(APIView):
+class AgentUserListCreateAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
         try:
-            users = await AssistantService.list_assistant_users(runtime_id, user=request.user)
-            return Response(AssistantUserSerializer(users, many=True).data)
+            users = await AgentService.list_agent_users(runtime_id, user=request.user)
+            return Response(AgentUserSerializer(users, many=True).data)
         except ValueError as e:
             return Response({"error": str(e)}, status=404)
 
     async def post(self, request: Request, runtime_id: str) -> Response:
-        serializer = AssistantUserAddSerializer(data=request.data)
+        serializer = AgentUserAddSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
         try:
-            entry = await AssistantService.add_assistant_user(
+            entry = await AgentService.add_agent_user(
                 runtime_id,
                 serializer.validated_data["user_id"],
                 serializer.validated_data["can_manage"],
                 user=request.user,
             )
-            return Response(AssistantUserSerializer(entry).data, status=201)
+            return Response(AgentUserSerializer(entry).data, status=201)
         except PermissionDenied as e:
             return Response({"error": str(e)}, status=403)
         except ValueError as e:
             return Response({"error": str(e)}, status=404)
 
 
-class AssistantUserDetailAPIView(APIView):
+class AgentUserDetailAPIView(APIView):
     async def patch(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        serializer = AssistantUserUpdateSerializer(data=request.data)
+        serializer = AgentUserUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
         try:
-            entry = await AssistantService.update_assistant_user(
+            entry = await AgentService.update_agent_user(
                 runtime_id,
                 user_id,
                 serializer.validated_data["can_manage"],
                 user=request.user,
             )
-            return Response(AssistantUserSerializer(entry).data)
+            return Response(AgentUserSerializer(entry).data)
         except PermissionDenied as e:
             return Response({"error": str(e)}, status=403)
         except ValueError as e:
@@ -1102,7 +1100,7 @@ class AssistantUserDetailAPIView(APIView):
 
     async def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
         try:
-            await AssistantService.remove_assistant_user(runtime_id, user_id, user=request.user)
+            await AgentService.remove_agent_user(runtime_id, user_id, user=request.user)
             return Response(status=204)
         except PermissionDenied as e:
             return Response({"error": str(e)}, status=403)
@@ -1111,26 +1109,26 @@ class AssistantUserDetailAPIView(APIView):
 
 
 urlpatterns = [
-    path("assistants/", ListAssistantsAPIView.as_view(), name="assistant-list"),
+    path("agents/", ListAgentsAPIView.as_view(), name="agent-list"),
     path(
-        "assistants/<str:assistant_id>/",
-        AssistantInfoAPIView.as_view(),
-        name="assistant-info",
+        "agents/<str:agent_id>/",
+        AgentInfoAPIView.as_view(),
+        name="agent-info",
     ),
     path(
-        "assistants/<str:assistant_id>/tools/",
-        AssistantToolsAPIView.as_view(),
-        name="assistant-tools",
+        "agents/<str:agent_id>/tools/",
+        AgentToolsAPIView.as_view(),
+        name="agent-tools",
     ),
     path(
-        "assistants/<str:assistant_id>/reindex/",
-        ReindexAssistantAPIView.as_view(),
-        name="assistant-reindex",
+        "agents/<str:agent_id>/reindex/",
+        ReindexAgentAPIView.as_view(),
+        name="agent-reindex",
     ),
     path(
-        "assistants/<str:assistant_id>/run/",
-        AssistantStatelessRunAPIView.as_view(),
-        name="assistant-run",
+        "agents/<str:agent_id>/run/",
+        AgentStatelessRunAPIView.as_view(),
+        name="agent-run",
     ),
     path("threads/", ThreadListAPIView.as_view(), name="thread-list"),
     path("threads/<str:thread_id>/", ThreadDetailAPIView.as_view(), name="thread-detail"),
@@ -1143,12 +1141,12 @@ urlpatterns = [
     path("threads/<str:thread_id>/delete/", ThreadDeleteAPIView.as_view(), name="thread-delete"),
     path(
         "threads/<str:thread_id>/message/",
-        AssistantAPIView.as_view(),
+        AgentAPIView.as_view(),
         name="thread-message",
     ),
     path(
         "threads/<str:thread_id>/run/",
-        AssistantRunAPIView.as_view(),
+        AgentRunAPIView.as_view(),
         name="thread-run",
     ),
     path(
@@ -1172,44 +1170,44 @@ urlpatterns = [
         name="message-restore",
     ),
     path(
-        "assistants/runtimes/bases/",
-        RuntimeAssistantBasesAPIView.as_view(),
-        name="runtime-assistant-bases",
+        "agents/runtimes/bases/",
+        RuntimeAgentBasesAPIView.as_view(),
+        name="runtime-agent-bases",
     ),
     path(
-        "assistants/runtimes/tools/",
-        RuntimeAssistantToolsAPIView.as_view(),
-        name="runtime-assistant-tools",
+        "agents/runtimes/tools/",
+        RuntimeAgentToolsAPIView.as_view(),
+        name="runtime-agent-tools",
     ),
     path(
-        "assistants/runtimes/",
-        RuntimeAssistantListCreateAPIView.as_view(),
-        name="runtime-assistant-list",
+        "agents/runtimes/",
+        RuntimeAgentListCreateAPIView.as_view(),
+        name="runtime-agent-list",
     ),
     path(
-        "assistants/runtimes/<str:runtime_id>/",
-        RuntimeAssistantDetailAPIView.as_view(),
-        name="runtime-assistant-detail",
+        "agents/runtimes/<str:runtime_id>/",
+        RuntimeAgentDetailAPIView.as_view(),
+        name="runtime-agent-detail",
     ),
     path(
-        "assistants/runtimes/<str:runtime_id>/users/",
-        AssistantUserListCreateAPIView.as_view(),
-        name="runtime-assistant-user-list",
+        "agents/runtimes/<str:runtime_id>/users/",
+        AgentUserListCreateAPIView.as_view(),
+        name="runtime-agent-user-list",
     ),
     path(
-        "assistants/runtimes/<str:runtime_id>/users/<str:user_id>/",
-        AssistantUserDetailAPIView.as_view(),
-        name="runtime-assistant-user-detail",
+        "agents/runtimes/<str:runtime_id>/users/<str:user_id>/",
+        AgentUserDetailAPIView.as_view(),
+        name="runtime-agent-user-detail",
     ),
     path(
-        "assistants/runtimes/<str:runtime_id>/groups/",
-        AssistantGroupListCreateAPIView.as_view(),
-        name="runtime-assistant-group-list",
+        "agents/runtimes/<str:runtime_id>/groups/",
+        AgentGroupListCreateAPIView.as_view(),
+        name="runtime-agent-group-list",
     ),
     path(
-        "assistants/runtimes/<str:runtime_id>/groups/<int:group_id>/",
-        AssistantGroupDetailAPIView.as_view(),
-        name="runtime-assistant-group-detail",
+        "agents/runtimes/<str:runtime_id>/groups/<int:group_id>/",
+        AgentGroupDetailAPIView.as_view(),
+        name="runtime-agent-group-detail",
     ),
     path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
     path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),

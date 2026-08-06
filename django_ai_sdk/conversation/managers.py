@@ -27,9 +27,9 @@ class ThreadManager(models.Manager):
         """Get threads that have at least one message."""
         return self.filter(messages__isnull=False).distinct()
 
-    def by_assistant(self, assistant_id: str) -> QuerySet:
-        """Get threads for a specific assistant."""
-        return self.filter(metadata__assistant_id=assistant_id)
+    def by_agent(self, agent_id: str) -> QuerySet:
+        """Get threads for a specific agent."""
+        return self.filter(metadata__agent_id=agent_id)
 
 
 class MessageManager(models.Manager):
@@ -53,8 +53,8 @@ class MessageManager(models.Manager):
         """Get user messages only."""
         return self.by_role("user")
 
-    def assistant_messages(self) -> QuerySet:
-        """Get assistant messages only."""
+    def agent_messages(self) -> QuerySet:
+        """Get agent messages only."""
         return self.by_role("assistant")
 
     def conversation_history(self, thread: models.Model, include_system: bool = False) -> QuerySet:

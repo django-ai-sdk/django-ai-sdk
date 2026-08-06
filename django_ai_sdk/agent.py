@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
-from django_ai_sdk.assistants.mixins import AssistantInfoMixin
-from django_ai_sdk.assistants.registry import registry
+from django_ai_sdk.agents.mixins import AgentInfoMixin
+from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.citations import (
     CitationFormatter,
     CitationRegistry,
@@ -56,7 +56,7 @@ def _namespaced(integration_name: str, tool: Any) -> Any:
     Nothing stops two unrelated MCP servers from defining the same tool name
     (GitHub and Linear both have list_issues), and Haystack requires unique names
     across everything handed to one agent, so without this, enabling two
-    integrations that happen to collide would fail assistant construction outright.
+    integrations that happen to collide would fail agent construction outright.
     """
     try:
         return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
@@ -70,87 +70,87 @@ def _namespaced(integration_name: str, tool: Any) -> Any:
         return tool
 
 
-class Assistant(ABC, AssistantInfoMixin):
+class Agent(ABC, AgentInfoMixin):
     """
-    Base class for AI assistants in the Django AI SDK.
+    Base class for AI agents in the Django AI SDK.
 
-    Provides a consistent interface for creating assistants that work
-    with the streaming view system. Each assistant encapsulates:
+    Provides a consistent interface for creating agents that work
+    with the streaming view system. Each agent encapsulates:
     - Name and instructions (AI personality)
     - Tools (as methods for co-location)
     - Adapter creation (backend-specific logic)
     - Protocol handler for message conversion
 
-    This class includes the AssistantInfoMixin which provides:
-    - info(): Get assistant metadata
-    - assistant_id: Stable UUID v5 ID
+    This class includes the AgentInfoMixin which provides:
+    - info(): Get agent metadata
+    - agent_id: Stable UUID v5 ID
 
     Registration:
 
     Method 1: Settings-based (recommended)
         # In your settings.py:
-        AI_SDK_ASSISTANTS = [
-            "myapp.assistants.MyAssistant",
+        AI_SDK_AGENTS = [
+            "myapp.agents.MyAgent",
         ]
 
         # In your AppConfig.ready():
         from django.utils.module_loading import import_string
         from django.conf import settings
-        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.agents.registry import registry
 
-        for path in getattr(settings, 'AI_SDK_ASSISTANTS', []):
+        for path in getattr(settings, 'AI_SDK_AGENTS', []):
             import_string(path)
         registry.setup()
 
     Method 2: Decorator-based
-        from django_ai_sdk.assistants import auto_register
+        from django_ai_sdk.agents import auto_register
 
         @auto_register
-        class MyAssistant(Assistant):
+        class MyAgent(Agent):
             name = "My Bot"
             model = "gpt-4"
 
     Every concrete subclass also auto-registers on definition (__init_subclass__),
     so either method above is really just what gets the module imported. An
     abstract shared base (abstract = True) is skipped regardless of how it's
-    reached — see AssistantRegistry.register().
+    reached — see AgentRegistry.register().
 
     Usage:
         from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 
-        class MyAssistant(Assistant):
+        class MyAgent(Agent):
             name = "My Bot"
             model = "gpt-4"
-            instructions = prompt("You are a helpful assistant...")
+            instructions = prompt("You are a helpful agent...")
             protocol = VercelProtocolHandler
 
             async def get_pipeline_adapter(self): return SomeAdapter(...)
 
-        # Get registered assistant by UUID
-        from django_ai_sdk.assistants.registry import registry
-        assistant = registry.get(assistant_id)
-        return await assistant.as_view(protocol_messages)
+        # Get registered agent by UUID
+        from django_ai_sdk.agents.registry import registry
+        agent = registry.get(agent_id)
+        return await agent.as_view(protocol_messages)
     """
 
-    # Name of assistant.
+    # Name of agent.
     name: str
 
-    # Short description of assistant.
+    # Short description of agent.
     description: str
 
     # Model identifier for LLM backend.
     model: str
 
-    # System prompt instructions for the assistant.
-    instructions: Prompt = prompt("You are a helpful assistant.")
+    # System prompt instructions for the agent.
+    instructions: Prompt = prompt("You are a helpful agent.")
 
-    # Permission classes used to gate access to this assistant's operations.
+    # Permission classes used to gate access to this agent's operations.
     permissions: list[type[BasePermission]] = [AllowAll]
 
     # Default list of connected memories.
     memories: list[str] = []
 
-    # Tools are callable from assistant.
+    # Tools are callable from agent.
     tools: list[str] = []
 
     # ArtifactSchema subclasses to register as tools in stream pipelines.
@@ -171,7 +171,7 @@ class Assistant(ABC, AssistantInfoMixin):
     # If True, this is a shared base meant only to be subclassed.
     abstract: bool = False
 
-    # If Assistant should automatically warm up after initialization.
+    # If Agent should automatically warm up after initialization.
     warmup_on_init: bool = False
 
     # RAG provider: set to a RAGProvider instance to enable RAG, None disables RAG.
@@ -180,7 +180,7 @@ class Assistant(ABC, AssistantInfoMixin):
     # Maximum conversation history to send to LLM (None = unlimited).
     max_history: int | None = None
 
-    # Enable file upload UI for this assistant's threads.
+    # Enable file upload UI for this agent's threads.
     file_upload: bool = False
 
     # Declare one FilePipeline per supported file type.
@@ -201,20 +201,20 @@ class Assistant(ABC, AssistantInfoMixin):
     suggestion_generator: type[SuggestionGenerator] | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Auto-register Assistant subclasses in the registry.
+        """Auto-register Agent subclasses in the registry.
 
         This enables settings-based registration:
-        - When a class is imported via AI_SDK_ASSISTANTS, it auto-registers
+        - When a class is imported via AI_SDK_AGENTS, it auto-registers
         - Works together with @auto_register decorator
         """
         super().__init_subclass__(**kwargs)
-        # Don't register the base Assistant class itself, or classes that
-        # manage their own registration (e.g. RuntimeAssistant).
-        if cls.__name__ != "Assistant" and not getattr(cls, "_skip_auto_register", False):
+        # Don't register the base Agent class itself, or classes that
+        # manage their own registration (e.g. RuntimeAgent).
+        if cls.__name__ != "Agent" and not getattr(cls, "_skip_auto_register", False):
             registry.register(cls)
 
     @classmethod
-    async def warmup(cls, assistant: Assistant, memory_id: str | None = None) -> None:
+    async def warmup(cls, agent: Agent, memory_id: str | None = None) -> None:
         """
         Warm up the RAG pipeline.
 
@@ -222,40 +222,40 @@ class Assistant(ABC, AssistantInfoMixin):
         If no RAG provider is set, returns immediately.
 
         Args:
-            assistant: Instance of the assistant
+            agent: Instance of the agent
             memory_id: Optional memory
         """
-        if assistant.rag_provider is None:
+        if agent.rag_provider is None:
             logger.debug("No RAG provider configured, skipping warmup")
             return
 
-        await assistant.rag_provider.warmup(assistant, memory_id)
+        await agent.rag_provider.warmup(agent, memory_id)
 
     @classmethod
-    def clear_rag_cache(cls, assistant: Assistant) -> None:
+    def clear_rag_cache(cls, agent: Agent) -> None:
         """
         Clear the RAG cache.
 
         Args:
-            assistant: Instance of the assistant
+            agent: Instance of the agent
         """
-        if assistant.rag_provider is not None:
-            assistant.rag_provider.clear_cache()
+        if agent.rag_provider is not None:
+            agent.rag_provider.clear_cache()
             logger.debug("RAG cache cleared via provider")
 
     @classmethod
     async def reindex(
         cls,
-        assistant: Assistant,
+        agent: Agent,
         memory_id: str | None = None,
         force_rebuild: bool = False,
     ) -> Any:
         """
-        Reindex the RAG pipeline for this assistant.
+        Reindex the RAG pipeline for this agent.
         Delegates to rag_provider.reindex() if configured.
 
         Args:
-            assistant: Instance of the assistant
+            agent: Instance of the agent
             memory_id: Optional memory ID for document source
             force_rebuild: If True, forces a complete rebuild of the index.
                           For persistent storage backends (like Qdrant), this
@@ -264,11 +264,11 @@ class Assistant(ABC, AssistantInfoMixin):
         Returns:
             The reindexed RAG pipeline, or None if no provider
         """
-        if assistant.rag_provider is None:
+        if agent.rag_provider is None:
             logger.debug("No RAG provider configured, skipping reindex")
             return None
 
-        return await assistant.rag_provider.reindex(assistant, memory_id, force_rebuild)
+        return await agent.rag_provider.reindex(agent, memory_id, force_rebuild)
 
     def __init__(self) -> None:
         # Protocol handler setup
@@ -297,7 +297,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
         If thread_id is provided, finds which storage actually contains the thread
         queries all registered adapters, then returns that adapter type.
-        If thread not found anywhere, falls back to assistant's configured storage.
+        If thread not found anywhere, falls back to agent's configured storage.
         If thread_id is None, returns None
 
         Args:
@@ -318,7 +318,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 return adapter_class(thread_id)
 
         # Thread not found in any registered adapter — fall back to this
-        # assistant's configured storage (always set in __init__).
+        # agent's configured storage (always set in __init__).
         return self.storage_adapter(thread_id)
 
     async def get_file_pipeline(self, file: object) -> FilePipeline | None:
@@ -329,8 +329,8 @@ class Assistant(ABC, AssistantInfoMixin):
         return None
 
     def get_name(self) -> str:
-        """Return the assistant's display name."""
-        return self.name or "Unnamed Assistant"
+        """Return the agent's display name."""
+        return self.name or "Unnamed Agent"
 
     def get_instructions(self) -> Prompt:
         """Return formatted system instructions as a single string."""
@@ -378,7 +378,7 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         if not self.suggestion_generator:
             return None
-        return self.suggestion_generator(assistant=self)
+        return self.suggestion_generator(agent=self)
 
     async def get_tools(
         self,
@@ -520,9 +520,7 @@ class Assistant(ABC, AssistantInfoMixin):
             List of RagDocuments (vendor-neutral)
         """
 
-        logger.info(
-            f"[get_rag_documents] memory_id={memory_id}, assistant={self.__class__.__name__}"
-        )
+        logger.info(f"[get_rag_documents] memory_id={memory_id}, agent={self.__class__.__name__}")
         logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
 
         queryset = await self.get_rag_queryset(memory_id)
@@ -573,7 +571,7 @@ class Assistant(ABC, AssistantInfoMixin):
             messages: Conversation messages
             system_prompt: Optional system prompt override
             response_format: Optional Pydantic model for structured output. Pass None
-                explicitly to disable structured output even if the assistant has a
+                explicitly to disable structured output even if the agent has a
                 default response_format set.
             thread_id: Optional thread ID (forwarded to get_run_adapter)
             user: Optional user (forwarded to get_run_adapter)
@@ -596,14 +594,14 @@ class Assistant(ABC, AssistantInfoMixin):
     ) -> Any:
         """Return a Run adapter for non-streaming tasks (title generation, etc.).
 
-        Must be implemented by subclasses that use Assistant.run() or title generation.
+        Must be implemented by subclasses that use Agent.run() or title generation.
         """
         raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
 
     #: Flat list of integration names (`["linear"]`) — every tool that integration
-    #: exposes reaches this assistant. Names are registry keys, i.e. the `name` on
+    #: exposes reaches this agent. Names are registry keys, i.e. the `name` on
     #: each Integration subclass. Narrowing an integration to a subset of its tools
-    #: per assistant is not supported: restrict it at the integration instead, via
+    #: per agent is not supported: restrict it at the integration instead, via
     #: an MCP integration's `default_tools` allow-list.
     integrations: list[str] = []
 
@@ -625,7 +623,7 @@ class Assistant(ABC, AssistantInfoMixin):
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
             try:
-                tools = await integration.get_tools(user, assistant=self, thread_id=thread_id)
+                tools = await integration.get_tools(user, agent=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []
@@ -643,7 +641,7 @@ class Assistant(ABC, AssistantInfoMixin):
     ) -> Any:
         """Return the adapter used for streaming chat.
 
-        Must be implemented by subclasses used in chat. A worker-only assistant
+        Must be implemented by subclasses used in chat. A worker-only agent
         (hidden = True, called only via run()) can leave this unimplemented.
         """
         raise NotImplementedError(
@@ -711,7 +709,7 @@ class Assistant(ABC, AssistantInfoMixin):
         """
         Convert protocol messages to streaming HTTP response with optional storage.
 
-        Similar to Django's as_view() pattern - converts the assistant
+        Similar to Django's as_view() pattern - converts the agent
         into a response that can be returned directly from a view.
 
         Args:
@@ -723,10 +721,10 @@ class Assistant(ABC, AssistantInfoMixin):
             StreamingHttpResponse ready for Django views
 
         Raises:
-            PermissionDenied: If user has no CHAT permission for this assistant/thread
+            PermissionDenied: If user has no CHAT permission for this agent/thread
         """
         logger.debug(
-            f"Assistant as_view called: assistant={self.__class__.__name__}, "
+            f"Agent as_view called: agent={self.__class__.__name__}, "
             f"messages={len(protocol_messages) if protocol_messages else 0}, "
             f"thread_id={thread_id}, user={user}"
         )
@@ -787,7 +785,7 @@ class Assistant(ABC, AssistantInfoMixin):
                 await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
             if self.title_generation and thread and not thread.title:
                 title = await generate_thread_title(
-                    assistant=self, messages=messages, thread_id=thread_id, user=user
+                    agent=self, messages=messages, thread_id=thread_id, user=user
                 )
                 if title:
                     await ThreadService.update_thread(thread_id, title=title, user=user)

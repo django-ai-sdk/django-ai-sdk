@@ -11,7 +11,7 @@ from django_ai_sdk.conversation.models import Thread
 
 class Artifact(models.Model):
     """
-    Structured artifact submitted by the assistant via tool call.
+    Structured artifact submitted by the agent via tool call.
     Linked to a thread; the tool result JSON carries the artifact_id for
     message-level association on the frontend.
     """

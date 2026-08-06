@@ -41,22 +41,22 @@ INSTALLED_APPS = [
 
 Then run `python manage.py migrate`.
 
-### 2. Define your assistant
+### 2. Define your agent
 
 ```python
-# assistants.py
+# agents.py
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Stream
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
 
-class HelpDeskAssistant(Assistant):
+class HelpDeskAgent(Agent):
     name = "Help Desk"
     model = "gpt-4o"
-    instructions = "You are a helpful support assistant."
+    instructions = "You are a helpful support agent."
 
     async def get_pipeline_adapter(self, thread_id=None, user=None):
         storage_adapter = await self.get_storage_adapter(thread_id)
@@ -88,14 +88,14 @@ from django_ai_sdk.adapters.base import Run
 
 ```python
 # views.py
-from .assistants import HelpDeskAssistant
+from .agents import HelpDeskAgent
 
-assistant = HelpDeskAssistant()
+agent = HelpDeskAgent()
 
 
 @router.post("/chat")
 async def chat(request, payload: ChatRequest):
-    return await assistant.as_view(
+    return await agent.as_view(
         payload.messages,
         thread_id=payload.thread_id,
     )
@@ -103,10 +103,10 @@ async def chat(request, payload: ChatRequest):
 
 ## Integrations
 
-An integration gives an assistant tools from a third party: an MCP server, or an API
+An integration gives an agent tools from a third party: an MCP server, or an API
 you wrap yourself. Each one is a small Django app that registers itself on `ready()`.
 
-Enable a shipped integration by installing its app and naming it on an assistant:
+Enable a shipped integration by installing its app and naming it on an agent:
 
 ```python
 # settings.py
@@ -124,7 +124,7 @@ AI_SDK_INTEGRATIONS = {
 ```
 
 ```python
-class HelpDeskAssistant(Assistant):
+class HelpDeskAgent(Agent):
     integrations = ["github"]
 ```
 
@@ -166,7 +166,7 @@ class ZendeskIntegration(MCPIntegration):
 
 Add `"myapp.integrations.zendesk"` to `INSTALLED_APPS`, add
 `"zendesk": {"TOKEN": env("ZENDESK_API_TOKEN")}` to `AI_SDK_INTEGRATIONS`,
-and list `"zendesk"` on an assistant. For an API you wrap by hand, subclass
+and list `"zendesk"` on an agent. For an API you wrap by hand, subclass
 `APIIntegration` and set `tools` to `@haystack.tools.tool`-decorated functions.
 `django_ai_sdk/integrations/weather/` is a complete, credential-free example, and
 `github/`, `linear/` and `notion/` cover token and OAuth MCP servers.
@@ -192,7 +192,7 @@ the OAuth callback, which must sit at a fixed URL:
 - **RAG Pipelines**: BM25, ChromaDB, and Qdrant hybrid search with query expansion.
 - **Streaming Responses**: Built-in SSE streaming. Works with Vercel AI SDK protocol.
 - **Conversation Storage**: Automatic message persistence. Thread-based history out of the box.
-- **Tool Calling**: MCP, memory, and custom tools, all managed by your Assistant.
+- **Tool Calling**: MCP, memory, and custom tools, all managed by your Agent.
 - **Artifacts**: 16 structured UI types (tables, plans, approval cards, code blocks, and more)
   submitted by the LLM via tool calls.
 - **File Processing**: Document upload with pipeline-based processing (text, CSV, JSON,

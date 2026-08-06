@@ -280,30 +280,30 @@ class TestProcessAsync:
         assert "timed out" in entry_doc.processing_error.lower()
         assert entry_doc.processing_step is None
 
-    async def test_uses_assistant_pipeline_when_assistant_id_given(self):
+    async def test_uses_agent_pipeline_when_agent_id_given(self):
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.tasks import run_file_pipeline
 
-        memory = await Memory.objects.acreate(name="task-assistant")
+        memory = await Memory.objects.acreate(name="task-agent")
         entry_doc = await _make_entry_doc(memory)
 
         mock_result = MagicMock()
-        mock_result.content = "from assistant pipeline"
+        mock_result.content = "from agent pipeline"
         mock_result.data = {}
 
         mock_custom_pipeline = MagicMock()
         mock_custom_pipeline.run = AsyncMock(return_value=mock_result)
 
-        mock_assistant = MagicMock()
-        mock_assistant.get_file_pipeline = AsyncMock(return_value=mock_custom_pipeline)
+        mock_agent = MagicMock()
+        mock_agent.get_file_pipeline = AsyncMock(return_value=mock_custom_pipeline)
 
         with patch(
-            "django_ai_sdk.assistants.services.AssistantService.get",
-            new=AsyncMock(return_value=mock_assistant),
+            "django_ai_sdk.agents.services.AgentService.get",
+            new=AsyncMock(return_value=mock_agent),
         ):
             await run_file_pipeline(str(entry_doc.id), str(memory.id), "asst-123")
 
-        mock_assistant.get_file_pipeline.assert_called_once()
+        mock_agent.get_file_pipeline.assert_called_once()
         mock_custom_pipeline.run.assert_called_once()
 
         await entry_doc.arefresh_from_db()

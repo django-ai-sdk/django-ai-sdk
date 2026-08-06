@@ -1,7 +1,7 @@
 """
-Mock assistant factory.
+Mock agent factory.
 
-Assistants have side effects (LLM calls, registry registration, storage I/O),
+Agents have side effects (LLM calls, registry registration, storage I/O),
 so we use controlled MagicMock instances in unit tests instead of real subclasses.
 """
 
@@ -11,15 +11,15 @@ from django_ai_sdk.permissions import AllowAll
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 
 
-def create_assistant_mock(
-    assistant_id: str = "test-assistant",
-    name: str = "Test Assistant",
+def create_agent_mock(
+    agent_id: str = "test-agent",
+    name: str = "Test Agent",
     model: str = "gpt-4",
     permissions: list | None = None,
     storage_adapter=MemoryStorageAdapter,
     **attrs,
 ) -> MagicMock:
-    """Create a controlled MagicMock representing a registered assistant.
+    """Create a controlled MagicMock representing a registered agent.
 
     Defaults to AllowAll permissions and MemoryStorageAdapter.
     Pass extra keyword arguments to override or add attributes.
@@ -27,20 +27,20 @@ def create_assistant_mock(
     if permissions is None:
         permissions = [AllowAll]
 
-    assistant = MagicMock()
-    assistant.id = assistant_id
-    assistant.name = name
-    assistant.model = model
-    assistant.storage_adapter = storage_adapter
-    assistant.permissions = permissions
-    assistant.history = AsyncMock(
+    agent = MagicMock()
+    agent.id = agent_id
+    agent.name = name
+    agent.model = model
+    agent.storage_adapter = storage_adapter
+    agent.permissions = permissions
+    agent.history = AsyncMock(
         return_value=MagicMock(
             thread={"id": "thread-1", "title": "Test"}, messages=[]
         )
     )
     for k, v in attrs.items():
-        setattr(assistant, k, v)
-    return assistant
+        setattr(agent, k, v)
+    return agent
 
 
 def create_mock_adapter_class(get_thread=None):
@@ -55,17 +55,17 @@ def create_mock_adapter_class(get_thread=None):
     return adapter_cls
 
 
-def mock_assistant_memories(slugs):
+def mock_agent_memories(slugs):
     """Return a ``patch.object`` context manager that mocks
-    ``registry.get`` to return an assistant with the given memory slugs.
+    ``registry.get`` to return an agent with the given memory slugs.
 
     Usage::
 
-        with mock_assistant_memories([mem1.slug]):
-            result = await MemoryService.get_assistant_memories("test-asst")
+        with mock_agent_memories([mem1.slug]):
+            result = await MemoryService.get_agent_memories("test-asst")
     """
-    from django_ai_sdk.assistants.services import registry
+    from django_ai_sdk.agents.services import registry
 
-    mock_assistant = MagicMock()
-    mock_assistant.memories = slugs
-    return patch.object(registry, "get", return_value=mock_assistant)
+    mock_agent = MagicMock()
+    mock_agent.memories = slugs
+    return patch.object(registry, "get", return_value=mock_agent)

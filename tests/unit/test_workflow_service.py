@@ -12,10 +12,10 @@ from django_ai_sdk.workflows.schemas import WorkflowDefinition, WorkflowStep
 from django_ai_sdk.workflows.services import WorkflowService
 
 
-def make_definition(assistant_id="asst-1", output_key="result"):
+def make_definition(agent_id="asst-1", output_key="result"):
     return WorkflowDefinition(
         name="test-workflow",
-        steps=[WorkflowStep(assistant_id=assistant_id, output_key=output_key)],
+        steps=[WorkflowStep(agent_id=agent_id, output_key=output_key)],
     )
 
 

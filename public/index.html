@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Django AI SDK | AI Assistants for Django</title>
+  <title>Django AI SDK | AI Agents for Django</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/bold/style.css" />
@@ -65,11 +65,11 @@
   <section class="pt-24 pb-16 px-6">
     <div class="max-w-4xl mx-auto text-center">
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight mb-6 leading-tight">
-        AI assistants for<br>
+        AI agents for<br>
         <span class="gradient-text">Django applications</span>
       </h1>
       <p class="text-lg md:text-xl text-text-secondary max-w-2xl mx-auto mb-10 leading-relaxed">
-        Build intelligent assistants powered by <strong>Haystack</strong> with RAG, streaming responses, and conversation memory.
+        Build intelligent agents powered by <strong>Haystack</strong> with RAG, streaming responses, and conversation memory.
         Ready in days.
       </p>
       <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -87,7 +87,7 @@
     <div class="max-w-5xl mx-auto">
       <div class="text-center mb-12 md:mb-16">
         <h2 class="text-2xl md:text-3xl font-bold mb-4">Get started in 4 steps</h2>
-        <p class="text-text-secondary">Create an AI assistant with RAG in minutes</p>
+        <p class="text-text-secondary">Create an AI agent with RAG in minutes</p>
       </div>
 
       <div class="space-y-12">
@@ -114,20 +114,20 @@ python manage.py migrate</code></pre>
         <!-- Step 2 -->
         <div class="group">
           <div>
-            <h3 class="text-lg font-semibold mb-2">Define your assistant</h3>
+            <h3 class="text-lg font-semibold mb-2">Define your agent</h3>
             <p class="text-text-secondary mb-4">Create a class with name, model, and instructions.</p>
-            <pre class="bg-subtle text-text p-4 md:p-5 rounded-xl text-xs md:text-sm overflow-x-auto border border-border"><code class="language-python"># assistants.py
+            <pre class="bg-subtle text-text p-4 md:p-5 rounded-xl text-xs md:text-sm overflow-x-auto border border-border"><code class="language-python"># agents.py
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Stream
 from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-class HelpDeskAssistant(Assistant):
+class HelpDeskAgent(Agent):
     name = "Help Desk"
     model = "gpt-4o"
-    instructions = "You are a helpful support assistant."
+    instructions = "You are a helpful support agent."
 
     async def get_pipeline_adapter(self, thread_id=None, user=None):
         storage_adapter = await self.get_storage_adapter(thread_id)
@@ -175,13 +175,13 @@ async def get_rag_pipeline(self, memory_id=None):
             <h3 class="text-lg font-semibold mb-2">Return streaming response</h3>
             <p class="text-text-secondary mb-4">Use <code>as_view()</code> to return an SSE response.</p>
             <pre class="bg-subtle text-text p-4 md:p-5 rounded-xl text-xs md:text-sm overflow-x-auto border border-border"><code class="language-python"># views.py
-from .assistants import HelpDeskAssistant
+from .agents import HelpDeskAgent
 
-assistant = HelpDeskAssistant()
+agent = HelpDeskAgent()
 
 @router.post("/chat")
 async def chat(request, payload: ChatRequest):
-    return await assistant.as_view(
+    return await agent.as_view(
         payload.messages,
         thread_id=payload.thread_id,
     )</code></pre>
@@ -196,7 +196,7 @@ async def chat(request, payload: ChatRequest):
     <div class="max-w-5xl mx-auto">
       <div class="text-center mb-12 md:mb-16">
         <h2 class="text-2xl md:text-3xl font-bold mb-4">What's included</h2>
-        <p class="text-text-secondary">Everything you need to build production-ready AI assistants</p>
+        <p class="text-text-secondary">Everything you need to build production-ready AI agents</p>
       </div>
 
       <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -232,7 +232,7 @@ async def chat(request, payload: ChatRequest):
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
           <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-wrench"></i></div>
           <h3 class="font-semibold mb-2">Tool Calling</h3>
-          <p class="text-sm text-text-secondary">MCP, memory, and custom tools, all managed by your Assistant.</p>
+          <p class="text-sm text-text-secondary">MCP, memory, and custom tools, all managed by your Agent.</p>
         </div>
 
         <!-- Feature 5 -->
@@ -264,9 +264,9 @@ async def chat(request, payload: ChatRequest):
   <section class="py-16 md:py-24 px-4 md:px-6 bg-surface">
     <div class="max-w-4xl mx-auto">
       <h2 class="text-xl md:text-2xl font-bold mb-6 md:8 text-center">Full example</h2>
-      <pre class="bg-subtle text-text p-4 md:p-6 rounded-2xl text-xs md:text-sm overflow-x-auto border border-border leading-relaxed"><code class="language-python"># assistants.py
+      <pre class="bg-subtle text-text p-4 md:p-6 rounded-2xl text-xs md:text-sm overflow-x-auto border border-border leading-relaxed"><code class="language-python"># agents.py
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Stream
 from django_ai_sdk.rags import (
     BM25QueryExpanderRAG,
@@ -276,10 +276,10 @@ from haystack import Pipeline
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-class HelpDeskAssistant(Assistant):
+class HelpDeskAgent(Agent):
     name = "Help Desk"
     model = "gpt-4o"
-    instructions = "You are a helpful support assistant."
+    instructions = "You are a helpful support agent."
 
     async def get_rag_queryset(self, memory_id=None):
         if memory_id:
@@ -309,13 +309,13 @@ class HelpDeskAssistant(Assistant):
 
 
 # views.py
-from .assistants import HelpDeskAssistant
+from .agents import HelpDeskAgent
 
-assistant = HelpDeskAssistant()
+agent = HelpDeskAgent()
 
 @router.post("/chat")
 async def chat(request, payload: ChatRequest):
-    return await assistant.as_view(
+    return await agent.as_view(
         payload.messages,
         thread_id=payload.thread_id,
     )</code></pre>

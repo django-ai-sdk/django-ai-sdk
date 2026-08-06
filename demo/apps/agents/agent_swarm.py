@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Annotated
 
 from django.conf import settings
 from django.utils import timezone
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.agents import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.permissions import IsAdminUser
@@ -51,13 +51,13 @@ def get_datetime() -> dict:
 
 
 @auto_register
-class AgentSwarmAssistant(Assistant):
+class AgentSwarmAgent(Agent):
     """
-    Agent swarm assistant with specialized pirate expertise.
+    Agent swarm agent with specialized pirate expertise.
     """
 
     name = "Pirate Agent Swarm"
-    description = "An agent swarm assistant with specialized pirate expertise."
+    description = "An agent swarm agent with specialized pirate expertise."
     model = settings.AI_SDK_DEFAULT_MODEL
     permissions = [IsAdminUser]
     instructions = prompt("""\

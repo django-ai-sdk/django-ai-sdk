@@ -68,7 +68,7 @@ def get_upload_settings() -> UploadSettings:
 
 
 async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
-    """Return a default FilePipeline for uploads without assistant context.
+    """Return a default FilePipeline for uploads without agent context.
 
     Configurable via AI_SDK_MEMORY_FILE_PIPELINE setting:
       - single dotted path: "myapp.pipelines.get_my_pipeline"

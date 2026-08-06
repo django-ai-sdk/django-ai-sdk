@@ -5,7 +5,7 @@ Covers four distinct pagination paths:
   - MemoryStore (in-memory dict)
   - ThreadService.threads (multi-adapter merge then slice)
   - MemoryService.list_memories (DB queryset slice)
-  - AssistantService.list_assistants (list slice on registry + DB)
+  - AgentService.list_agents (list slice on registry + DB)
 """
 
 from datetime import UTC, datetime, timedelta
@@ -92,7 +92,7 @@ def _make_thread_info(thread_id: str, age_seconds: int = 0):
     return ThreadInfo(
         id=thread_id,
         title=f"Thread {thread_id}",
-        assistant_id="test-assistant",
+        agent_id="test-agent",
         model="gpt-4",
         user_id=None,
         created_at=ts,
@@ -231,45 +231,45 @@ class TestMemoryServiceListMemoriesPagination:
 
 
 # ============================================================================
-# AssistantService.list_assistants — list slice (registry + DB)
+# AgentService.list_agents — list slice (registry + DB)
 # ============================================================================
 
 
 @pytest.mark.asyncio
-class TestAssistantServiceListAssistantsPagination:
+class TestAgentServiceListAgentsPagination:
     def _make_registry_with(self, n: int):
-        """Return a mock registry with n visible assistants."""
+        """Return a mock registry with n visible agents."""
         mock_registry = MagicMock()
-        assistants = {}
+        agents = {}
         for i in range(n):
             a = MagicMock()
-            a.name = f"Assistant {i}"
+            a.name = f"Agent {i}"
             a.model = "gpt-4"
             a.permissions = []
-            assistants[f"asst-{i}"] = a
-        mock_registry.visible.return_value = assistants
+            agents[f"asst-{i}"] = a
+        mock_registry.visible.return_value = agents
         return mock_registry
 
     async def _list(self, n_registry: int, limit: int = 100, offset: int = 0):
-        from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.assistants.models import AssistantSettings
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.agents.models import AgentSettings
 
         registry = self._make_registry_with(n_registry)
 
         with (
-            patch("django_ai_sdk.assistants.services.registry", registry),
+            patch("django_ai_sdk.agents.services.registry", registry),
             patch.object(
-                AssistantService,
+                AgentService,
                 "has_perms",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                AssistantSettings.objects,
+                AgentSettings.objects,
                 "filter",
                 return_value=MagicMock(__aiter__=MagicMock(return_value=aiter([]))),
             ),
         ):
-            return await AssistantService.list_assistants(
+            return await AgentService.list_agents(
                 user=None, limit=limit, offset=offset
             )
 

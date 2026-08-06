@@ -8,7 +8,7 @@ from django_ai_sdk.integrations.services import IntegrationService
 from django_ai_sdk.permissions import PermissionDenied
 from ninja import Router, Schema
 
-from apps.assistants.views.ninja import Error
+from apps.agents.views.ninja import Error
 
 
 class DetailOut(Schema):

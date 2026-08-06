@@ -21,24 +21,24 @@ class _Cancelled(Exception):
 def process_document_upload(
     entry_doc_id: str,
     memory_id: str,
-    assistant_id: str | None = None,
+    agent_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Sync task entry point for background file pipeline processing.
 
     The return value becomes ``DBTaskResult.return_value``, retrievable via
     ``aget_task_status`` on success.
     """
-    return async_to_sync(run_file_pipeline)(entry_doc_id, memory_id, assistant_id)
+    return async_to_sync(run_file_pipeline)(entry_doc_id, memory_id, agent_id)
 
 
 async def run_file_pipeline(
     entry_doc_id: str,
     memory_id: str,
-    assistant_id: str | None,
+    agent_id: str | None,
 ) -> dict[str, Any] | None:
     from django.utils import timezone
 
-    from django_ai_sdk.assistants.services import AssistantService
+    from django_ai_sdk.agents.services import AgentService
     from django_ai_sdk.files.common import get_default_file_pipeline
     from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
 
@@ -83,9 +83,9 @@ async def run_file_pipeline(
             raise _Cancelled
 
     try:
-        if assistant_id:
-            assistant = await AssistantService.get(assistant_id)
-            pipeline = await assistant.get_file_pipeline(
+        if agent_id:
+            agent = await AgentService.get(agent_id)
+            pipeline = await agent.get_file_pipeline(
                 entry_doc.file
             ) or await get_default_file_pipeline(entry_doc.file)
         else:

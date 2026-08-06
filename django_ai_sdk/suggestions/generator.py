@@ -8,7 +8,7 @@ from django_ai_sdk.common import ChatMessage, prompt
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
 
 logger = get_logger(__name__)
 
@@ -16,14 +16,14 @@ logger = get_logger(__name__)
 class SuggestionGenerator(Protocol):
     """Generate follow-up questions based on a response."""
 
-    def __init__(self, assistant: Assistant) -> None: ...
+    def __init__(self, agent: Agent) -> None: ...
 
     async def generate(self, messages: list[ChatMessage], response: str) -> list[str]:
         """Generate 2-3 follow-up suggestions.
 
         Args:
             messages: Full conversation history
-            response: The assistant's response to generate suggestions from
+            response: The agent's response to generate suggestions from
 
         Returns:
             List of suggested follow-up questions (max 3)
@@ -42,7 +42,7 @@ def format_conversation(messages: list[ChatMessage], response: str) -> str:
         for msg in messages
         if msg.role in ("user", "assistant") and msg.content
     ]
-    lines.append(f"ASSISTANT: {response}")
+    lines.append(f"AGENT: {response}")
     return "\n\n".join(lines)
 
 
@@ -50,16 +50,16 @@ class DefaultSuggestionGenerator:
     """Default implementation using LLM to generate contextual suggestions.
 
     Customizable via prompt parameter. Suggestions are disabled (returns empty list) if:
-    - Assistant.get_suggestion_generator() is not overridden (returns None by default)
+    - Agent.get_suggestion_generator() is not overridden (returns None by default)
     """
 
     DEFAULT_PROMPT = prompt("""\
-        You are a helpful assistant that suggests follow-up questions.
+        You are a helpful agent that suggests follow-up questions.
         Task: Suggest 2-3 relevant follow-up questions that the user might naturally ask next
-        based on the conversation and the assistant's previous response.
+        based on the conversation and the agent's previous response.
 
         Guidelines:
-        - Write questions from the user's point of view, as if they're asking the assistant.
+        - Write questions from the user's point of view, as if they're asking the agent.
         - Make questions concise, clear, and directly related to the discussed topic.
         - Suggest follow-ups that make sense given the context and don't repeat what was already covered.
         - Detect the conversation's language and use the same language for questions.
@@ -67,14 +67,14 @@ class DefaultSuggestionGenerator:
 
     def __init__(
         self,
-        assistant: Assistant,
+        agent: Agent,
         prompt: str | None = None,
     ) -> None:
-        self.assistant = assistant
+        self.agent = agent
         self.prompt = prompt or self.DEFAULT_PROMPT
 
     async def generate(self, messages: list[ChatMessage], response: str) -> list[str]:
-        """Generate suggestions using LLM via the assistant.
+        """Generate suggestions using LLM via the agent.
 
         Returns empty list if:
         - response is empty
@@ -93,7 +93,7 @@ class DefaultSuggestionGenerator:
                 Based on this conversation, suggest follow-up questions.
             """)
 
-            result = await self.assistant.run(
+            result = await self.agent.run(
                 messages=messages,
                 system_prompt=system_prompt,
                 response_format=FollowUpSuggestions,

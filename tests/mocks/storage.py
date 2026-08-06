@@ -30,16 +30,16 @@ def mock_get_storage(method="rate_message", return_value=True):
         yield mock_storage
 
 
-def setup_thread_adapter(registry, user_id="user-1", assistant_id="test-assistant"):
+def setup_thread_adapter(registry, user_id="user-1", agent_id="test-agent"):
     """Build a ThreadInfo + adapter class and register it on the storage registry.
 
     Returns ``(thread_info, adapter_cls)`` for further configuration.
     """
-    from tests.mocks.assistant import create_mock_adapter_class
+    from tests.mocks.agent import create_mock_adapter_class
     from tests.factories.schemas import ThreadInfoFactory
 
     thread_info = ThreadInfoFactory.build(
-        assistant_id=assistant_id, user_id=user_id
+        agent_id=agent_id, user_id=user_id
     )
     adapter_cls = create_mock_adapter_class(get_thread=thread_info)
     registry.get_all_adapters.return_value = [adapter_cls]

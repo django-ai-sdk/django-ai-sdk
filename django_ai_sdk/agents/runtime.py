@@ -8,7 +8,7 @@ from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.assistant import Assistant
+from django_ai_sdk.agent import Agent
 from django_ai_sdk.common import prompt
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -19,13 +19,13 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from .models import AssistantSettings
+    from .models import AgentSettings
 
 
-class RuntimeAssistant(Assistant):
-    """Assistant whose configuration is loaded from an AssistantSettings DB record.
+class RuntimeAgent(Agent):
+    """Agent whose configuration is loaded from an AgentSettings DB record.
 
-    Constructed on demand by AssistantService, not registered in the class registry.
+    Constructed on demand by AgentService, not registered in the class registry.
     Each instance reflects the live DB config at construction time.
     """
 
@@ -34,11 +34,11 @@ class RuntimeAssistant(Assistant):
     protocol = VercelProtocolHandler
     storage_adapter = DbStorageAdapter
 
-    def __init__(self, config: AssistantSettings) -> None:
+    def __init__(self, config: AgentSettings) -> None:
         self._config = config
         self.name = config.name
         self.model = config.model
-        self.instructions = prompt(config.system_prompt or "You are a helpful assistant.")
+        self.instructions = prompt(config.system_prompt or "You are a helpful agent.")
         self.integrations = list(config.integrations or [])
         self.memories = list(config.memories or [])
         self.title_generation = config.title_generation
@@ -50,7 +50,7 @@ class RuntimeAssistant(Assistant):
         super().__init__()
 
     @property
-    def assistant_id(self) -> str:
+    def agent_id(self) -> str:
         return str(self._config.id)
 
     def _build_generator(self) -> OpenAIChatGenerator:
@@ -97,7 +97,7 @@ class RuntimeAssistant(Assistant):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         result = await super().get_tools(thread_id=thread_id, user=user)
-        from django_ai_sdk.assistants.config import get_tool_registry
+        from django_ai_sdk.agents.config import get_tool_registry
 
         tool_registry = get_tool_registry()
         for key in self._config.tools or []:
@@ -113,4 +113,4 @@ class RuntimeAssistant(Assistant):
         return result
 
     def __repr__(self) -> str:
-        return f"<RuntimeAssistant id={self.assistant_id!r} name={self.name!r}>"
+        return f"<RuntimeAgent id={self.agent_id!r} name={self.name!r}>"

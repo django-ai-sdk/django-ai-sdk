@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
@@ -13,10 +13,10 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
 
-class PirateExtractionAssistant(Assistant):
-    """Extraction assistant for the demo."""
+class PirateExtractionAgent(Agent):
+    """Extraction agent for the demo."""
 
-    name = "Extraction Assistant"
+    name = "Extraction Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     hidden = True
 

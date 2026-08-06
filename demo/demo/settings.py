@@ -66,7 +66,7 @@ INSTALLED_APPS = [
     "django_ai_sdk.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
-    "apps.assistants",
+    "apps.agents",
     "apps.memories",
     "apps.integrations",
 ]
@@ -213,26 +213,26 @@ OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 # AI_SDK_DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-# Base classes available for runtime configured assistants
-AI_SDK_RUNTIME_ASSISTANT_BASES = [
-    "apps.assistants.assistants.runtime.DefaultRuntimeAssistant",
+# Base classes available for runtime configured agents
+AI_SDK_RUNTIME_AGENT_BASES = [
+    "apps.agents.runtime.DefaultRuntimeAgent",
 ]
 
-# Tools selectable in runtime assistant configuration
-AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
-    "get_today": "apps.assistants.tools.get_today",
-    "get_memory_files": "apps.assistants.tools.get_memory_files",
+# Tools selectable in runtime agent configuration
+AI_SDK_RUNTIME_AGENT_TOOLS = {
+    "get_today": "apps.agents.tools.get_today",
+    "get_memory_files": "apps.agents.tools.get_memory_files",
 }
 
 # Default Workflow actions
 AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "apps.assistants.actions.ConsoleLogAction",
+    "console_log": "apps.agents.actions.ConsoleLogAction",
 }
 
 # Default asssitants
-AI_SDK_ASSISTANTS = [
-    "apps.assistants.assistants.pirate_basic.PirateBasicAssistant",
-    "apps.assistants.assistants.agent_swarm.AgentSwarmAssistant",
+AI_SDK_AGENTS = [
+    "apps.agents.pirate_basic.PirateBasicAgent",
+    "apps.agents.agent_swarm.AgentSwarmAgent",
 ]
 
 # Permission overrides by domain
@@ -241,7 +241,7 @@ AI_SDK_PERMISSIONS = {
         "apps.memories.permissions.AllowAnonymousMemoryPermission",
     ],
     "thread": [
-        "apps.assistants.permissions.DemoThreadPermission",
+        "apps.agents.permissions.DemoThreadPermission",
     ],
 }
 

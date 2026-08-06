@@ -26,7 +26,7 @@ from tests.factories.schemas import chat_message
 @pytest.mark.asyncio
 class TestThreadServiceCreateThread:
     async def test_creates_thread_with_auto_metadata(
-        self, mock_assistants_registry, mock_user
+        self, mock_agents_registry, mock_user
     ):
         from django_ai_sdk.storage.memory import MemoryStorageAdapter
 
@@ -34,19 +34,19 @@ class TestThreadServiceCreateThread:
             mock_create.return_value = "gen-thread-id"
 
             result = await ThreadService.create_thread(
-                assistant_id="test-assistant",
+                agent_id="test-agent",
                 user=mock_user,
             )
 
             assert result == "gen-thread-id"
             call_kwargs = mock_create.call_args.kwargs
-            assert call_kwargs["metadata"]["assistant_id"] == "test-assistant"
+            assert call_kwargs["metadata"]["agent_id"] == "test-agent"
             assert call_kwargs["metadata"]["model"] == "gpt-4"
-            assert call_kwargs["metadata"]["assistant_name"] == "Test Assistant"
+            assert call_kwargs["metadata"]["agent_name"] == "Test Agent"
             assert call_kwargs["metadata"]["created_via"] == "create_thread"
 
     async def test_create_thread_passes_empty_title(
-        self, mock_assistants_registry, mock_user
+        self, mock_agents_registry, mock_user
     ):
         from django_ai_sdk.storage.memory import MemoryStorageAdapter
 
@@ -54,21 +54,21 @@ class TestThreadServiceCreateThread:
             mock_create.return_value = "gen-thread-id"
 
             await ThreadService.create_thread(
-                assistant_id="test-assistant",
+                agent_id="test-agent",
                 user=mock_user,
             )
 
             call_kwargs = mock_create.call_args.kwargs
             assert call_kwargs["title"] == ""
 
-    async def test_raises_when_assistant_not_found(
-        self, mock_assistants_registry, mock_user
+    async def test_raises_when_agent_not_found(
+        self, mock_agents_registry, mock_user
     ):
-        mock_assistants_registry.get.return_value = None
+        mock_agents_registry.get.return_value = None
 
         with pytest.raises(ValueError, match="not found"):
             await ThreadService.create_thread(
-                assistant_id="nonexistent", user=mock_user
+                agent_id="nonexistent", user=mock_user
             )
 
 
@@ -80,7 +80,7 @@ class TestThreadServiceCreateThread:
 @pytest.mark.asyncio
 class TestThreadServiceRateMessage:
     async def test_rates_message_success(
-        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
+        self, mock_agents_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
@@ -103,7 +103,7 @@ class TestThreadServiceRateMessage:
             )
 
     async def test_raises_when_message_not_found(
-        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
+        self, mock_agents_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
@@ -124,7 +124,7 @@ class TestThreadServiceRateMessage:
 @pytest.mark.asyncio
 class TestThreadServiceDeleteMessage:
     async def test_deletes_message_success(
-        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
+        self, mock_agents_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
@@ -155,7 +155,7 @@ class TestThreadServiceDeleteMessage:
 @pytest.mark.asyncio
 class TestThreadServiceRestoreMessage:
     async def test_restores_message_success(
-        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
+        self, mock_agents_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter, mock_get_storage
 
@@ -188,7 +188,7 @@ class TestThreadServiceCreateThreadPermissions:
     """Thread creation permission-denied scenarios."""
 
     async def test_denies_create_when_deny_all(
-        self, mock_assistants_registry, mock_user
+        self, mock_agents_registry, mock_user
     ):
         from django_ai_sdk.permissions import DenyAll, PermissionDenied
         from tests.mocks.permissions import thread_permissions
@@ -196,24 +196,24 @@ class TestThreadServiceCreateThreadPermissions:
         with thread_permissions("django_ai_sdk.permissions.DenyAll"):
             with pytest.raises(PermissionDenied):
                 await ThreadService.create_thread(
-                    assistant_id="test-assistant", user=mock_user
+                    agent_id="test-agent", user=mock_user
                 )
 
     async def test_denies_create_when_not_authenticated(
-        self, mock_assistants_registry
+        self, mock_agents_registry
     ):
         from django_ai_sdk.permissions import PermissionDenied
 
         with pytest.raises(PermissionDenied):
             await ThreadService.create_thread(
-                assistant_id="test-assistant", user=None
+                agent_id="test-agent", user=None
             )
 
     async def test_allows_create_when_authenticated(
-        self, mock_assistants_registry, mock_user
+        self, mock_agents_registry, mock_user
     ):
         thread_id = await ThreadService.create_thread(
-            assistant_id="test-assistant", user=mock_user
+            agent_id="test-agent", user=mock_user
         )
         assert thread_id is not None
 
@@ -306,7 +306,7 @@ class TestDbStorageAdapterUpdateThreadTitle:
 @pytest.mark.asyncio
 class TestGetThreadHistory:
     async def test_returns_thread_and_messages(
-        self, mock_assistants_registry, mock_storage_adapter_registry, mock_user
+        self, mock_agents_registry, mock_storage_adapter_registry, mock_user
     ):
         from tests.mocks.storage import setup_thread_adapter
 
@@ -317,7 +317,7 @@ class TestGetThreadHistory:
     async def test_raises_when_thread_not_found(
         self, mock_storage_adapter_registry, mock_user
     ):
-        from tests.mocks.assistant import create_mock_adapter_class
+        from tests.mocks.agent import create_mock_adapter_class
 
         mock_adapter_cls = create_mock_adapter_class(get_thread=None)
         mock_storage_adapter_registry.get_all_adapters.return_value = [mock_adapter_cls]
@@ -337,7 +337,7 @@ class TestGetThreadFileMeta:
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
             with patch(
                 "django_ai_sdk.storage.services._get_thread",
-                return_value=MagicMock(assistant_id="test", file_memory_id=file_memory_id),
+                return_value=MagicMock(agent_id="test", file_memory_id=file_memory_id),
             ):
                 result = await aget_thread_file_meta("thread-1", user=None)
         assert result["file_memory_id"] == file_memory_id
@@ -357,7 +357,7 @@ class TestGetThreadFileMeta:
             with (
                 patch(
                     "django_ai_sdk.storage.services._get_thread",
-                    return_value=MagicMock(assistant_id="test", file_memory_id=file_memory_id),
+                    return_value=MagicMock(agent_id="test", file_memory_id=file_memory_id),
                 ),
                 patch("django_ai_sdk.memories.models.Entry") as mock_entry,
             ):

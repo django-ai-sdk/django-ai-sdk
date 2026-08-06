@@ -4,6 +4,7 @@ Django AI SDK - A plug-and-play Django AI streaming SDK.
 
 from __future__ import annotations
 
+from django_ai_sdk.agent import Agent
 from django_ai_sdk.artifacts import ArtifactSchema, ArtifactType
 from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,
@@ -23,7 +24,6 @@ from django_ai_sdk.artifacts.schemas import (
     TerminalArtifact,
     TestResultsArtifact,
 )
-from django_ai_sdk.assistant import Assistant
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.permissions import (
     AllowAll,
@@ -65,7 +65,7 @@ __all__ = [
     "TestResultsArtifact",
     "TaskArtifact",
     "ImageArtifact",
-    "Assistant",
+    "Agent",
     "ChatMessage",
     "StreamChunk",
     "stream_response",
