@@ -26,7 +26,7 @@ from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 from django_ai_sdk.workflows.models import WorkflowSettings
 from ninja import Router, Schema
 
-from piratespeak.views_permissions import assistant_permissions, thread_permissions
+from .permissions import assistant_permissions, thread_permissions
 
 router = Router()
 logger = get_logger(__name__)
@@ -161,7 +161,7 @@ class RunResponse(Schema):
 
 @router.get("/health/", response={200: HealthResponse}, operation_id="health_check")
 def health_check(request: HttpRequest) -> HealthResponse:
-    return HealthResponse(status="ok", service="piratespeak")
+    return HealthResponse(status="ok", service="django-ai-sdk")
 
 
 @router.get(

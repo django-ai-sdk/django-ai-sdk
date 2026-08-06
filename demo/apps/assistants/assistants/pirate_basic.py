@@ -27,9 +27,9 @@ from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-from piratespeak.assistants.extraction import PirateExtractionAssistant
-from piratespeak.assistants.tools import get_memory_files, get_today
-from piratespeak.assistants.transforms import DocumentExtractionTransform
+from ..tools import get_memory_files, get_today
+from .extraction import PirateExtractionAssistant
+from .transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser

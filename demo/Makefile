@@ -9,7 +9,7 @@ reset:
 	uv run python manage.py load_demo_assistants
 
 run:
-	OPENAI_AGENTS_DISABLE_TRACING=1 uv run python manage.py runserver
+	uv run python manage.py runserver
 
 
 db:

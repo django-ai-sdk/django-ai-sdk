@@ -816,7 +816,7 @@ class TestObjectPermissionsSchema:
     """Tests for the ObjectPermissions schema and ObjectPermsSchema mixin."""
 
     async def test_default_values_all_false(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions()
         assert perms.can_read is False
@@ -824,7 +824,7 @@ class TestObjectPermissionsSchema:
         assert perms.can_manage is False
 
     async def test_custom_values(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
         assert perms.can_read is True
@@ -832,14 +832,14 @@ class TestObjectPermissionsSchema:
         assert perms.can_manage is True
 
     async def test_serializes_as_dict(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=True, can_manage=False)
         d = perms.model_dump()
         assert d == {"can_read": True, "can_write": True, "can_manage": False}
 
     async def test_memory_out_response_has_permissions_field(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         instance = MemoryOutResponse(
@@ -857,7 +857,7 @@ class TestObjectPermissionsSchema:
         assert instance.permissions.can_read is False
 
     async def test_memory_out_response_with_custom_permissions(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
@@ -876,7 +876,7 @@ class TestObjectPermissionsSchema:
         assert instance.permissions.can_manage is True
 
     async def test_multiple_inheritance_with_memory_out(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         instance = MemoryOutResponse(
@@ -909,7 +909,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_owner_gets_all(self):
         from django_ai_sdk.memories.models import Memory, MemoryUser
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Owner Mem", is_public=False)
@@ -922,7 +922,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_stranger_on_public_only_read(self):
         from django_ai_sdk.memories.models import Memory
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Public Mem", is_public=True)
@@ -937,7 +937,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_stranger_on_private_gets_none(self):
         from django_ai_sdk.memories.models import Memory
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Private Mem", is_public=False)
@@ -948,7 +948,7 @@ class TestObjectPermissionsCalculators:
         assert perms.can_manage is False
 
     async def test_memory_permissions_nonexistent_memory_returns_default(self):
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         perms = await memory_permissions(user, "nonexistent-id")
@@ -963,7 +963,7 @@ class TestObjectPermissionsCalculators:
 
         from django_ai_sdk.storage.db import DbStorageAdapter
         from django_ai_sdk.storage.services import ThreadService
-        from piratespeak.views_permissions import thread_permissions
+        from apps.assistants.views.permissions import thread_permissions
 
         user = await self._make_user()
         thread_id = str(uuid4())
@@ -983,7 +983,7 @@ class TestObjectPermissionsCalculators:
         from uuid import uuid4
 
         from django_ai_sdk.storage.db import DbStorageAdapter
-        from piratespeak.views_permissions import thread_permissions
+        from apps.assistants.views.permissions import thread_permissions
 
         owner = await self._make_user()
         stranger = await self._make_user()
@@ -1001,7 +1001,7 @@ class TestObjectPermissionsCalculators:
         assert perms.can_manage is False
 
     async def test_thread_permissions_nonexistent_returns_default(self):
-        from piratespeak.views_permissions import thread_permissions
+        from apps.assistants.views.permissions import thread_permissions
 
         user = await self._make_user()
         perms = await thread_permissions(user, "nonexistent-id")
@@ -1013,7 +1013,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_assistant_permissions_owner_gets_all(self):
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from piratespeak.views_permissions import assistant_permissions
+        from apps.assistants.views.permissions import assistant_permissions
 
         user = await self._make_user()
         config = await AssistantSettings.objects.acreate(
@@ -1028,7 +1028,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_assistant_permissions_stranger_gets_none(self):
         from django_ai_sdk.assistants.models import AssistantSettings
-        from piratespeak.views_permissions import assistant_permissions
+        from apps.assistants.views.permissions import assistant_permissions
 
         stranger = await self._make_user()
         await AssistantSettings.objects.acreate(
@@ -1041,7 +1041,7 @@ class TestObjectPermissionsCalculators:
         assert perms.can_manage is False
 
     async def test_assistant_permissions_nonexistent_returns_default(self):
-        from piratespeak.views_permissions import assistant_permissions
+        from apps.assistants.views.permissions import assistant_permissions
 
         user = await self._make_user()
         perms = await assistant_permissions(user, "nonexistent")
@@ -1051,7 +1051,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_assistant_permissions_looks_up_by_id_fallback(self):
         from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from piratespeak.views_permissions import assistant_permissions
+        from apps.assistants.views.permissions import assistant_permissions
 
         user = await self._make_user()
         config = await AssistantSettings.objects.acreate(
