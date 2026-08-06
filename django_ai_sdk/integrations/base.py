@@ -65,13 +65,9 @@ class Integration(ABC):
     name: str = ""
     label: str = ""
 
-    #: What this integration's data actually is, e.g. "Company wiki, HR docs, and
-    #: engineering runbooks" for a Notion server. A tool's own name and description
-    #: tell the model *what it can do* (search, fetch a page); they say nothing about
-    #: *which* Notion workspace or Linear projects this deployment points at. This gets
-    #: prepended to every tool's description (see assistant._namespaced) so the model
-    #: sees that context at the point it decides whether to reach for the tool at all,
-    #: not just its mechanics. Empty means no hint is added.
+    #: What this deployment's instance of the integration actually contains, e.g.
+    #: "Company wiki and HR docs" for a Notion server. Prepended to every tool's
+    #: description (see assistant._namespaced). Empty adds nothing.
     hint: str = ""
 
     #: Permission classes gating this integration (like Assistant.permissions).

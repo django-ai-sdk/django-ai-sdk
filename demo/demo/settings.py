@@ -251,7 +251,12 @@ AI_SDK_VECTOR_STORE_PATH = "stores/"
 # doesn't crash boot: the integration reports that it needs setup instead. `weather`
 # needs none at all, so it isn't listed here and still works out of the box.
 AI_SDK_INTEGRATIONS = {
-    "linear": {"TOKEN": env("LINEAR_API_KEY", default="")},
+    "linear": {
+        "TOKEN": env("LINEAR_API_KEY", default=""),
+        # Prepended to every tool this integration exposes, so the model sees not
+        # just "list_issues" but what this deployment's Linear actually tracks.
+        "HINT": "Engineering issue tracker for the Pirate Speak demo project.",
+    },
 }
 
 
