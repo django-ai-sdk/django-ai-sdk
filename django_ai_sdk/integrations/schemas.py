@@ -23,6 +23,10 @@ class IntegrationOut(BaseModel):
 
     name: str
     label: str
+    #: What this integration's data actually is, shown next to the label so a user
+    #: (or an admin deciding whether to enable it for an assistant) knows what it's
+    #: for, not just its name. See Integration.hint.
+    hint: str = ""
     kind: str
     status: IntegrationStatus
     supports_connect: bool = False

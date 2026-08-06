@@ -50,16 +50,26 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
-def _namespaced(integration_name: str, tool: Any) -> Any:
-    """Rename tool to {integration_name}_{tool.name}.
+def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
+    """Rename tool to {integration_name}_{tool.name} and prepend the integration's
+    hint (if any) to its description.
 
     Nothing stops two unrelated MCP servers from defining the same tool name
     (GitHub and Linear both have list_issues), and Haystack requires unique names
     across everything handed to one agent, so without this, enabling two
     integrations that happen to collide would fail assistant construction outright.
+
+    The tool's own description, whether hand-written or supplied by a remote MCP
+    server, says what the tool does (e.g. "search pages"), not what this deployment's
+    instance of it actually contains. `hint` (Integration.hint) fills that gap, so the
+    model sees "search pages -- Contains our company wiki and HR docs" at the point it
+    decides whether to reach for the tool, not just its mechanics.
     """
     try:
-        return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
+        updates: dict[str, Any] = {"name": f"{integration_name}_{tool.name}"}
+        if hint:
+            updates["description"] = f"{tool.description}\n\n{hint}" if tool.description else hint
+        return dataclasses.replace(tool, **updates)
     except (TypeError, AttributeError):
         logger.warning(
             "Could not namespace tool %r from integration %r — left as-is, may "
@@ -629,7 +639,7 @@ class Assistant(ABC, AssistantInfoMixin):
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []
-            return [_namespaced(integration.name, tool) for tool in tools]
+            return [_namespaced(integration.name, tool, integration.hint) for tool in tools]
 
         services = (await get_integrations(self.integrations)).values()
         allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]

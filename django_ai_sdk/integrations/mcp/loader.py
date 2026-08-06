@@ -84,6 +84,7 @@ class DynamicMCPIntegration(Integration):
             cb_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
         )
         self.label = config.label or name.title()
+        self.hint = config.hint
         self.config = config
         # Only OAuth has a per-user connect step; static/token servers use one
         # shared deployment secret and are either configured or not.
@@ -354,6 +355,7 @@ def build_mcp_config_safe(
     url: str,
     label: str,
     tools: list[str],
+    hint: str = "",
     scope: str = "",
     client_id: str = "",
     client_secret: str = "",
@@ -392,6 +394,7 @@ def build_mcp_config_safe(
             config = OAuthMCPIntegrationConfig(
                 url=url,
                 label=label,
+                hint=hint,
                 tools=tools,
                 scope=scope,
                 client_id=client_id,
@@ -402,10 +405,10 @@ def build_mcp_config_safe(
             )
         elif auth == "token":
             config = TokenMCPIntegrationConfig(
-                url=url, label=label, tools=tools, token=SecretStr(token)
+                url=url, label=label, hint=hint, tools=tools, token=SecretStr(token)
             )
         else:
-            config = StaticMCPIntegrationConfig(url=url, label=label, tools=tools)
+            config = StaticMCPIntegrationConfig(url=url, label=label, hint=hint, tools=tools)
     except ValidationError as e:
         reason = "; ".join(err["msg"] for err in e.errors()) or str(e)
         return StaticMCPIntegrationConfig(url="about:blank", label=label, tools=[]), reason
@@ -436,7 +439,7 @@ class MCPIntegration(DynamicMCPIntegration):
 
     URL is overridable because it is the value that genuinely varies per environment
     -- a self-hosted MCP server differs between staging and production, and having to
-    subclass for that would be absurd. TOOLS, LABEL and SCOPE follow for the same
+    subclass for that would be absurd. TOOLS, LABEL, HINT and SCOPE follow for the same
     reason. Class attributes remain the default, so a shipped integration works with
     only its secrets supplied.
 
@@ -469,6 +472,7 @@ class MCPIntegration(DynamicMCPIntegration):
     auth: str = "static"  # "static" | "token" | "oauth"
     default_tools: list[str] = []
     scope: str = ""
+    hint: str = ""
 
     #: Keys recognised in this integration's AI_SDK_INTEGRATIONS entry. Anything else is
     #: a typo, and a silently-ignored one produces a misleading error downstream -- a
@@ -478,6 +482,7 @@ class MCPIntegration(DynamicMCPIntegration):
             "AUTH",
             "URL",
             "LABEL",
+            "HINT",
             "TOOLS",
             "SCOPE",
             "TOKEN",
@@ -542,6 +547,7 @@ class MCPIntegration(DynamicMCPIntegration):
             auth=self._auth(),
             url=config.get("URL") or self.url,
             label=config.get("LABEL") or self.label or self.name.title(),
+            hint=config.get("HINT") or self.hint,
             tools=list(config.get("TOOLS") or self.default_tools),
             scope=config.get("SCOPE") or self.scope,
             client_id=self.secret("client_id"),

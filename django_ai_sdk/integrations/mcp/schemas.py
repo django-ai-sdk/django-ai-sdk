@@ -9,6 +9,7 @@ class StaticMCPIntegrationConfig(BaseModel):
     type: Literal["static"] = "static"
     url: str
     label: str = ""
+    hint: str = ""
     tools: list[str] = []
 
 
@@ -16,6 +17,7 @@ class TokenMCPIntegrationConfig(BaseModel):
     type: Literal["token"] = "token"
     url: str
     label: str = ""
+    hint: str = ""
     token: SecretStr
     tools: list[str] = []
 
@@ -30,6 +32,7 @@ class OAuthMCPIntegrationConfig(BaseModel):
     type: Literal["oauth"] = "oauth"
     url: str
     label: str = ""
+    hint: str = ""
     client_id: str = ""
     client_secret: SecretStr = SecretStr("")
     scope: str = ""
