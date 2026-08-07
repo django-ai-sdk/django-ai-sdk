@@ -21,7 +21,7 @@ from django_ai_sdk.permissions import ConflictError, ObjectPermissions, Permissi
 from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 
-from piratespeak.views_permissions import memory_permissions
+from .permissions import memory_permissions
 
 router = Router()
 

@@ -66,7 +66,9 @@ INSTALLED_APPS = [
     "django_ai_sdk.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
-    "piratespeak",
+    "apps.assistants",
+    "apps.memories",
+    "apps.integrations",
 ]
 
 MIDDLEWARE = [
@@ -213,30 +215,33 @@ AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 # Base classes available for runtime configured assistants
 AI_SDK_RUNTIME_ASSISTANT_BASES = [
-    "piratespeak.assistants.runtime.DefaultRuntimeAssistant",
+    "apps.assistants.assistants.runtime.DefaultRuntimeAssistant",
 ]
 
 # Tools selectable in runtime assistant configuration
 AI_SDK_RUNTIME_ASSISTANT_TOOLS = {
-    "get_today": "piratespeak.assistants.tools.get_today",
-    "get_memory_files": "piratespeak.assistants.tools.get_memory_files",
+    "get_today": "apps.assistants.tools.get_today",
+    "get_memory_files": "apps.assistants.tools.get_memory_files",
 }
 
 # Default Workflow actions
 AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "piratespeak.actions.ConsoleLogAction",
+    "console_log": "apps.assistants.actions.ConsoleLogAction",
 }
 
 # Default asssitants
 AI_SDK_ASSISTANTS = [
-    "piratespeak.assistants.pirate_basic.PirateBasicAssistant",
-    "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
+    "apps.assistants.assistants.pirate_basic.PirateBasicAssistant",
+    "apps.assistants.assistants.agent_swarm.AgentSwarmAssistant",
 ]
 
 # Permission overrides by domain
 AI_SDK_PERMISSIONS = {
     "memory": [
-        "piratespeak.permissions.AllowAnonymousMemoryPermission",
+        "apps.memories.permissions.AllowAnonymousMemoryPermission",
+    ],
+    "thread": [
+        "apps.assistants.permissions.DemoThreadPermission",
     ],
 }
 
@@ -275,7 +280,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
-    "EXCEPTION_HANDLER": "piratespeak.exceptions.api_exception_handler",
+    "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
 }
 
 # Allowed upload filetypes
@@ -289,3 +294,9 @@ AI_SDK_ALLOWED_FILES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+
+# HuggingFace models to pre-download for offline embedding use
+HF_PRELOAD_MODELS = [
+    "Qdrant/bm42-all-minilm-l6-v2-attentions",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+]

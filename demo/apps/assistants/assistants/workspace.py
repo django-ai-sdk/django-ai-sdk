@@ -31,7 +31,7 @@ from django_ai_sdk.storage.db import DbStorageAdapter
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-from piratespeak.assistants.tools import get_today
+from ..tools import get_today
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
