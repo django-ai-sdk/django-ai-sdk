@@ -50,8 +50,9 @@ T = TypeVar("T", bound=BaseModel)
 logger = get_logger(__name__)
 
 
-def _namespaced(integration_name: str, tool: Any) -> Any:
-    """Rename tool to {integration_name}_{tool.name}.
+def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
+    """Rename tool to {integration_name}_{tool.name} and prepend `hint` (if set)
+    to its description.
 
     Nothing stops two unrelated MCP servers from defining the same tool name
     (GitHub and Linear both have list_issues), and Haystack requires unique names
@@ -59,7 +60,10 @@ def _namespaced(integration_name: str, tool: Any) -> Any:
     integrations that happen to collide would fail agent construction outright.
     """
     try:
-        return dataclasses.replace(tool, name=f"{integration_name}_{tool.name}")
+        updates: dict[str, Any] = {"name": f"{integration_name}_{tool.name}"}
+        if hint:
+            updates["description"] = f"{tool.description}\n\n{hint}" if tool.description else hint
+        return dataclasses.replace(tool, **updates)
     except (TypeError, AttributeError):
         logger.warning(
             "Could not namespace tool %r from integration %r — left as-is, may "
@@ -627,7 +631,7 @@ class Agent(ABC, AgentInfoMixin):
             except Exception:
                 logger.exception("Failed to load tools for integration %r", integration.name)
                 return []
-            return [_namespaced(integration.name, tool) for tool in tools]
+            return [_namespaced(integration.name, tool, integration.hint) for tool in tools]
 
         services = (await get_integrations(self.integrations)).values()
         allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]

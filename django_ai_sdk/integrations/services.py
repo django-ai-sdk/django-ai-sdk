@@ -86,6 +86,7 @@ class IntegrationService:
             return IntegrationOut(
                 name=name,
                 label=integration.label,
+                hint=integration.hint,
                 kind=integration.kind,
                 status=status,
                 supports_connect=integration.supports_connect,

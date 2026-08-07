@@ -919,6 +919,75 @@ class TestIntegrationToolNamespacing:
         assert {t.name for t in tools} == {"first_list_issues", "second_list_issues"}
 
 
+class TestIntegrationHint:
+    """A tool's own description says what it does, not what this deployment's
+    instance of it actually contains -- Integration.hint fills that gap by getting
+    prepended to every tool's description at the same point tools get namespaced."""
+
+    @dataclass
+    class FakeToolWithDescription:
+        name: str
+        description: str
+
+    async def test_hint_is_prepended_to_every_tool_description(self):
+        from django_ai_sdk.agent import Agent
+
+        class HintedIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "notion"
+            hint = "Contains our company wiki and HR docs"
+            tools = [
+                lambda **kwargs: TestIntegrationHint.FakeToolWithDescription(
+                    name="search", description="Search pages"
+                )
+            ]
+
+        class FakeAgent(Agent):
+            name = "Fake"
+            description = ""
+            model = "gpt-fake"
+            integrations = ["notion"]
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                raise NotImplementedError
+
+        register(HintedIntegration())
+
+        tools = await FakeAgent()._get_integration_tools()
+
+        assert len(tools) == 1
+        assert tools[0].description == (
+            "Search pages\n\nContains our company wiki and HR docs"
+        )
+
+    async def test_no_hint_leaves_the_description_untouched(self):
+        from django_ai_sdk.agent import Agent
+
+        class UnhintedIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "plain"
+            tools = [
+                lambda **kwargs: TestIntegrationHint.FakeToolWithDescription(
+                    name="search", description="Search pages"
+                )
+            ]
+
+        class FakeAgent(Agent):
+            name = "Fake"
+            description = ""
+            model = "gpt-fake"
+            integrations = ["plain"]
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                raise NotImplementedError
+
+        register(UnhintedIntegration())
+
+        tools = await FakeAgent()._get_integration_tools()
+
+        assert tools[0].description == "Search pages"
+
+
 @pytest.mark.django_db
 class TestOAuthTokenRefresh:
     """refresh_oauth_token() goes through Authlib's AsyncOAuth2Client. These cover the

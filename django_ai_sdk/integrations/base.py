@@ -65,8 +65,12 @@ class Integration(ABC):
     name: str = ""
     label: str = ""
 
+    #: What this deployment's instance of the integration actually contains, e.g.
+    #: "Company wiki and HR docs" for a Notion server. Prepended to every tool's
+    #: description (see assistant._namespaced). Empty adds nothing.
+    hint: str = ""
+
     #: Permission classes gating this integration (like Agent.permissions).
-    #: Empty falls back to the INTEGRATIONS domain default (see permissions.py).
     permissions: list[type[BasePermission] | BasePermission] = []
     domain: PermissionDomain = PermissionDomain.INTEGRATIONS
 
