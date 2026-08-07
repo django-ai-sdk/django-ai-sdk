@@ -1,6 +1,6 @@
 """Shared contract and caching for integrations.
 
-Integration wraps something an assistant plugs in, such as an MCP server or a
+Integration wraps something an agent plugs in, such as an MCP server or a
 hand-written API wrapper. ResilientCache caches a backend's live-fetched data per key,
 with stale-while-revalidate refresh and a circuit breaker for repeated failures. The
 cache and breaker mechanics come from cashews; this module adds a small
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
     from django_ai_sdk.permissions import BasePermission
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class Integration(ABC):
     Every integration, whether an MCP server or a hand-written API wrapper, is one
     Integration subclass, living in its app's integration.py. It owns the
     integration's tools, health, permissions, connection lifecycle and credential
-    refresh, and is what the Assistant and the host project's integrations endpoints
+    refresh, and is what the Agent and the host project's integrations endpoints
     talk to. An IntegrationAppConfig (see apps.py) constructs it and registers it
     into the process registry on app ready().
     """
@@ -70,8 +70,7 @@ class Integration(ABC):
     #: description (see assistant._namespaced). Empty adds nothing.
     hint: str = ""
 
-    #: Permission classes gating this integration (like Assistant.permissions).
-    #: Empty falls back to the INTEGRATIONS domain default (see permissions.py).
+    #: Permission classes gating this integration (like Agent.permissions).
     permissions: list[type[BasePermission] | BasePermission] = []
     domain: PermissionDomain = PermissionDomain.INTEGRATIONS
 
@@ -131,14 +130,14 @@ class Integration(ABC):
     async def get_tools(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
         thread_id: str = "",
     ) -> list[Any]:
         """Return this integration's tool objects.
 
-        assistant is the calling Assistant instance. thread_id is the active
-        conversation, forwarded from Assistant.get_tools(). Most integrations (MCP
-        servers, external APIs) are user/assistant-scoped and can ignore it; it
+        agent is the calling Agent instance. thread_id is the active
+        conversation, forwarded from Agent.get_tools(). Most integrations (MCP
+        servers, external APIs) are user/agent-scoped and can ignore it; it
         exists for the rare integration whose tools need to know which thread
         they're running in, e.g. one that lists documents attached to that
         conversation.
@@ -148,7 +147,7 @@ class Integration(ABC):
     async def get_status(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
     ) -> IntegrationStatus:
         """Return this integration's current health."""
 

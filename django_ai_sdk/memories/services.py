@@ -9,8 +9,8 @@ from django.contrib.auth import get_user_model
 from django.db.models import Count, QuerySet
 from django.utils import timezone
 
-from django_ai_sdk.assistants.registry import registry
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.agents.registry import registry
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.files.common import compute_file_hash
 from django_ai_sdk.memories.models import (
@@ -36,7 +36,7 @@ from django_ai_sdk.permissions import (
     Operation,
     PermissionDomain,
     PermissionsMixin,
-    get_assistant_permissions,
+    get_agent_permissions,
     has_perms,
 )
 from django_ai_sdk.tasks import TaskStatus, aget_task_status
@@ -335,50 +335,48 @@ class MemoryService(PermissionsMixin):
         ]
 
     @classmethod
-    async def _get_assistant_memories(cls, assistant_id: str) -> QuerySet[Memory]:
-        """Resolve the assistant's configured memories as a queryset."""
+    async def _get_agent_memories(cls, agent_id: str) -> QuerySet[Memory]:
+        """Resolve the agent's configured memories as a queryset."""
         try:
-            assistant = await AssistantService.get(assistant_id)
+            agent = await AgentService.get(agent_id)
         except ValueError:
             return Memory.objects.none()
-        slugs: list[str] = getattr(assistant, "memories", [])
+        slugs: list[str] = getattr(agent, "memories", [])
         if not slugs:
             return Memory.objects.none()
         return Memory.objects.filter(slug__in=slugs).distinct()
 
     @classmethod
-    async def get_assistant_memories(cls, assistant_id: str) -> list[str]:
-        qs = await cls._get_assistant_memories(assistant_id)
+    async def get_agent_memories(cls, agent_id: str) -> list[str]:
+        qs = await cls._get_agent_memories(agent_id)
         return [str(m.id) async for m in qs]
 
     @classmethod
-    async def get_assistant_memories_for_user(
-        cls, assistant_id: str, *, user: UserType
-    ) -> list[Memory]:
-        """Return the assistant's configured memories the user can ``VIEW_MEMORY``.
+    async def get_agent_memories_for_user(cls, agent_id: str, *, user: UserType) -> list[Memory]:
+        """Return the agent's configured memories the user can ``VIEW_MEMORY``.
 
         Filters out memories the user doesn't have permission to see, so the
         caller never receives unreadable memories.
         """
-        qs = await cls._get_assistant_memories(assistant_id)
+        qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.VIEW_MEMORY, queryset=qs)
         return [m async for m in qs]
 
     @classmethod
     async def link_memories(
         cls,
-        assistant_id: str,
+        agent_id: str,
         thread_id: str,
         *,
         user: UserType,
     ) -> None:
-        """Link an assistant's configured memories to a thread.
+        """Link an agent's configured memories to a thread.
 
         Skips memories the user doesn't have ``LINK_MEMORY`` permission for,
         consistent with the per-request retrieval filter, a private memory
         the user cannot read is simply not linked, rather than blocking by raise.
         """
-        qs = await cls._get_assistant_memories(assistant_id)
+        qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.LINK_MEMORY, queryset=qs)
         async for memory in qs:
             await ThreadMemory.objects.aget_or_create(thread_id=thread_id, memory=memory)
@@ -386,16 +384,16 @@ class MemoryService(PermissionsMixin):
     @classmethod
     async def unlink_memories(
         cls,
-        assistant_id: str,
+        agent_id: str,
         thread_id: str,
         *,
         user: UserType,
     ) -> None:
-        """Unlink an assistant's configured memories from a thread.
+        """Unlink an agent's configured memories from a thread.
 
         Only unlinks memories the user has ``UNLINK_MEMORY`` permission for.
         """
-        qs = await cls._get_assistant_memories(assistant_id)
+        qs = await cls._get_agent_memories(agent_id)
         qs = cls.has_queryset_perms(user, Operation.UNLINK_MEMORY, queryset=qs)
         if not await qs.aexists():
             return
@@ -752,15 +750,15 @@ class MemoryService(PermissionsMixin):
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
-        assistant_id = thread.metadata.get("assistant_id") or None
-        if assistant_id is None:
-            raise ValueError("Thread has no assistant")
-        assistant = await AssistantService.get(assistant_id)
+        agent_id = thread.metadata.get("agent_id") or None
+        if agent_id is None:
+            raise ValueError("Thread has no agent")
+        agent = await AgentService.get(agent_id)
         await has_perms(
             user,
             Operation.UPLOAD_FILE,
             thread,
-            permissions=get_assistant_permissions(assistant),
+            permissions=get_agent_permissions(agent),
         )
         memory = await cls.get_or_create_thread_file_memory(thread_id)
 
@@ -794,7 +792,7 @@ class MemoryService(PermissionsMixin):
         )
 
         task_result = await process_document_upload.aenqueue(
-            str(entry_doc.id), str(memory.id), assistant_id
+            str(entry_doc.id), str(memory.id), agent_id
         )
         await EntryDocument.objects.filter(
             id=entry_doc.id,
@@ -822,15 +820,15 @@ class MemoryService(PermissionsMixin):
             Thread.objects.select_related("file_memory"), id=thread_id
         )
 
-        assistant_id = thread.metadata.get("assistant_id") or None
-        if assistant_id is None:
-            raise ValueError("Thread has no assistant")
-        assistant = await AssistantService.get(assistant_id)
+        agent_id = thread.metadata.get("agent_id") or None
+        if agent_id is None:
+            raise ValueError("Thread has no agent")
+        agent = await AgentService.get(agent_id)
         await has_perms(
             user,
             Operation.VIEW_FILE,
             thread,
-            permissions=get_assistant_permissions(assistant),
+            permissions=get_agent_permissions(agent),
         )
 
         if not thread.file_memory_id:
@@ -853,15 +851,15 @@ class MemoryService(PermissionsMixin):
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
-        assistant_id = thread.metadata.get("assistant_id") or None
-        if assistant_id is None:
-            raise ValueError("Thread has no assistant")
-        assistant = await AssistantService.get(assistant_id)
+        agent_id = thread.metadata.get("agent_id") or None
+        if agent_id is None:
+            raise ValueError("Thread has no agent")
+        agent = await AgentService.get(agent_id)
         await has_perms(
             user,
             Operation.DELETE_FILE,
             thread,
-            permissions=get_assistant_permissions(assistant),
+            permissions=get_agent_permissions(agent),
         )
         if not thread.file_memory_id:
             return
@@ -935,8 +933,8 @@ class MemoryService(PermissionsMixin):
         ``COMPLETED`` documents are skipped (re-processing would create duplicate
         index entries).
 
-        Recovers ``assistant_id`` from the owning thread (for thread-file
-        memories) so the assistant's file pipeline (e.g. OCR) is used again,
+        Recovers ``agent_id`` from the owning thread (for thread-file
+        memories) so the agent's file pipeline (e.g. OCR) is used again,
         not just the default text pipeline.
         """
         _RETRYABLE = {
@@ -958,18 +956,18 @@ class MemoryService(PermissionsMixin):
                 f"Only {sorted(s.value for s in _RETRYABLE)} are retryable."
             )
 
-        assistant_id = None
+        agent_id = None
         thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
         if thread is not None:
-            assistant_id = thread.metadata.get("assistant_id")
-            if assistant_id is None:
-                raise ValueError("Thread has no assistant")
-            assistant = await AssistantService.get(assistant_id)
+            agent_id = thread.metadata.get("agent_id")
+            if agent_id is None:
+                raise ValueError("Thread has no agent")
+            agent = await AgentService.get(agent_id)
             await has_perms(
                 user,
                 Operation.UPLOAD_FILE,
                 thread,
-                permissions=get_assistant_permissions(assistant),
+                permissions=get_agent_permissions(agent),
             )
         else:
             await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
@@ -989,7 +987,7 @@ class MemoryService(PermissionsMixin):
         )
 
         task_result = await process_document_upload.aenqueue(
-            str(entry_doc.id), str(memory.id), assistant_id
+            str(entry_doc.id), str(memory.id), agent_id
         )
         await EntryDocument.objects.filter(
             id=entry_doc.id,
@@ -1028,15 +1026,15 @@ class MemoryService(PermissionsMixin):
 
         thread = await Thread.objects.filter(file_memory_id=memory.id).afirst()
         if thread is not None:
-            assistant_id = thread.metadata.get("assistant_id")
-            if assistant_id is None:
-                raise ValueError("Thread has no assistant")
-            assistant = await AssistantService.get(assistant_id)
+            agent_id = thread.metadata.get("agent_id")
+            if agent_id is None:
+                raise ValueError("Thread has no agent")
+            agent = await AgentService.get(agent_id)
             await has_perms(
                 user,
                 Operation.UPLOAD_FILE,
                 thread,
-                permissions=get_assistant_permissions(assistant),
+                permissions=get_agent_permissions(agent),
             )
         else:
             await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
@@ -1087,10 +1085,10 @@ class MemoryService(PermissionsMixin):
 
         memory_id = str(entry.memory_id)
 
-        for assistant in registry.all().values():
-            if assistant.rag_provider is None:
+        for agent in registry.all().values():
+            if agent.rag_provider is None:
                 continue
-            rag = assistant.rag_provider.get_cached_rag_instance(assistant, memory_id)
+            rag = agent.rag_provider.get_cached_rag_instance(agent, memory_id)
             if rag is None:
                 continue
             chunk = await rag.get_chunk(chunk_id)

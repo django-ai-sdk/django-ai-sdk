@@ -241,7 +241,7 @@ class EntryDocument(models.Model):
     task_id = models.CharField(max_length=64, null=True, blank=True)
     # Pipeline-defined progress marker (e.g. "ocr", "extracting"), null except
     # while processing_status=PROCESSING. Not a TextChoices enum: any
-    # assistant's custom processor/transform can supply its own step string.
+    # agent's custom processor/transform can supply its own step string.
     processing_step = models.CharField(max_length=32, null=True, blank=True, default=None)
     processing_error = models.TextField(blank=True, default="")
     # Checked cooperatively at each pipeline step boundary (see

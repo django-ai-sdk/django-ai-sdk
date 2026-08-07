@@ -114,45 +114,45 @@ class TestPermissions:
         with pytest.raises(PermissionDenied):
             await check_object_permissions(user, Operation.DELETE_THREAD, obj, [DenyAll, AllowAll])
 
-    async def test_view_assistant_allows_with_allow_all(self):
+    async def test_view_agent_allows_with_allow_all(self):
         from django_ai_sdk.permissions import AllowAll, Operation, check_permissions
 
-        await check_permissions(None, Operation.VIEW_ASSISTANT, [AllowAll])
+        await check_permissions(None, Operation.VIEW_AGENT, [AllowAll])
 
-    async def test_view_assistant_denies_anonymous_with_is_authenticated(self):
+    async def test_view_agent_denies_anonymous_with_is_authenticated(self):
         from django_ai_sdk.permissions import IsAuthenticated, Operation, PermissionDenied, check_permissions
 
         with pytest.raises(PermissionDenied):
-            await check_permissions(None, Operation.VIEW_ASSISTANT, [IsAuthenticated])
+            await check_permissions(None, Operation.VIEW_AGENT, [IsAuthenticated])
 
-    async def test_view_assistant_denies_regular_user_with_is_admin(self):
+    async def test_view_agent_denies_regular_user_with_is_admin(self):
         from django_ai_sdk.permissions import IsAdminUser, Operation, PermissionDenied, check_permissions
 
         user = MagicMock(is_staff=False, is_superuser=False)
         with pytest.raises(PermissionDenied):
-            await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
+            await check_permissions(user, Operation.VIEW_AGENT, [IsAdminUser])
 
-    async def test_view_assistant_allows_admin_with_is_admin(self):
+    async def test_view_agent_allows_admin_with_is_admin(self):
         from django_ai_sdk.permissions import IsAdminUser, Operation, check_permissions
 
         user = MagicMock(is_staff=True)
-        await check_permissions(user, Operation.VIEW_ASSISTANT, [IsAdminUser])
+        await check_permissions(user, Operation.VIEW_AGENT, [IsAdminUser])
 
     # --- get_domain_permissions ---
 
     async def test_get_domain_permissions_falls_back_to_default(self):
-        from django_ai_sdk.permissions import AssistantDefaultPermission, get_domain_permissions, PermissionDomain
+        from django_ai_sdk.permissions import AgentDefaultPermission, get_domain_permissions, PermissionDomain
 
         get_domain_permissions.cache_clear()
-        result = get_domain_permissions(PermissionDomain.ASSISTANT)
-        assert result == [AssistantDefaultPermission]
+        result = get_domain_permissions(PermissionDomain.AGENT)
+        assert result == [AgentDefaultPermission]
 
     async def test_get_domain_permissions_from_setting_single(self):
         from django_ai_sdk.permissions import DenyAll, get_domain_permissions, PermissionDomain
 
-        with override_settings(AI_SDK_PERMISSIONS={"assistant": ["django_ai_sdk.permissions.DenyAll"]}):
+        with override_settings(AI_SDK_PERMISSIONS={"agent": ["django_ai_sdk.permissions.DenyAll"]}):
             get_domain_permissions.cache_clear()
-            result = get_domain_permissions(PermissionDomain.ASSISTANT)
+            result = get_domain_permissions(PermissionDomain.AGENT)
             assert result == [DenyAll]
         get_domain_permissions.cache_clear()
 
@@ -161,32 +161,32 @@ class TestPermissions:
 
         with override_settings(
             AI_SDK_PERMISSIONS={
-                "assistant": [
+                "agent": [
                     "django_ai_sdk.permissions.DenyAll",
                     "django_ai_sdk.permissions.IsAuthenticated",
                 ]
             }
         ):
             get_domain_permissions.cache_clear()
-            result = get_domain_permissions(PermissionDomain.ASSISTANT)
+            result = get_domain_permissions(PermissionDomain.AGENT)
             assert result == [DenyAll, IsAuthenticated]
         get_domain_permissions.cache_clear()
 
-    async def test_get_domain_permissions_used_as_fallback_in_assistant_permissions(self):
-        from django_ai_sdk.assistants.services import AssistantService
+    async def test_get_domain_permissions_used_as_fallback_in_agent_permissions(self):
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import AllowAll, DenyAll, get_domain_permissions, PermissionDomain
 
         get_domain_permissions.cache_clear()
-        with override_settings(AI_SDK_PERMISSIONS={"assistant": ["django_ai_sdk.permissions.DenyAll"]}):
+        with override_settings(AI_SDK_PERMISSIONS={"agent": ["django_ai_sdk.permissions.DenyAll"]}):
             get_domain_permissions.cache_clear()
             reg = MagicMock()
-            assistant_a = MagicMock(name="a", id="a")
-            del assistant_a.permissions
-            assistant_b = MagicMock(name="b", id="b", permissions=[AllowAll])
-            reg.visible.return_value = {"a": assistant_a, "b": assistant_b}
+            agent_a = MagicMock(name="a", id="a")
+            del agent_a.permissions
+            agent_b = MagicMock(name="b", id="b", permissions=[AllowAll])
+            reg.visible.return_value = {"a": agent_a, "b": agent_b}
             reg.get.side_effect = lambda id: reg.visible.return_value.get(id)
-            with patch("django_ai_sdk.assistants.services.registry", reg):
-                summaries = await AssistantService.list_assistants(None)
+            with patch("django_ai_sdk.agents.services.registry", reg):
+                summaries = await AgentService.list_agents(None)
                 assert len(summaries) == 1
                 assert summaries[0]["id"] == "b"
 
@@ -425,66 +425,66 @@ class TestMemoryDefaultPermission:
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestAssistantDefaultPermission:
-    """Tests for AssistantDefaultPermission three-tier access model."""
+class TestAgentDefaultPermission:
+    """Tests for AgentDefaultPermission three-tier access model."""
 
-    async def _make_assistant_user(self, user, can_manage=False):
-        """Helper to create an assistant with a user entry."""
-        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
+    async def _make_agent_user(self, user, can_manage=False):
+        """Helper to create an agent with a user entry."""
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
 
-        config = AssistantSettings(name="Test Assistant", slug=str(uuid4()), assistant="test")
+        config = AgentSettings(name="Test Agent", slug=str(uuid4()), agent="test")
         await config.asave()
-        assistant_user = AssistantUser(assistant=config, user=user, can_manage=can_manage)
-        await assistant_user.asave()
+        agent_user = AgentUser(agent=config, user=user, can_manage=can_manage)
+        await agent_user.asave()
         return config
 
-    async def _make_assistant_group(self, user, can_manage=False, assistant=None):
-        """Helper to link *user* to *assistant* (or a fresh one) via a group."""
+    async def _make_agent_group(self, user, can_manage=False, agent=None):
+        """Helper to link *user* to *agent* (or a fresh one) via a group."""
         from asgiref.sync import sync_to_async
         from django.contrib.auth.models import Group
 
-        from django_ai_sdk.assistants.models import AssistantGroup, AssistantSettings
+        from django_ai_sdk.agents.models import AgentGroup, AgentSettings
 
-        if assistant is None:
-            assistant = AssistantSettings(
-                name="Group Assistant", slug=str(uuid4()), assistant="test"
+        if agent is None:
+            agent = AgentSettings(
+                name="Group Agent", slug=str(uuid4()), agent="test"
             )
-            await assistant.asave()
+            await agent.asave()
 
         group = Group(name=f"Test Group {uuid4()}")
         await group.asave()
         await sync_to_async(user.groups.add)(group)
 
-        assistant_group = AssistantGroup(assistant=assistant, group=group, can_manage=can_manage)
-        await assistant_group.asave()
-        return assistant
+        agent_group = AgentGroup(agent=agent, group=group, can_manage=can_manage)
+        await agent_group.asave()
+        return agent
 
-    async def _make_private_assistant(self):
-        from django_ai_sdk.assistants.models import AssistantSettings
+    async def _make_private_agent(self):
+        from django_ai_sdk.agents.models import AgentSettings
 
-        config = AssistantSettings(name="Private Assistant", slug=str(uuid4()), assistant="test")
+        config = AgentSettings(name="Private Agent", slug=str(uuid4()), agent="test")
         await config.asave()
         return config
 
     async def test_manager_can_do_anything(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         manager = await UserFactory.acreate()
-        config = await self._make_assistant_user(manager, can_manage=True)
+        config = await self._make_agent_user(manager, can_manage=True)
 
         for op in Operation:
             await check_object_permissions(
-                manager, op, config, [AssistantDefaultPermission]
+                manager, op, config, [AgentDefaultPermission]
             )
 
     async def test_owner_cannot_manage(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             PermissionDenied,
             check_object_permissions,
@@ -492,33 +492,33 @@ class TestAssistantDefaultPermission:
         from tests.factories.db import UserFactory
 
         owner = await UserFactory.acreate()
-        config = await self._make_assistant_user(owner, can_manage=False)
+        config = await self._make_agent_user(owner, can_manage=False)
 
-        for op in AssistantDefaultPermission.MANAGE:
+        for op in AgentDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
-                    owner, op, config, [AssistantDefaultPermission]
+                    owner, op, config, [AgentDefaultPermission]
                 )
 
     async def test_owner_can_view_and_chat(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         owner = await UserFactory.acreate()
-        config = await self._make_assistant_user(owner, can_manage=False)
+        config = await self._make_agent_user(owner, can_manage=False)
 
-        for op in {Operation.VIEW_ASSISTANT, Operation.CHAT}:
+        for op in {Operation.VIEW_AGENT, Operation.CHAT}:
             await check_object_permissions(
-                owner, op, config, [AssistantDefaultPermission]
+                owner, op, config, [AgentDefaultPermission]
             )
 
     async def test_stranger_cannot_access(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             PermissionDenied,
             check_object_permissions,
@@ -526,33 +526,33 @@ class TestAssistantDefaultPermission:
         from tests.factories.db import UserFactory
 
         stranger = await UserFactory.acreate()
-        config = await self._make_private_assistant()
+        config = await self._make_private_agent()
 
         for op in Operation:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
-                    stranger, op, config, [AssistantDefaultPermission]
+                    stranger, op, config, [AgentDefaultPermission]
                 )
 
     async def test_group_member_can_view_and_chat(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         member = await UserFactory.acreate()
-        config = await self._make_assistant_group(member, can_manage=False)
+        config = await self._make_agent_group(member, can_manage=False)
 
-        for op in {Operation.VIEW_ASSISTANT, Operation.CHAT}:
+        for op in {Operation.VIEW_AGENT, Operation.CHAT}:
             await check_object_permissions(
-                member, op, config, [AssistantDefaultPermission]
+                member, op, config, [AgentDefaultPermission]
             )
 
     async def test_group_member_cannot_manage(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             PermissionDenied,
             check_object_permissions,
@@ -560,65 +560,65 @@ class TestAssistantDefaultPermission:
         from tests.factories.db import UserFactory
 
         member = await UserFactory.acreate()
-        config = await self._make_assistant_group(member, can_manage=False)
+        config = await self._make_agent_group(member, can_manage=False)
 
-        for op in AssistantDefaultPermission.MANAGE:
+        for op in AgentDefaultPermission.MANAGE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
-                    member, op, config, [AssistantDefaultPermission]
+                    member, op, config, [AgentDefaultPermission]
                 )
 
     async def test_group_manager_can_manage(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         manager = await UserFactory.acreate()
-        config = await self._make_assistant_group(manager, can_manage=True)
+        config = await self._make_agent_group(manager, can_manage=True)
 
         for op in Operation:
             await check_object_permissions(
-                manager, op, config, [AssistantDefaultPermission]
+                manager, op, config, [AgentDefaultPermission]
             )
 
     async def test_group_manage_grant_overrides_weaker_direct_membership(self):
         """A user's direct (non-manager) membership must not mask a manager
         grant coming from a group they also belong to."""
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
-        config = await self._make_assistant_user(user, can_manage=False)
-        await self._make_assistant_group(user, can_manage=True, assistant=config)
+        config = await self._make_agent_user(user, can_manage=False)
+        await self._make_agent_group(user, can_manage=True, agent=config)
 
-        for op in AssistantDefaultPermission.MANAGE:
-            await check_object_permissions(user, op, config, [AssistantDefaultPermission])
+        for op in AgentDefaultPermission.MANAGE:
+            await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
         """The reverse: a manager-level direct membership must not be masked
-        by a weaker group membership on the same assistant."""
+        by a weaker group membership on the same agent."""
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             check_object_permissions,
         )
         from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
-        config = await self._make_assistant_user(user, can_manage=True)
-        await self._make_assistant_group(user, can_manage=False, assistant=config)
+        config = await self._make_agent_user(user, can_manage=True)
+        await self._make_agent_group(user, can_manage=False, agent=config)
 
-        for op in AssistantDefaultPermission.MANAGE:
-            await check_object_permissions(user, op, config, [AssistantDefaultPermission])
+        for op in AgentDefaultPermission.MANAGE:
+            await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
     async def test_anonymous_denied(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             PermissionDenied,
             check_permissions,
@@ -626,25 +626,25 @@ class TestAssistantDefaultPermission:
 
         with pytest.raises(PermissionDenied):
             await check_permissions(
-                None, Operation.VIEW_ASSISTANT, [AssistantDefaultPermission]
+                None, Operation.VIEW_AGENT, [AgentDefaultPermission]
             )
 
     async def test_authenticated_allowed_at_permission_level(self):
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_permissions,
         )
 
         user = MagicMock(is_authenticated=True)
         await check_permissions(
-            user, Operation.VIEW_ASSISTANT, [AssistantDefaultPermission]
+            user, Operation.VIEW_AGENT, [AgentDefaultPermission]
         )
 
-    async def test_non_assistant_object_passes_through(self):
-        """AssistantDefaultPermission should not interfere with non-AssistantSettings objects."""
+    async def test_non_agent_object_passes_through(self):
+        """AgentDefaultPermission should not interfere with non-AgentSettings objects."""
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
@@ -653,77 +653,77 @@ class TestAssistantDefaultPermission:
         user = await UserFactory.acreate()
         some_obj = MagicMock()
 
-        # Should not raise for any operation on non-AssistantSettings objects
+        # Should not raise for any operation on non-AgentSettings objects
         for op in Operation:
             await check_object_permissions(
-                user, op, some_obj, [AssistantDefaultPermission]
+                user, op, some_obj, [AgentDefaultPermission]
             )
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestAssistantServicePermissions:
-    """Permission checks in AssistantService (list_assistants, get_assistant_info)."""
+class TestAgentServicePermissions:
+    """Permission checks in AgentService (list_agents, get_agent_info)."""
 
-    async def test_list_assistants_filters_by_permission(self):
-        from django_ai_sdk.assistants.models import AssistantSettings
-        from django_ai_sdk.assistants.services import AssistantService
+    async def test_list_agents_filters_by_permission(self):
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import AllowAll, DenyAll
 
         reg = MagicMock()
-        allow_assistant = MagicMock(
+        allow_agent = MagicMock(
             name="allow", id="allow-id", permissions=[AllowAll]
         )
-        deny_assistant = MagicMock(name="deny", id="deny-id", permissions=[DenyAll])
+        deny_agent = MagicMock(name="deny", id="deny-id", permissions=[DenyAll])
 
-        reg.visible.return_value = {"allow": allow_assistant, "deny": deny_assistant}
+        reg.visible.return_value = {"allow": allow_agent, "deny": deny_agent}
         reg.get.side_effect = lambda id: reg.visible.return_value.get(id)
 
-        # Patch DB query to yield nothing so only registry assistants are tested
-        with patch("django_ai_sdk.assistants.services.registry", reg):
+        # Patch DB query to yield nothing so only registry agents are tested
+        with patch("django_ai_sdk.agents.services.registry", reg):
             with patch.object(
-                AssistantSettings.objects, "filter", return_value=AssistantSettings.objects.none()
+                AgentSettings.objects, "filter", return_value=AgentSettings.objects.none()
             ):
-                summaries = await AssistantService.list_assistants(None)
+                summaries = await AgentService.list_agents(None)
                 assert len(summaries) == 1
                 assert summaries[0]["id"] == "allow"
 
-    async def test_get_assistant_info_allows_with_view_permission(self):
-        from django_ai_sdk.assistants.services import AssistantService
+    async def test_get_agent_info_allows_with_view_permission(self):
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import AllowAll
 
         reg = MagicMock()
-        assistant = MagicMock(name="test", id="test-id", permissions=[AllowAll])
-        assistant.info.return_value = {"id": "test-id", "name": "Test"}
+        agent = MagicMock(name="test", id="test-id", permissions=[AllowAll])
+        agent.info.return_value = {"id": "test-id", "name": "Test"}
 
         user = MagicMock(is_authenticated=True)
-        reg.get.return_value = assistant
-        with patch("django_ai_sdk.assistants.services.registry", reg):
-            info = await AssistantService.get_assistant_info("test-id", user=user)
+        reg.get.return_value = agent
+        with patch("django_ai_sdk.agents.services.registry", reg):
+            info = await AgentService.get_agent_info("test-id", user=user)
             assert info["id"] == "test-id"
 
-    async def test_get_assistant_info_denies_without_permission(self):
-        from django_ai_sdk.assistants.services import AssistantService
+    async def test_get_agent_info_denies_without_permission(self):
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import DenyAll, PermissionDenied
 
         user = MagicMock(is_authenticated=True)
         reg = MagicMock()
-        assistant = MagicMock(name="test", id="test-id", permissions=[DenyAll])
+        agent = MagicMock(name="test", id="test-id", permissions=[DenyAll])
 
-        reg.get.return_value = assistant
-        with patch("django_ai_sdk.assistants.services.registry", reg):
+        reg.get.return_value = agent
+        with patch("django_ai_sdk.agents.services.registry", reg):
             with pytest.raises(PermissionDenied):
-                await AssistantService.get_assistant_info("test-id", user=user)
+                await AgentService.get_agent_info("test-id", user=user)
 
-    async def test_get_assistant_info_raises_on_unknown(self):
-        from django_ai_sdk.assistants.services import AssistantService
+    async def test_get_agent_info_raises_on_unknown(self):
+        from django_ai_sdk.agents.services import AgentService
 
         user = MagicMock(is_authenticated=True)
         reg = MagicMock()
         reg.get.return_value = None
-        with patch("django_ai_sdk.assistants.services.registry", reg):
+        with patch("django_ai_sdk.agents.services.registry", reg):
             with pytest.raises(ValueError, match="not found"):
-                await AssistantService.get_assistant_info("nonexistent", user=user)
+                await AgentService.get_agent_info("nonexistent", user=user)
 
 
 # ============================================================================
@@ -816,7 +816,7 @@ class TestObjectPermissionsSchema:
     """Tests for the ObjectPermissions schema and ObjectPermsSchema mixin."""
 
     async def test_default_values_all_false(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions()
         assert perms.can_read is False
@@ -824,7 +824,7 @@ class TestObjectPermissionsSchema:
         assert perms.can_manage is False
 
     async def test_custom_values(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
         assert perms.can_read is True
@@ -832,14 +832,14 @@ class TestObjectPermissionsSchema:
         assert perms.can_manage is True
 
     async def test_serializes_as_dict(self):
-        from piratespeak.views_permissions import ObjectPermissions
+        from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=True, can_manage=False)
         d = perms.model_dump()
         assert d == {"can_read": True, "can_write": True, "can_manage": False}
 
     async def test_memory_out_response_has_permissions_field(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         instance = MemoryOutResponse(
@@ -857,7 +857,7 @@ class TestObjectPermissionsSchema:
         assert instance.permissions.can_read is False
 
     async def test_memory_out_response_with_custom_permissions(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         perms = ObjectPermissions(can_read=True, can_write=False, can_manage=True)
@@ -876,7 +876,7 @@ class TestObjectPermissionsSchema:
         assert instance.permissions.can_manage is True
 
     async def test_multiple_inheritance_with_memory_out(self):
-        from piratespeak.views_memories_ninja import MemoryOutResponse
+        from apps.memories.views.ninja import MemoryOutResponse
         from django_ai_sdk.permissions import ObjectPermissions
 
         instance = MemoryOutResponse(
@@ -898,7 +898,7 @@ class TestObjectPermissionsSchema:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestObjectPermissionsCalculators:
-    """Integration tests for memory/thread/assistant permission calculators."""
+    """Integration tests for memory/thread/agent permission calculators."""
 
     async def _make_user(self):
         from tests.factories.db import UserFactory
@@ -909,7 +909,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_owner_gets_all(self):
         from django_ai_sdk.memories.models import Memory, MemoryUser
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Owner Mem", is_public=False)
@@ -922,7 +922,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_stranger_on_public_only_read(self):
         from django_ai_sdk.memories.models import Memory
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Public Mem", is_public=True)
@@ -937,7 +937,7 @@ class TestObjectPermissionsCalculators:
 
     async def test_memory_permissions_stranger_on_private_gets_none(self):
         from django_ai_sdk.memories.models import Memory
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         memory = await Memory.objects.acreate(name="Private Mem", is_public=False)
@@ -948,7 +948,7 @@ class TestObjectPermissionsCalculators:
         assert perms.can_manage is False
 
     async def test_memory_permissions_nonexistent_memory_returns_default(self):
-        from piratespeak.views_permissions import memory_permissions
+        from apps.memories.views.permissions import memory_permissions
 
         user = await self._make_user()
         perms = await memory_permissions(user, "nonexistent-id")
@@ -963,13 +963,13 @@ class TestObjectPermissionsCalculators:
 
         from django_ai_sdk.storage.db import DbStorageAdapter
         from django_ai_sdk.storage.services import ThreadService
-        from piratespeak.views_permissions import thread_permissions
+        from apps.agents.views.permissions import thread_permissions
 
         user = await self._make_user()
         thread_id = str(uuid4())
         await DbStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test"},
+            metadata={"agent_id": "test"},
             user=user,
             thread_id=thread_id,
         )
@@ -983,14 +983,14 @@ class TestObjectPermissionsCalculators:
         from uuid import uuid4
 
         from django_ai_sdk.storage.db import DbStorageAdapter
-        from piratespeak.views_permissions import thread_permissions
+        from apps.agents.views.permissions import thread_permissions
 
         owner = await self._make_user()
         stranger = await self._make_user()
         thread_id = str(uuid4())
         await DbStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test"},
+            metadata={"agent_id": "test"},
             user=owner,
             thread_id=thread_id,
         )
@@ -1001,7 +1001,7 @@ class TestObjectPermissionsCalculators:
         assert perms.can_manage is False
 
     async def test_thread_permissions_nonexistent_returns_default(self):
-        from piratespeak.views_permissions import thread_permissions
+        from apps.agents.views.permissions import thread_permissions
 
         user = await self._make_user()
         perms = await thread_permissions(user, "nonexistent-id")
@@ -1009,70 +1009,70 @@ class TestObjectPermissionsCalculators:
         assert perms.can_write is False
         assert perms.can_manage is False
 
-    # --- assistant_permissions ---
+    # --- agent_permissions ---
 
-    async def test_assistant_permissions_owner_gets_all(self):
-        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from piratespeak.views_permissions import assistant_permissions
+    async def test_agent_permissions_owner_gets_all(self):
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
+        from apps.agents.views.permissions import agent_permissions
 
         user = await self._make_user()
-        config = await AssistantSettings.objects.acreate(
-            name="Test", slug="test-slug", assistant="test"
+        config = await AgentSettings.objects.acreate(
+            name="Test", slug="test-slug", agent="test"
         )
-        await AssistantUser.objects.acreate(assistant=config, user=user, can_manage=True)
+        await AgentUser.objects.acreate(agent=config, user=user, can_manage=True)
 
-        perms = await assistant_permissions(user, "test-slug")
+        perms = await agent_permissions(user, "test-slug")
         assert perms.can_read is True
         assert perms.can_write is True
         assert perms.can_manage is True
 
-    async def test_assistant_permissions_stranger_gets_none(self):
-        from django_ai_sdk.assistants.models import AssistantSettings
-        from piratespeak.views_permissions import assistant_permissions
+    async def test_agent_permissions_stranger_gets_none(self):
+        from django_ai_sdk.agents.models import AgentSettings
+        from apps.agents.views.permissions import agent_permissions
 
         stranger = await self._make_user()
-        await AssistantSettings.objects.acreate(
-            name="Private", slug="private-slug", assistant="test"
+        await AgentSettings.objects.acreate(
+            name="Private", slug="private-slug", agent="test"
         )
 
-        perms = await assistant_permissions(stranger, "private-slug")
+        perms = await agent_permissions(stranger, "private-slug")
         assert perms.can_read is False
         assert perms.can_write is False
         assert perms.can_manage is False
 
-    async def test_assistant_permissions_nonexistent_returns_default(self):
-        from piratespeak.views_permissions import assistant_permissions
+    async def test_agent_permissions_nonexistent_returns_default(self):
+        from apps.agents.views.permissions import agent_permissions
 
         user = await self._make_user()
-        perms = await assistant_permissions(user, "nonexistent")
+        perms = await agent_permissions(user, "nonexistent")
         assert perms.can_read is False
         assert perms.can_write is False
         assert perms.can_manage is False
 
-    async def test_assistant_permissions_looks_up_by_id_fallback(self):
-        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from piratespeak.views_permissions import assistant_permissions
+    async def test_agent_permissions_looks_up_by_id_fallback(self):
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
+        from apps.agents.views.permissions import agent_permissions
 
         user = await self._make_user()
-        config = await AssistantSettings.objects.acreate(
-            name="By ID", slug="by-id-slug", assistant="test"
+        config = await AgentSettings.objects.acreate(
+            name="By ID", slug="by-id-slug", agent="test"
         )
-        await AssistantUser.objects.acreate(assistant=config, user=user, can_manage=True)
+        await AgentUser.objects.acreate(agent=config, user=user, can_manage=True)
 
-        perms = await assistant_permissions(user, str(config.id))
+        perms = await agent_permissions(user, str(config.id))
         assert perms.can_read is True
         assert perms.can_manage is True
 
 
 # ============================================================================
-# AssistantDefaultPermission — creator-as-manager, upserts
+# AgentDefaultPermission — creator-as-manager, upserts
 # ============================================================================
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestAssistantDefaultPermissionCreator:
-    """Creator automatically becomes manager via create_runtime_assistant."""
+class TestAgentDefaultPermissionCreator:
+    """Creator automatically becomes manager via create_runtime_agent."""
 
     async def _make_user(self):
         from tests.factories.db import UserFactory
@@ -1080,21 +1080,21 @@ class TestAssistantDefaultPermissionCreator:
         return await UserFactory.acreate()
 
     async def test_creator_is_manager(self):
-        """After create_runtime_assistant, creator can manage."""
-        from django_ai_sdk.assistants.services import AssistantService
+        """After create_runtime_agent, creator can manage."""
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             check_object_permissions,
         )
 
         user = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Creator Test",
                 "slug": "creator-test",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=user,
@@ -1102,19 +1102,19 @@ class TestAssistantDefaultPermissionCreator:
 
         # Creator should be able to update (manager operation)
         await check_object_permissions(
-            user, Operation.UPDATE_ASSISTANT, config, [AssistantDefaultPermission]
+            user, Operation.UPDATE_AGENT, config, [AgentDefaultPermission]
         )
 
         # Creator should be able to delete (manager operation)
         await check_object_permissions(
-            user, Operation.DELETE_ASSISTANT, config, [AssistantDefaultPermission]
+            user, Operation.DELETE_AGENT, config, [AgentDefaultPermission]
         )
 
     async def test_stranger_cannot_manage(self):
         """Non-member cannot perform manager operations."""
-        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.permissions import (
-            AssistantDefaultPermission,
+            AgentDefaultPermission,
             Operation,
             PermissionDenied,
             check_object_permissions,
@@ -1123,11 +1123,11 @@ class TestAssistantDefaultPermissionCreator:
         creator = await self._make_user()
         stranger = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Stranger Test",
                 "slug": "stranger-test",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
@@ -1135,77 +1135,77 @@ class TestAssistantDefaultPermissionCreator:
 
         with pytest.raises(PermissionDenied):
             await check_object_permissions(
-                stranger, Operation.UPDATE_ASSISTANT, config, [AssistantDefaultPermission]
+                stranger, Operation.UPDATE_AGENT, config, [AgentDefaultPermission]
             )
 
     async def test_add_user_upsert(self):
         """Adding existing user updates can_manage flag."""
-        from django_ai_sdk.assistants.models import AssistantUser
-        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.agents.models import AgentUser
+        from django_ai_sdk.agents.services import AgentService
 
         creator = await self._make_user()
         member = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Upsert Test",
                 "slug": "upsert-test",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         # Add as viewer
-        await AssistantService.add_assistant_user(
+        await AgentService.add_agent_user(
             str(config.id), str(member.id), can_manage=False, user=creator
         )
 
         # Re-add as manager (upsert)
-        await AssistantService.add_assistant_user(
+        await AgentService.add_agent_user(
             str(config.id), str(member.id), can_manage=True, user=creator
         )
 
-        entry = await AssistantUser.objects.aget(assistant=config, user=member)
+        entry = await AgentUser.objects.aget(agent=config, user=member)
         assert entry.can_manage is True
 
     async def test_add_group_upsert(self):
         """Adding existing group updates can_manage flag."""
         from django.contrib.auth.models import Group
-        from django_ai_sdk.assistants.models import AssistantGroup
-        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.agents.models import AgentGroup
+        from django_ai_sdk.agents.services import AgentService
 
         creator = await self._make_user()
         group = await Group.objects.acreate(name="test-group")
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Group Upsert",
                 "slug": "group-upsert",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         # Add as viewer
-        await AssistantService.add_assistant_group(
+        await AgentService.add_agent_group(
             str(config.id), group.id, can_manage=False, user=creator
         )
 
         # Re-add as manager (upsert)
-        await AssistantService.add_assistant_group(
+        await AgentService.add_agent_group(
             str(config.id), group.id, can_manage=True, user=creator
         )
 
-        entry = await AssistantGroup.objects.aget(assistant=config, group=group)
+        entry = await AgentGroup.objects.aget(agent=config, group=group)
         assert entry.can_manage is True
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestAssistantUserManagement:
-    """Assistant owner/manager can add users; strangers and viewers are blocked."""
+class TestAgentUserManagement:
+    """Agent owner/manager can add users; strangers and viewers are blocked."""
 
     async def _make_user(self):
         from tests.factories.db import UserFactory
@@ -1213,100 +1213,100 @@ class TestAssistantUserManagement:
         return await UserFactory.acreate()
 
     async def test_manager_can_add_user(self):
-        """Assistant manager can add other users as viewers."""
+        """Agent manager can add other users as viewers."""
         from unittest.mock import patch
 
-        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.permissions import AssistantDefaultPermission
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.permissions import AgentDefaultPermission
 
         creator = await self._make_user()
         viewer = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Add User Test",
                 "slug": "add-user-test",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         with patch(
-            "django_ai_sdk.assistants.services.get_assistant_permissions",
-            return_value=[AssistantDefaultPermission],
+            "django_ai_sdk.agents.services.get_agent_permissions",
+            return_value=[AgentDefaultPermission],
         ):
-            result = await AssistantService.add_assistant_user(
+            result = await AgentService.add_agent_user(
                 str(config.id), str(viewer.id), can_manage=False, user=creator
             )
 
         assert result.can_manage is False
-        assert await AssistantUser.objects.filter(assistant=config, user=viewer).aexists()
+        assert await AgentUser.objects.filter(agent=config, user=viewer).aexists()
 
     async def test_manager_can_promote_user_to_manager(self):
-        """Assistant manager can promote viewer to manager."""
+        """Agent manager can promote viewer to manager."""
         from unittest.mock import patch
 
-        from django_ai_sdk.assistants.models import AssistantSettings, AssistantUser
-        from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.permissions import AssistantDefaultPermission
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.permissions import AgentDefaultPermission
 
         creator = await self._make_user()
         member = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Promote Test",
                 "slug": "promote-test",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         with patch(
-            "django_ai_sdk.assistants.services.get_assistant_permissions",
-            return_value=[AssistantDefaultPermission],
+            "django_ai_sdk.agents.services.get_agent_permissions",
+            return_value=[AgentDefaultPermission],
         ):
-            await AssistantService.add_assistant_user(
+            await AgentService.add_agent_user(
                 str(config.id), str(member.id), can_manage=False, user=creator
             )
 
-            result = await AssistantService.update_assistant_user(
+            result = await AgentService.update_agent_user(
                 str(config.id), str(member.id), can_manage=True, user=creator
             )
 
         assert result.can_manage is True
 
     async def test_stranger_cannot_add_user(self):
-        """Non-member cannot add users to assistant."""
+        """Non-member cannot add users to agent."""
         from unittest.mock import patch
 
-        from django_ai_sdk.assistants.models import AssistantSettings
-        from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.permissions import AssistantDefaultPermission, PermissionDenied
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.permissions import AgentDefaultPermission, PermissionDenied
 
         creator = await self._make_user()
         stranger = await self._make_user()
         viewer = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Stranger Block",
                 "slug": "stranger-block",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         with patch(
-            "django_ai_sdk.assistants.services.get_assistant_permissions",
-            return_value=[AssistantDefaultPermission],
+            "django_ai_sdk.agents.services.get_agent_permissions",
+            return_value=[AgentDefaultPermission],
         ):
             with pytest.raises(PermissionDenied):
-                await AssistantService.add_assistant_user(
+                await AgentService.add_agent_user(
                     str(config.id), str(viewer.id), can_manage=False, user=stranger
                 )
 
@@ -1314,33 +1314,33 @@ class TestAssistantUserManagement:
         """Non-manager member cannot add other users."""
         from unittest.mock import patch
 
-        from django_ai_sdk.assistants.models import AssistantSettings
-        from django_ai_sdk.assistants.services import AssistantService
-        from django_ai_sdk.permissions import AssistantDefaultPermission, PermissionDenied
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.permissions import AgentDefaultPermission, PermissionDenied
 
         creator = await self._make_user()
         viewer = await self._make_user()
         new_user = await self._make_user()
 
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": "Viewer Block",
                 "slug": "viewer-block",
-                "assistant": "",
+                "agent": "",
                 "model": "gpt-4o",
             },
             user=creator,
         )
 
         with patch(
-            "django_ai_sdk.assistants.services.get_assistant_permissions",
-            return_value=[AssistantDefaultPermission],
+            "django_ai_sdk.agents.services.get_agent_permissions",
+            return_value=[AgentDefaultPermission],
         ):
-            await AssistantService.add_assistant_user(
+            await AgentService.add_agent_user(
                 str(config.id), str(viewer.id), can_manage=False, user=creator
             )
 
             with pytest.raises(PermissionDenied):
-                await AssistantService.add_assistant_user(
+                await AgentService.add_agent_user(
                     str(config.id), str(new_user.id), can_manage=False, user=viewer
                 )

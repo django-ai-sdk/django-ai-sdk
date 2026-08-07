@@ -103,7 +103,7 @@ class TestVercelProtocolHandler:
         """Test converting ChatMessages back to protocol format."""
         chat_messages = [
             ChatMessageFactory.build(role="user", content="User msg"),
-            ChatMessageFactory.build(role="assistant", content="Assistant msg"),
+            ChatMessageFactory.build(role="assistant", content="Agent msg"),
         ]
 
         protocol_messages = handler.from_chat_messages(chat_messages)

@@ -34,7 +34,7 @@ def thread_permissions(*perm_paths):
     Usage::
 
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
-            result = await ThreadService.create_thread(assistant_id="x", user=None)
+            result = await ThreadService.create_thread(agent_id="x", user=None)
     """
     from django.test.utils import override_settings
     from django_ai_sdk.permissions import get_domain_permissions, PermissionDomain

@@ -6,10 +6,10 @@ reset:
 	uv run python manage.py makemigrations django_ai_sdk
 	uv run python manage.py migrate
 	uv run python manage.py load_demo_memories
-	uv run python manage.py load_demo_assistants
+	uv run python manage.py load_demo_agents
 
 run:
-	OPENAI_AGENTS_DISABLE_TRACING=1 uv run python manage.py runserver
+	uv run python manage.py runserver
 
 
 db:

@@ -14,13 +14,13 @@ logger = get_logger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Pre-warm RAG indexes for all assistants and memories."
+    help = "Pre-warm RAG indexes for all agents and memories."
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument(
-            "--assistant",
+            "--agent",
             type=str,
-            help="Only warm up a specific assistant (class name)",
+            help="Only warm up a specific agent (class name)",
         )
         parser.add_argument(
             "--memory",
@@ -49,7 +49,7 @@ class Command(BaseCommand):
         asyncio.run(
             self._warmup(
                 memory_ids=memory_ids,
-                assistant_filter=cast("str | None", options.get("assistant")),
+                agent_filter=cast("str | None", options.get("agent")),
                 force_rebuild=bool(options.get("force_rebuild", False)),
             )
         )
@@ -57,36 +57,34 @@ class Command(BaseCommand):
     async def _warmup(
         self,
         memory_ids: list[str],
-        assistant_filter: str | None,
+        agent_filter: str | None,
         force_rebuild: bool,
     ) -> None:
-        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.agents.registry import registry
 
         try:
-            assistants = registry.all()
+            agents = registry.all()
         except RuntimeError:
             registry.setup(instantiate=True)
-            assistants = registry.all()
+            agents = registry.all()
 
-        if assistant_filter:
+        if agent_filter:
             filtered = {
-                aid: inst
-                for aid, inst in assistants.items()
-                if inst.__class__.__name__ == assistant_filter
+                aid: inst for aid, inst in agents.items() if inst.__class__.__name__ == agent_filter
             }
             if not filtered:
-                raise CommandError(f"Assistant '{assistant_filter}' not found in registry")
-            assistants = filtered
+                raise CommandError(f"Agent '{agent_filter}' not found in registry")
+            agents = filtered
 
-        if not assistants:
-            self.stdout.write(self.style.WARNING("No assistants registered."))
+        if not agents:
+            self.stdout.write(self.style.WARNING("No agents registered."))
             return
 
         if not memory_ids:
             self.stdout.write(self.style.WARNING("No memories found."))
             return
 
-        for aid, inst in assistants.items():
+        for aid, inst in agents.items():
             name = inst.__class__.__name__
             if inst.rag_provider is None:
                 self.stdout.write(

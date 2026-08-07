@@ -45,32 +45,32 @@ def mock_user():
 
 
 @pytest.fixture
-def mock_assistants_registry():
-    """Patch the global assistant registry at both import paths."""
+def mock_agents_registry():
+    """Patch the global agent registry at both import paths."""
     from unittest.mock import MagicMock, patch
-    from tests.mocks.assistant import create_assistant_mock
+    from tests.mocks.agent import create_agent_mock
 
-    assistant = create_assistant_mock()
+    agent = create_agent_mock()
     with \
-        patch("django_ai_sdk.assistants.registry.registry") as reg, \
-        patch("django_ai_sdk.assistants.services.registry", reg):
-        reg.get = MagicMock(return_value=assistant)
-        reg.all = MagicMock(return_value={"test-assistant": assistant})
+        patch("django_ai_sdk.agents.registry.registry") as reg, \
+        patch("django_ai_sdk.agents.services.registry", reg):
+        reg.get = MagicMock(return_value=agent)
+        reg.all = MagicMock(return_value={"test-agent": agent})
         yield reg
 
 
 @pytest.fixture
-def assistant_permissions(mock_assistants_registry):
-    """Fixture returning a setter that changes the registry assistant's permissions.
+def agent_permissions(mock_agents_registry):
+    """Fixture returning a setter that changes the registry agent's permissions.
 
     Usage::
 
-        def test_something(self, assistant_permissions):
-            assistant_permissions(DenyAll)        # single
-            assistant_permissions(IsOwner, DenyAll)  # multiple
+        def test_something(self, agent_permissions):
+            agent_permissions(DenyAll)        # single
+            agent_permissions(IsOwner, DenyAll)  # multiple
     """
     def set_perms(*perms):
-        mock_assistants_registry.get.return_value.permissions = list(perms)
+        mock_agents_registry.get.return_value.permissions = list(perms)
     return set_perms
 
 
@@ -97,8 +97,8 @@ def sample_user_message():
 
 
 @pytest.fixture
-def sample_assistant_response():
-    """Sample assistant response."""
+def sample_agent_response():
+    """Sample agent response."""
     return {"role": "assistant", "content": "Here's a joke for you!"}
 
 

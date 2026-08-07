@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import uuid
+from typing import TYPE_CHECKING
+
+from django.conf import settings
+from django.db import models
+from django.utils.text import slugify
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from django.db.models.base import ModelBase
+
+
+class AgentSettings(models.Model):
+    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(unique=True, max_length=100)
+    model = models.CharField(max_length=255)
+    system_prompt = models.TextField(blank=True, default="")
+    agent = models.CharField(max_length=255, blank=True, default="")
+    tools = models.JSONField(default=list, blank=True)
+    memories = models.JSONField(default=list, blank=True)
+    integrations = models.JSONField(default=list, blank=True)
+    suggestion_enabled = models.BooleanField(default=False)
+    title_generation = models.BooleanField(default=True)
+    max_history = models.PositiveIntegerField(null=True, blank=True)
+    file_upload = models.BooleanField(default=False)
+    active = models.BooleanField(default=True, db_index=True)
+    is_public = models.BooleanField(default=False)
+
+    # Reverse relation type hints
+    agent_users: models.Manager[AgentUser]
+    agent_groups: models.Manager[AgentGroup]
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_runtime_agents"
+        ordering = ["name"]
+        verbose_name = "Agent Settings"
+        verbose_name_plural = "Agent Settings"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(
+        self,
+        *,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(
+            force_insert=force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
+
+
+class AgentUser(models.Model):
+    agent = models.ForeignKey(
+        AgentSettings,
+        on_delete=models.CASCADE,
+        related_name="agent_users",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agents",
+    )
+    user_id: int  # Django FK attrib — no query needed
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    agent_id: int
+    user_id: int
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_runtime_agent_users"
+        unique_together = [["agent", "user"]]
+
+    def __str__(self) -> str:
+        return f"{self.user} - {self.agent.name}"
+
+
+class AgentGroup(models.Model):
+    agent = models.ForeignKey(
+        AgentSettings,
+        on_delete=models.CASCADE,
+        related_name="agent_groups",
+    )
+    group = models.ForeignKey(
+        "auth.Group",
+        on_delete=models.CASCADE,
+        related_name="agent_group_links",
+    )
+    can_manage = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    agent_id: int
+    group_id: int
+
+    class Meta:
+        app_label = "django_ai_sdk"
+        db_table = "django_ai_sdk_runtime_agent_groups"
+        unique_together = [["agent", "group"]]
+
+    def __str__(self) -> str:
+        return f"{self.group} - {self.agent.name}"

@@ -34,31 +34,31 @@ class TestRAGProviderStructure:
         assert provider._cache == {}
 
 
-class TestAssistantRAGConfig:
-    """Test Assistant configuration with RAG (no actual RAG calls)."""
+class TestAgentRAGConfig:
+    """Test Agent configuration with RAG (no actual RAG calls)."""
 
-    def test_assistant_has_rag_provider_attribute(self):
-        """Verify Assistant can have rag_provider."""
-        from django_ai_sdk import Assistant
+    def test_agent_has_rag_provider_attribute(self):
+        """Verify Agent can have rag_provider."""
+        from django_ai_sdk import Agent
 
-        assert hasattr(Assistant, "rag_provider")
+        assert hasattr(Agent, "rag_provider")
 
-    def test_assistant_rag_provider_is_none_by_default(self):
+    def test_agent_rag_provider_is_none_by_default(self):
         """Verify RAG is disabled by default."""
-        from django_ai_sdk import Assistant
+        from django_ai_sdk import Agent
 
-        assert Assistant.rag_provider is None
+        assert Agent.rag_provider is None
 
-    def test_assistant_can_set_rag_provider(self):
+    def test_agent_can_set_rag_provider(self):
         """Verify RAGProvider can be set."""
-        from django_ai_sdk import Assistant
+        from django_ai_sdk import Agent
         from django_ai_sdk.rags import RAGProvider
 
-        class TestAssistant(Assistant):
+        class TestAgent(Agent):
             name = "Test"
             rag_provider = RAGProvider()
 
-        assert isinstance(TestAssistant.rag_provider, RAGProvider)
+        assert isinstance(TestAgent.rag_provider, RAGProvider)
 
 
 class TestRAGExports:

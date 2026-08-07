@@ -36,19 +36,19 @@ class TestStepField:
 
 class TestWorkflowStep:
     def test_minimal(self):
-        s = WorkflowStep(assistant_id="abc", output_key="result")
+        s = WorkflowStep(agent_id="abc", output_key="result")
         assert s.name == ""
         assert s.input_key is None
         assert s.system_prompt_override is None
         assert s.output_fields == {}
 
     def test_with_name(self):
-        s = WorkflowStep(name="Extract", assistant_id="abc", output_key="result")
+        s = WorkflowStep(name="Extract", agent_id="abc", output_key="result")
         assert s.name == "Extract"
 
     def test_output_fields_parsed(self):
         s = WorkflowStep(
-            assistant_id="abc",
+            agent_id="abc",
             output_key="result",
             output_fields={"topic": {"type": "str", "description": "main topic"}},
         )
@@ -58,7 +58,7 @@ class TestWorkflowStep:
     def test_output_fields_invalid_type_rejected(self):
         with pytest.raises(ValidationError):
             WorkflowStep(
-                assistant_id="abc",
+                agent_id="abc",
                 output_key="result",
                 output_fields={"topic": {"type": "list"}},
             )
@@ -77,7 +77,7 @@ class TestWorkflowAction:
 class TestWorkflowDefinition:
     def test_minimal(self):
         d = WorkflowDefinition(
-            steps=[WorkflowStep(assistant_id="abc", output_key="result")]
+            steps=[WorkflowStep(agent_id="abc", output_key="result")]
         )
         assert d.name == ""
         assert d.actions == []
@@ -88,7 +88,7 @@ class TestWorkflowDefinition:
             steps=[
                 WorkflowStep(
                     name="Step 1",
-                    assistant_id="abc-123",
+                    agent_id="abc-123",
                     output_key="summary",
                     output_fields={"text": StepField(type="str", description="output")},
                 )

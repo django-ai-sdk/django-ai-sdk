@@ -1,18 +1,18 @@
-"""Service-layer facade for integrations, the AssistantService counterpart.
+"""Service-layer facade for integrations, the AgentService counterpart.
 
 Integration (integrations/base.py) is the per-item business logic, one instance per
-configured integration, the role Assistant plays for assistants. IntegrationService
+configured integration, the role Agent plays for agents. IntegrationService
 resolves by name, permission-checks, and delegates to the instance, the role
-AssistantService plays for assistants.
+AgentService plays for agents.
 
 This is the seam an HTTP layer sits on. The SDK deliberately ships no integrations
 router -- it doesn't pick the host's web framework -- so the host project builds
 list/connect/disconnect/reconnect endpoints over the four methods below;
 demo/piratespeak/views_integrations_ninja.py is a complete reference. Its other
-caller is AssistantService, and either could be replaced by a management command
+caller is AgentService, and either could be replaced by a management command
 without duplicating this logic.
 
-There is no PermissionsMixin here (contrast AssistantService): every operation below
+There is no PermissionsMixin here (contrast AgentService): every operation below
 already has a concrete Integration instance to delegate has_perms to, so there is no
 domain-level check that needs to run without one.
 """
@@ -46,7 +46,7 @@ async def _safe_status_and_tools(
     """One integration's (status, tool_names), isolated from the rest of a fan-out.
 
     Shared by IntegrationService.list_for_user and
-    AssistantService.get_integration_status. A slow or broken integration (a dead
+    AgentService.get_integration_status. A slow or broken integration (a dead
     server, a DB hiccup fetching an OAuth token) degrades to DEGRADED/[] instead of
     failing whichever list it's part of.
     """

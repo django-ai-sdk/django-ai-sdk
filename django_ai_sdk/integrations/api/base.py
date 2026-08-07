@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from haystack.tools import Tool
 
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
 
 
 def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -62,7 +62,7 @@ class APIIntegration(Integration):
     - a factory callable returning a Tool or list of Tools (optionally async), for
       tools that must be built per request, e.g. one carrying the current user's API
       token. A factory is passed only the arguments it declares: any subset of
-      user, assistant, thread_id (or all of them via **kwargs). So def
+      user, agent, thread_id (or all of them via **kwargs). So def
       make_tool(user): ... and def make_tool(**kwargs): ... both work:
 
           def issue_tool(user):
@@ -124,12 +124,12 @@ class APIIntegration(Integration):
     async def get_tools(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
         thread_id: str = "",
     ) -> list[Any]:
         from haystack.tools import Tool
 
-        context = {"user": user, "assistant": assistant, "thread_id": thread_id}
+        context = {"user": user, "agent": agent, "thread_id": thread_id}
         result: list[Any] = []
         for entry in self.tools:
             # A ready-made Tool (e.g. a @tool-decorated function) is used as-is;
@@ -149,7 +149,7 @@ class APIIntegration(Integration):
     async def get_status(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
     ) -> IntegrationStatus:
         if self._cache is None or self.health_check is None:
             return IntegrationStatus.ACTIVE

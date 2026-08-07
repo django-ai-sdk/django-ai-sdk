@@ -19,18 +19,18 @@ from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.rags.schemas import RagDocument
 
 
-def _make_assistant(call_counter: list, rag: object) -> MagicMock:
-    """Mock assistant that yields once before returning the RAG instance."""
-    assistant = MagicMock()
-    assistant.__class__.__name__ = "MockAssistant"
+def _make_agent(call_counter: list, rag: object) -> MagicMock:
+    """Mock agent that yields once before returning the RAG instance."""
+    agent = MagicMock()
+    agent.__class__.__name__ = "MockAgent"
 
     async def get_rag_pipeline(memory_id=None):
         call_counter.append(1)
         await asyncio.sleep(0)  # yield — lets the second coroutine enter before warmup completes
         return rag
 
-    assistant.get_rag_pipeline = get_rag_pipeline
-    return assistant
+    agent.get_rag_pipeline = get_rag_pipeline
+    return agent
 
 
 def _make_rag() -> MagicMock:
@@ -46,11 +46,11 @@ class TestRAGProviderConcurrency:
         provider = RAGProvider()
         calls: list = []
         rag = _make_rag()
-        assistant = _make_assistant(calls, rag)
+        agent = _make_agent(calls, rag)
 
         r1, r2 = await asyncio.gather(
-            provider.get_rag_instance(assistant, "mem-1"),
-            provider.get_rag_instance(assistant, "mem-1"),
+            provider.get_rag_instance(agent, "mem-1"),
+            provider.get_rag_instance(agent, "mem-1"),
         )
 
         assert r1 is r2 is rag
@@ -62,10 +62,10 @@ class TestRAGProviderConcurrency:
         provider = RAGProvider()
         calls: list = []
         rag = _make_rag()
-        assistant = _make_assistant(calls, rag)
+        agent = _make_agent(calls, rag)
 
-        await provider.get_rag_instance(assistant, "mem-warm")
-        await provider.get_rag_instance(assistant, "mem-warm")
+        await provider.get_rag_instance(agent, "mem-warm")
+        await provider.get_rag_instance(agent, "mem-warm")
 
         assert len(calls) == 1
 
@@ -75,12 +75,12 @@ class TestRAGProviderConcurrency:
         calls_a: list = []
         calls_b: list = []
         rag_a, rag_b = _make_rag(), _make_rag()
-        assistant_a = _make_assistant(calls_a, rag_a)
-        assistant_b = _make_assistant(calls_b, rag_b)
+        agent_a = _make_agent(calls_a, rag_a)
+        agent_b = _make_agent(calls_b, rag_b)
 
         r_a, r_b = await asyncio.gather(
-            provider.get_rag_instance(assistant_a, "mem-a"),
-            provider.get_rag_instance(assistant_b, "mem-b"),
+            provider.get_rag_instance(agent_a, "mem-a"),
+            provider.get_rag_instance(agent_b, "mem-b"),
         )
 
         assert r_a is rag_a

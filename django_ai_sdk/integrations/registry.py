@@ -2,7 +2,7 @@
 
 Integrations register themselves from their app's ready() (see IntegrationAppConfig
 in apps.py). This module is just the shared dict they register into and the lookups
-the assistant and the host project's integrations endpoints use.
+the agent and the host project's integrations endpoints use.
 
 get_all_integrations() and get_integrations() are async even though this
 implementation needs no I/O, to leave room for a database-backed source without

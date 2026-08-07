@@ -1,7 +1,7 @@
 """Generic, integration-kind-agnostic output schemas.
 
 These describe integrations to the /api/integrations surface and to the
-per-assistant status endpoint, regardless of whether an integration is MCP-backed or
+per-agent status endpoint, regardless of whether an integration is MCP-backed or
 a hand-written API wrapper.
 """
 
@@ -41,8 +41,8 @@ class IntegrationOut(BaseModel):
     connected: bool | None = None
 
 
-class AssistantIntegrationStatus(BaseModel):
-    """One configured integration's status for a given assistant/user."""
+class AgentIntegrationStatus(BaseModel):
+    """One configured integration's status for a given agent/user."""
 
     server_name: str
     label: str
