@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.permissions import ObjectPermissions
 from django_ai_sdk.storage.services import ThreadService
 
@@ -27,18 +27,18 @@ async def thread_permissions(user: UserType, thread_id: str) -> ObjectPermission
     )
 
 
-async def assistant_permissions(user: UserType, assistant_id: str) -> ObjectPermissions:
+async def agent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
     from django.core.exceptions import ValidationError
-    from django_ai_sdk.assistants.models import AssistantSettings
+    from django_ai_sdk.agents.models import AgentSettings
 
     try:
-        config = await AssistantSettings.objects.aget(slug=assistant_id)
-    except AssistantSettings.DoesNotExist:
+        config = await AgentSettings.objects.aget(slug=agent_id)
+    except AgentSettings.DoesNotExist:
         try:
-            config = await AssistantSettings.objects.aget(id=assistant_id)
-        except (AssistantSettings.DoesNotExist, ValueError, ValidationError):
+            config = await AgentSettings.objects.aget(id=agent_id)
+        except (AgentSettings.DoesNotExist, ValueError, ValidationError):
             return ObjectPermissions()
-    raw = await AssistantService.get_object_permissions_map(user, config)
+    raw = await AgentService.get_object_permissions_map(user, config)
     return ObjectPermissions(
         can_read=raw.get("read", False),
         can_write=raw.get("write", False),

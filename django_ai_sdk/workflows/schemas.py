@@ -14,7 +14,7 @@ class StepField(BaseModel):
 
 class WorkflowStep(BaseModel):
     name: str = ""
-    assistant_id: str
+    agent_id: str
     output_key: str
     input_key: str | None = None
     system_prompt_override: str | None = None

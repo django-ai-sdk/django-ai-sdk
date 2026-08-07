@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from django.http import HttpRequest
 
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
     from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
 
 logger = logging.getLogger(__name__)
@@ -144,10 +144,10 @@ class DynamicMCPIntegration(Integration):
     async def get_tools(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
         thread_id: str = "",
     ) -> list[Any]:
-        # assistant/thread_id are unused here: MCP tools are discovered from the
+        # agent/thread_id are unused here: MCP tools are discovered from the
         # remote server as-is, with no per-call model/context to inject. Accepted
         # only for signature consistency with the Integration ABC.
         if self._needs_setup:
@@ -160,7 +160,7 @@ class DynamicMCPIntegration(Integration):
     async def get_status(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        assistant: Assistant | None = None,
+        agent: Agent | None = None,
     ) -> IntegrationStatus:
         """Report real, attempted status.
 

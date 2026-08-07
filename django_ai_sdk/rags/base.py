@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # TODO: move into prompts.py file, this should make maintenance easier.
 DEFAULT_EXPANDER_PROMPT = """
-You are a search query expansion assistant.
+You are a search query expansion agent.
 
 Your task is to generate search queries based on the user's original query to improve search recall.
 

@@ -60,7 +60,7 @@ class MemoryThread(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
-    assistant_id: str = ""
+    agent_id: str = ""
     model: str = ""
     user_id: str | None = None
     metadata: dict = Field(default_factory=dict)
@@ -87,7 +87,7 @@ class MemoryStore:
         cls,
         thread_id: str,
         title: str = "",
-        assistant_id: str = "",
+        agent_id: str = "",
         model: str = "",
         user_id: str | None = None,
         metadata: dict | None = None,
@@ -96,7 +96,7 @@ class MemoryStore:
         thread = MemoryThread(
             id=thread_id,
             title=title,
-            assistant_id=assistant_id,
+            agent_id=agent_id,
             model=model,
             user_id=user_id,
             metadata=metadata or {},
@@ -281,7 +281,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
 
         Args:
             title: Thread title
-            metadata: Should include assistant_id, model
+            metadata: Should include agent_id, model
             user: Optional user
             thread_id: Optional custom thread ID
 
@@ -289,14 +289,14 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             Thread ID (UUID string)
         """
         thread_id = thread_id or str(uuid.uuid4())
-        assistant_id = metadata.get("assistant_id", "") if metadata else ""
+        agent_id = metadata.get("agent_id", "") if metadata else ""
         model = metadata.get("model", "") if metadata else ""
         user_id = str(user.pk) if user and user.is_authenticated else None
 
         MemoryStore.create_thread(
             thread_id=thread_id,
             title=title,
-            assistant_id=assistant_id,
+            agent_id=agent_id,
             model=model,
             user_id=user_id,
             metadata=metadata or {},
@@ -315,7 +315,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return ThreadInfo(
             id=thread.id,
             title=thread.title,
-            assistant_id=thread.assistant_id,
+            agent_id=thread.agent_id,
             model=thread.model,
             user_id=thread.user_id,
             created_at=thread.created_at,
@@ -342,7 +342,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
                 ThreadInfo(
                     id=thread.id,
                     title=thread.title,
-                    assistant_id=thread.assistant_id,
+                    agent_id=thread.agent_id,
                     model=thread.model,
                     user_id=thread.user_id,
                     created_at=thread.created_at,

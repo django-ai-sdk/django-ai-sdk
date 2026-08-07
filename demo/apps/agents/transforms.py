@@ -35,12 +35,12 @@ Return the output strictly in the DocumentExtraction format.
 
 
 class DocumentExtractionTransform(BaseTransform):
-    def __init__(self, assistant: Any) -> None:
-        self._assistant = assistant
+    def __init__(self, agent: Any) -> None:
+        self._agent = agent
 
     async def run(self, data: Any, **kwargs: Any) -> DocumentExtraction | Any:
         content = data if isinstance(data, str) else json.dumps(data, default=str)
-        result = await self._assistant.run(
+        result = await self._agent.run(
             [ChatMessage(role="user", content=content[:MAX_CONTENT_LENGTH])],
             system_prompt=EXTRACTION_PROMPT,
             response_format=DocumentExtraction,

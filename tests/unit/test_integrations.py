@@ -485,7 +485,7 @@ class TestIntegrationDisplayMetadata:
         assert await DummyIntegration().get_tool_names() == ["dummy_tool"]
 
     async def test_api_integration_factory_receives_only_declared_kwargs(self):
-        """A tool factory may declare any subset of user/assistant/thread_id (or
+        """A tool factory may declare any subset of user/agent/thread_id (or
         **kwargs) — it's called with only what it accepts, never a spurious TypeError."""
 
         class DummyIntegration(APIIntegration):
@@ -494,7 +494,7 @@ class TestIntegrationDisplayMetadata:
                 lambda user: _fake_tool("only_user"),
                 lambda user, thread_id: _fake_tool("user_thread"),
                 lambda **kw: _fake_tool(
-                    "kwargs_all" if "assistant" in kw else "kwargs_bad"
+                    "kwargs_all" if "agent" in kw else "kwargs_bad"
                 ),
             ]
 
@@ -721,10 +721,10 @@ class TestExtensibility:
             name = "custom"
             label = "Custom"
 
-            async def get_tools(self, user=None, assistant=None, thread_id=""):
+            async def get_tools(self, user=None, agent=None, thread_id=""):
                 return ["custom-tool"]
 
-            async def get_status(self, user=None, assistant=None):
+            async def get_status(self, user=None, agent=None):
                 return IntegrationStatus.ACTIVE
 
         instance = CustomBackendService()
@@ -735,15 +735,15 @@ class TestExtensibility:
         assert await resolved.get_tools() == ["custom-tool"]
         assert resolved.kind == "api"  # the contract's default, no MCP assumptions
 
-    async def test_assistant_get_tools_threads_assistant_into_factory(self):
+    async def test_agent_get_tools_threads_agent_into_factory(self):
         """A tool factory that runs its own LLM call (e.g. translation) needs the
-        calling assistant's model — that's why `assistant` is in the contract."""
-        from django_ai_sdk.assistant import Assistant
+        calling agent's model — that's why `agent` is in the contract."""
+        from django_ai_sdk.agent import Agent
 
         received: dict = {}
 
-        def factory(*, user=None, assistant=None, thread_id=""):
-            received["assistant"] = assistant
+        def factory(*, user=None, agent=None, thread_id=""):
+            received["agent"] = agent
             return []
 
         class ModelAwareIntegration(APIIntegration):
@@ -751,7 +751,7 @@ class TestExtensibility:
             name = "model-aware"
             tools = [factory]
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -762,11 +762,11 @@ class TestExtensibility:
 
         register(ModelAwareIntegration())
 
-        assistant = FakeAssistant()
-        await assistant._get_integration_tools()
+        agent = FakeAgent()
+        await agent._get_integration_tools()
 
-        assert received["assistant"] is assistant
-        assert received["assistant"].model == "gpt-fake"
+        assert received["agent"] is agent
+        assert received["agent"].model == "gpt-fake"
 
 
 class TestIntegrationFailureIsolation:
@@ -775,14 +775,14 @@ class TestIntegrationFailureIsolation:
     asyncio.gather plus a per-integration try/except."""
 
     async def test_one_failing_integration_does_not_drop_others_tools(self):
-        from django_ai_sdk.assistant import Assistant
+        from django_ai_sdk.agent import Agent
 
         class BrokenIntegration(APIIntegration):
             permissions = [AllowAll]
             name = "broken"
             tools = []
 
-            async def get_tools(self, user=None, assistant=None, thread_id=""):
+            async def get_tools(self, user=None, agent=None, thread_id=""):
                 raise RuntimeError("upstream is down")
 
         class HealthyIntegration(APIIntegration):
@@ -790,7 +790,7 @@ class TestIntegrationFailureIsolation:
             name = "healthy"
             tools = [lambda **kwargs: "healthy-tool"]
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -802,12 +802,12 @@ class TestIntegrationFailureIsolation:
         register(BrokenIntegration())
         register(HealthyIntegration())
 
-        assert await FakeAssistant()._get_integration_tools() == ["healthy-tool"]
+        assert await FakeAgent()._get_integration_tools() == ["healthy-tool"]
 
     async def test_integrations_are_awaited_concurrently_not_serially(self):
         """If a slow integration and another were awaited one at a time, total
         wall-clock time would be additive. Assert it isn't."""
-        from django_ai_sdk.assistant import Assistant
+        from django_ai_sdk.agent import Agent
 
         delay = 0.2
 
@@ -816,18 +816,18 @@ class TestIntegrationFailureIsolation:
             name = "slow"
             tools = []
 
-            async def get_tools(self, user=None, assistant=None, thread_id=""):
+            async def get_tools(self, user=None, agent=None, thread_id=""):
                 await asyncio.sleep(delay)
                 return ["slow-tool"]
 
         class OtherSlowIntegration(SlowIntegration):
             name = "other-slow"
 
-            async def get_tools(self, user=None, assistant=None, thread_id=""):
+            async def get_tools(self, user=None, agent=None, thread_id=""):
                 await asyncio.sleep(delay)
                 return ["other-slow-tool"]
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -840,7 +840,7 @@ class TestIntegrationFailureIsolation:
         register(OtherSlowIntegration())
 
         start = time.monotonic()
-        tools = await FakeAssistant()._get_integration_tools()
+        tools = await FakeAgent()._get_integration_tools()
         elapsed = time.monotonic() - start
 
         assert set(tools) == {"slow-tool", "other-slow-tool"}
@@ -848,7 +848,7 @@ class TestIntegrationFailureIsolation:
 
     async def test_an_unpermitted_integration_contributes_no_tools(self):
         """Permissions are enforced before tools reach the model, not after."""
-        from django_ai_sdk.assistant import Assistant
+        from django_ai_sdk.agent import Agent
 
         class ForbiddenIntegration(APIIntegration):
             name = "forbidden"
@@ -857,7 +857,7 @@ class TestIntegrationFailureIsolation:
             async def has_perms(self, user, operation=None, *, raise_on_deny=False):
                 return False
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -868,13 +868,13 @@ class TestIntegrationFailureIsolation:
 
         register(ForbiddenIntegration())
 
-        assert await FakeAssistant()._get_integration_tools() == []
+        assert await FakeAgent()._get_integration_tools() == []
 
 
 class TestIntegrationToolNamespacing:
     """Two MCP servers can define the same tool name (GitHub and Linear both have
     ``list_issues``) — nothing prevents it. Haystack requires unique names across
-    everything handed to one agent, so without namespacing this would fail assistant
+    everything handed to one agent, so without namespacing this would fail agent
     construction outright as soon as both were enabled together."""
 
     @dataclass
@@ -882,7 +882,7 @@ class TestIntegrationToolNamespacing:
         name: str
 
     async def test_same_named_tools_from_two_integrations_do_not_collide(self):
-        from django_ai_sdk.assistant import Assistant
+        from django_ai_sdk.agent import Agent
 
         class FirstIntegration(APIIntegration):
             permissions = [AllowAll]
@@ -902,7 +902,7 @@ class TestIntegrationToolNamespacing:
                 )
             ]
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -914,7 +914,7 @@ class TestIntegrationToolNamespacing:
         register(FirstIntegration())
         register(SecondIntegration())
 
-        tools = await FakeAssistant()._get_integration_tools()
+        tools = await FakeAgent()._get_integration_tools()
 
         assert {t.name for t in tools} == {"first_list_issues", "second_list_issues"}
 
@@ -1271,7 +1271,7 @@ class TestOAuthRedirectFlow:
         The settings page checks status before the user connects, which caches
         "no tools" for them. Without an invalidation on callback that entry
         outlives the handshake by up to AI_SDK_INTEGRATION_CACHE_TTL (900s), so
-        the assistant keeps treating a freshly connected server as unconfigured.
+        the agent keeps treating a freshly connected server as unconfigured.
         """
         from django_ai_sdk.integrations.mcp import loader as loader_module
         from django_ai_sdk.integrations.mcp import oauth_views
@@ -1436,7 +1436,7 @@ class TestNoStartUrl:
 
 @pytest.mark.django_db
 class TestIntegrationService:
-    """The facade views.py delegates to — mirrors AssistantService's shape (resolve by
+    """The facade views.py delegates to — mirrors AgentService's shape (resolve by
     name, permission-check, delegate to the instance)."""
 
     async def test_list_for_user_drops_unpermitted_rows(self):
@@ -1475,7 +1475,7 @@ class TestIntegrationService:
             name = "broken"
             tools = []
 
-            async def get_status(self, user=None, assistant=None):
+            async def get_status(self, user=None, agent=None):
                 raise RuntimeError("upstream is down")
 
         class HealthyIntegration(APIIntegration):
@@ -1547,13 +1547,13 @@ class TestIntegrationPermissions:
         """The INTEGRATIONS domain default requires an authenticated user, so a system
         or anonymous context contributes no integration tools at all. Documented because
         it's easy to mistake for a registry miss when writing a test."""
-        from django_ai_sdk.assistant import Assistant
+        from django_ai_sdk.agent import Agent
 
         class DefaultPermsIntegration(APIIntegration):
             name = "default-perms"
             tools = [lambda **kwargs: "should-not-appear"]
 
-        class FakeAssistant(Assistant):
+        class FakeAgent(Agent):
             name = "Fake"
             description = ""
             model = "gpt-fake"
@@ -1564,4 +1564,4 @@ class TestIntegrationPermissions:
 
         register(DefaultPermsIntegration())
 
-        assert await FakeAssistant()._get_integration_tools(user=None) == []
+        assert await FakeAgent()._get_integration_tools(user=None) == []

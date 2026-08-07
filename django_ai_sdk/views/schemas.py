@@ -16,7 +16,7 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[Message]
-    assistant_id: str | None = None
+    agent_id: str | None = None
     id: str | None = None
     trigger: str | None = None
 

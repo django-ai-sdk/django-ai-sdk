@@ -1,12 +1,12 @@
-"""Tests for the AssistantRegistry."""
+"""Tests for the AgentRegistry."""
 
 import uuid
 
 import pytest
-from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.registry import (
-    AssistantRegistry,
-    AssistantRegistrationError,
+from django_ai_sdk import Agent
+from django_ai_sdk.agents.registry import (
+    AgentRegistry,
+    AgentRegistrationError,
     auto_register,
     registry,
 )
@@ -21,8 +21,8 @@ def is_valid_uuid(value: str) -> bool:
         return False
 
 
-class TestAssistantRegistry:
-    """Test suite for AssistantRegistry singleton."""
+class TestAgentRegistry:
+    """Test suite for AgentRegistry singleton."""
 
     @pytest.fixture(autouse=True)
     def reset_registry(self):
@@ -32,10 +32,10 @@ class TestAssistantRegistry:
         registry._reset()
 
     def test_auto_registration(self):
-        """Test that Assistant subclasses are auto-registered with UUID v5 IDs."""
+        """Test that Agent subclasses are auto-registered with UUID v5 IDs."""
 
         @auto_register
-        class TestBot(Assistant):
+        class TestBot(Agent):
             name = "Test Bot"
 
             async def get_pipeline_adapter(self, thread_id=None):
@@ -53,22 +53,22 @@ class TestAssistantRegistry:
 
         # First registration
         @auto_register
-        class DeterministicAssistant(Assistant):
+        class DeterministicAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        first_id = DeterministicAssistant._assistant_id
+        first_id = DeterministicAgent._agent_id
 
         # Reset and re-register (simulating restart)
         registry._reset()
 
         # Re-define same class with same decorator
         @auto_register
-        class DeterministicAssistant(Assistant):  # noqa: F811
+        class DeterministicAgent(Agent):  # noqa: F811
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        second_id = DeterministicAssistant._assistant_id
+        second_id = DeterministicAgent._agent_id
 
         # Same class path should generate same UUID
         assert first_id == second_id
@@ -78,12 +78,12 @@ class TestAssistantRegistry:
         """Test that different classes get unique UUIDs."""
 
         @auto_register
-        class FirstAssistant(Assistant):
+        class FirstAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
         @auto_register
-        class SecondAssistant(Assistant):
+        class SecondAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
@@ -96,62 +96,62 @@ class TestAssistantRegistry:
         """Test that a different class with same ID can override (for testing)."""
         # This allows test classes with same names to work properly
 
-        class OverrideAssistant(Assistant):
+        class OverrideAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        first_id = OverrideAssistant._assistant_id
-        registry.register(OverrideAssistant)
+        first_id = OverrideAgent._agent_id
+        registry.register(OverrideAgent)
 
         # Create another class with same module.name (simulates test scenario)
-        class OverrideAssistant(Assistant):  # noqa: F811
+        class OverrideAgent(Agent):  # noqa: F811
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        second_id = OverrideAssistant._assistant_id
+        second_id = OverrideAgent._agent_id
         # Should be same ID (based on module.name)
         assert first_id == second_id
 
         # Register again - should succeed (replaces previous)
-        result = registry.register(OverrideAssistant)
-        assert result is OverrideAssistant
+        result = registry.register(OverrideAgent)
+        assert result is OverrideAgent
         assert first_id in registry.ids()
 
-    def test_base_assistant_not_registered(self):
-        """Test that the base Assistant class is not auto-registered."""
-        # The base Assistant class should not appear in registry
+    def test_base_agent_not_registered(self):
+        """Test that the base Agent class is not auto-registered."""
+        # The base Agent class should not appear in registry
         assert len(registry.ids()) == 0
 
-    def test_setup_instantiates_assistants(self):
-        """Test that setup() creates instances of all assistants."""
+    def test_setup_instantiates_agents(self):
+        """Test that setup() creates instances of all agents."""
 
         @auto_register
-        class SetupAssistant(Assistant):
+        class SetupAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = SetupAssistant._assistant_id
+        agent_id = SetupAgent._agent_id
         registry.setup()
 
-        assistant = registry.get(assistant_id)
-        assert assistant is not None
-        assert isinstance(assistant, SetupAssistant)
-        assert assistant.assistant_id == assistant_id
+        agent = registry.get(agent_id)
+        assert agent is not None
+        assert isinstance(agent, SetupAgent)
+        assert agent.agent_id == agent_id
 
     def test_setup_is_idempotent(self):
         """Test that calling setup() multiple times doesn't duplicate."""
 
         @auto_register
-        class IdempotentAssistant(Assistant):
+        class IdempotentAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = IdempotentAssistant._assistant_id
+        agent_id = IdempotentAgent._agent_id
         registry.setup()
-        first_instance = registry.get(assistant_id)
+        first_instance = registry.get(agent_id)
 
         registry.setup()  # Call again
-        second_instance = registry.get(assistant_id)
+        second_instance = registry.get(agent_id)
 
         assert first_instance is second_instance
 
@@ -159,14 +159,14 @@ class TestAssistantRegistry:
         """Test that get() before setup() raises RuntimeError."""
 
         @auto_register
-        class EarlyAssistant(Assistant):
+        class EarlyAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = EarlyAssistant._assistant_id
+        agent_id = EarlyAgent._agent_id
 
         with pytest.raises(RuntimeError) as exc_info:
-            registry.get(assistant_id)
+            registry.get(agent_id)
 
         assert "not initialized" in str(exc_info.value).lower()
 
@@ -174,7 +174,7 @@ class TestAssistantRegistry:
         """Test that get() returns None for unknown ID."""
 
         @auto_register
-        class KnownAssistant(Assistant):
+        class KnownAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
@@ -188,29 +188,29 @@ class TestAssistantRegistry:
         """Test that all() returns dict of all instances."""
 
         @auto_register
-        class FirstAssistant(Assistant):
+        class FirstAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
         @auto_register
-        class SecondAssistant(Assistant):
+        class SecondAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
         registry.setup()
 
-        all_assistants = registry.all()
-        assert len(all_assistants) == 2
+        all_agents = registry.all()
+        assert len(all_agents) == 2
         # All values should be instances, all keys should be valid UUIDs
-        for assistant_id, assistant in all_assistants.items():
-            assert is_valid_uuid(assistant_id)
-            assert isinstance(assistant, Assistant)
+        for agent_id, agent in all_agents.items():
+            assert is_valid_uuid(agent_id)
+            assert isinstance(agent, Agent)
 
     def test_all_before_setup_raises(self):
         """Test that all() before setup() raises RuntimeError."""
 
         @auto_register
-        class AnyAssistant(Assistant):
+        class AnyAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
@@ -221,53 +221,53 @@ class TestAssistantRegistry:
         """Test that ids() works even before setup()."""
 
         @auto_register
-        class PreSetupAssistant(Assistant):
+        class PreSetupAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = PreSetupAssistant._assistant_id
+        agent_id = PreSetupAgent._agent_id
 
         # Can get IDs before setup
-        assert assistant_id in registry.ids()
-        assert is_valid_uuid(assistant_id)
+        assert agent_id in registry.ids()
+        assert is_valid_uuid(agent_id)
 
         # But can't get instances
         with pytest.raises(RuntimeError):
-            registry.get(assistant_id)
+            registry.get(agent_id)
 
     def test_in_operator(self):
         """Test the 'in' operator for checking registration."""
 
         @auto_register
-        class InOperatorAssistant(Assistant):
+        class InOperatorAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = InOperatorAssistant._assistant_id
+        agent_id = InOperatorAgent._agent_id
 
-        assert assistant_id in registry
+        assert agent_id in registry
         assert "not-a-real-uuid" not in registry
 
-    def test_assistant_id_set_on_class(self):
-        """Test that _assistant_id is set on the registered class."""
+    def test_agent_id_set_on_class(self):
+        """Test that _agent_id is set on the registered class."""
 
         @auto_register
-        class IdAssistant(Assistant):
+        class IdAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assert is_valid_uuid(IdAssistant._assistant_id)
+        assert is_valid_uuid(IdAgent._agent_id)
 
     def test_singleton_instance(self):
         """Test that registry is a singleton."""
-        reg1 = AssistantRegistry()
-        reg2 = AssistantRegistry()
+        reg1 = AgentRegistry()
+        reg2 = AgentRegistry()
         assert reg1 is reg2
         assert reg1 is registry
 
 
-class TestAssistantInfoMixin:
-    """Test suite for AssistantInfoMixin."""
+class TestAgentInfoMixin:
+    """Test suite for AgentInfoMixin."""
 
     @pytest.fixture(autouse=True)
     def reset_registry(self):
@@ -280,7 +280,7 @@ class TestAssistantInfoMixin:
         """Test that info() returns correct metadata with UUID id."""
 
         @auto_register
-        class InfoAssistant(Assistant):
+        class InfoAgent(Agent):
             name = "Info Bot"
             model = "gpt-4"
             description = "An info bot"
@@ -288,58 +288,58 @@ class TestAssistantInfoMixin:
             async def get_pipeline_adapter(self, thread_id=None):
                 pass
 
-        assistant_id = InfoAssistant._assistant_id
+        agent_id = InfoAgent._agent_id
         registry.setup()
-        assistant = registry.get(assistant_id)
+        agent = registry.get(agent_id)
 
-        info = assistant.info()
-        assert info.id == assistant_id
+        info = agent.info()
+        assert info.id == agent_id
         assert is_valid_uuid(info.id)
         assert info.name == "Info Bot"
         assert info.model == "gpt-4"
         assert info.description == "An info bot"
-        assert info.class_name == "InfoAssistant"
+        assert info.class_name == "InfoAgent"
 
-    def test_assistant_id_property(self):
-        """Test the assistant_id property returns UUID."""
+    def test_agent_id_property(self):
+        """Test the agent_id property returns UUID."""
 
         @auto_register
-        class PropAssistant(Assistant):
+        class PropAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
-        assistant_id = PropAssistant._assistant_id
-        assistant = registry.get(assistant_id)
+        agent_id = PropAgent._agent_id
+        agent = registry.get(agent_id)
 
-        assert assistant.assistant_id == assistant_id
-        assert is_valid_uuid(assistant.assistant_id)
+        assert agent.agent_id == agent_id
+        assert is_valid_uuid(agent.agent_id)
 
-    def test_assistant_id_fallback(self):
-        """Test assistant_id fallback generates consistent UUID."""
+    def test_agent_id_fallback(self):
+        """Test agent_id fallback generates consistent UUID."""
 
         # Create instance without going through registry
         @auto_register
-        class FallbackAssistant(Assistant):
+        class FallbackAgent(Agent):
             async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
-        # Manually create instance (won't have _assistant_id cached yet)
-        assistant = FallbackAssistant()
+        # Manually create instance (won't have _agent_id cached yet)
+        agent = FallbackAgent()
 
         # Should generate UUID from class path
-        first_id = assistant.assistant_id
+        first_id = agent.agent_id
         assert is_valid_uuid(first_id)
 
         # Second call should return cached value
-        second_id = assistant.assistant_id
+        second_id = agent.agent_id
         assert first_id == second_id
 
     def test_info_with_get_name_method(self):
         """Test info() uses get_name() when name attribute is None."""
 
         @auto_register
-        class DynamicNameAssistant(Assistant):
+        class DynamicNameAgent(Agent):
             name = None
 
             def get_name(self):
@@ -348,11 +348,11 @@ class TestAssistantInfoMixin:
             async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
-        assistant_id = DynamicNameAssistant._assistant_id
+        agent_id = DynamicNameAgent._agent_id
         registry.setup()
-        assistant = registry.get(assistant_id)
+        agent = registry.get(agent_id)
 
-        info = assistant.info()
+        info = agent.info()
         assert info.name == "Dynamic Name"
         assert is_valid_uuid(info.id)
 
@@ -360,16 +360,16 @@ class TestAssistantInfoMixin:
         """Test info().rag is False when no rag_provider set."""
 
         @auto_register
-        class NoRagAssistant(Assistant):
+        class NoRagAgent(Agent):
             name = "No RAG"
 
             async def get_pipeline_adapter(self, thread_id=None, run_id=None):
                 pass
 
         registry.setup()
-        assistant = registry.get(NoRagAssistant._assistant_id)
+        agent = registry.get(NoRagAgent._agent_id)
 
-        info = assistant.info()
+        info = agent.info()
         assert info.rag is False
 
     def test_info_rag_true_with_provider(self):
@@ -378,7 +378,7 @@ class TestAssistantInfoMixin:
         from django_ai_sdk.rags.provider import RAGProvider
 
         @auto_register
-        class RagAssistant(Assistant):
+        class RagAgent(Agent):
             name = "Has RAG"
             rag_provider = RAGProvider()
 
@@ -386,16 +386,16 @@ class TestAssistantInfoMixin:
                 pass
 
         registry.setup()
-        assistant = registry.get(RagAssistant._assistant_id)
+        agent = registry.get(RagAgent._agent_id)
 
-        info = assistant.info()
+        info = agent.info()
         assert info.rag is True
 
 
-class TestAbstractAssistants:
+class TestAbstractAgents:
     """`abstract = True` marks a shared base meant only to be subclassed. It exists so
     a project can factor common config (model, permissions, storage) into a base class
-    without that base showing up as a usable assistant.
+    without that base showing up as a usable agent.
     """
 
     @pytest.fixture(autouse=True)
@@ -405,41 +405,41 @@ class TestAbstractAssistants:
         registry._reset()
 
     def test_an_abstract_base_is_not_registered(self):
-        class SharedBase(Assistant):
+        class SharedBase(Agent):
             abstract = True
             name = "Shared Base"
 
         # register() never ran, so the class-level default is untouched.
-        assert SharedBase._assistant_id == ""
+        assert SharedBase._agent_id == ""
         assert SharedBase not in registry._classes.values()
 
     def test_a_concrete_subclass_of_an_abstract_base_is_registered(self):
         """`abstract` is read off the class's own __dict__, so subclasses don't inherit
         it and don't have to restate `abstract = False`."""
 
-        class SharedBase(Assistant):
+        class SharedBase(Agent):
             abstract = True
             name = "Shared Base"
 
         class RealBot(SharedBase):
             name = "Real Bot"
 
-        assert RealBot._assistant_id
-        assert registry._classes[RealBot._assistant_id] is RealBot
+        assert RealBot._agent_id
+        assert registry._classes[RealBot._agent_id] is RealBot
 
     def test_abstract_also_blocks_explicit_registration(self):
         """Checked in register() rather than __init_subclass__, so @auto_register and
-        AI_SDK_ASSISTANTS skip it too — one rule, every path."""
+        AI_SDK_AGENTS skip it too — one rule, every path."""
 
         @auto_register
-        class DecoratedBase(Assistant):
+        class DecoratedBase(Agent):
             abstract = True
             name = "Decorated Base"
 
         assert DecoratedBase not in registry._classes.values()
 
     def test_setup_does_not_instantiate_an_abstract_base(self):
-        class SharedBase(Assistant):
+        class SharedBase(Agent):
             abstract = True
             name = "Shared Base"
 

@@ -226,8 +226,8 @@ class Stream:
 
         # Ensure we have at least one message
         # TODO: we now return a system message instead of a user message, this is a temporary fix
-        # In real-world scenarios: the assistant could be working without user input, it might be
-        # handed of from another assistant or system. We should support this case gracefully.
+        # In real-world scenarios: the agent could be working without user input, it might be
+        # handed of from another agent or system. We should support this case gracefully.
         if not converted_messages:
             logger.warning("No messages available for Haystack pipeline!")
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))

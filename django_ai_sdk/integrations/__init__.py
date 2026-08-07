@@ -4,7 +4,7 @@ later.
 
 Every integration is one Integration (the contract in base.py), living in its own
 Django app. Its AppConfig (subclassing IntegrationAppConfig) registers it on
-ready(). The assistant and the host project's integrations endpoints all talk to
+ready(). The agent and the host project's integrations endpoints all talk to
 the one Integration contract, so none of them know or care which kind an
 integration is.
 
@@ -24,7 +24,7 @@ Adding one -- three files, no models, no migrations::
         "zendesk": {"TOKEN": env("ZENDESK_API_TOKEN")},
     }
 
-Then list it on an assistant: ``integrations = ["zendesk"]``.
+Then list it on an agent: ``integrations = ["zendesk"]``.
 
 INSTALLED_APPS decides which integrations exist; AI_SDK_INTEGRATIONS configures them,
 keyed by registry name, in the shape Django uses for every other pluggable backend
@@ -42,7 +42,7 @@ Package layout, two tiers:
   api.base.APIIntegration is the base for hand-written API wrappers. mcp/ is the MCP
   toolkit (OAuth token models, discovery/PKCE, the Haystack MCPToolset loader) for
   any MCP server. Both kinds produce ordinary Haystack tool objects, consumed
-  identically by the assistant.
+  identically by the agent.
 
 The SDK ships no integrations router: HTTP surfaces are the host project's, since
 the SDK doesn't pick your framework. Build one over IntegrationService (list, connect,

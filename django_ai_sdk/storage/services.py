@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     Operation,
@@ -32,8 +32,8 @@ async def _get_thread(thread_id: str) -> ThreadInfo | None:
 
 async def _get_storage(thread_info: ThreadInfo) -> Any:
     """Get a storage adapter instance for a thread without permission checks."""
-    assistant = await AssistantService.get(thread_info.assistant_id)
-    storage_class = ThreadService.get_storage(assistant)
+    agent = await AgentService.get(thread_info.agent_id)
+    storage_class = ThreadService.get_storage(agent)
     return storage_class(thread_info.id)
 
 
@@ -50,7 +50,7 @@ class ThreadService(PermissionsMixin):
     @classmethod
     async def create_thread(
         cls,
-        assistant_id: str,
+        agent_id: str,
         title: str = "",
         metadata: dict | None = None,
         *,
@@ -60,13 +60,13 @@ class ThreadService(PermissionsMixin):
         """
         Create a new thread in the appropriate storage.
 
-        Uses the assistant's configured storage adapter class.
+        Uses the agent's configured storage adapter class.
 
         Args:
-            assistant_id: ID of the assistant creating the thread
+            agent_id: ID of the agent creating the thread
             title: Thread title
-            metadata: Additional metadata. Auto-populates model, assistant_name,
-                     assistant_class, and created_via. Caller-provided values
+            metadata: Additional metadata. Auto-populates model, agent_name,
+                     agent_class, and created_via. Caller-provided values
                      take precedence over auto-generated ones.
             user: User for permission checking and thread ownership
             thread_id: Optional custom thread ID
@@ -77,19 +77,19 @@ class ThreadService(PermissionsMixin):
         Raises:
             PermissionDenied: If user has no CREATE_THREAD permission
         """
-        from django_ai_sdk.assistants.services import AssistantService
+        from django_ai_sdk.agents.services import AgentService
 
-        assistant = await AssistantService.get(assistant_id)
+        agent = await AgentService.get(agent_id)
 
         await cls.has_perms(user, Operation.CREATE_THREAD)
 
-        storage_class = assistant.storage_adapter
+        storage_class = agent.storage_adapter
         title = title or ""
         default_metadata = {
-            "assistant_id": assistant_id,
-            "model": assistant.model,
-            "assistant_name": assistant.name or assistant.__class__.__name__,
-            "assistant_class": assistant.__class__.__name__,
+            "agent_id": agent_id,
+            "model": agent.model,
+            "agent_name": agent.name or agent.__class__.__name__,
+            "agent_class": agent.__class__.__name__,
             "created_via": "create_thread",
         }
         default_metadata.update(metadata or {})
@@ -101,7 +101,7 @@ class ThreadService(PermissionsMixin):
             thread_id=thread_id,
         )
 
-        logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")
+        logger.debug(f"Created thread {thread_id} for agent {agent_id}")
         return thread_id
 
     @classmethod
@@ -109,14 +109,14 @@ class ThreadService(PermissionsMixin):
         """
         Find thread by querying storage adapters.
 
-        Returns thread metadata including assistant_id.
+        Returns thread metadata including agent_id.
 
         Args:
             thread_id: Thread ID to look up
             user: Required user for permission checking
 
         Returns:
-            ThreadInfo with assistant_id, or None if not found
+            ThreadInfo with agent_id, or None if not found
 
         Raises:
             PermissionDenied: If user has no VIEW_THREAD permission for the thread
@@ -124,7 +124,7 @@ class ThreadService(PermissionsMixin):
         thread = await _get_thread(thread_id)
         if thread:
             await cls.has_perms(user, Operation.VIEW_THREAD, thread)
-            logger.debug(f"Found thread {thread_id} in adapter, assistant: {thread.assistant_id}")
+            logger.debug(f"Found thread {thread_id} in adapter, agent: {thread.agent_id}")
 
         if not thread:
             logger.debug(f"Thread not found: {thread_id}")
@@ -359,7 +359,7 @@ class ThreadService(PermissionsMixin):
         Resolve a thread's storage adapter, instantiated and bound to the thread.
 
         Convenience for the common pattern: look up the thread, find its
-        assistant, get the assistant's storage class, instantiate with
+        agent, get the agent's storage class, instantiate with
         thread_id. Returns a ready-to-use storage adapter instance.
 
         Args:
@@ -380,24 +380,22 @@ class ThreadService(PermissionsMixin):
         return await _get_storage(thread)
 
     @classmethod
-    def get_storage(cls, assistant: Any) -> type:
+    def get_storage(cls, agent: Any) -> type:
         """
-        Get the storage adapter class for an assistant.
+        Get the storage adapter class for an agent.
 
         Args:
-            assistant: Assistant instance
+            agent: Agent instance
 
         Returns:
             Storage adapter class (not instantiated)
 
         Raises:
-            ValueError: If assistant has no storage_adapter configured
+            ValueError: If agent has no storage_adapter configured
         """
-        storage_class = assistant.storage_adapter
+        storage_class = agent.storage_adapter
         if storage_class is None:
-            raise ValueError(
-                f"Assistant '{assistant.assistant_id}' has no storage_adapter configured"
-            )
+            raise ValueError(f"Agent '{agent.agent_id}' has no storage_adapter configured")
         return storage_class
 
 
@@ -424,13 +422,13 @@ async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
         Dict with thread and messages (each message includes feedbacks)
 
     Raises:
-        ValueError: If thread or assistant not found
+        ValueError: If thread or agent not found
         PermissionDenied: If user has no VIEW_THREAD permission
     """
-    from django_ai_sdk.assistants.services import AssistantService
+    from django_ai_sdk.agents.services import AgentService
 
-    assistant = await AssistantService.get_assistant(thread_id, user=user)
-    thread_detail: ThreadDetail = await assistant.history(thread_id, user=user)
+    agent = await AgentService.get_agent(thread_id, user=user)
+    thread_detail: ThreadDetail = await agent.history(thread_id, user=user)
 
     return {
         "thread": thread_detail.thread,

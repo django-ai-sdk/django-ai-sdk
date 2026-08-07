@@ -13,7 +13,7 @@ class ThreadInfo(BaseModel):
 
     id: str
     title: str = ""
-    assistant_id: str = ""
+    agent_id: str = ""
     model: str = ""
     user_id: str | None = None
     created_at: datetime
@@ -26,7 +26,7 @@ class ThreadInfo(BaseModel):
 class ThreadDetail(BaseModel):
     """Full thread information including messages for API responses.
 
-    Returned by Assistant.history() for complete thread views.
+    Returned by Agent.history() for complete thread views.
     Contains both thread metadata and the conversation messages
     formatted according to the protocol handler.
     """

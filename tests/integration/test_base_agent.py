@@ -1,5 +1,5 @@
 """
-Integration tests for BaseAssistant.
+Integration tests for BaseAgent.
 """
 
 import pytest
@@ -7,7 +7,7 @@ import pytest_asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.storage.memory import MemoryStorageAdapter, MemoryStore
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -15,24 +15,24 @@ from tests.factories.schemas import ChatMessageFactory
 
 
 @pytest.mark.django_db
-class TestBaseAssistant:
-    """Test suite for BaseAssistant core functionality."""
+class TestBaseAgent:
+    """Test suite for BaseAgent core functionality."""
 
     @pytest_asyncio.fixture
-    async def assistant(self):
-        """Create a test assistant with memory storage."""
+    async def agent(self):
+        """Create a test agent with memory storage."""
 
-        class TestAssistant(Assistant):
-            name = "test_assistant"
+        class TestAgent(Agent):
+            name = "test_agent"
             model = "gpt-4o-mini"
-            instructions = ["You are a test assistant"]
+            instructions = ["You are a test agent"]
             protocol = VercelProtocolHandler  # Class, not instance!
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None):
                 return MagicMock()
 
-        return TestAssistant()
+        return TestAgent()
 
     @pytest_asyncio.fixture
     async def thread_id(self):
@@ -40,34 +40,34 @@ class TestBaseAssistant:
         return str(uuid.uuid4())
 
     @pytest.mark.asyncio
-    async def test_assistant_creates_thread(self, assistant, thread_id):
-        """Test that assistant properly creates threads."""
+    async def test_agent_creates_thread(self, agent, thread_id):
+        """Test that agent properly creates threads."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test_assistant"},
+            metadata={"agent_id": "test_agent"},
             thread_id=thread_id
         )
 
         # Now get storage adapter for existing thread
-        storage = await assistant.get_storage_adapter(thread_id)
+        storage = await agent.get_storage_adapter(thread_id)
 
         # Thread should be accessible
         assert storage is not None
         assert storage.thread_id == thread_id
 
     @pytest.mark.asyncio
-    async def test_message_storage_flow(self, assistant, thread_id):
+    async def test_message_storage_flow(self, agent, thread_id):
         """Test complete message storage flow."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test_assistant"},
+            metadata={"agent_id": "test_agent"},
             thread_id=thread_id
         )
 
         # Now get storage adapter
-        storage = await assistant.get_storage_adapter(thread_id)
+        storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
         # Store user message
@@ -81,16 +81,16 @@ class TestBaseAssistant:
         assert history[0].role == "user"
 
     @pytest.mark.asyncio
-    async def test_message_rating_flow(self, assistant, thread_id):
+    async def test_message_rating_flow(self, agent, thread_id):
         """Test complete message rating workflow."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test_assistant"},
+            metadata={"agent_id": "test_agent"},
             thread_id=thread_id
         )
 
-        storage = await assistant.get_storage_adapter(thread_id)
+        storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
         # Store message
@@ -107,16 +107,16 @@ class TestBaseAssistant:
         assert stored_messages[0].feedbacks[0]["rating"] == 1
 
     @pytest.mark.asyncio
-    async def test_conversation_history_retrieval(self, assistant, thread_id):
+    async def test_conversation_history_retrieval(self, agent, thread_id):
         """Test conversation history retrieval."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
             title="Test Thread",
-            metadata={"assistant_id": "test_assistant"},
+            metadata={"agent_id": "test_agent"},
             thread_id=thread_id
         )
 
-        storage = await assistant.get_storage_adapter(thread_id)
+        storage = await agent.get_storage_adapter(thread_id)
         assert storage is not None
 
         # Create conversation history
@@ -137,7 +137,7 @@ class TestBaseAssistant:
         assert history[2].role == "user"
 
     @pytest.mark.asyncio
-    async def test_thread_not_found_error(self, assistant):
+    async def test_thread_not_found_error(self, agent):
         """Test that accessing non-existent thread raises error."""
         # Use a valid UUID format but one that doesn't exist
         nonexistent_id = str(uuid.uuid4())
@@ -149,9 +149,9 @@ class TestBaseAssistant:
             await storage.store_chat_message(msg)
 
     @pytest.mark.asyncio
-    async def test_protocol_message_conversion(self, assistant):
+    async def test_protocol_message_conversion(self, agent):
         """Test protocol handler converts messages correctly."""
-        protocol = assistant.protocol_handler  # Use protocol_handler, not protocol
+        protocol = agent.protocol_handler  # Use protocol_handler, not protocol
 
         # Create mock Vercel message objects with .parts attribute
         class MockPart:
@@ -178,18 +178,18 @@ class TestBaseAssistant:
 
 
     @pytest.mark.asyncio
-    async def test_get_storage_adapter_falls_back_for_unknown_thread(self, assistant):
+    async def test_get_storage_adapter_falls_back_for_unknown_thread(self, agent):
         """get_storage_adapter() must return configured adapter for unknown threads."""
         unknown_thread_id = str(uuid.uuid4())
         # No thread created in any adapter — should fall back to storage_adapter
-        storage = await assistant.get_storage_adapter(unknown_thread_id)
+        storage = await agent.get_storage_adapter(unknown_thread_id)
         assert storage is not None
         assert storage.thread_id == unknown_thread_id
 
     @pytest.mark.asyncio
-    async def test_get_storage_adapter_returns_none_for_none_thread_id(self, assistant):
+    async def test_get_storage_adapter_returns_none_for_none_thread_id(self, agent):
         """get_storage_adapter() must return None when thread_id is None."""
-        storage = await assistant.get_storage_adapter(None)
+        storage = await agent.get_storage_adapter(None)
         assert storage is None
 
     @pytest.mark.asyncio
@@ -204,26 +204,26 @@ class TestBaseAssistant:
 
 @pytest.mark.django_db
 class TestStreamWriterIntegration:
-    """Test StreamWriter integration with BaseAssistant."""
+    """Test StreamWriter integration with BaseAgent."""
 
     @pytest_asyncio.fixture
-    async def assistant_with_storage(self):
-        """Create assistant with storage enabled."""
+    async def agent_with_storage(self):
+        """Create agent with storage enabled."""
 
-        class TestAssistant(Assistant):
-            name = "test_assistant"
+        class TestAgent(Agent):
+            name = "test_agent"
             model = "gpt-4o-mini"
-            instructions = ["You are a test assistant"]
+            instructions = ["You are a test agent"]
             protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None, *args, **kwargs):
                 return MagicMock()
 
-        return TestAssistant()
+        return TestAgent()
 
     @pytest.mark.asyncio
-    async def test_stream_writer_creates_message_with_id(self, assistant_with_storage):
+    async def test_stream_writer_creates_message_with_id(self, agent_with_storage):
         """Test that StreamWriter creates message with proper ID."""
         from django_ai_sdk.common import StreamWriter
 
@@ -257,42 +257,42 @@ class TestStreamWriterIntegration:
 class TestTitleGenerationPrompt:
     """`get_title_generation_prompt` is overridable and defaults to a
     length-capped prompt, and `generate_thread_title` must honour whatever
-    the assistant returns from it."""
+    the agent returns from it."""
 
     @pytest_asyncio.fixture
-    async def assistant(self):
-        class TestAssistant(Assistant):
-            name = "test_assistant"
+    async def agent(self):
+        class TestAgent(Agent):
+            name = "test_agent"
             model = "gpt-4o-mini"
-            instructions = ["You are a test assistant"]
+            instructions = ["You are a test agent"]
             protocol = VercelProtocolHandler
             storage_adapter = MemoryStorageAdapter
 
             async def get_pipeline_adapter(self, thread_id: str | None = None, *args, **kwargs):
                 return MagicMock()
 
-        return TestAssistant()
+        return TestAgent()
 
-    def test_default_prompt_mentions_sanity_limit(self, assistant):
+    def test_default_prompt_mentions_sanity_limit(self, agent):
         from django_ai_sdk.conversation.utils import get_title_sanity_limit
 
         sanity_limit = get_title_sanity_limit()
-        prompt = assistant.get_title_generation_prompt()
+        prompt = agent.get_title_generation_prompt()
 
         assert str(sanity_limit) in prompt
 
     @pytest.mark.asyncio
-    async def test_generate_thread_title_uses_overridden_prompt(self, assistant):
+    async def test_generate_thread_title_uses_overridden_prompt(self, agent):
         from django_ai_sdk.common import Prompt
         from django_ai_sdk.conversation.utils import generate_thread_title
 
         custom_prompt = Prompt("Custom title prompt, stay under 10 characters.")
-        assistant.get_title_generation_prompt = MagicMock(return_value=custom_prompt)
-        assistant.run = AsyncMock(return_value="Result")
+        agent.get_title_generation_prompt = MagicMock(return_value=custom_prompt)
+        agent.run = AsyncMock(return_value="Result")
 
         await generate_thread_title(
-            assistant=assistant,
+            agent=agent,
             messages=[ChatMessage(role="user", content="hi")],
         )
 
-        assert assistant.run.call_args.kwargs["system_prompt"] == custom_prompt
+        assert agent.run.call_args.kwargs["system_prompt"] == custom_prompt

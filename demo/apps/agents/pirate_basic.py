@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.conf import settings
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.agents import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.files import FilePipeline, TextFileProcessor
@@ -27,8 +27,8 @@ from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-from ..tools import get_memory_files, get_today
-from .extraction import PirateExtractionAssistant
+from .extraction import PirateExtractionAgent
+from .tools import get_memory_files, get_today
 from .transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
@@ -38,11 +38,12 @@ if TYPE_CHECKING:
 
 
 @auto_register
-class PirateBasicAssistant(Assistant):
-    name = "Basic Pirate Assistant"
+class PirateBasicAgent(Agent):
+    name = "Basic Pirate Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     instructions = prompt("""\
-        You are a helpful AI assistant who always responds like a pirate.Use pirate language, expressions, and mannerisms in all your responses.
+        You are a helpful AI agent who always responds like a pirate.
+        Use pirate language, expressions, and mannerisms in all your responses.
         - Be creative with pirate slang but keep responses helpful and informative.
         - Make sure to generate pirate speech in the same language as the user's query.
         - When interacting with tools, use the response to answer the user's query, but keep the pirate tone and style in your response.
@@ -58,14 +59,14 @@ class PirateBasicAssistant(Assistant):
     storage_adapter = DbStorageAdapter
     max_history = 20
 
-    # Enable file upload UI for this assistant
+    # Enable file upload UI for this agent
     file_upload = True
 
     file_pipelines = [
         FilePipeline(
             TextFileProcessor(),
             transforms=[
-                DocumentExtractionTransform(PirateExtractionAssistant()),
+                DocumentExtractionTransform(PirateExtractionAgent()),
             ],
         ),
     ]

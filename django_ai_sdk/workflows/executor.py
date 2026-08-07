@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from django.utils import timezone
 from pydantic import BaseModel, Field, create_model
 
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.workflows.actions import get_action_registry
@@ -99,7 +99,7 @@ class WorkflowExecutor:
                 )
 
                 try:
-                    assistant = await AssistantService.get(step.assistant_id)
+                    agent = await AgentService.get(step.agent_id)
 
                     if step.input_key:
                         if step.input_key not in outputs:
@@ -139,7 +139,7 @@ class WorkflowExecutor:
                             "type[BaseModel]",
                             create_model(f"Output_{step.output_key}", **field_definitions),
                         )
-                        result = await assistant.run(
+                        result = await agent.run(
                             step_messages,
                             system_prompt=system_prompt,
                             response_format=DynamicModel,
@@ -149,7 +149,7 @@ class WorkflowExecutor:
                             result.model_dump() if isinstance(result, BaseModel) else {}
                         )
                     else:
-                        result = await assistant.run(
+                        result = await agent.run(
                             step_messages,
                             system_prompt=system_prompt,
                             user=user,

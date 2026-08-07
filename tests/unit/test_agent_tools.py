@@ -4,17 +4,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from django_ai_sdk import Assistant
+from django_ai_sdk import Agent
 from django_ai_sdk.memories.models import Entry, ThreadMemory
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from tests.factories.db import MemoryFactory
 
 
-class RagToolsAssistant(Assistant):
+class RagToolsAgent(Agent):
     name = "rag_tools_test"
     model = "gpt-4o-mini"
-    instructions = ["You are a test assistant"]
+    instructions = ["You are a test agent"]
     protocol = VercelProtocolHandler
     storage_adapter = MemoryStorageAdapter
 
@@ -24,27 +24,27 @@ class RagToolsAssistant(Assistant):
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestAssistantGetRagTools:
-    """Tests for Assistant.get_rag_tools()."""
+class TestAgentGetRagTools:
+    """Tests for Agent.get_rag_tools()."""
 
     async def test_returns_empty_when_no_rag_provider(self):
-        assistant = RagToolsAssistant()
-        assert assistant.rag_provider is None
-        result = await assistant.get_rag_tools(thread_id="any-thread")
+        agent = RagToolsAgent()
+        assert agent.rag_provider is None
+        result = await agent.get_rag_tools(thread_id="any-thread")
         assert result == []
 
     async def test_returns_empty_when_no_thread_id(self):
-        assistant = RagToolsAssistant()
-        assistant.rag_provider = MagicMock()
-        result = await assistant.get_rag_tools(thread_id="")
+        agent = RagToolsAgent()
+        agent.rag_provider = MagicMock()
+        result = await agent.get_rag_tools(thread_id="")
         assert result == []
 
     async def test_empty_thread_id_allows_none_check_with_provider(self):
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock()
-        assistant.rag_provider = mock_provider
-        result = await assistant.get_rag_tools(thread_id="")
+        agent.rag_provider = mock_provider
+        result = await agent.get_rag_tools(thread_id="")
         assert result == []
         mock_provider.get_tool.assert_not_called()
 
@@ -58,13 +58,13 @@ class TestAssistantGetRagTools:
         thread = await Thread.objects.acreate()
         await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_tool = MagicMock()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(return_value=mock_tool)
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        result = await assistant.get_rag_tools(thread_id=str(thread.id))
+        result = await agent.get_rag_tools(thread_id=str(thread.id))
 
         assert len(result) == 1
         assert result[0] is mock_tool
@@ -78,12 +78,12 @@ class TestAssistantGetRagTools:
         thread = await Thread.objects.acreate()
         await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=False)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock()
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        result = await assistant.get_rag_tools(thread_id=str(thread.id))
+        result = await agent.get_rag_tools(thread_id=str(thread.id))
 
         assert result == []
         mock_provider.get_tool.assert_not_called()
@@ -95,12 +95,12 @@ class TestAssistantGetRagTools:
         thread = await Thread.objects.acreate()
         await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(return_value=None)
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        result = await assistant.get_rag_tools(thread_id=str(thread.id))
+        result = await agent.get_rag_tools(thread_id=str(thread.id))
 
         assert result == []
         mock_provider.get_tool.assert_awaited_once()
@@ -119,14 +119,14 @@ class TestAssistantGetRagTools:
         await ThreadMemory.objects.acreate(thread=thread, memory=mem_a, active=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem_b, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         tool_a = MagicMock()
         tool_b = MagicMock()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(side_effect=[tool_a, tool_b])
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        result = await assistant.get_rag_tools(thread_id=str(thread.id))
+        result = await agent.get_rag_tools(thread_id=str(thread.id))
 
         assert len(result) == 2
         assert result[0] is tool_a
@@ -147,12 +147,12 @@ class TestAssistantGetRagTools:
         await ThreadMemory.objects.acreate(thread=thread, memory=mem_a, active=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem_b, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(side_effect=[MagicMock(), MagicMock()])
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        await assistant.get_rag_tools(thread_id=str(thread.id))
+        await agent.get_rag_tools(thread_id=str(thread.id))
 
         names = [call.kwargs["spec"].name for call in mock_provider.get_tool.await_args_list]
         assert len(set(names)) == 2
@@ -172,17 +172,17 @@ class TestAssistantGetRagTools:
         await ThreadMemory.objects.acreate(thread=thread, memory=inactive, active=False)
         await ThreadMemory.objects.acreate(thread=thread, memory=empty, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_tool = MagicMock()
         mock_provider = MagicMock()
 
-        async def get_tool_side_effect(_assistant, memory_id, **kwargs):
+        async def get_tool_side_effect(_agent, memory_id, **kwargs):
             return None if memory_id == str(empty.id) else mock_tool
 
         mock_provider.get_tool = AsyncMock(side_effect=get_tool_side_effect)
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        result = await assistant.get_rag_tools(thread_id=str(thread.id))
+        result = await agent.get_rag_tools(thread_id=str(thread.id))
 
         assert len(result) == 1
         assert result[0] is mock_tool
@@ -196,16 +196,16 @@ class TestAssistantGetRagTools:
         thread = await Thread.objects.acreate()
         await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_tool = MagicMock()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(return_value=mock_tool)
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
         citation_registry = MagicMock()
         citation_formatter = MagicMock()
 
-        result = await assistant.get_rag_tools(
+        result = await agent.get_rag_tools(
             thread_id=str(thread.id),
             citation_registry=citation_registry,
             citation_formatter=citation_formatter,
@@ -225,13 +225,13 @@ class TestAssistantGetRagTools:
         thread = await Thread.objects.acreate()
         await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
 
-        assistant = RagToolsAssistant()
+        agent = RagToolsAgent()
         mock_tool = MagicMock()
         mock_provider = MagicMock()
         mock_provider.get_tool = AsyncMock(return_value=mock_tool)
-        assistant.rag_provider = mock_provider
+        agent.rag_provider = mock_provider
 
-        await assistant.get_rag_tools(thread_id=str(thread.id))
+        await agent.get_rag_tools(thread_id=str(thread.id))
 
         call_args = mock_provider.get_tool.await_args
         assert call_args.args[1] == str(memory.id)

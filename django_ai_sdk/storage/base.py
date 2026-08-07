@@ -130,7 +130,7 @@ class BaseStorageAdapter(ABC):
 
         Args:
             title: Thread title
-            metadata: Optional metadata dict (should include assistant_id)
+            metadata: Optional metadata dict (should include agent_id)
             user: Optional user for the thread owner
             thread_id: Optional custom thread ID
 
@@ -245,7 +245,7 @@ class BaseStorageAdapter(ABC):
         Callback for StreamWriter to auto-store messages.
 
         Called automatically when streaming completes to persist
-        the assistant's response.
+        the agent's response.
 
         Args:
             chat_message: The ChatMessage to store

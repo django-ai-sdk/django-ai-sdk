@@ -8,39 +8,39 @@ import pytest
 
 
 # ============================================================================
-# MemoryService — get_assistant_memories
+# MemoryService — get_agent_memories
 # ============================================================================
 
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-class TestMemoryServiceGetAssistantMemories:
+class TestMemoryServiceGetAgentMemories:
     async def test_filters_by_slug(self):
         from django_ai_sdk.memories.models import Memory
         from django_ai_sdk.memories.services import MemoryService
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
         mem1 = await Memory.objects.acreate(name="Legal Documents")
         await Memory.objects.acreate(name="General Docs")
 
-        with mock_assistant_memories([mem1.slug]):
-            result = await MemoryService.get_assistant_memories("test-asst")
+        with mock_agent_memories([mem1.slug]):
+            result = await MemoryService.get_agent_memories("test-asst")
             assert result == [str(mem1.id)]
 
     async def test_returns_empty_list_when_no_memories(self):
         from django_ai_sdk.memories.services import MemoryService
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
-        with mock_assistant_memories([]):
-            result = await MemoryService.get_assistant_memories("test-asst")
+        with mock_agent_memories([]):
+            result = await MemoryService.get_agent_memories("test-asst")
             assert result == []
 
     async def test_skips_nonexistent_slugs(self):
         from django_ai_sdk.memories.services import MemoryService
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
-        with mock_assistant_memories(["nonexistent-slug"]):
-            result = await MemoryService.get_assistant_memories("test-asst")
+        with mock_agent_memories(["nonexistent-slug"]):
+            result = await MemoryService.get_agent_memories("test-asst")
             assert result == []
 
 
@@ -149,12 +149,12 @@ class TestMemoryServicePermissions:
 
         await mem.adelete()
 
-    async def test_link_memories_links_assistant_memories(self):
+    async def test_link_memories_links_agent_memories(self):
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
         memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -165,7 +165,7 @@ class TestMemoryServicePermissions:
         await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with (
-            mock_assistant_memories([mem.slug]),
+            mock_agent_memories([mem.slug]),
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.link_memories(
@@ -184,7 +184,7 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
         memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -195,7 +195,7 @@ class TestMemoryServicePermissions:
         await MemoryUser.objects.acreate(memory=mem, user=memory_user, can_manage=True)
 
         with (
-            mock_assistant_memories([mem.slug]),
+            mock_agent_memories([mem.slug]),
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.link_memories(
@@ -214,7 +214,7 @@ class TestMemoryServicePermissions:
         from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
         memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -226,7 +226,7 @@ class TestMemoryServicePermissions:
         await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
 
         with (
-            mock_assistant_memories([mem.slug]),
+            mock_agent_memories([mem.slug]),
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.unlink_memories(
@@ -240,12 +240,12 @@ class TestMemoryServicePermissions:
 
         await mem.adelete()
 
-    async def test_unlink_memories_unlinks_assistant_memories(self):
+    async def test_unlink_memories_unlinks_agent_memories(self):
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.memories.models import Memory, MemoryUser, ThreadMemory
         from django_ai_sdk.conversation.models import Thread
         from tests.mocks.permissions import memory_permissions
-        from tests.mocks.assistant import mock_assistant_memories
+        from tests.mocks.agent import mock_agent_memories
 
         memory_user = await self._get_user()
         thread = await Thread.objects.acreate()
@@ -259,7 +259,7 @@ class TestMemoryServicePermissions:
         )
 
         with (
-            mock_assistant_memories([mem.slug]),
+            mock_agent_memories([mem.slug]),
             memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
         ):
             await MemoryService.unlink_memories(
@@ -310,23 +310,23 @@ class TestOpenMode:
     """Verify the SDK works without restriction under AllowAll + user=None."""
 
     async def test_thread_service_create_with_none_user(
-        self, mock_assistants_registry, mock_storage_adapter_registry
+        self, mock_agents_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
         from tests.mocks.permissions import thread_permissions
 
         mock_storage_class = MagicMock()
         mock_storage_class.create_thread = AsyncMock(return_value="new-thread-id")
-        mock_assistants_registry.get.return_value.storage_adapter = mock_storage_class
+        mock_agents_registry.get.return_value.storage_adapter = mock_storage_class
 
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
             result = await ThreadService.create_thread(
-                "test-assistant", user=None
+                "test-agent", user=None
             )
         assert result == "new-thread-id"
 
     async def test_thread_service_get_with_none_user(
-        self, mock_assistants_registry, mock_storage_adapter_registry
+        self, mock_agents_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
         from tests.mocks.permissions import thread_permissions
@@ -338,16 +338,16 @@ class TestOpenMode:
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
             result = await ThreadService.get_thread("thread-1", user=None)
         assert result is not None
-        assert result.assistant_id == "test-assistant"
+        assert result.agent_id == "test-agent"
 
     async def test_thread_service_storage_for_thread_with_none_user(
-        self, mock_assistants_registry
+        self, mock_agents_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
         from tests.factories.schemas import ThreadInfoFactory
         from tests.mocks.permissions import thread_permissions
 
-        thread_info = ThreadInfoFactory.build(assistant_id="test-assistant", user_id=None)
+        thread_info = ThreadInfoFactory.build(agent_id="test-agent", user_id=None)
 
         with thread_permissions("django_ai_sdk.permissions.AllowAll"):
             with (
@@ -364,7 +364,7 @@ class TestOpenMode:
         assert result is not None
 
     async def test_thread_service_rate_with_none_user(
-        self, mock_assistants_registry, mock_storage_adapter_registry
+        self, mock_agents_registry, mock_storage_adapter_registry
     ):
         from django_ai_sdk.storage.services import ThreadService
         from tests.mocks.permissions import thread_permissions

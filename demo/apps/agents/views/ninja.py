@@ -7,8 +7,8 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.http import HttpRequest
-from django_ai_sdk import Assistant
-from django_ai_sdk.assistants.services import AssistantService
+from django_ai_sdk import Agent
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
@@ -26,7 +26,7 @@ from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 from django_ai_sdk.workflows.models import WorkflowSettings
 from ninja import Router, Schema
 
-from .permissions import assistant_permissions, thread_permissions
+from .permissions import agent_permissions, thread_permissions
 
 router = Router()
 logger = get_logger(__name__)
@@ -47,7 +47,7 @@ class HealthResponse(Schema):
     service: str
 
 
-class AssistantItem(Schema):
+class AgentItem(Schema):
     id: str
     name: str | None = None
     model: str | None = None
@@ -55,11 +55,11 @@ class AssistantItem(Schema):
     rag: bool = False
 
 
-class AssistantsListResponse(Schema):
-    assistants: list[AssistantItem]
+class AgentsListResponse(Schema):
+    agents: list[AgentItem]
 
 
-class AssistantInfoResponse(Schema):
+class AgentInfoResponse(Schema):
     id: str
     name: str | None = None
     model: str | None = None
@@ -93,7 +93,7 @@ class ToolsResponse(Schema):
 class ThreadListItem(Schema):
     id: str
     title: str
-    assistant_id: str
+    agent_id: str
     created_at: str
     updated_at: str
     message_count: int
@@ -145,7 +145,7 @@ class DeleteAllThreadsResponse(Schema):
 
 
 class PatchThreadPayload(Schema):
-    assistant_id: str
+    agent_id: str
 
 
 class MessageResponse(Schema):
@@ -174,7 +174,7 @@ async def list_threads(request: HttpRequest, limit: int = 100, offset: int = 0) 
             ThreadListItem(
                 id=t.id,
                 title=t.title,
-                assistant_id=t.assistant_id,
+                agent_id=t.agent_id,
                 created_at=t.created_at.isoformat(),
                 updated_at=t.updated_at.isoformat(),
                 message_count=t.message_count,
@@ -193,14 +193,14 @@ async def list_threads(request: HttpRequest, limit: int = 100, offset: int = 0) 
 )
 async def create_thread(request: HttpRequest, payload: ChatRequest) -> Any:
     try:
-        assistant_id = payload.assistant_id or ""
+        agent_id = payload.agent_id or ""
         # Initial messages are not persisted here; the chat/stream endpoint
         # receives and stores the full message list.
         thread_id = await ThreadService.create_thread(
-            assistant_id=assistant_id,
+            agent_id=agent_id,
             user=request.user,
         )
-        await MemoryService.link_memories(assistant_id, thread_id, user=request.user)
+        await MemoryService.link_memories(agent_id, thread_id, user=request.user)
         return CreateThreadResponse(thread_id=thread_id)
     except ValueError as e:
         return 400, Error(message=str(e))
@@ -252,15 +252,15 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
 
 
 @router.post(
-    "/assistants/{assistant_id}/run/",
+    "/agents/{agent_id}/run/",
     response={200: RunResponse, 400: Error, 403: Error, 404: Error, 500: Error, 501: Error},
-    operation_id="run_assistant",
+    operation_id="run_agent",
 )
-async def run_assistant(request: HttpRequest, assistant_id: str, payload: ChatRequest) -> Any:
+async def run_agent(request: HttpRequest, agent_id: str, payload: ChatRequest) -> Any:
     try:
-        assistant = await AssistantService.get(assistant_id)
-        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
-        result = await assistant.run(chat_messages, user=request.user)
+        agent = await AgentService.get(agent_id)
+        chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
+        result = await agent.run(chat_messages, user=request.user)
         return RunResponse(result=result, thread_id="")
     except PermissionDenied as e:
         return 403, Error(message=str(e))
@@ -279,9 +279,9 @@ async def run_assistant(request: HttpRequest, assistant_id: str, payload: ChatRe
 )
 async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     try:
-        assistant = await AssistantService.get_assistant(thread_id, user=request.user)
-        chat_messages = assistant.protocol_handler.to_chat_messages(payload.messages)
-        result = await assistant.run(chat_messages, thread_id=thread_id, user=request.user)
+        agent = await AgentService.get_agent(thread_id, user=request.user)
+        chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
+        result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
         return RunResponse(result=result, thread_id=thread_id)
     except PermissionDenied as e:
         return 403, Error(message=str(e))
@@ -300,8 +300,8 @@ async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest)
 )
 async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     try:
-        assistant = await AssistantService.get_assistant(thread_id, user=request.user)
-        return await assistant.as_view(payload.messages, thread_id=thread_id, user=request.user)
+        agent = await AgentService.get_agent(thread_id, user=request.user)
+        return await agent.as_view(payload.messages, thread_id=thread_id, user=request.user)
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
@@ -349,16 +349,16 @@ async def delete_all_threads(request: HttpRequest) -> Any:
 )
 async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
     try:
-        await AssistantService.get(payload.assistant_id)
+        await AgentService.get(payload.agent_id)
         thread = await ThreadService.get_thread(thread_id, user=request.user)
         if thread is None:
             return 404, Error(message="Thread not found")
-        if thread.assistant_id:
-            await MemoryService.unlink_memories(thread.assistant_id, thread_id, user=request.user)
+        if thread.agent_id:
+            await MemoryService.unlink_memories(thread.agent_id, thread_id, user=request.user)
         await ThreadService.update_thread(
-            thread_id, metadata={"assistant_id": payload.assistant_id}, user=request.user
+            thread_id, metadata={"agent_id": payload.agent_id}, user=request.user
         )
-        await MemoryService.link_memories(payload.assistant_id, thread_id, user=request.user)
+        await MemoryService.link_memories(payload.agent_id, thread_id, user=request.user)
         return Success(success=True)
     except PermissionDenied as e:
         return 403, Error(message=str(e))
@@ -419,15 +419,15 @@ async def restore_message(request: HttpRequest, thread_id: str, message_id: str)
 
 
 # ============================================================================
-# Runtime Assistants (DB-configured)
+# Runtime Agents (DB-configured)
 # ============================================================================
 
 
-class AssistantSettingsOut(Schema):
+class AgentSettingsOut(Schema):
     id: UUID
     name: str
     slug: str
-    assistant: str
+    agent: str
     model: str
     system_prompt: str
     tools: list[str]
@@ -442,36 +442,36 @@ class AssistantSettingsOut(Schema):
     updated_at: datetime
 
 
-class AssistantSettingsCreateUserEntry(Schema):
+class AgentSettingsCreateUserEntry(Schema):
     user_id: str
     can_manage: bool = False
 
 
-class AssistantSettingsCreateGroupEntry(Schema):
+class AgentSettingsCreateGroupEntry(Schema):
     group_id: int
     can_manage: bool = False
 
 
-class AssistantSettingsCreateIn(Schema):
+class AgentSettingsCreateIn(Schema):
     name: str
     slug: str = ""
-    assistant: str = ""
+    agent: str = ""
     model: str = "gpt-4o"
     system_prompt: str = ""
     tools: list[str] = []
     integrations: list[str] = []
     memories: list[str] = []
-    users: list[AssistantSettingsCreateUserEntry] = []
-    groups: list[AssistantSettingsCreateGroupEntry] = []
+    users: list[AgentSettingsCreateUserEntry] = []
+    groups: list[AgentSettingsCreateGroupEntry] = []
     suggestion_enabled: bool = False
     title_generation: bool = True
     max_history: int | None = None
     file_upload: bool = False
 
 
-class AssistantSettingsUpdateIn(Schema):
+class AgentSettingsUpdateIn(Schema):
     name: str | None = None
-    assistant: str | None = None
+    agent: str | None = None
     model: str | None = None
     system_prompt: str | None = None
     tools: list[str] | None = None
@@ -484,67 +484,65 @@ class AssistantSettingsUpdateIn(Schema):
     active: bool | None = None
 
 
-class RuntimeAssistantBaseItem(Schema):
+class RuntimeAgentBaseItem(Schema):
     path: str
     name: str
 
 
-class RuntimeAssistantToolItem(Schema):
+class RuntimeAgentToolItem(Schema):
     key: str
     path: str
 
 
 @router.get(
-    "/assistants/runtimes/bases/",
-    response={200: list[RuntimeAssistantBaseItem]},
-    operation_id="list_runtime_assistant_bases",
+    "/agents/runtimes/bases/",
+    response={200: list[RuntimeAgentBaseItem]},
+    operation_id="list_runtime_agent_bases",
 )
-def list_runtime_assistant_bases(request: HttpRequest) -> list[RuntimeAssistantBaseItem]:
-    from django_ai_sdk.assistants.config import get_runtime_assistant_bases
+def list_runtime_agent_bases(request: HttpRequest) -> list[RuntimeAgentBaseItem]:
+    from django_ai_sdk.agents.config import get_runtime_agent_bases
 
     return [
-        RuntimeAssistantBaseItem(
+        RuntimeAgentBaseItem(
             path=f"{cls.__module__}.{cls.__qualname__}",
             name=cls.__name__,
         )
-        for cls in get_runtime_assistant_bases()
+        for cls in get_runtime_agent_bases()
     ]
 
 
 @router.get(
-    "/assistants/runtimes/tools/",
-    response={200: list[RuntimeAssistantToolItem]},
-    operation_id="list_runtime_assistant_tools",
+    "/agents/runtimes/tools/",
+    response={200: list[RuntimeAgentToolItem]},
+    operation_id="list_runtime_agent_tools",
 )
-def list_runtime_assistant_tools(request: HttpRequest) -> list[RuntimeAssistantToolItem]:
-    from django_ai_sdk.assistants.config import get_tool_registry
+def list_runtime_agent_tools(request: HttpRequest) -> list[RuntimeAgentToolItem]:
+    from django_ai_sdk.agents.config import get_tool_registry
 
-    return [
-        RuntimeAssistantToolItem(key=key, path=path) for key, path in get_tool_registry().items()
-    ]
+    return [RuntimeAgentToolItem(key=key, path=path) for key, path in get_tool_registry().items()]
 
 
 @router.get(
-    "/assistants/runtimes/",
-    response={200: list[AssistantSettingsOut]},
-    operation_id="list_runtime_assistants",
+    "/agents/runtimes/",
+    response={200: list[AgentSettingsOut]},
+    operation_id="list_runtime_agents",
 )
-async def list_runtime_assistants(request: HttpRequest) -> Any:
-    return await AssistantService.list_runtime_assistants(user=request.user)
+async def list_runtime_agents(request: HttpRequest) -> Any:
+    return await AgentService.list_runtime_agents(user=request.user)
 
 
 @router.post(
-    "/assistants/runtimes/",
-    response={200: AssistantSettingsOut, 400: Error},
-    operation_id="create_runtime_assistant",
+    "/agents/runtimes/",
+    response={200: AgentSettingsOut, 400: Error},
+    operation_id="create_runtime_agent",
 )
-async def create_runtime_assistant(request: HttpRequest, payload: AssistantSettingsCreateIn) -> Any:
+async def create_runtime_agent(request: HttpRequest, payload: AgentSettingsCreateIn) -> Any:
     try:
-        config = await AssistantService.create_runtime_assistant(
+        config = await AgentService.create_runtime_agent(
             {
                 "name": payload.name,
                 "slug": payload.slug,
-                "assistant": payload.assistant,
+                "agent": payload.agent,
                 "model": payload.model,
                 "system_prompt": payload.system_prompt,
                 "tools": payload.tools,
@@ -559,14 +557,14 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
         )
         for entry in payload.users:
             try:
-                await AssistantService.add_assistant_user(
+                await AgentService.add_agent_user(
                     str(config.id), entry.user_id, entry.can_manage, user=request.user
                 )
             except Exception:
                 pass
         for entry in payload.groups:
             try:
-                await AssistantService.add_assistant_group(
+                await AgentService.add_agent_group(
                     str(config.id), entry.group_id, entry.can_manage, user=request.user
                 )
             except Exception:
@@ -577,37 +575,35 @@ async def create_runtime_assistant(request: HttpRequest, payload: AssistantSetti
 
 
 @router.get(
-    "/assistants/runtimes/{runtime_id}/",
-    response={200: AssistantSettingsOut, 404: Error},
-    operation_id="get_runtime_assistant",
+    "/agents/runtimes/{runtime_id}/",
+    response={200: AgentSettingsOut, 404: Error},
+    operation_id="get_runtime_agent",
 )
-async def get_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
+async def get_runtime_agent(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantService.get_runtime_assistant(str(runtime_id), user=request.user)
+        return await AgentService.get_runtime_agent(str(runtime_id), user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
 @router.patch(
-    "/assistants/runtimes/{runtime_id}/",
-    response={200: AssistantSettingsOut, 404: Error, 400: Error},
-    operation_id="update_runtime_assistant",
+    "/agents/runtimes/{runtime_id}/",
+    response={200: AgentSettingsOut, 404: Error, 400: Error},
+    operation_id="update_runtime_agent",
 )
-async def update_runtime_assistant(
-    request: HttpRequest, runtime_id: UUID, payload: AssistantSettingsUpdateIn
+async def update_runtime_agent(
+    request: HttpRequest, runtime_id: UUID, payload: AgentSettingsUpdateIn
 ) -> Any:
     try:
         from typing import cast
 
-        from django_ai_sdk.assistants.services import AssistantUpdateData
+        from django_ai_sdk.agents.services import AgentUpdateData
 
         data = cast(
-            "AssistantUpdateData",
+            "AgentUpdateData",
             {k: v for k, v in payload.model_dump().items() if v is not None},
         )
-        return await AssistantService.update_runtime_assistant(
-            str(runtime_id), data, user=request.user
-        )
+        return await AgentService.update_runtime_agent(str(runtime_id), data, user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
     except Exception as e:
@@ -615,21 +611,21 @@ async def update_runtime_assistant(
 
 
 @router.delete(
-    "/assistants/runtimes/{runtime_id}/",
-    response={200: AssistantSettingsOut, 404: Error},
-    operation_id="delete_runtime_assistant",
+    "/agents/runtimes/{runtime_id}/",
+    response={200: AgentSettingsOut, 404: Error},
+    operation_id="delete_runtime_agent",
 )
-async def delete_runtime_assistant(request: HttpRequest, runtime_id: UUID) -> Any:
+async def delete_runtime_agent(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        return await AssistantService.delete_runtime_assistant(str(runtime_id), user=request.user)
+        return await AgentService.delete_runtime_agent(str(runtime_id), user=request.user)
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
-# ── Assistant Users ───────────────────────────────────────────────────────────
+# ── Agent Users ───────────────────────────────────────────────────────────
 
 
-class AssistantUserOut(Schema):
+class AgentUserOut(Schema):
     user_id: str
     email: str = ""
     first_name: str = ""
@@ -638,25 +634,25 @@ class AssistantUserOut(Schema):
     created_at: str
 
 
-class AddAssistantUserIn(Schema):
+class AddAgentUserIn(Schema):
     user_id: str
     can_manage: bool = False
 
 
-class UpdateAssistantUserIn(Schema):
+class UpdateAgentUserIn(Schema):
     can_manage: bool
 
 
 @router.get(
-    "/assistants/runtimes/{runtime_id}/users/",
-    response={200: list[AssistantUserOut], 403: Error, 404: Error},
-    operation_id="list_assistant_users",
+    "/agents/runtimes/{runtime_id}/users/",
+    response={200: list[AgentUserOut], 403: Error, 404: Error},
+    operation_id="list_agent_users",
 )
-async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
+async def list_agent_users(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        users = await AssistantService.list_assistant_users(str(runtime_id), user=request.user)
+        users = await AgentService.list_agent_users(str(runtime_id), user=request.user)
         return [
-            AssistantUserOut(
+            AgentUserOut(
                 user_id=str(u.user_id),
                 email=u.user.email,
                 first_name=u.user.first_name,
@@ -671,21 +667,19 @@ async def list_assistant_users(request: HttpRequest, runtime_id: UUID) -> Any:
 
 
 @router.post(
-    "/assistants/runtimes/{runtime_id}/users/",
-    response={200: AssistantUserOut, 403: Error, 404: Error},
-    operation_id="add_assistant_user",
+    "/agents/runtimes/{runtime_id}/users/",
+    response={200: AgentUserOut, 403: Error, 404: Error},
+    operation_id="add_agent_user",
 )
-async def add_assistant_user(
-    request: HttpRequest, runtime_id: UUID, payload: AddAssistantUserIn
-) -> Any:
+async def add_agent_user(request: HttpRequest, runtime_id: UUID, payload: AddAgentUserIn) -> Any:
     try:
-        entry = await AssistantService.add_assistant_user(
+        entry = await AgentService.add_agent_user(
             str(runtime_id),
             payload.user_id,
             payload.can_manage,
             user=request.user,
         )
-        return AssistantUserOut(
+        return AgentUserOut(
             user_id=str(entry.user_id),
             email=entry.user.email,
             first_name=entry.user.first_name,
@@ -700,21 +694,21 @@ async def add_assistant_user(
 
 
 @router.patch(
-    "/assistants/runtimes/{runtime_id}/users/{user_id}/",
-    response={200: AssistantUserOut, 403: Error, 404: Error},
-    operation_id="update_assistant_user",
+    "/agents/runtimes/{runtime_id}/users/{user_id}/",
+    response={200: AgentUserOut, 403: Error, 404: Error},
+    operation_id="update_agent_user",
 )
-async def update_assistant_user(
-    request: HttpRequest, runtime_id: UUID, user_id: str, payload: UpdateAssistantUserIn
+async def update_agent_user(
+    request: HttpRequest, runtime_id: UUID, user_id: str, payload: UpdateAgentUserIn
 ) -> Any:
     try:
-        entry = await AssistantService.update_assistant_user(
+        entry = await AgentService.update_agent_user(
             str(runtime_id),
             user_id,
             payload.can_manage,
             user=request.user,
         )
-        return AssistantUserOut(
+        return AgentUserOut(
             user_id=str(entry.user_id),
             email=entry.user.email,
             first_name=entry.user.first_name,
@@ -729,45 +723,45 @@ async def update_assistant_user(
 
 
 @router.delete(
-    "/assistants/runtimes/{runtime_id}/users/{user_id}/",
+    "/agents/runtimes/{runtime_id}/users/{user_id}/",
     response={200: Success, 403: Error, 404: Error},
-    operation_id="delete_assistant_user",
+    operation_id="delete_agent_user",
 )
-async def delete_assistant_user(request: HttpRequest, runtime_id: UUID, user_id: str) -> Any:
+async def delete_agent_user(request: HttpRequest, runtime_id: UUID, user_id: str) -> Any:
     try:
-        await AssistantService.remove_assistant_user(str(runtime_id), user_id, user=request.user)
-        return Success(success=True, message="User removed from assistant")
+        await AgentService.remove_agent_user(str(runtime_id), user_id, user=request.user)
+        return Success(success=True, message="User removed from agent")
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
 
 
-# ── Assistant Groups ──────────────────────────────────────────────────────────
+# ── Agent Groups ──────────────────────────────────────────────────────────
 
 
-class AssistantGroupOut(Schema):
+class AgentGroupOut(Schema):
     group_id: int
     group_name: str
     can_manage: bool
     created_at: str
 
 
-class AddAssistantGroupIn(Schema):
+class AddAgentGroupIn(Schema):
     group_id: int
     can_manage: bool = False
 
 
 @router.get(
-    "/assistants/runtimes/{runtime_id}/groups/",
-    response={200: list[AssistantGroupOut], 403: Error, 404: Error},
-    operation_id="list_assistant_groups",
+    "/agents/runtimes/{runtime_id}/groups/",
+    response={200: list[AgentGroupOut], 403: Error, 404: Error},
+    operation_id="list_agent_groups",
 )
-async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
+async def list_agent_groups(request: HttpRequest, runtime_id: UUID) -> Any:
     try:
-        groups = await AssistantService.list_assistant_groups(str(runtime_id), user=request.user)
+        groups = await AgentService.list_agent_groups(str(runtime_id), user=request.user)
         return [
-            AssistantGroupOut(
+            AgentGroupOut(
                 group_id=g.group_id,
                 group_name=g.group.name,
                 can_manage=g.can_manage,
@@ -780,21 +774,19 @@ async def list_assistant_groups(request: HttpRequest, runtime_id: UUID) -> Any:
 
 
 @router.post(
-    "/assistants/runtimes/{runtime_id}/groups/",
-    response={200: AssistantGroupOut, 403: Error, 404: Error},
-    operation_id="add_assistant_group",
+    "/agents/runtimes/{runtime_id}/groups/",
+    response={200: AgentGroupOut, 403: Error, 404: Error},
+    operation_id="add_agent_group",
 )
-async def add_assistant_group(
-    request: HttpRequest, runtime_id: UUID, payload: AddAssistantGroupIn
-) -> Any:
+async def add_agent_group(request: HttpRequest, runtime_id: UUID, payload: AddAgentGroupIn) -> Any:
     try:
-        entry = await AssistantService.add_assistant_group(
+        entry = await AgentService.add_agent_group(
             str(runtime_id),
             payload.group_id,
             payload.can_manage,
             user=request.user,
         )
-        return AssistantGroupOut(
+        return AgentGroupOut(
             group_id=entry.group_id,
             group_name=entry.group.name,
             can_manage=entry.can_manage,
@@ -807,14 +799,14 @@ async def add_assistant_group(
 
 
 @router.delete(
-    "/assistants/runtimes/{runtime_id}/groups/{group_id}/",
+    "/agents/runtimes/{runtime_id}/groups/{group_id}/",
     response={200: Success, 403: Error, 404: Error},
-    operation_id="delete_assistant_group",
+    operation_id="delete_agent_group",
 )
-async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_id: int) -> Any:
+async def delete_agent_group(request: HttpRequest, runtime_id: UUID, group_id: int) -> Any:
     try:
-        await AssistantService.remove_assistant_group(str(runtime_id), group_id, user=request.user)
-        return Success(success=True, message="Group removed from assistant")
+        await AgentService.remove_agent_group(str(runtime_id), group_id, user=request.user)
+        return Success(success=True, message="Group removed from agent")
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except ValueError as e:
@@ -822,16 +814,14 @@ async def delete_assistant_group(request: HttpRequest, runtime_id: UUID, group_i
 
 
 @router.get(
-    "/assistants/",
-    response={200: AssistantsListResponse, 403: Error, 500: Error},
-    operation_id="list_assistants",
+    "/agents/",
+    response={200: AgentsListResponse, 403: Error, 500: Error},
+    operation_id="list_agents",
 )
-async def list_assistants(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+async def list_agents(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
     try:
-        items = await AssistantService.list_assistants(
-            user=request.user, limit=limit, offset=offset
-        )
-        return AssistantsListResponse(assistants=[AssistantItem(**item) for item in items])
+        items = await AgentService.list_agents(user=request.user, limit=limit, offset=offset)
+        return AgentsListResponse(agents=[AgentItem(**item) for item in items])
     except PermissionDenied as e:
         return 403, Error(message=str(e))
     except Exception as e:
@@ -839,22 +829,22 @@ async def list_assistants(request: HttpRequest, limit: int = 100, offset: int = 
 
 
 @router.get(
-    "/assistants/{assistant_id}/",
-    response={200: AssistantInfoResponse, 403: Error, 404: Error},
-    operation_id="get_assistant_info",
+    "/agents/{agent_id}/",
+    response={200: AgentInfoResponse, 403: Error, 404: Error},
+    operation_id="get_agent_info",
 )
-async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
+async def get_agent_info(request: HttpRequest, agent_id: str) -> Any:
     try:
-        assistant = await AssistantService.get(assistant_id)
-        info = await AssistantService.get_assistant_info(assistant_id, user=request.user)
-        perms = await assistant_permissions(request.user, assistant_id)
-        return AssistantInfoResponse(
+        agent = await AgentService.get(agent_id)
+        info = await AgentService.get_agent_info(agent_id, user=request.user)
+        perms = await agent_permissions(request.user, agent_id)
+        return AgentInfoResponse(
             id=info.id,
             name=info.name,
             model=info.model,
             class_name=info.class_name,
             description=info.description,
-            instructions=assistant.get_system_prompt(),
+            instructions=agent.get_system_prompt(),
             file_upload=info.file_upload,
             rag=info.rag,
             permissions=perms,
@@ -866,19 +856,19 @@ async def get_assistant_info(request: HttpRequest, assistant_id: str) -> Any:
 
 
 @router.get(
-    "/assistants/{assistant_id}/tools/",
+    "/agents/{agent_id}/tools/",
     response={200: ToolsResponse, 404: Error},
-    operation_id="get_assistant_tools",
+    operation_id="get_agent_tools",
 )
-async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
+async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
     try:
-        assistant = await AssistantService.get(assistant_id)
+        agent = await AgentService.get(agent_id)
     except ValueError as e:
         return 404, Error(message=str(e))
 
     tools_data = []
     try:
-        tool_objs = await assistant.get_tools()
+        tool_objs = await agent.get_tools()
         tools_data = [
             Tool(
                 label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
@@ -887,13 +877,11 @@ async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
             for t in tool_objs
         ]
     except Exception:
-        logger.exception("Failed to build tools for assistant %s", assistant_id)
+        logger.exception("Failed to build tools for agent %s", agent_id)
 
     integrations_data = []
     try:
-        integration_status = await AssistantService.get_integration_status(
-            assistant, user=request.user
-        )
+        integration_status = await AgentService.get_integration_status(agent, user=request.user)
         integrations_data = [
             IntegrationStatusOut(
                 server_name=s.server_name,
@@ -905,28 +893,28 @@ async def get_assistant_tools(request: HttpRequest, assistant_id: str) -> Any:
             for s in integration_status
         ]
     except Exception:
-        logger.exception("Failed to load integration status for assistant %s", assistant_id)
+        logger.exception("Failed to load integration status for agent %s", agent_id)
 
     return ToolsResponse(tools=tools_data, integrations=integrations_data)
 
 
 @router.post(
-    "/assistants/{assistant_id}/reindex/",
+    "/agents/{agent_id}/reindex/",
     response={200: Success, 404: Error, 500: Error},
-    operation_id="reindex_assistant",
+    operation_id="reindex_agent",
 )
-async def reindex_assistant(
+async def reindex_agent(
     request: HttpRequest,
-    assistant_id: str,
+    agent_id: str,
     memory_id: str | None = None,
     force_rebuild: bool = False,
 ) -> Any:
     try:
-        assistant = await AssistantService.get(assistant_id)
-        result = await Assistant.reindex(assistant, memory_id, force_rebuild)
+        agent = await AgentService.get(agent_id)
+        result = await Agent.reindex(agent, memory_id, force_rebuild)
 
         if not result:
-            return Success(success=False, message="No RAG provider configured for this assistant")
+            return Success(success=False, message="No RAG provider configured for this agent")
 
         rebuild_msg = " (force rebuild)" if force_rebuild else ""
         message = "RAG pipeline reindexed successfully" + rebuild_msg

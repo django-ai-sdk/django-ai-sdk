@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.assistant import Assistant
+    from django_ai_sdk.agent import Agent
     from django_ai_sdk.common import ChatMessage
 
 logger = get_logger(__name__)
@@ -25,7 +25,7 @@ def get_title_sanity_limit() -> int:
 
 
 async def generate_thread_title(
-    assistant: Assistant,
+    agent: Agent,
     messages: list[ChatMessage],
     thread_id: str | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
@@ -37,9 +37,9 @@ async def generate_thread_title(
         return None
 
     try:
-        title = await assistant.run(
+        title = await agent.run(
             messages=user_messages,
-            system_prompt=assistant.get_title_generation_prompt(),
+            system_prompt=agent.get_title_generation_prompt(),
             thread_id=thread_id,
             user=user,
             response_format=None,

@@ -21,7 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["django", "ai", "assistant", "rag", "llm", "streaming", "sse"]
+keywords = ["django", "ai", "agent", "rag", "llm", "streaming", "sse"]
 dependencies = [
   "aiofiles>=25.1.0",
   "daphne>=4.2.3",

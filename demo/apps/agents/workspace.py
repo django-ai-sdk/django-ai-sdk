@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django_ai_sdk import (
+    Agent,
     ApprovalCardArtifact,
-    Assistant,
     ChainOfThoughtArtifact,
     CodeBlockArtifact,
     ConfirmationArtifact,
@@ -23,7 +23,7 @@ from django_ai_sdk import (
     TestResultsArtifact,
 )
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.assistants import auto_register
+from django_ai_sdk.agents import auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -31,7 +31,7 @@ from django_ai_sdk.storage.db import DbStorageAdapter
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
 
-from ..tools import get_today
+from .tools import get_today
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -39,11 +39,11 @@ if TYPE_CHECKING:
 
 
 @auto_register
-class WorkspaceAssistant(Assistant):
-    name = "Workspace Assistant"
+class WorkspaceAgent(Agent):
+    name = "Workspace Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     instructions = prompt("""\
-        You are a professional AI assistant for workplace productivity.
+        You are a professional AI agent for workplace productivity.
         Help with tasks like drafting messages, summarising content, planning,
         brainstorming, and answering questions clearly and concisely.
         - Be direct and professional.
