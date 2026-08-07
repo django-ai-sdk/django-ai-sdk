@@ -63,7 +63,7 @@ INSTALLED_APPS = [
     # mcp integration
     "django_ai_sdk.integrations.mcp",
     # default integrations
-    "django_ai_sdk.integrations.linear",
+    "piratespeak.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
     "piratespeak",

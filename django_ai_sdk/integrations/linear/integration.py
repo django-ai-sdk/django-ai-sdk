@@ -12,6 +12,5 @@ class LinearIntegration(MCPIntegration):
     name = "linear"
     label = "Linear"
     url = "https://mcp.linear.app/mcp"
-    hint = "Engineering issue tracker for the Pirate Speak demo project."
     auth = "token"
     default_tools = ["list_issues"]
