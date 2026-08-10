@@ -1,25 +1,35 @@
+from __future__ import annotations
+
 from django_ai_sdk.common import Prompt, prompt
 
-# Prompt template used for thread title generation.
-TITLE_GENERATION_PROMPT: Prompt = prompt("""\
-    ### Task:
-    Generate a concise, 3-5 word title summarizing the chat history.
 
-    ### Guidelines:
-    - The title should clearly represent the main theme or subject of the conversation.
-    - Start the title with a single emoji that enhances understanding of the topic.
-    - Write the title in the same language as the user's messages.
-    - default to English if multilingual or unclear.
-    - Match the tone and register of the user (formal, casual, technical, etc.).
-    - Prioritize accuracy over creativity; keep it clear and simple.
+def build_title_generation_prompt(max_length: int) -> Prompt:
+    """Prompt template used for thread title generation.
 
-    ### Output rules (strict):
-    - Return ONLY the title. No preamble, no explanation, no commentary.
-    - No markdown, no quotes, no backticks, no code fences.
-    - A single line of plain text.
+    `max_length` is passed in (rather than hardcoded) so it can be kept in
+    sync with the `Thread.title` column width - it's only a hint for the
+    model, storage still enforces the real limit.
+    """
+    return prompt(f"""\
+        ### Task:
+        Generate a concise, 3-5 word title summarizing the chat history.
 
-    ### Examples:
-    - 📉 Stock Market Trends
-    - 🍪 Perfect Chocolate Chip Recipe
-    - 🎮 Video Game Development Insights
-""")
+        ### Guidelines:
+        - The title should clearly represent the main theme or subject of the conversation.
+        - Start the title with a single emoji that enhances understanding of the topic.
+        - Write the title in the same language as the user's messages.
+        - default to English if multilingual or unclear.
+        - Match the tone and register of the user (formal, casual, technical, etc.).
+        - Prioritize accuracy over creativity; keep it clear and simple.
+        - Stay under {max_length} characters, including the emoji.
+
+        ### Output rules (strict):
+        - Return ONLY the title. No preamble, no explanation, no commentary.
+        - No markdown, no quotes, no backticks, no code fences.
+        - A single line of plain text.
+
+        ### Examples:
+        - 📉 Stock Market Trends
+        - 🍪 Perfect Chocolate Chip Recipe
+        - 🎮 Video Game Development Insights
+    """)

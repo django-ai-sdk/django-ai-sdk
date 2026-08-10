@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from django_ai_sdk.storage.schemas import ThreadInfo
-
 if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
+
     from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.storage.schemas import ThreadInfo
 
 
 class StorageType(IntEnum):
@@ -41,12 +45,12 @@ class StorageAdapterRegistry:
             thread = await adapter.get_thread(thread_id)
     """
 
-    _adapters: ClassVar[dict[type["BaseStorageAdapter"], StorageType]] = {}
+    _adapters: ClassVar[dict[type[BaseStorageAdapter], StorageType]] = {}
 
     @classmethod
     def register(
         cls,
-        adapter_class: type["BaseStorageAdapter"],
+        adapter_class: type[BaseStorageAdapter],
         intensiveness: StorageType,
     ) -> None:
         """
@@ -59,7 +63,7 @@ class StorageAdapterRegistry:
         cls._adapters[adapter_class] = intensiveness
 
     @classmethod
-    def get_all_adapters(cls) -> list[type["BaseStorageAdapter"]]:
+    def get_all_adapters(cls) -> list[type[BaseStorageAdapter]]:
         """
         Get all registered adapters sorted by intensiveness (fastest first).
 
@@ -69,7 +73,7 @@ class StorageAdapterRegistry:
         return sorted(cls._adapters.keys(), key=lambda a: cls._adapters[a])
 
     @classmethod
-    def get_intensiveness(cls, adapter_class: type["BaseStorageAdapter"]) -> StorageType:
+    def get_intensiveness(cls, adapter_class: type[BaseStorageAdapter]) -> StorageType:
         """Get the intensiveness level for a specific adapter class."""
         return cls._adapters.get(adapter_class, StorageType.DATABASE)
 
@@ -118,7 +122,7 @@ class BaseStorageAdapter(ABC):
         cls,
         title: str,
         metadata: dict[str, Any] | None = None,
-        user_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -126,8 +130,8 @@ class BaseStorageAdapter(ABC):
 
         Args:
             title: Thread title
-            metadata: Optional metadata dict (should include assistant_id)
-            user_id: Optional user ID for the thread owner
+            metadata: Optional metadata dict (should include agent_id)
+            user: Optional user for the thread owner
             thread_id: Optional custom thread ID
 
         Returns:
@@ -151,12 +155,20 @@ class BaseStorageAdapter(ABC):
 
     @classmethod
     @abstractmethod
-    async def list_threads(cls, user_id: str | None = None) -> list[ThreadInfo]:
+    async def list_threads(
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ThreadInfo]:
         """
         List all threads in this storage.
 
         Args:
-            user_id: Optional filter by user ID
+            user: Optional filter by user
+            limit: Maximum number of threads to return (None = no limit)
+            offset: Number of threads to skip
 
         Returns:
             List of ThreadInfo objects
@@ -198,23 +210,12 @@ class BaseStorageAdapter(ABC):
         """
         pass
 
-    @classmethod
-    @abstractmethod
-    async def delete_all_threads(cls) -> int:
-        """
-        Delete all threads and their messages.
-
-        Returns:
-            Number of threads deleted
-        """
-        pass
-
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
     # ============================================================================
 
     @abstractmethod
-    async def get_messages(self) -> list["ChatMessage"]:
+    async def get_messages(self) -> list[ChatMessage]:
         """
         Retrieve all ChatMessages for this thread, ordered by creation.
 
@@ -226,7 +227,7 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def store_chat_message(self, chat_message: "ChatMessage") -> str:
+    async def store_chat_message(self, chat_message: ChatMessage) -> str:
         """
         Store a ChatMessage to this thread.
 
@@ -239,12 +240,12 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def storage_callback(self, chat_message: "ChatMessage") -> str | None:
+    async def storage_callback(self, chat_message: ChatMessage) -> str | None:
         """
         Callback for StreamWriter to auto-store messages.
 
         Called automatically when streaming completes to persist
-        the assistant's response.
+        the agent's response.
 
         Args:
             chat_message: The ChatMessage to store
@@ -255,13 +256,21 @@ class BaseStorageAdapter(ABC):
         pass
 
     @abstractmethod
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> bool:
         """
         Rate a message in this thread.
 
         Args:
             message_id: Message ID to rate
-            rating: 1 for good, -1 for bad
+            rating: 1 for good, -1 for bad, or None to unrate
+            feedback: Optional explanation for the rating
+            user: Optional user (for multi-user feedback)
 
         Returns:
             True if rated successfully, False if message not found

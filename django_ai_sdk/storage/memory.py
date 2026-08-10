@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +14,10 @@ from django_ai_sdk.storage.base import (
     StorageType,
 )
 from django_ai_sdk.storage.schemas import ThreadInfo
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
 
 logger = get_logger(__name__)
 
@@ -27,17 +33,20 @@ class MemoryMessage(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Message management fields
-    rating: int | None = None  # 1 for good, -1 for bad
+    feedbacks: list[dict] = Field(default_factory=list)  # List of {user_id, rating, feedback}
     is_deleted: bool = False
     deleted_at: datetime | None = None
 
     def to_chat_message(self) -> ChatMessage:
         """Convert stored data to ChatMessage object."""
         # ID is already in self.result from model_dump(), model_validate restores it
-        return ChatMessage.model_validate(self.result)
+        chat_message = ChatMessage.model_validate(self.result)
+        # Include feedbacks in metadata
+        chat_message.metadata["feedbacks"] = self.feedbacks
+        return chat_message
 
     @classmethod
-    def from_chat_message(cls, thread_id: str, chat_message: ChatMessage) -> "MemoryMessage":
+    def from_chat_message(cls, thread_id: str, chat_message: ChatMessage) -> MemoryMessage:
         """Create MemoryMessage from a ChatMessage - ID must be provided by adapter."""
         return cls(
             id=chat_message.id,
@@ -51,7 +60,7 @@ class MemoryThread(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str = ""
-    assistant_id: str = ""
+    agent_id: str = ""
     model: str = ""
     user_id: str | None = None
     metadata: dict = Field(default_factory=dict)
@@ -63,6 +72,8 @@ class MemoryStore:
     """
     Singleton in-memory store for threads and messages.
     """
+
+    MAX_THREADS: ClassVar[int] = 1000
 
     threads: ClassVar[dict[str, MemoryThread]] = {}
     messages: ClassVar[dict[str, list[MemoryMessage]]] = {}
@@ -76,7 +87,7 @@ class MemoryStore:
         cls,
         thread_id: str,
         title: str = "",
-        assistant_id: str = "",
+        agent_id: str = "",
         model: str = "",
         user_id: str | None = None,
         metadata: dict | None = None,
@@ -85,13 +96,18 @@ class MemoryStore:
         thread = MemoryThread(
             id=thread_id,
             title=title,
-            assistant_id=assistant_id,
+            agent_id=agent_id,
             model=model,
             user_id=user_id,
             metadata=metadata or {},
         )
         cls.threads[thread_id] = thread
         cls.messages.setdefault(thread_id, [])
+        # Evict oldest thread when over the cap
+        while len(cls.threads) > cls.MAX_THREADS:
+            oldest = next(iter(cls.threads))
+            del cls.threads[oldest]
+            cls.messages.pop(oldest, None)
         return thread
 
     @classmethod
@@ -100,11 +116,19 @@ class MemoryStore:
         return cls.threads.get(thread_id)
 
     @classmethod
-    def list_threads(cls, user_id: str | None = None) -> list[MemoryThread]:
+    def list_threads(
+        cls,
+        user_id: str | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[MemoryThread]:
         """List all threads, optionally filtered by user."""
         threads = list(cls.threads.values())
         if user_id:
             threads = [t for t in threads if t.user_id == user_id]
+        if offset or limit is not None:
+            threads = threads[offset : (offset + limit) if limit is not None else None]
         return threads
 
     @classmethod
@@ -135,14 +159,6 @@ class MemoryStore:
             return True
         return False
 
-    @classmethod
-    def delete_all_threads(cls) -> int:
-        """Delete all threads and their messages."""
-        count = len(cls.threads)
-        cls.threads.clear()
-        cls.messages.clear()
-        return count
-
     # ============================================================================
     # Message Operations
     # ============================================================================
@@ -162,7 +178,7 @@ class MemoryStore:
         """Get messages for thread, optionally including deleted ones."""
         messages = cls.messages.get(thread_id, [])
 
-        # Filter out sofd-deleted messages
+        # Filter out soft-deleted messages
         if not include_deleted:
             messages = [m for m in messages if not m.is_deleted]
         return messages
@@ -177,11 +193,32 @@ class MemoryStore:
         return None
 
     @classmethod
-    def rate_message(cls, message_id: str, rating: int) -> bool:
+    def rate_message(
+        cls, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
+    ) -> bool:
         """Rate a message."""
         message = cls.get_message(message_id)
         if message:
-            message.rating = rating
+            if rating is not None:
+                # Update or create feedback for this user
+                existing_feedback = None
+                for fb in message.feedbacks:
+                    if fb.get("user_id") == user_id:
+                        existing_feedback = fb
+                        break
+
+                if existing_feedback:
+                    existing_feedback["rating"] = rating
+                    existing_feedback["feedback"] = feedback
+                else:
+                    message.feedbacks.append(
+                        {"user_id": user_id, "rating": rating, "feedback": feedback}
+                    )
+            else:
+                # Delete feedback when rating is None
+                message.feedbacks[:] = [
+                    fb for fb in message.feedbacks if fb.get("user_id") != user_id
+                ]
             return True
         return False
 
@@ -236,7 +273,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         cls,
         title: str,
         metadata: dict | None = None,
-        user_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -244,21 +281,22 @@ class MemoryStorageAdapter(BaseStorageAdapter):
 
         Args:
             title: Thread title
-            metadata: Should include assistant_id, model
-            user_id: Optional user ID
+            metadata: Should include agent_id, model
+            user: Optional user
             thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
         """
         thread_id = thread_id or str(uuid.uuid4())
-        assistant_id = metadata.get("assistant_id", "") if metadata else ""
+        agent_id = metadata.get("agent_id", "") if metadata else ""
         model = metadata.get("model", "") if metadata else ""
+        user_id = str(user.pk) if user and user.is_authenticated else None
 
         MemoryStore.create_thread(
             thread_id=thread_id,
             title=title,
-            assistant_id=assistant_id,
+            agent_id=agent_id,
             model=model,
             user_id=user_id,
             metadata=metadata or {},
@@ -277,7 +315,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         return ThreadInfo(
             id=thread.id,
             title=thread.title,
-            assistant_id=thread.assistant_id,
+            agent_id=thread.agent_id,
             model=thread.model,
             user_id=thread.user_id,
             created_at=thread.created_at,
@@ -287,9 +325,16 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         )
 
     @classmethod
-    async def list_threads(cls, user_id: str | None = None) -> list[ThreadInfo]:
+    async def list_threads(
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ThreadInfo]:
         """List all threads in memory."""
-        threads = MemoryStore.list_threads(user_id)
+        user_id = str(user.pk) if user and user.is_authenticated else None
+        threads = MemoryStore.list_threads(user_id, limit=limit, offset=offset)
         result = []
         for thread in threads:
             messages = MemoryStore.get_messages(thread.id, include_deleted=False)
@@ -297,7 +342,7 @@ class MemoryStorageAdapter(BaseStorageAdapter):
                 ThreadInfo(
                     id=thread.id,
                     title=thread.title,
-                    assistant_id=thread.assistant_id,
+                    agent_id=thread.agent_id,
                     model=thread.model,
                     user_id=thread.user_id,
                     created_at=thread.created_at,
@@ -320,11 +365,6 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     async def delete_thread(cls, thread_id: str) -> bool:
         """Delete thread and all its messages."""
         return MemoryStore.delete_thread(thread_id)
-
-    @classmethod
-    async def delete_all_threads(cls) -> int:
-        """Delete all threads and their messages."""
-        return MemoryStore.delete_all_threads()
 
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
@@ -373,13 +413,20 @@ class MemoryStorageAdapter(BaseStorageAdapter):
             MemoryStore.add_message(self.thread_id, message)
             logger.debug(f"Message saved to memory store with ID: {message.id}")
             return message.id
-        except Exception as error:
+        except (ValueError, KeyError, RuntimeError) as error:
             logger.error(f"Memory storage failed: {error}")
             return None
 
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> bool:
         """Rate a message in this thread."""
-        success = MemoryStore.rate_message(message_id, rating)
+        user_id = str(user.pk) if user and user.is_authenticated else None
+        success = MemoryStore.rate_message(message_id, rating, feedback, user_id)
         if success:
             logger.debug(f"Rated message {message_id}: {rating}")
         return success

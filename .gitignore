@@ -217,6 +217,8 @@ __marimo__/
 
 # Dev
 .agents/
+.claude/
+skills-lock.json
 logs/
 tmp/
 
@@ -224,5 +226,6 @@ tmp/
 demo/memories
 demo/stores
 
-# Ideas directory for exploration documents
+# Ideas and plans directory for exploration documents
 ideas/
+plans/

@@ -1,28 +1,33 @@
+from __future__ import annotations
+
 import uuid
-from collections.abc import AsyncGenerator
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
 from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.events import (
-    DataEvent,
-    ErrorEvent,
-    MessageEndEvent,
-    MessageStartEvent,
-    ReasoningChunkEvent,
-    SourceEvent,
-    StreamEvent,
-    SuggestionEvent,
-    TextChunkEvent,
-    ToolCallStartEvent,
-    ToolInputCompleteEvent,
-    ToolOutputEvent,
-)
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.events import (
+        DataEvent,
+        ErrorEvent,
+        MessageEndEvent,
+        MessageStartEvent,
+        ReasoningChunkEvent,
+        SourceEvent,
+        StreamEvent,
+        SuggestionEvent,
+        TextChunkEvent,
+        ToolCallStartEvent,
+        ToolInputCompleteEvent,
+        ToolOutputEvent,
+    )
 
 logger = get_logger(__name__)
 
@@ -116,6 +121,13 @@ class SourceDocumentPart(Schema):
     source_id: str = Field(validation_alias="source_id", serialization_alias="sourceId")
     media_type: str = Field(validation_alias="media_type", serialization_alias="mediaType")
     title: str
+    # Carries the citation index so the client can map an inline citation to
+    # the right source by index rather than emission order (which is retrieval,
+    # not index, order). providerMetadata is the only extra channel the Vercel
+    # AI SDK preserves on a source-document part.
+    provider_metadata: dict[str, Any] | None = Field(
+        default=None, serialization_alias="providerMetadata"
+    )
 
 
 # === File Part ===
@@ -290,14 +302,13 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.sources:
                 for source in chat_message.sources:
-                    # Emit spec-compliant source-document with optional content for UI display
                     parts.append(
                         {
                             "type": "source-document",
-                            "sourceId": str(source.get("index", "")),
+                            "sourceId": source.get("source_id") or str(source.get("index", "")),
                             "mediaType": "file",
                             "title": source.get("title", ""),
-                            "content": source.get("content", ""),  # From stored history
+                            "providerMetadata": {"citation": {"index": source.get("index")}},
                         }
                     )
 
@@ -318,22 +329,19 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     "id": chat_message.id,
                     "role": chat_message.role,
                     "parts": parts,
-                    "adapter_type": chat_message.adapter_type,
                     "finish_reason": chat_message.finish_reason,
                     "tool_calls": chat_message.tool_calls,
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
-                    "usage": chat_message.usage,
+                    "feedbacks": chat_message.metadata.get("feedbacks", []),
                     "created_at": chat_message.created_at,
                 }
             )
-            logger.debug(f"Converting message {chat_message.id}: usage={chat_message.usage}")
-
         return result
 
-    async def sse(  # type: ignore
+    async def sse(
         self,
-        adapter: BasePipelineAdapter,
+        adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""
@@ -346,8 +354,8 @@ class VercelProtocolHandler(BaseProtocolHandler):
         self.reasoning_started = False
         self.reasoning_id = None
 
-        events = adapter.stream(messages)  # type: ignore
-        protocol_stream = self.handle_stream(events)  # type: ignore
+        events = adapter.stream(messages)
+        protocol_stream = self.handle_stream(events)
 
         try:
             async for chunk in protocol_stream:
@@ -357,6 +365,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                 else:
                     yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
         finally:
+            await protocol_stream.aclose()
             # Ensure any open blocks are closed if stream was interrupted
             cleanup_chunks = []
             reasoning_id = self.reasoning_id
@@ -438,9 +447,15 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_output":
                     tool_output_event = cast("ToolOutputEvent", event)
+                    raw = tool_output_event.tool_output
+                    # Haystack wraps the tool return value in {result, origin, error}.
+                    # Unwrap so the frontend receives the actual tool return value.
+                    output = raw.get("result", raw) if isinstance(raw, dict) else raw
+                    if not isinstance(output, dict):
+                        output = {"result": output}
                     yield ToolOutputAvailablePart(
                         tool_call_id=tool_output_event.tool_call_id,
-                        output=tool_output_event.tool_output,
+                        output=output,
                     )
 
                 case "data":
@@ -460,6 +475,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         source_id=src.source_id,
                         media_type=src.media_type,
                         title=src.title,
+                        provider_metadata={"citation": {"index": src.index}},
                     )
 
                 case "error":
@@ -478,16 +494,7 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         self.text_started = False
                     # Default to "stop" if no finish_reason provided
                     finish_reason = end_event.finish_reason or "stop"
-                    logger.info(f"Message end: usage={end_event.usage}")
                     yield FinishPart(finishReason=finish_reason)
-                    # Emit usage as custom data event if available
-                    if end_event.usage:
-                        logger.info(f"Emitting data-usage event: {end_event.usage}")
-                        yield DataPart(type="data-usage", data=end_event.usage)
-                    else:
-                        logger.info(
-                            "No usage in message end event - data-usage event will NOT be emitted"
-                        )
 
                 case "stream_end":
                     yield DonePart()

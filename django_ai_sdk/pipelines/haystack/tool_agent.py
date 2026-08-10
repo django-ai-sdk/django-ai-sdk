@@ -2,14 +2,18 @@
 Haystack ToolAgent implementation.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
-from haystack.components.generators.chat import OpenAIChatGenerator
 from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
+
+if TYPE_CHECKING:
+    from haystack.components.generators.chat import OpenAIChatGenerator
 
 logger = get_logger(__name__)
 

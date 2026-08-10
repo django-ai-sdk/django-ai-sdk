@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
@@ -5,7 +7,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage
 
 from .managers import MessageManager, ThreadManager
 
@@ -16,11 +18,11 @@ class Thread(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(max_length=255, blank=True, default="")
+    title = models.CharField(max_length=THREAD_TITLE_MAX_LENGTH, blank=True, default="")
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="ai_threads",
+        related_name="threads",
         null=True,
         blank=True,
     )
@@ -29,15 +31,19 @@ class Thread(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="file_threads",
+        related_name="thread_files",
     )
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     metadata = models.JSONField(default=dict, blank=True)
 
-    # Reverse relation type hint
-    messages: models.Manager["Message"]
+    # Reverse relation type hints
+    messages: models.Manager[Message]
     user_id: str | None
+    file_memory_id: str | None
+
+    # Annotated field from querysets
+    msg_count: int
 
     # Custom manager
     objects = ThreadManager()
@@ -45,6 +51,11 @@ class Thread(models.Model):
     class Meta:
         db_table = "django_ai_sdk_threads"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["user"]),
+            models.Index(fields=["-updated_at"]),
+            models.Index(fields=["-created_at"]),
+        ]
 
     def __str__(self) -> str:
         return self.title or f"Thread {self.id}"
@@ -54,10 +65,10 @@ class Thread(models.Model):
         return self.messages.count()
 
     @property
-    def last_message(self) -> "Message | None":
+    def last_message(self) -> Message | None:
         return self.messages.order_by("-created_at").first()
 
-    def add_user_message(self, chat_message: ChatMessage) -> "Message":
+    def add_user_message(self, chat_message: ChatMessage) -> Message:
         """Add user ChatMessage to this thread."""
         message = Message.from_chat_message(self, chat_message)
         message.save()
@@ -80,13 +91,6 @@ class Message(models.Model):
     # Store complete ChatMessage as JSON
     result = models.JSONField()
 
-    # User feedback
-    rating = models.SmallIntegerField(
-        null=True,
-        blank=True,
-        choices=[(1, "good"), (-1, "bad")],
-    )
-
     # Soft delete
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -99,6 +103,8 @@ class Message(models.Model):
         ordering = ["created_at"]
         indexes = [
             models.Index(fields=["thread", "created_at"]),
+            models.Index(fields=["is_deleted"]),
+            models.Index(fields=["thread", "created_at", "is_deleted"]),
         ]
 
     def __str__(self) -> str:
@@ -122,7 +128,7 @@ class Message(models.Model):
         return chat_message
 
     @classmethod
-    def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> "Message":
+    def from_chat_message(cls, thread: Thread, chat_message: ChatMessage) -> Message:
         """Create Message from ChatMessage - ID must be provided by adapter."""
         # Validate that ID is provided by adapter (contract enforcement)
         if not chat_message.id:
@@ -137,19 +143,45 @@ class Message(models.Model):
             ) from e
         return cls(id=message_id, thread=thread, result=chat_message.model_dump())
 
-    def rate(self, rating_value: int) -> "Message":
-        """Rate this message as good (1) or bad (-1)."""
-        self.rating = rating_value
-        return self
-
-    def delete_message(self) -> "Message":
+    def delete_message(self) -> Message:
         """Soft delete this message."""
         self.is_deleted = True
         self.deleted_at = timezone.now()
         return self
 
-    def restore_message(self) -> "Message":
+    def restore_message(self) -> Message:
         """Restore a soft-deleted message."""
         self.is_deleted = False
         self.deleted_at = None
         return self
+
+
+class MessageFeedback(models.Model):
+    """
+    Feedback (rating + optional comment) on a message.
+    Supports multiple feedbacks per message (one per user).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="feedbacks")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="message_feedbacks",
+    )
+    rating = models.SmallIntegerField(choices=[(1, "good"), (-1, "bad")])
+    feedback = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    # Type hints for related fields
+    message_id: str
+    user_id: str | None
+
+    class Meta:
+        db_table = "django_ai_sdk_message_feedbacks"
+        unique_together = [("message", "user")]
+
+    def __str__(self) -> str:
+        return f"Feedback on message {self.message_id}: {self.rating}"

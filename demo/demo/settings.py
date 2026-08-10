@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
 
 env = environ.Env(
     # set casting, default value
@@ -28,6 +31,9 @@ SECRET_KEY = "django-insecure-bu5o)x@7lydjdtfn92=mtwc4sobt=7(*-l)pc_s@-pqqnj97(2
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG")
 
+if DEBUG:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 ALLOWED_HOSTS = []
 
 
@@ -41,12 +47,28 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # auth
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
+    "allauth.usersessions",
     # third-party
+    "corsheaders",
     "django_watchfiles",
     "rest_framework",
+    "django_tasks",
+    "django_tasks_db",
+    # sdk
     "django_ai_sdk",
+    # mcp integration
+    "django_ai_sdk.integrations.mcp",
+    # default integrations
+    "piratespeak.integrations.linear",
+    "django_ai_sdk.integrations.weather",
     # local
-    "piratespeak",
+    "apps.agents",
+    "apps.memories",
+    "apps.integrations",
 ]
 
 MIDDLEWARE = [
@@ -57,6 +79,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # auth
+    "allauth.account.middleware.AccountMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = "demo.urls"
@@ -76,10 +101,22 @@ TEMPLATES = [
     },
 ]
 
-
 # ASGI application
 ASGI_APPLICATION = "demo.asgi.application"
 
+
+# Background tasks
+# Dev: ImmediateBackend runs tasks inline (no worker needed).
+# Prod (DEBUG=False): DatabaseBackend — run `python manage.py db_worker`.
+TASKS = {
+    "default": {
+        "BACKEND": (
+            "django_tasks.backends.immediate.ImmediateBackend"
+            if DEBUG
+            else "django_tasks_db.DatabaseBackend"
+        ),
+    }
+}
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -110,6 +147,41 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Authentication
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+HEADLESS_ONLY = True
+
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": "http://localhost:3000/verify-email/{key}",
+    "account_reset_password_from_key": "http://localhost:3000/password/reset/key/{key}",
+    "account_signup": "http://localhost:3000/signup",
+}
+
+CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
+
+# Accounts
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_LOGIN_METHODS = {"email"}
+
+
+# CORS
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-email-verification-key",
+    "x-password-reset-key",
+)
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
@@ -141,13 +213,90 @@ OPENAI_API_URL = env("OPENAI_API_URL", default=None)
 # AI_SDK_DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 AI_SDK_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-# Default asssitants
-AI_SDK_ASSISTANTS = [
-    "piratespeak.assistants.pirate_basic.PirateBasicAssistant",
-    "piratespeak.assistants.pirate_openai.PirateOpenAIAssistant",
-    "piratespeak.assistants.pirate_agent.PirateAgentAssistant",
-    "piratespeak.assistants.agent_swarm.AgentSwarmAssistant",
+# Base classes available for runtime configured agents
+AI_SDK_RUNTIME_AGENT_BASES = [
+    "apps.agents.runtime.DefaultRuntimeAgent",
 ]
+
+# Tools selectable in runtime agent configuration
+AI_SDK_RUNTIME_AGENT_TOOLS = {
+    "get_today": "apps.agents.tools.get_today",
+    "get_memory_files": "apps.agents.tools.get_memory_files",
+}
+
+# Default Workflow actions
+AI_SDK_WORKFLOW_ACTIONS = {
+    "console_log": "apps.agents.actions.ConsoleLogAction",
+}
+
+# Default asssitants
+AI_SDK_AGENTS = [
+    "apps.agents.pirate_basic.PirateBasicAgent",
+    "apps.agents.agent_swarm.AgentSwarmAgent",
+]
+
+# Permission overrides by domain
+AI_SDK_PERMISSIONS = {
+    "memory": [
+        "apps.memories.permissions.AllowAnonymousMemoryPermission",
+    ],
+    "thread": [
+        "apps.agents.permissions.DemoThreadPermission",
+    ],
+}
+
 
 # Default vector store path
 AI_SDK_VECTOR_STORE_PATH = "stores/"
+
+
+# Integrations are Django apps (see INSTALLED_APPS above) that register themselves on
+# ready(). INSTALLED_APPS decides which exist; this dict configures them, keyed by
+# integration name, in the same shape as DATABASES or CACHES. A missing credential
+# doesn't crash boot: the integration reports that it needs setup instead. `weather`
+# needs none at all, so it isn't listed here and still works out of the box.
+AI_SDK_INTEGRATIONS = {
+    "linear": {"TOKEN": env("LINEAR_API_KEY", default="")},
+}
+
+
+# MCP OAuth discovery (RFC 9728)
+AI_SDK_MCP_DISCOVERY_TIMEOUT = 10  # seconds
+AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds (1 hour)
+AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
+
+# Integration caching, timeouts and circuit breaker (see
+# django_ai_sdk.integrations.base.ResilientCache). Together these bound the worst case
+# a slow or dead integration can add to a chat response.
+AI_SDK_INTEGRATION_CACHE_TTL = 900  # seconds a discovered tool list stays fresh
+AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
+AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
+}
+
+# Allowed upload filetypes
+AI_SDK_ALLOWED_FILES = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "text/json",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+# HuggingFace models to pre-download for offline embedding use
+HF_PRELOAD_MODELS = [
+    "Qdrant/bm42-all-minilm-l6-v2-attentions",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+]

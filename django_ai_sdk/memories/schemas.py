@@ -1,18 +1,10 @@
-"""
-TODO:
-I moved these data schema out of the package and embedded them here for now.
-We still use a light version, the package has better extraction handling as well,
-but I need to finalize this.
-
-Also check the PyPi account we are going to release from: there are now two versions,
-The one for Caren will be separated and then the one for public release, both
-need to be in sync.
-
-"""
+from __future__ import annotations
 
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+from django_ai_sdk.tasks import TaskStatus
 
 # Data schema
 
@@ -83,6 +75,7 @@ class MemoryIn(BaseModel):
     name: str
     slug: str = ""
     description: str = ""
+    is_public: bool = True
 
 
 class MemoryOut(BaseModel):
@@ -92,6 +85,7 @@ class MemoryOut(BaseModel):
     name: str
     slug: str
     description: str
+    is_public: bool
     document_count: int
     created_at: str
     updated_at: str
@@ -104,16 +98,26 @@ class DocumentIn(BaseModel):
 
 
 class DocumentOut(BaseModel):
-    """Schema for document output."""
+    """Schema for document output.
+
+    `id` is the EntryDocument id (stable across the upload → processing →
+    completed/failed lifecycle). `status` reflects EntryDocument.processing_status
+    and `error` carries any processing failure message. `content`/`extraction` are
+    only populated once processing has produced an Entry.
+    """
 
     id: str
     file: str
     content: str
     extraction: DocumentExtraction | None = None
     file_name: str
+    data: dict = Field(default_factory=dict)
     file_size: int
     content_type: str
     file_extension: str
+    status: str
+    error: str = ""
+    processing_step: str | None = None
     created_at: str
     updated_at: str
 
@@ -135,7 +139,63 @@ class BulkConnectMemoriesIn(BaseModel):
     memory_ids: list[str]
 
 
+class DocumentUploadResponse(BaseModel):
+    """Schema to return after upload"""
+
+    id: str
+    status: str
+    processing_step: str | None = None
+    task_id: str | None = None
+
+
+class DocumentStatusOut(BaseModel):
+    """Processing status for an uploaded document."""
+
+    id: str
+    status: str
+    error: str = ""
+    processing_step: str | None = None
+    task: TaskStatus | None = None
+
+
 class ToggleMemoryActiveIn(BaseModel):
     """Schema for toggling memory active status."""
 
     active: bool
+
+
+class MemoryUserOut(BaseModel):
+    """Schema for memory user output."""
+
+    user_id: str
+    can_manage: bool
+    created_at: str
+
+
+class MemoryGroupOut(BaseModel):
+    """Schema for memory group output."""
+
+    group_id: int
+    group_name: str
+    can_manage: bool
+    created_at: str
+
+
+class AddMemoryUserIn(BaseModel):
+    """Schema for adding a user to a memory."""
+
+    user_id: str
+    can_manage: bool = False
+
+
+class UpdateMemoryUserIn(BaseModel):
+    """Schema for updating a memory user."""
+
+    can_manage: bool
+
+
+class AddMemoryGroupIn(BaseModel):
+    """Schema for adding a group to a memory."""
+
+    group_id: int
+    can_manage: bool = False

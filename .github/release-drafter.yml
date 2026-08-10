@@ -1,0 +1,59 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - title: "Features"
+    labels:
+      - "feat"
+      - "feature"
+      - "enhancement"
+  - title: "Bug Fixes"
+    labels:
+      - "fix"
+      - "bug"
+  - title: "Maintenance"
+    labels:
+      - "chore"
+      - "refactor"
+      - "ci"
+  - title: "Dependencies"
+    labels:
+      - "deps"
+      - "dependencies"
+  - title: "Documentation"
+    labels:
+      - "docs"
+  - title: "Tests"
+    labels:
+      - "test"
+
+change-template: "- $TITLE (#$NUMBER)"
+
+change-title-escapes: '\<*_&'
+
+exclude-labels:
+  - "skip-changelog"
+
+version-resolver:
+  major:
+    labels:
+      - "breaking"
+  minor:
+    labels:
+      - "feat"
+      - "feature"
+      - "enhancement"
+  patch:
+    labels:
+      - "fix"
+      - "bug"
+      - "chore"
+      - "deps"
+      - "docs"
+      - "test"
+      - "refactor"
+      - "ci"
+  default: patch
+
+template: |
+  $CHANGES

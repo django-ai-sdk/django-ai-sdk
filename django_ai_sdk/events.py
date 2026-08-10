@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -75,7 +77,7 @@ class SourceEvent(StreamEvent):
     """A retrieved document, numbered for inline [N] citation by the LLM.
 
     Emitted by adapters after a retrieval tool runs, in cumulative-index order
-    across the assistant turn. Protocol handlers translate this into whatever
+    across the agent turn. Protocol handlers translate this into whatever
     citation format their frontend understands (OWUI source pills, OpenAI
     annotations, etc.).
     """
@@ -101,7 +103,6 @@ class MessageEndEvent(StreamEvent):
 
     event_type: Literal["message_end"] = "message_end"
     finish_reason: str | None = None
-    usage: dict | None = None
 
 
 class ErrorEvent(StreamEvent):

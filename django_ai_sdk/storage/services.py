@@ -1,15 +1,43 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync
 
+from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.permissions import (
+    Operation,
+    PermissionDenied,
+    PermissionDomain,
+    PermissionsMixin,
+)
 from django_ai_sdk.storage.base import StorageAdapterRegistry
-from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
+
+if TYPE_CHECKING:
+    from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
+    from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
 
 
-class ThreadService:
+async def _get_thread(thread_id: str) -> ThreadInfo | None:
+    """Look up a thread across all storage adapters"""
+    for adapter_class in StorageAdapterRegistry.get_all_adapters():
+        thread = await adapter_class.get_thread(thread_id)
+        if thread:
+            return thread
+    return None
+
+
+async def _get_storage(thread_info: ThreadInfo) -> Any:
+    """Get a storage adapter instance for a thread without permission checks."""
+    agent = await AgentService.get(thread_info.agent_id)
+    storage_class = ThreadService.get_storage(agent)
+    return storage_class(thread_info.id)
+
+
+class ThreadService(PermissionsMixin):
     """
     Service for thread operations across all storage adapters.
 
@@ -17,171 +45,136 @@ class ThreadService:
     (e.g., DRF class-based views).
     """
 
-    @staticmethod
+    domain = PermissionDomain.THREAD
+
+    @classmethod
     async def create_thread(
-        assistant_id: str,
-        messages: list[Any] | None = None,
+        cls,
+        agent_id: str,
         title: str = "",
         metadata: dict | None = None,
-        user_id: str | None = None,
+        *,
+        user: UserType,
         thread_id: str | None = None,
     ) -> str:
         """
         Create a new thread in the appropriate storage.
 
-        Uses the assistant's configured storage adapter class.
+        Uses the agent's configured storage adapter class.
 
         Args:
-            assistant_id: ID of the assistant creating the thread
-            messages: Optional list of messages for auto-title generation
-            title: Thread title. If empty and messages provided, auto-generated
-            metadata: Additional metadata. Auto-populates model, assistant_name,
-                     assistant_class, and created_via. Caller-provided values
+            agent_id: ID of the agent creating the thread
+            title: Thread title
+            metadata: Additional metadata. Auto-populates model, agent_name,
+                     agent_class, and created_via. Caller-provided values
                      take precedence over auto-generated ones.
-            user_id: Optional user ID for the thread owner
+            user: User for permission checking and thread ownership
             thread_id: Optional custom thread ID
 
         Returns:
             Thread ID (UUID string)
+
+        Raises:
+            PermissionDenied: If user has no CREATE_THREAD permission
         """
-        from django_ai_sdk.assistants.registry import registry
+        from django_ai_sdk.agents.services import AgentService
 
-        assistant = registry.get(assistant_id)
-        if not assistant:
-            raise ValueError(f"Assistant not found: {assistant_id}")
+        agent = await AgentService.get(agent_id)
 
-        storage_class = assistant.storage_adapter
+        await cls.has_perms(user, Operation.CREATE_THREAD)
+
+        storage_class = agent.storage_adapter
         title = title or ""
         default_metadata = {
-            "assistant_id": assistant_id,
-            "model": assistant.model,
-            "assistant_name": assistant.name or assistant.__class__.__name__,
-            "assistant_class": assistant.__class__.__name__,
+            "agent_id": agent_id,
+            "model": agent.model,
+            "agent_name": agent.name or agent.__class__.__name__,
+            "agent_class": agent.__class__.__name__,
             "created_via": "create_thread",
         }
         default_metadata.update(metadata or {})
 
         thread_id = await storage_class.create_thread(
-            title=title, metadata=default_metadata, user_id=user_id, thread_id=thread_id
+            title=title,
+            metadata=default_metadata,
+            user=user,
+            thread_id=thread_id,
         )
 
-        logger.debug(f"Created thread {thread_id} for assistant {assistant_id}")
+        logger.debug(f"Created thread {thread_id} for agent {agent_id}")
         return thread_id
 
-    @staticmethod
-    async def rate_message(thread_id: str, message_id: str, rating: int) -> bool:
-        """
-        Rate a message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to rate
-            rating: 1 for good, -1 for bad
-
-        Returns:
-            True if rated successfully
-
-        Raises:
-            ValueError: If thread or message not found
-        """
-        storage = await ThreadService.storage_for_thread(thread_id)
-        success = await storage.rate_message(message_id, rating)
-        if not success:
-            raise ValueError("Message not found")
-        return True
-
-    @staticmethod
-    async def delete_message(thread_id: str, message_id: str) -> bool:
-        """
-        Soft delete a message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to delete
-
-        Returns:
-            True if deleted successfully
-
-        Raises:
-            ValueError: If thread or message not found
-        """
-        storage = await ThreadService.storage_for_thread(thread_id)
-        success = await storage.delete_message(message_id)
-        if not success:
-            raise ValueError("Message not found")
-        return True
-
-    @staticmethod
-    async def restore_message(thread_id: str, message_id: str) -> bool:
-        """
-        Restore a soft-deleted message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to restore
-
-        Returns:
-            True if restored successfully
-
-        Raises:
-            ValueError: If thread or message not found
-        """
-        storage = await ThreadService.storage_for_thread(thread_id)
-        success = await storage.restore_message(message_id)
-        if not success:
-            raise ValueError("Message not found")
-        return True
-
-    @staticmethod
-    async def get_thread(thread_id: str) -> ThreadInfo | None:
+    @classmethod
+    async def get_thread(cls, thread_id: str, *, user: UserType) -> ThreadInfo | None:
         """
         Find thread by querying storage adapters.
 
-        Returns thread metadata including assistant_id.
+        Returns thread metadata including agent_id.
 
         Args:
             thread_id: Thread ID to look up
+            user: Required user for permission checking
 
         Returns:
-            ThreadInfo with assistant_id, or None if not found
+            ThreadInfo with agent_id, or None if not found
+
+        Raises:
+            PermissionDenied: If user has no VIEW_THREAD permission for the thread
         """
-        for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            thread = await adapter_class.get_thread(thread_id)
-            if thread:
-                logger.debug(
-                    f"Found thread {thread_id} in {adapter_class.__name__}, assistant: {thread.assistant_id}"
-                )
-                return thread
+        thread = await _get_thread(thread_id)
+        if thread:
+            await cls.has_perms(user, Operation.VIEW_THREAD, thread)
+            logger.debug(f"Found thread {thread_id} in adapter, agent: {thread.agent_id}")
 
-        logger.debug(f"Thread not found: {thread_id}")
-        return None
+        if not thread:
+            logger.debug(f"Thread not found: {thread_id}")
 
-    @staticmethod
-    async def threads(user_id: str | None = None) -> list[ThreadInfo]:
+        return thread
+
+    @classmethod
+    async def threads(
+        cls,
+        user: UserType,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadInfo]:
         """
         List all threads from all storage adapters.
 
         Args:
-            user_id: Optional filter by user ID
+            user: Optional user for filtering thread ownership
+            limit: Maximum threads to return (default 100)
+            offset: Number of threads to skip
 
         Returns:
             List of ThreadInfo from all storage types
         """
-        all_threads = []
+        all_threads: list[ThreadInfo] = []
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            threads = await adapter_class.list_threads(user_id)
-            all_threads.extend(threads)
+            threads = await adapter_class.list_threads(user)
+            for thread in threads:
+                try:
+                    await cls.has_perms(user, Operation.LIST_THREADS, thread)
+                    all_threads.append(thread)
+                except PermissionDenied:
+                    continue
             logger.debug(f"Found {len(threads)} threads in {adapter_class.__name__}")
 
         all_threads.sort(key=lambda t: t.updated_at, reverse=True)
 
         logger.debug(f"Total threads: {len(all_threads)}")
-        return all_threads
+        return all_threads[offset : offset + limit]
 
-    @staticmethod
+    @classmethod
     async def update_thread(
-        thread_id: str, title: str | None = None, metadata: dict | None = None
+        cls,
+        thread_id: str,
+        *,
+        user: UserType,
+        title: str | None = None,
+        metadata: dict | None = None,
     ) -> bool:
         """
         Update thread metadata.
@@ -190,12 +183,20 @@ class ThreadService:
 
         Args:
             thread_id: Thread ID to update
+            user: Required user for permission checking
             title: New title (optional)
             metadata: New metadata to merge (optional)
 
         Returns:
             True if updated, False if not found
+
+        Raises:
+            PermissionDenied: If user has no UPDATE_THREAD permission
         """
+        thread = await _get_thread(thread_id)
+        if thread:
+            await cls.has_perms(user, Operation.UPDATE_THREAD, thread)
+
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.update_thread(thread_id, title, metadata)
             if success:
@@ -204,17 +205,25 @@ class ThreadService:
 
         return False
 
-    @staticmethod
-    async def delete_thread(thread_id: str) -> bool:
+    @classmethod
+    async def delete_thread(cls, thread_id: str, *, user: UserType) -> bool:
         """
         Delete a thread and all its messages.
 
         Args:
             thread_id: Thread ID to delete
+            user: Required user for permission checking
 
         Returns:
             True if deleted, False if not found
+
+        Raises:
+            PermissionDenied: If user has no DELETE_THREAD permission
         """
+        thread = await _get_thread(thread_id)
+        if thread:
+            await cls.has_perms(user, Operation.DELETE_THREAD, thread)
+
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             success = await adapter_class.delete_thread(thread_id)
             if success:
@@ -223,61 +232,170 @@ class ThreadService:
 
         return False
 
-    @staticmethod
-    async def delete_all_threads() -> int:
+    @classmethod
+    async def delete_all_threads(cls, *, user: UserType) -> int:
         """
-        Delete all threads and their messages.
+        Delete current user's threads and their messages.
+
+        Args:
+            user: Required user for permission checking and thread ownership
 
         Returns:
             Total number of threads deleted
+
+        Raises:
+            PermissionDenied: If user has no DELETE_ALL_THREADS permission
         """
         total_deleted = 0
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
-            count = await adapter_class.delete_all_threads()
-            if count and count > 0:
-                logger.debug(f"Deleted {count} threads from {adapter_class.__name__}")
-                total_deleted += count
+            threads = await adapter_class.list_threads(user)
+            for thread in threads:
+                try:
+                    await cls.has_perms(user, Operation.DELETE_ALL_THREADS, thread)
+                    if await adapter_class.delete_thread(thread.id):
+                        total_deleted += 1
+                except PermissionDenied:
+                    continue
+            logger.debug(f"Deleted threads from {adapter_class.__name__}")
 
         return total_deleted
 
-    @staticmethod
-    async def storage_for_thread(thread_id: str) -> Any:
-        """Resolve a thread's storage adapter, instantiated and bound to the thread.
-
-        Convenience for the common pattern: look up the thread, find its
-        assistant, get the assistant's storage class, instantiate with
-        thread_id. Returns a ready-to-use storage adapter instance.
-
-        Raises ValueError if the thread does not exist or the assistant
-        has no storage_adapter configured.
+    @classmethod
+    async def rate_message(
+        cls,
+        thread_id: str,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        *,
+        user: UserType,
+    ) -> bool:
         """
-        from django_ai_sdk.assistants.services import AssistantService  # noqa: PLC0415
-
-        thread_info = await ThreadService.get_thread(thread_id)
-        if thread_info is None:
-            raise ValueError(f"Thread not found: {thread_id}")
-        assistant = AssistantService.from_registry(thread_info.assistant_id)
-        return ThreadService.get_storage(assistant)(thread_id)
-
-    @staticmethod
-    def get_storage(assistant: Any) -> type:
-        """
-        Get the storage adapter class for an assistant.
+        Rate a message in a thread.
 
         Args:
-            assistant: Assistant instance
+            thread_id: Thread ID containing the message
+            message_id: Message ID to rate
+            rating: 1 for good, -1 for bad
+            user: Required user for permission checking
+
+        Returns:
+            True if rated successfully
+
+        Raises:
+            ValueError: If thread or message not found
+            PermissionDenied: If user has no RATE_MESSAGE permission
+        """
+        thread = await _get_thread(thread_id)
+        if not thread:
+            raise ValueError("Thread not found")
+        await cls.has_perms(user, Operation.RATE_MESSAGE, thread)
+
+        storage = await _get_storage(thread)
+        success = await storage.rate_message(message_id, rating, feedback, user=user)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @classmethod
+    async def delete_message(cls, thread_id: str, message_id: str, *, user: UserType) -> bool:
+        """
+        Soft delete a message in a thread.
+
+        Args:
+            thread_id: Thread ID containing the message
+            message_id: Message ID to delete
+            user: Required user for permission checking
+
+        Returns:
+            True if deleted successfully
+
+        Raises:
+            ValueError: If thread or message not found
+            PermissionDenied: If user has no DELETE_MESSAGE permission
+        """
+        thread = await _get_thread(thread_id)
+        if not thread:
+            raise ValueError("Thread not found")
+        await cls.has_perms(user, Operation.DELETE_MESSAGE, thread)
+
+        storage = await _get_storage(thread)
+        success = await storage.delete_message(message_id)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @classmethod
+    async def restore_message(cls, thread_id: str, message_id: str, *, user: UserType) -> bool:
+        """
+        Restore a soft-deleted message in a thread.
+
+        Args:
+            thread_id: Thread ID containing the message
+            message_id: Message ID to restore
+            user: Required user for permission checking
+
+        Returns:
+            True if restored successfully
+
+        Raises:
+            ValueError: If thread or message not found
+            PermissionDenied: If user has no RESTORE_MESSAGE permission
+        """
+        thread = await _get_thread(thread_id)
+        if not thread:
+            raise ValueError("Thread not found")
+        await cls.has_perms(user, Operation.RESTORE_MESSAGE, thread)
+
+        storage = await _get_storage(thread)
+        success = await storage.restore_message(message_id)
+        if not success:
+            raise ValueError("Message not found")
+        return True
+
+    @classmethod
+    async def storage_for_thread(cls, thread_id: str, *, user: UserType) -> Any:
+        """
+        Resolve a thread's storage adapter, instantiated and bound to the thread.
+
+        Convenience for the common pattern: look up the thread, find its
+        agent, get the agent's storage class, instantiate with
+        thread_id. Returns a ready-to-use storage adapter instance.
+
+        Args:
+            thread_id: Thread ID to get storage for
+            user: User for permission checking
+
+        Returns:
+            Storage adapter instance bound to the thread
+
+        Raises:
+            ValueError: If the thread does not exist or has no storage
+            PermissionDenied: If user has no VIEW_THREAD permission
+        """
+        thread = await _get_thread(thread_id)
+        if thread is None:
+            raise ValueError(f"Thread not found: {thread_id}")
+        await cls.has_perms(user, Operation.VIEW_THREAD, thread)
+        return await _get_storage(thread)
+
+    @classmethod
+    def get_storage(cls, agent: Any) -> type:
+        """
+        Get the storage adapter class for an agent.
+
+        Args:
+            agent: Agent instance
 
         Returns:
             Storage adapter class (not instantiated)
 
         Raises:
-            ValueError: If assistant has no storage_adapter configured
+            ValueError: If agent has no storage_adapter configured
         """
-        storage_class = assistant.storage_adapter
+        storage_class = agent.storage_adapter
         if storage_class is None:
-            raise ValueError(
-                f"Assistant '{assistant.assistant_id}' has no storage_adapter configured"
-            )
+            raise ValueError(f"Agent '{agent.agent_id}' has no storage_adapter configured")
         return storage_class
 
 
@@ -286,26 +404,31 @@ class ThreadService:
 # ============================================================================
 
 
-async def aget_thread_history(thread_id: str) -> dict[str, Any]:
+async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
     """
-    Get thread history: thread metadata and messages only.
+    Get thread history: thread metadata and messages with feedbacks.
+
+    Messages include feedbacks via the protocol handler which reads them from
+    ChatMessage metadata. No feedbacks are duplicated in the response.
 
     For memories, use GET /memories/thread/{thread_id}/
     For file metadata, use aget_thread_file_meta().
 
     Args:
         thread_id: Thread ID to retrieve history for
+        user: Optional user for permission checking
 
     Returns:
-        Dict with thread and messages
+        Dict with thread and messages (each message includes feedbacks)
 
     Raises:
-        ValueError: If thread or assistant not found
+        ValueError: If thread or agent not found
+        PermissionDenied: If user has no VIEW_THREAD permission
     """
-    from django_ai_sdk.assistants.services import AssistantService
+    from django_ai_sdk.agents.services import AgentService
 
-    assistant = await AssistantService.get_assistant(thread_id)
-    thread_detail: ThreadDetail = await assistant.history(thread_id)
+    agent = await AgentService.get_agent(thread_id, user=user)
+    thread_detail: ThreadDetail = await agent.history(thread_id, user=user)
 
     return {
         "thread": thread_detail.thread,
@@ -321,42 +444,39 @@ get_thread_history = async_to_sync(aget_thread_history)
 # ============================================================================
 
 
-async def aget_thread_file_meta(thread_id: str) -> dict[str, Any]:
+async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, Any]:
     """
     Get file metadata for a thread: file_count and file_memory_id.
 
-    Does not raise if thread has no file memory — returns {file_count: 0, file_memory_id: None}.
+    Does not raise if thread has no file memory, returns {file_count: 0, file_memory_id: None}.
 
     Args:
         thread_id: Thread ID to retrieve file metadata for
+        user: Required user for permission check
 
     Returns:
         Dict with file_count and file_memory_id
 
     Raises:
         ValueError: If thread not found in DB
+        PermissionDenied: If user has no VIEW_THREAD permission
     """
-    from django_ai_sdk.conversation.models import Thread
-    from django_ai_sdk.memories.models import Entry
-
-    if not await Thread.objects.filter(id=thread_id).aexists():
+    thread = await _get_thread(thread_id)
+    if thread is None:
         raise ValueError("Thread not found")
+    await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
 
-    thread = await Thread.objects.select_related("file_memory").aget(id=thread_id)
-    file_memory_id = str(thread.file_memory_id) if thread.file_memory_id else None
+    from django_ai_sdk.memories.models import Entry  # noqa: PLC0415
+
+    file_memory_id = thread.file_memory_id
     file_count = (
-        await Entry.objects.filter(memory_id=thread.file_memory_id).acount()
-        if file_memory_id
-        else 0
+        await Entry.objects.filter(memory_id=file_memory_id).acount() if file_memory_id else 0
     )
 
     return {
         "file_count": file_count,
         "file_memory_id": file_memory_id,
     }
-
-
-get_thread_file_meta = async_to_sync(aget_thread_file_meta)
 
 
 # ============================================================================
@@ -368,7 +488,8 @@ rate_message = async_to_sync(ThreadService.rate_message)
 delete_message = async_to_sync(ThreadService.delete_message)
 restore_message = async_to_sync(ThreadService.restore_message)
 get_thread = async_to_sync(ThreadService.get_thread)
-threads = async_to_sync(ThreadService.threads)
+list_threads = async_to_sync(ThreadService.threads)
 update_thread = async_to_sync(ThreadService.update_thread)
 delete_thread = async_to_sync(ThreadService.delete_thread)
 delete_all_threads = async_to_sync(ThreadService.delete_all_threads)
+get_thread_file_meta = async_to_sync(aget_thread_file_meta)

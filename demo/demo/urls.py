@@ -15,22 +15,61 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from django.contrib import admin
-from django.urls import include, path
-from ninja import NinjaAPI
+from __future__ import annotations
 
-from piratespeak.views_memories_ninja import router as memories_router
-from piratespeak.views_ninja import router as piratespeak_router
+from typing import TYPE_CHECKING
+
+from django.contrib import admin
+from django.core.exceptions import ObjectDoesNotExist
+from django.urls import include, path
+from django_ai_sdk.permissions import PermissionDenied
+from ninja import NinjaAPI
+from ninja.security import SessionAuth
+
+from apps.agents.views.ninja import router as agents_router
+from apps.integrations.views.ninja import router as integrations_router
+from apps.memories.views.ninja import router as memories_router
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest, HttpResponse
+
 
 # Create the main API instance
-api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0")
+api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0", auth=SessionAuth())
 
-api.add_router("/piratespeak", piratespeak_router)
+api.add_router("/", agents_router)
 api.add_router("/memories", memories_router)
+# The SDK ships no integrations router — HTTP surfaces are the host project's, so it
+# doesn't pick your web framework. views_integrations_ninja builds one over
+# IntegrationService; the OAuth *callback* is the one leg the SDK does ship, since it
+# must sit at a fixed URL (included in urlpatterns below).
+api.add_router("/integrations", integrations_router)
+
+
+# Global safety net so service-layer errors never surface as 500s.
+# Endpoints may still catch these earlier for custom payloads.
+@api.exception_handler(PermissionDenied)
+def _on_permission_denied(request: HttpRequest, exc: PermissionDenied) -> HttpResponse:
+    return api.create_response(request, {"detail": str(exc)}, status=403)
+
+
+@api.exception_handler(ObjectDoesNotExist)
+def _on_does_not_exist(request: HttpRequest, exc: ObjectDoesNotExist) -> HttpResponse:
+    return api.create_response(request, {"detail": "Not found"}, status=404)
+
+
+@api.exception_handler(ValueError)
+def _on_value_error(request: HttpRequest, exc: ValueError) -> HttpResponse:
+    # Service-layer convention: ValueError means a referenced object was not found.
+    return api.create_response(request, {"detail": str(exc)}, status=404)
+
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("accounts/", include("allauth.urls")),
+    path("_allauth/", include("allauth.headless.urls")),
     path("api/", api.urls),
-    path("api/v2/", include("piratespeak.views_drf")),
-    path("api/v2/", include("piratespeak.views_memories_drf")),
+    path("api/v2/", include("apps.agents.views.drf")),
+    path("api/v2/", include("apps.memories.views.drf")),
+    path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
 ]

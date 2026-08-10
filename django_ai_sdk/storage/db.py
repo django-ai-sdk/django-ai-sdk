@@ -1,10 +1,15 @@
-import traceback
-import uuid
+from __future__ import annotations
 
+import uuid
+from typing import TYPE_CHECKING
+
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError, models
+from django.db.models import Count
 from django.utils import timezone
 
-from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.conversation.models import Message, Thread
+from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH
+from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
@@ -12,6 +17,12 @@ from django_ai_sdk.storage.base import (
     StorageType,
 )
 from django_ai_sdk.storage.schemas import ThreadInfo
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
+
+    from django_ai_sdk.common import ChatMessage
 
 logger = get_logger(__name__)
 
@@ -44,7 +55,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         cls,
         title: str,
         metadata: dict | None = None,
-        user_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
     ) -> str:
         """
@@ -52,8 +63,8 @@ class DbStorageAdapter(BaseStorageAdapter):
 
         Args:
             title: Thread title
-            metadata: Should include assistant_id, model
-            user_id: Optional user ID
+            metadata: Should include agent_id, model
+            user: Optional user
             thread_id: Optional custom thread ID
 
         Returns:
@@ -61,6 +72,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         """
         # Use provided thread_id or generate new UUID
         thread_id = thread_id or str(uuid.uuid4())
+        user_id = str(user.pk) if user and user.is_authenticated else None
 
         # Create in database
         thread = await Thread.objects.acreate(
@@ -73,45 +85,62 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def get_thread(cls, thread_id: str) -> ThreadInfo | None:
         """Get thread metadata by ID."""
         try:
-            thread = await Thread.objects.aget(id=thread_id)
-            # Get message count (excluding deleted)
-            message_count = await thread.messages.filter(is_deleted=False).acount()
+            thread = await Thread.objects.annotate(
+                msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
+            ).aget(id=thread_id)
 
             return ThreadInfo(
                 id=str(thread.id),
                 title=thread.title,
-                assistant_id=thread.metadata.get("assistant_id", ""),
+                agent_id=thread.metadata.get("agent_id", ""),
                 model=thread.metadata.get("model", ""),
                 user_id=str(thread.user_id) if thread.user_id else None,
                 created_at=thread.created_at,
                 updated_at=thread.updated_at,
                 metadata=thread.metadata,
-                message_count=message_count,
+                message_count=thread.msg_count,
+                file_memory_id=str(thread.file_memory_id) if thread.file_memory_id else None,
             )
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return None
 
     @classmethod
-    async def list_threads(cls, user_id: str | None = None) -> list[ThreadInfo]:
+    async def list_threads(
+        cls,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ThreadInfo]:
         """List all threads from database."""
         queryset = Thread.objects.all()
+        user_id = str(user.pk) if user and user.is_authenticated else None
         if user_id:
             queryset = queryset.filter(user_id=user_id)
 
+        queryset = queryset.annotate(
+            msg_count=Count("messages", filter=models.Q(messages__is_deleted=False))
+        ).order_by("-updated_at")
+
+        if limit is not None:
+            queryset = queryset[offset : offset + limit]
+        elif offset:
+            queryset = queryset[offset:]
+
         threads = []
-        async for thread in queryset.order_by("-updated_at"):
-            message_count = await thread.messages.filter(is_deleted=False).acount()
+        async for thread in queryset:
             threads.append(
                 ThreadInfo(
                     id=str(thread.id),
                     title=thread.title,
-                    assistant_id=thread.metadata.get("assistant_id", ""),
+                    agent_id=thread.metadata.get("agent_id", ""),
                     model=thread.metadata.get("model", ""),
                     user_id=str(thread.user_id) if thread.user_id else None,
                     created_at=thread.created_at,
                     updated_at=thread.updated_at,
                     metadata=thread.metadata,
-                    message_count=message_count,
+                    message_count=thread.msg_count,
+                    file_memory_id=str(thread.file_memory_id) if thread.file_memory_id else None,
                 )
             )
         return threads
@@ -125,14 +154,14 @@ class DbStorageAdapter(BaseStorageAdapter):
             thread = await Thread.objects.aget(id=thread_id)
 
             if title is not None:
-                thread.title = title
+                thread.title = title[:THREAD_TITLE_MAX_LENGTH]
             if metadata is not None:
                 # Merge metadata
                 thread.metadata.update(metadata)
 
             await thread.asave()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
 
     @classmethod
@@ -145,21 +174,8 @@ class DbStorageAdapter(BaseStorageAdapter):
             # Delete thread
             await thread.adelete()
             return True
-        except Thread.DoesNotExist:
+        except (Thread.DoesNotExist, ValidationError):
             return False
-
-    @classmethod
-    async def delete_all_threads(cls) -> int:
-        """Delete all threads and their messages from database."""
-        from django_ai_sdk.conversation.models import Message
-
-        # Get count before deleting
-        count = await Thread.objects.acount() or 0
-        # Delete all messages first
-        await Message.objects.all().adelete()
-        # Delete all threads
-        await Thread.objects.all().adelete()
-        return count
 
     # ============================================================================
     # INSTANCE METHODS - Thread-Specific Operations
@@ -180,20 +196,45 @@ class DbStorageAdapter(BaseStorageAdapter):
     async def get_messages(self) -> list[ChatMessage]:
         """
         Retrieve all ChatMessages for this thread from database.
-        Excludes deleted messages.
+        Excludes deleted messages. Includes all feedbacks in metadata.
 
         Returns:
             List of ChatMessage objects ordered by creation time
         """
+
         logger.debug(f"Fetching conversation history from database: {self.thread_id}")
         thread = await self.load_thread()
+
+        messages_list = []
+        qs = thread.messages.filter(is_deleted=False).order_by("created_at")
+        async for msg in qs:
+            messages_list.append(msg)
+
+        # Batch-fetch all feedbacks for these messages
+        message_ids = [msg.id for msg in messages_list]
+        all_feedbacks = {}
+        if message_ids:
+            async for fb in MessageFeedback.objects.filter(message_id__in=message_ids):
+                if fb.message_id not in all_feedbacks:
+                    all_feedbacks[fb.message_id] = []
+                all_feedbacks[fb.message_id].append(
+                    {
+                        "id": str(fb.id),
+                        "user_id": str(fb.user_id) if fb.user_id else None,
+                        "rating": fb.rating,
+                        "feedback": fb.feedback,
+                        "created_at": fb.created_at.isoformat() if fb.created_at else None,
+                    }
+                )
+
         messages = []
-        # Filter out deleted messages
-        async for msg in thread.messages.filter(is_deleted=False).order_by("created_at"):
+        for msg in messages_list:
             chat_message = msg.to_chat_message()
             chat_message.id = str(msg.id)
+            chat_message.metadata["feedbacks"] = all_feedbacks.get(msg.id, [])
             messages.append(chat_message)
-        logger.debug(f"Retrieved {len(messages)} messages from database")
+
+        logger.debug(f"Retrieved {len(messages)} messages with feedbacks from database")
         return messages
 
     async def store_chat_message(self, chat_message: ChatMessage) -> str:
@@ -217,7 +258,7 @@ class DbStorageAdapter(BaseStorageAdapter):
 
     async def storage_callback(self, chat_message: ChatMessage) -> str | None:
         """
-        Store assistant ChatMessage in database when called by StreamWriter.finalize().
+        Store agent ChatMessage in database when called by StreamWriter.finalize().
         """
         logger.debug(
             f"Storing message via callback: role={chat_message.role}, content_length={len(chat_message.content)}, tool_calls={len(chat_message.tool_calls)}"
@@ -232,19 +273,48 @@ class DbStorageAdapter(BaseStorageAdapter):
             await message.asave()
             logger.debug(f"Message saved: id={message.id}, thread={message.thread_id}")
             return str(message.id)
-        except Exception as database_error:
-            logger.error(
-                f"Database storage failed: {database_error}\nThread ID: {self.thread_id}\nMessage thread_id: {message.thread_id if 'message' in locals() else 'N/A'}\nMessage content: {chat_message.content[:200] if chat_message.content else 'None'}...\nStack trace:\n{traceback.format_exc()}"
+        except DatabaseError:
+            logger.exception(
+                f"Database storage failed for thread {self.thread_id}. Content length: {len(chat_message.content) if chat_message.content else 0}"
             )
             return None
 
-    async def rate_message(self, message_id: str, rating: int) -> bool:
+    async def rate_message(
+        self,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> bool:
         """Rate a message in this thread."""
+        from django_ai_sdk.conversation.models import MessageFeedback
+
+        user = user if (user and user.is_authenticated) else None
         try:
-            message = await Message.objects.aget(id=message_id, thread_id=self.thread_id)
-            message.rating = rating
-            await message.asave()
-            logger.debug(f"Rated message {message_id}: {rating}")
+            # Verify message exists and belongs to this thread
+            await Message.objects.aget(id=message_id, thread_id=self.thread_id)
+            if rating is not None:
+                # Try to get existing feedback
+                try:
+                    fb = await MessageFeedback.objects.aget(message_id=message_id, user=user)
+                    # Update existing
+                    fb.rating = rating
+                    fb.feedback = feedback
+                    await fb.asave(update_fields=["rating", "feedback"])
+                    logger.debug(f"Updated feedback for message {message_id}: rating={rating}")
+                except MessageFeedback.DoesNotExist:
+                    # Create new
+                    await MessageFeedback.objects.acreate(
+                        message_id=message_id,
+                        user=user,
+                        rating=rating,
+                        feedback=feedback,
+                    )
+                    logger.debug(f"Created feedback for message {message_id}: rating={rating}")
+            else:
+                # Delete feedback when rating is None
+                await MessageFeedback.objects.filter(message_id=message_id, user=user).adelete()
+                logger.debug(f"Deleted feedback for message {message_id}")
             return True
         except Message.DoesNotExist:
             return False

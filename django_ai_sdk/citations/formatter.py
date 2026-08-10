@@ -1,10 +1,8 @@
-from typing import Protocol
+from __future__ import annotations
+
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
-
-from django_ai_sdk.logger import get_logger
-
-logger = get_logger(__name__)
 
 
 class NumberedSource(BaseModel):
@@ -13,7 +11,13 @@ class NumberedSource(BaseModel):
     index: int
     title: str
     content: str
-    metadata: dict = Field(default_factory=dict)
+    chunk_id: str | None = None
+    doc_id: str | None = None
+    memory_id: str | None = None
+    page_number: int | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict
+    )  # Display fields for UI (file_name, split_id)
 
 
 class CitationFormatter(Protocol):
@@ -44,25 +48,26 @@ class DefaultCitationFormatter:
 
     RAG_TEMPLATE = (
         'Retrieved documents below are wrapped in <source id="N"> tags. '
-        "When you reference one, cite inline as [N] using the exact id from "
-        "the tag. Do not renumber.\n\n"
+        'When you reference one, cite it inline using <citation id="N" />, '
+        "using the exact id from the source tag. Do not renumber.\n\n"
         "Citation rules:\n"
-        "- Use ASCII square brackets only ([]), never CJK or fullwidth variants.\n"
-        "- Place [N] immediately after the clause it supports, not bundled at "
+        '- Use exactly this format: <citation id="N" /> - one self-closing tag per source.\n'
+        "- Place the citation tag immediately after the clause it supports, not bundled at "
         "the end of a paragraph.\n"
-        "- Multiple sources: separate brackets with a space, e.g. [1] [2]. "
-        "Never [1,2] or [1][2].\n"
+        '- Multiple sources: use separate tags, e.g. <citation id="1" /> <citation id="2" />. '
+        "Never combine ids in one tag.\n"
         "- Do not add a 'Sources:' or 'References:' section - citations are inline only."
     )
 
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
+        if not documents:
+            return "", []
         sources: list[NumberedSource] = []
         lines: list[str] = [self.RAG_TEMPLATE]
 
         for offset, doc in enumerate(documents):
             idx = start_index + offset
-            meta = doc.get("meta") or {}
-            logger.debug("doc[%d] meta=%r", idx, meta)
+            meta: dict[str, Any] = doc.get("meta") or {}
             base = (
                 meta.get("file_name")
                 or meta.get("filename")
@@ -71,21 +76,24 @@ class DefaultCitationFormatter:
                 or meta.get("topic")
                 or f"Document {idx}"
             )
-            # If document was split into chunks, add page/section marker to title.
-            # Helps user distinguish between [1] policy.pdf·p2 vs [2] policy.pdf·p5.
-            # split_id is the chunk index (0-indexed, so §1 means first chunk).
             split_id = meta.get("split_id")
-            if split_id is not None:
-                page = meta.get("page_number")
-                title = f"{base} · p{page}" if page else f"{base} · §{split_id + 1}"
-            else:
-                title = base
-            content = doc.get("content") or ""
+            page_number = meta.get("page_number")
+            title = f"{base} · §{split_id + 1}" if split_id is not None else base
+            content = doc.get("content", "")
             metadata_dict = {
                 k: v for k, v in meta.items() if k in ("file_name", "page_number", "split_id")
             }
             sources.append(
-                NumberedSource(index=idx, title=title, content=content, metadata=metadata_dict)
+                NumberedSource(
+                    index=idx,
+                    title=title,
+                    content=content,
+                    chunk_id=doc.get("chunk_id"),
+                    doc_id=meta.get("doc_id"),
+                    memory_id=meta.get("memory_id"),
+                    page_number=page_number,
+                    metadata=metadata_dict,
+                )
             )
             lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
         return "\n".join(lines), sources

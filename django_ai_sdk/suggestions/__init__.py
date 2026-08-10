@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from django_ai_sdk.suggestions.generator import (
     DefaultSuggestionGenerator,
     SuggestionGenerator,

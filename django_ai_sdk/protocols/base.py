@@ -5,12 +5,16 @@ This module provides the main interface for selecting and using
 different protocol handlers based on the target format.
 """
 
-from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
-from typing import Any
+from __future__ import annotations
 
-from django_ai_sdk.adapters.base import BasePipelineAdapter
-from django_ai_sdk.common import ChatMessage
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.common import ChatMessage
 
 
 class BaseProtocolHandler(ABC):
@@ -30,10 +34,10 @@ class BaseProtocolHandler(ABC):
         pass
 
     @abstractmethod
-    def sse(
+    async def sse(
         self,
-        adapter: BasePipelineAdapter,
+        adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""
-        pass
+        yield cast("bytes", None)  # pragma: no cover

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 import traceback
 from textwrap import dedent
@@ -11,6 +13,8 @@ logger = get_logger(__name__)
 
 
 Prompt = NewType("Prompt", str)
+
+THREAD_TITLE_MAX_LENGTH = 255
 
 
 def prompt(text: str) -> Prompt:
@@ -32,9 +36,7 @@ class ChatMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
-    adapter_type: str = ""
     errors: list[str] = Field(default_factory=list)
-    usage: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 
     # Timestamps & timing
@@ -87,7 +89,6 @@ class StreamWriter:
 
     def __init__(
         self,
-        adapter_type: str,
         message_id: str,
         model: str = "",
         role: Literal["system", "user", "assistant"] = "assistant",
@@ -96,34 +97,27 @@ class StreamWriter:
         self.message = ChatMessage(
             id=message_id,
             role=role,
-            adapter_type=adapter_type,
             model=model,
             started_at=time.time(),
         )
         self._pending_tool_calls = {}  # Track multiple tool calls by ID
         self.storage_callback = storage_callback
+        self._content_chunks: list[str] = []
+        self._reasoning_chunks: list[str] = []
 
         logger.debug(
-            f"StreamWriter initialized: adapter={adapter_type}, model={model}, role={role}, storage={'enabled' if storage_callback else 'disabled'}"
+            f"StreamWriter initialized: model={model}, role={role}, storage={'enabled' if storage_callback else 'disabled'}"
         )
 
     def add_chunk(self, chunk: MessageChunk) -> ChatMessage:
         """Process a chunk and update message."""
-        logger.debug(
-            f"Processing chunk: type={chunk.type}, content_length={len(str(chunk.content))}"
-        )
-
         if chunk.type == "text":
-            self.message.content += chunk.content
-            logger.debug(f"Added text chunk, total content length now: {len(self.message.content)}")
+            self._content_chunks.append(chunk.content)
 
         elif chunk.type == "reasoning":
-            # Initialize reasoning field if first chunk
-            if self.message.reasoning is None:
-                self.message.reasoning = ""
-            self.message.reasoning += chunk.content
+            self._reasoning_chunks.append(chunk.content)
             logger.debug(
-                f"Added reasoning chunk, total reasoning length now: {len(self.message.reasoning or '')}"
+                f"Added reasoning chunk, total reasoning length now: {sum(len(c) for c in self._reasoning_chunks)}"
             )
 
         elif chunk.type == "tool_call_start":
@@ -166,9 +160,15 @@ class StreamWriter:
 
         return self.message
 
-    async def finalize(self, finish_reason: str = "", usage: dict | None = None) -> ChatMessage:
+    async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")
+
+        # Join string chunks
+        if self._content_chunks:
+            self.message.content = "".join(self._content_chunks)
+        if self._reasoning_chunks:
+            self.message.reasoning = "".join(self._reasoning_chunks)
 
         # Add any remaining pending tool calls (in casse tool_output never came)
         pending_tools_count = len(self._pending_tool_calls)
@@ -180,11 +180,6 @@ class StreamWriter:
                     f"Added pending tool call: {tool_call['name']} (ID: {tool_call['id']})"
                 )
         self._pending_tool_calls.clear()
-
-        # Set usage if provided
-        if usage:
-            self.message.usage = usage
-            logger.debug(f"Set usage on message: {usage}")
 
         # Finalize message
         self.message.finalize(finish_reason)
