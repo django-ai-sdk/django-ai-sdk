@@ -18,13 +18,13 @@ We'd love to have you along for the ride, just keep your seatbelt on.
 ## Install
 
 ```bash
-pip install django-ai-sdk
+pip install django-ai-sdk==0.1.1a14
 ```
 
 Or with uv:
 
 ```bash
-uv add django-ai-sdk
+uv add django-ai-sdk==0.1.1a14
 ```
 
 ## Quick Start
