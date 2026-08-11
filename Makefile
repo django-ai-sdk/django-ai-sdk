@@ -1,4 +1,4 @@
-PHONY: setup format test typecheck tag build publish release
+PHONY: setup format test typecheck tag build publish release docs-graphs docs-build docs-serve
 
 setup:
 	uv sync --all-extras
@@ -30,3 +30,12 @@ publish:
 	uv publish
 
 release: tag build publish
+
+docs-graphs:
+	uv run python docs/graph.py
+
+docs-build: docs-graphs
+	hugo --source docs --baseURL /docs/ --destination ../public/docs --gc --cleanDestinationDir
+
+docs-serve: docs-build
+	python3 -m http.server 1313 --directory public

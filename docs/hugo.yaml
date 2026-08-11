@@ -1,6 +1,12 @@
 # Hugo configuration file
 title: Django AI SDK
 
+# The docs deploy to the GitHub Pages site under the /docs/ subpath
+# (e.g. https://<user>.github.io/<repo>/docs/). All links in content
+# are therefore written as /docs/... root-absolute paths and Hextra
+# resolves nav, assets and search against this baseURL.
+baseURL: /docs/
+
 # import hextra as module
 module:
   imports:
@@ -19,19 +25,13 @@ markup:
 menu:
   main:
     - name: Quick Start
-      pageRef: /docs/quickstart
+      pageRef: /quickstart
       weight: 1
-    - name: Docs
-      pageRef: /docs
-      weight: 2
     - name: Manual
-      pageRef: /docs/manual
-      weight: 3
-    - name: About
-      pageRef: /about
-      weight: 4
+      pageRef: /manual
+      weight: 2
     - name: Search
-      weight: 5
+      weight: 3
       params:
         type: search
 

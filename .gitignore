@@ -229,3 +229,9 @@ demo/stores
 # Ideas and plans directory for exploration documents
 ideas/
 plans/
+
+# Hugo build output (the docs are served from public/docs/; only
+# public/index.html is tracked in git)
+/public/docs/
+/docs/public/
+/docs/resources/

@@ -2,20 +2,17 @@
 """
 Graphviz diagram generator for Django AI SDK documentation.
 
-This script generates all visual diagrams for both:
-1. The website (docs/static/images/graphs/)
-2. The manual (manual/graphs/)
+Generates the diagrams used by the Hugo site. Output goes to
+docs/static/images/graphs/ so pages can reference them as
+/images/graphs/<name>.png.
 
-Run with: python manual/graph.py
+Run with: uv run python docs/graph.py
 """
 
 import graphviz
 from pathlib import Path
-from typing import Dict, Any, List
 
-# Output directories
-MANUAL_GRAPHS_DIR = Path(__file__).parent / "graphs"
-DOCS_GRAPHS_DIR = Path(__file__).parent.parent / "docs" / "static" / "images" / "graphs"
+OUTPUT_DIR = Path(__file__).parent / "static" / "images" / "graphs"
 
 
 def create_graph(name: str, **attrs) -> graphviz.Digraph:
@@ -25,7 +22,7 @@ def create_graph(name: str, **attrs) -> graphviz.Digraph:
         format="png",
         graph_attr={
             "rankdir": "TB",
-            "bgcolor": "white",
+            "bgcolor": "transparent",
             "fontname": "Helvetica,Arial,sans-serif",
             "nodesep": "0.5",
             "ranksep": "0.75",
@@ -54,222 +51,227 @@ def create_graph(name: str, **attrs) -> graphviz.Digraph:
     return dot
 
 
-def add_component(
-    dot: graphviz.Digraph, name: str, label: str, fillcolor: str = "#f5f5f5", **attrs
-) -> str:
+def add_component(dot, name, label, fillcolor="#f5f5f5", **attrs) -> str:
     """Add a component node with consistent styling."""
-    dot.node(
-        name,
-        label=label,
-        fillcolor=fillcolor,
-        **attrs,
-    )
+    dot.node(name, label=label, fillcolor=fillcolor, **attrs)
     return name
 
 
-def add_flow_node(
-    dot: graphviz.Digraph,
-    name: str,
-    label: str,
-    fillcolor: str = "#e3f2fd",
-    textcolor: str = "#1565c0",
-    bordercolor: str = "#1565c0",
-    **attrs,
-) -> str:
+def add_flow_node(dot, name, label, fillcolor="#e3f2fd", **attrs) -> str:
     """Add a flow/step node with blue styling."""
+    dot.node(name, label=label, fillcolor=fillcolor, color="#1565c0", fontcolor="#1565c0", **attrs)
+    return name
+
+
+def add_note(dot, name, label, **attrs) -> str:
+    """Add an annotation note node."""
     dot.node(
         name,
         label=label,
-        fillcolor=fillcolor,
-        fontcolor=textcolor,
-        color=bordercolor,
+        shape="note",
+        fillcolor="#fff9c4",
+        color="#f57f17",
+        fontsize="9",
         **attrs,
     )
     return name
 
 
 def generate_overview_architecture() -> graphviz.Digraph:
-    """Generate README.md overview architecture diagram."""
+    """End-to-end request flow through an Agent."""
     dot = create_graph("overview_architecture")
 
-    # User request
-    user = add_flow_node(dot, "user", "User Request\nPOST /api/chat")
+    user = add_flow_node(dot, "user", "Client\nPOST /chat (Vercel protocol)")
 
-    # Assistant
-    assistant = add_component(
+    agent = add_component(
         dot,
-        "assistant",
-        "Assistant\n• as_view()\n• get_pipeline_adapter()\n• get_storage_adapter()",
+        "agent",
+        "Agent\n• as_view()\n• get_pipeline_adapter()\n• get_run_adapter()\n• get_tools()",
         fillcolor="#fff3e0",
         color="#e65100",
         fontcolor="#e65100",
     )
 
-    # Adapter
-    adapter = add_component(
+    stream = add_component(
         dot,
-        "adapter",
-        "Adapter\nOpenAIAdapter\nHaystackAdapter\nOpenAIAgentAdapter",
+        "stream",
+        "Stream\n• haystack Pipeline\n• ToolAgent + generator\n• storage_adapter",
         fillcolor="#e8f5e9",
         color="#2e7d32",
         fontcolor="#2e7d32",
     )
 
-    # Storage
-    storage = add_component(
+    run = add_component(
         dot,
-        "storage",
-        "Storage\nMemory/Database\n• Stores messages\n• Retrieves history",
+        "run",
+        "Run\n• generator\n• response_format\n(structured output)",
+        fillcolor="#e8f5e9",
+        color="#2e7d32",
+        fontcolor="#2e7d32",
+    )
+
+    tools = add_component(
+        dot,
+        "tools",
+        "Tools\n• haystack Tool objects\n• integrations\n• RAG retrieval\n• artifacts",
         fillcolor="#fce4ec",
         color="#c2185b",
         fontcolor="#c2185b",
     )
 
-    # AI Provider
-    provider = add_component(
+    storage = add_component(
         dot,
-        "provider",
-        "AI Provider\nOpenAI / Haystack\nStreaming Response",
+        "storage",
+        "Storage\nMemoryStorageAdapter / DbStorageAdapter\nThreads • Messages",
         fillcolor="#f3e5f5",
         color="#7b1fa2",
         fontcolor="#7b1fa2",
     )
 
-    # Protocol
     protocol = add_component(
         dot,
         "protocol",
-        "Protocol Handler\nVercel Protocol\nConverts → SSE → Frontend",
+        "Protocol Handler\nVercelProtocolHandler (default)\nStreamEvents → SSE",
         fillcolor="#e0f2f1",
         color="#00695c",
         fontcolor="#00695c",
     )
 
-    # Edges
-    dot.edge("user", "assistant")
-    dot.edge("assistant", "adapter")
-    dot.edge("assistant", "storage", style="dashed", color="#c2185b")
-    dot.edge("adapter", "provider")
-    dot.edge("provider", "protocol")
+    dot.edge("user", "agent")
+    dot.edge("agent", "stream", xlabel="streaming")
+    dot.edge("agent", "run", xlabel="non-streaming")
+    dot.edge("agent", "tools", style="dashed")
+    dot.edge("agent", "storage", style="dashed")
+    dot.edge("stream", "protocol", style="dashed")
+    dot.edge("run", "protocol", style="dashed")
+    dot.edge("protocol", "user", xlabel="SSE", style="dashed")
 
     return dot
 
 
 def generate_data_flow() -> graphviz.Digraph:
-    """Generate ARCHITECTURE.md data flow diagram."""
+    """Step-by-step lifecycle of a streaming chat request."""
     dot = create_graph(
         "data_flow", graph_attr={"rankdir": "TB", "nodesep": "0.6", "ranksep": "1.0"}
     )
 
-    # Steps as nodes
-    step1 = add_flow_node(dot, "step1", "1. USER REQUEST\nPOST /api/chat")
+    step1 = add_flow_node(dot, "step1", "1. USER REQUEST\nPOST /chat (protocol messages)")
     step2 = add_component(
         dot,
         "step2",
-        "2. ASSISTANT LAYER\n• Convert protocol → ChatMessage\n• Store last user message\n• Get pipeline adapter",
+        "2. AGENT LAYER\nas_view(messages, thread_id, user)\n• protocol_handler.to_chat_messages()\n• store last user message",
         fillcolor="#fff3e0",
     )
     step3 = add_component(
         dot,
         "step3",
-        "3. ADAPTER LAYER\n• Generate UUID\n• RAG: retrieve() → inject context\n• Call AI provider",
+        "3. ADAPTER LAYER\nget_pipeline_adapter(thread_id, user)\n• get_tools() (class + integrations + RAG)\n• build ToolAgent pipeline\n• return Stream",
         fillcolor="#e8f5e9",
     )
-    step4 = add_flow_node(dot, "step4", "4. AI PROVIDER\nStreaming chunks")
+    step4 = add_flow_node(dot, "step4", "4. HAYSTACK PIPELINE\ngenerator streams chunks")
     step5 = add_component(
         dot,
         "step5",
-        "5. EVENT NORMALIZATION\nChunks → StreamEvents",
+        "5. EVENT NORMALIZATION\nchunks → StreamEvents",
         fillcolor="#e1f5fe",
     )
     step6 = add_component(
         dot,
         "step6",
-        "6. PROTOCOL CONVERSION\nEvents → Vercel Protocol\nSSE format",
+        "6. PROTOCOL CONVERSION\nevents → Vercel protocol SSE parts",
         fillcolor="#e0f2f1",
     )
     step7 = add_component(
         dot,
         "step7",
-        "7. STORAGE\nStreamWriter → ChatMessage\nSame UUID everywhere!",
+        "7. STORAGE\nStreamWriter → ChatMessage\nsame message_id everywhere",
         fillcolor="#fce4ec",
     )
+    step8 = add_component(
+        dot,
+        "step8",
+        "8. POST-PROCESSING\ncitations • suggestions",
+        fillcolor="#f3e5f5",
+    )
 
-    # Connect steps
     dot.edge("step1", "step2")
     dot.edge("step2", "step3")
     dot.edge("step3", "step4")
     dot.edge("step4", "step5")
     dot.edge("step5", "step6")
     dot.edge("step3", "step7", style="dashed", constraint="false")
+    dot.edge("step6", "step8", style="dashed", constraint="false")
 
     return dot
 
 
 def generate_adapter_flow() -> graphviz.Digraph:
-    """Generate ADAPTERS.md adapter flow diagram."""
+    """Stream/Run adapters over haystack components."""
     dot = create_graph("adapter_flow")
 
-    assistant = add_component(
+    agent = add_component(
         dot,
-        "assistant",
-        "Assistant\nget_pipeline_adapter()",
+        "agent",
+        "Agent\nget_pipeline_adapter() / get_run_adapter()",
         fillcolor="#fff3e0",
         color="#e65100",
     )
-    adapter = add_component(
+
+    stream = add_component(
         dot,
-        "adapter",
-        "Adapter\n• stream()\n• get_messages()\n• emit events",
+        "stream",
+        "Stream\n• pipeline: haystack.Pipeline\n• generator\n• stream() → StreamEvents",
         fillcolor="#e8f5e9",
         color="#2e7d32",
     )
-    provider = add_component(
+
+    run = add_component(
         dot,
-        "provider",
-        "AI Provider\nOpenAI/Haystack",
+        "run",
+        "Run\n• generator\n• run() → structured output\n(response_format)",
+        fillcolor="#e8f5e9",
+        color="#2e7d32",
+    )
+
+    tool_agent = add_component(
+        dot,
+        "tool_agent",
+        "haystack ToolAgent\n• tools: haystack.Tool[]\n• system_prompt",
+        fillcolor="#e1f5fe",
+        color="#1565c0",
+    )
+
+    generator = add_component(
+        dot,
+        "generator",
+        "Generator\nOpenAIChatGenerator (OpenAI-compatible)",
         fillcolor="#f3e5f5",
         color="#7b1fa2",
     )
 
-    # Add action labels
-    dot.edge("assistant", "adapter")
-    dot.edge("adapter", "provider")
+    note_stream = add_note(dot, "note_stream", "Stream requires a haystack.Pipeline")
+    note_run = add_note(dot, "note_run", "Run requires a Runnable generator")
 
-    # Add annotation nodes
-    dot.node(
-        "gen_id",
-        "Generate ID",
-        shape="note",
-        fillcolor="#fff9c4",
-        color="#f57f17",
-        fontsize="9",
-    )
-    dot.node(
-        "format",
-        "Format events",
-        shape="note",
-        fillcolor="#fff9c4",
-        color="#f57f17",
-        fontsize="9",
-    )
-
-    dot.edge("adapter", "gen_id", style="dotted", arrowhead="none", constraint="false")
-    dot.edge("adapter", "format", style="dotted", arrowhead="none", constraint="false")
+    dot.edge("agent", "stream", xlabel="streaming")
+    dot.edge("agent", "run", xlabel="non-streaming")
+    dot.edge("stream", "tool_agent")
+    dot.edge("tool_agent", "generator")
+    dot.edge("run", "generator", style="dashed")
+    dot.edge("stream", "note_stream", style="dotted", arrowhead="none", constraint="false")
+    dot.edge("run", "note_run", style="dotted", arrowhead="none", constraint="false")
 
     return dot
 
 
 def generate_id_generation() -> graphviz.Digraph:
-    """Generate ADAPTERS.md ID generation flow diagram."""
+    """Message id generated once in the adapter and reused everywhere."""
     dot = create_graph("id_generation", graph_attr={"rankdir": "TB"})
 
     dot.attr(compound="true")
 
-    # Create a cluster for the flow
     with dot.subgraph(name="cluster_flow") as c:
         c.attr(
-            label="Adapter.stream()",
+            label="Stream.stream()",
             style="rounded",
             fillcolor="#f5f5f5",
             color="#666666",
@@ -277,7 +279,7 @@ def generate_id_generation() -> graphviz.Digraph:
 
         gen = c.node(
             "gen",
-            "message_id = uuid.uuid4()\n← GENERATE",
+            "message_id = uuid.uuid4()\n← GENERATED",
             fillcolor="#fff9c4",
             color="#f57f17",
             fontcolor="#f57f17",
@@ -286,7 +288,7 @@ def generate_id_generation() -> graphviz.Digraph:
         sse = c.node("sse", 'SSE Stream\n{"messageId": "..."}')
         writer = c.node("writer", "StreamWriter\n(message_id=...)")
         msg = c.node("msg", "ChatMessage\n(id=message_id)")
-        storage = c.node("storage", "Storage.save()\nSame ID everywhere!")
+        storage = c.node("storage", "Storage.save()\nsame ID everywhere")
 
         c.edge("gen", "start")
         c.edge("start", "sse")
@@ -298,37 +300,33 @@ def generate_id_generation() -> graphviz.Digraph:
 
 
 def generate_storage_architecture() -> graphviz.Digraph:
-    """Generate STORAGE.md storage architecture diagram."""
+    """Storage layer: base interface + implementations."""
     dot = create_graph("storage_architecture")
 
-    # Storage Layer cluster
     with dot.subgraph(name="cluster_storage") as c:
-        c.attr(
-            label="Storage Layer", style="rounded", fillcolor="#f5f5f5", color="#666666"
-        )
+        c.attr(label="Storage Layer", style="rounded", fillcolor="#f5f5f5", color="#666666")
 
         memory = add_component(
             c,
             "memory",
-            "MemoryStorage\n(In-Memory)",
+            "MemoryStorageAdapter\n(In-Memory)",
             fillcolor="#e3f2fd",
             color="#1565c0",
         )
         db = add_component(
-            c, "db", "DbStorage\n(Django ORM)", fillcolor="#e8f5e9", color="#2e7d32"
+            c, "db", "DbStorageAdapter\n(Django ORM)", fillcolor="#e8f5e9", color="#2e7d32"
         )
         base = add_component(
-            c, "base", "BaseStorage\n(Abstract)", fillcolor="#fff3e0", color="#e65100"
+            c, "base", "BaseStorageAdapter\n(Abstract)", fillcolor="#fff3e0", color="#e65100"
         )
 
         c.edge("memory", "base", style="dashed")
         c.edge("db", "base", style="dashed")
 
-    # ChatMessage format
     format_node = add_component(
         dot,
         "format",
-        "Universal ChatMessage Format\n{id, role, content, model, ...}",
+        "ChatMessage\nsingle format for history, rating, threads",
         fillcolor="#fce4ec",
         color="#c2185b",
         fontcolor="#c2185b",
@@ -340,48 +338,14 @@ def generate_storage_architecture() -> graphviz.Digraph:
     return dot
 
 
-def generate_id_consistency() -> graphviz.Digraph:
-    """Generate STORAGE.md ID consistency flow diagram."""
-    dot = create_graph("id_consistency", graph_attr={"rankdir": "TB", "ranksep": "0.8"})
-
-    step1 = add_flow_node(dot, "step1", '1. User Request\n"What is the pirate code?"')
-    step2 = add_component(
-        dot,
-        "step2",
-        "2. Adapter Layer\nmessage_id = uuid\n← GENERATED ONCE",
-        fillcolor="#fff9c4",
-        color="#f57f17",
-    )
-    step3 = add_flow_node(
-        dot, "step3", '3. Streaming to Frontend\nSSE: {"messageId": "..."}'
-    )
-    step4 = add_component(
-        dot,
-        "step4",
-        "4. Storage Layer\nMessage(id=uuid)\nSame ID in database!",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
-    )
-    step5 = add_flow_node(
-        dot, "step5", "5. API Endpoints\nGET /threads/.../rate\nSame ID for rating!"
-    )
-
-    dot.edge("step1", "step2")
-    dot.edge("step2", "step3")
-    dot.edge("step3", "step4")
-    dot.edge("step4", "step5")
-
-    return dot
-
-
 def generate_rag_architecture() -> graphviz.Digraph:
-    """Generate RAG.md architecture diagram."""
+    """RAG pipeline: provider, memories, retrieval tools, citations."""
     dot = create_graph("rag_architecture")
 
-    assistant = add_component(
+    agent = add_component(
         dot,
-        "assistant",
-        "Assistant\n• get_rag_queryset()\n• get_rag_documents()\n• get_rag_pipeline()\n• rag_provider",
+        "agent",
+        "Agent\n• rag_provider = RAGProvider()\n• get_rag_queryset(memory_id)\n• get_rag_documents(memory_id)\n• get_rag_pipeline(memory_id)",
         fillcolor="#fff3e0",
         color="#e65100",
     )
@@ -389,43 +353,61 @@ def generate_rag_architecture() -> graphviz.Digraph:
     provider = add_component(
         dot,
         "provider",
-        "RAG Provider\n• warmup()\n• get_rag_instance()\n• build_tool()\n• clear_cache()",
+        "RAGProvider\n• caches pipelines per agent + memory\n• warmup() / reindex() / clear_rag_cache()",
         fillcolor="#e3f2fd",
         color="#1565c0",
     )
 
-    instance = add_component(
+    pipelines = add_component(
         dot,
-        "instance",
-        "RAG Instance\n• warmup()\n• retrieve(query)\n• format_context()\n• as_tool()",
+        "pipelines",
+        "RAG Pipelines\nBM25QueryExpanderRAG\nChromaDBQueryExpanderRAG\nQdrantBM25HybridRAG",
         fillcolor="#e8f5e9",
         color="#2e7d32",
     )
 
-    adapter = add_component(
+    memories = add_component(
         dot,
-        "adapter",
-        "Adapter\n• Context injection\n• Tool calling",
+        "memories",
+        "MemoryService\nthread ↔ memory links",
         fillcolor="#f3e5f5",
         color="#7b1fa2",
     )
 
-    dot.edge("assistant", "provider")
-    dot.edge("provider", "instance")
-    dot.edge("instance", "adapter")
+    retrieval = add_component(
+        dot,
+        "retrieval",
+        "get_rag_tools()\nretrieval tools on the agent",
+        fillcolor="#fce4ec",
+        color="#c2185b",
+    )
+
+    citations = add_component(
+        dot,
+        "citations",
+        "CitationRegistry + CitationFormatter\nsource numbers streamed with the answer",
+        fillcolor="#fff9c4",
+        color="#f57f17",
+    )
+
+    dot.edge("agent", "provider")
+    dot.edge("agent", "memories", style="dashed")
+    dot.edge("provider", "pipelines")
+    dot.edge("memories", "pipelines", style="dashed", constraint="false")
+    dot.edge("pipelines", "retrieval", style="dashed")
+    dot.edge("retrieval", "citations", style="dashed")
 
     return dot
 
 
 def generate_testing_pyramid() -> graphviz.Digraph:
-    """Generate TESTING.md test pyramid diagram."""
+    """Test pyramid: unit / integration / e2e."""
     dot = create_graph("testing_pyramid", graph_attr={"rankdir": "TB"})
 
-    # Pyramid levels
     e2e = add_component(
         dot,
         "e2e",
-        "E2E Tests\nFull assistant flow",
+        "E2E Tests\nfull agent flow",
         fillcolor="#fce4ec",
         color="#c2185b",
         width="2",
@@ -443,7 +425,7 @@ def generate_testing_pyramid() -> graphviz.Digraph:
     unit = add_component(
         dot,
         "unit",
-        "Unit Tests\nIndividual components",
+        "Unit Tests\nindividual components",
         fillcolor="#e8f5e9",
         color="#2e7d32",
         width="4",
@@ -452,122 +434,47 @@ def generate_testing_pyramid() -> graphviz.Digraph:
     dot.edge("integration", "e2e", style="invis")
     dot.edge("unit", "integration", style="invis")
 
-    # Align them
     dot.graph_attr["rankdir"] = "BT"
 
     return dot
 
 
-def generate_directory_structure() -> graphviz.Digraph:
-    """Generate directory structure tree diagram."""
-    dot = graphviz.Digraph(
-        name="directory_structure",
-        format="png",
-        graph_attr={
-            "rankdir": "LR",
-            "bgcolor": "white",
-            "fontname": "Courier,monospace",
-            "dpi": "150",
-        },
-        node_attr={
-            "fontname": "Courier,monospace",
-            "fontsize": "10",
-            "shape": "none",
-        },
-    )
-
-    tree_text = """<
-<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
-<TR><TD ALIGN="LEFT" BGCOLOR="#f5f5f5">django_ai_sdk/</TD></TR>
-<TR><TD ALIGN="LEFT">├── __init__.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── assistant.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── common.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── events.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── adapters/</TD></TR>
-<TR><TD ALIGN="LEFT">│   ├── openai.py</TD></TR>
-<TR><TD ALIGN="LEFT">│   └── haystack.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── protocols/</TD></TR>
-<TR><TD ALIGN="LEFT">│   └── vercel.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── storage/</TD></TR>
-<TR><TD ALIGN="LEFT">│   ├── memory.py</TD></TR>
-<TR><TD ALIGN="LEFT">│   └── db.py</TD></TR>
-<TR><TD ALIGN="LEFT">├── rags/</TD></TR>
-<TR><TD ALIGN="LEFT">│   ├── bm25.py</TD></TR>
-<TR><TD ALIGN="LEFT">│   └── haystack/</TD></TR>
-<TR><TD ALIGN="LEFT">└── tests/</TD></TR>
-</TABLE>
->"""
-
-    manual_tree = """<
-<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
-<TR><TD ALIGN="LEFT" BGCOLOR="#e3f2fd">manual/</TD></TR>
-<TR><TD ALIGN="LEFT">├── README.md</TD></TR>
-<TR><TD ALIGN="LEFT">├── ARCHITECTURE.md</TD></TR>
-<TR><TD ALIGN="LEFT">├── RAG.md</TD></TR>
-<TR><TD ALIGN="LEFT">├── ADAPTERS.md</TD></TR>
-<TR><TD ALIGN="LEFT">├── STORAGE.md</TD></TR>
-<TR><TD ALIGN="LEFT">└── TESTING.md</TD></TR>
-</TABLE>
->"""
-
-    dot.node("sdk", tree_text)
-    dot.node("manual", manual_tree)
-
-    return dot
-
-
-# Dictionary of all diagrams to generate
-DIAGRAMS: dict[str, Any] = {
+DIAGRAMS = {
     "overview_architecture": generate_overview_architecture,
     "data_flow": generate_data_flow,
     "adapter_flow": generate_adapter_flow,
     "id_generation": generate_id_generation,
     "storage_architecture": generate_storage_architecture,
-    "id_consistency": generate_id_consistency,
     "rag_architecture": generate_rag_architecture,
     "testing_pyramid": generate_testing_pyramid,
-    "directory_structure": generate_directory_structure,
 }
 
 
 def generate_all():
-    """Generate all diagram images to both manual and docs directories."""
+    """Generate all diagram images into the docs static dir."""
     print("Generating Django AI SDK documentation diagrams...")
-    print(f"Manual output: {MANUAL_GRAPHS_DIR}")
-    print(f"Docs output: {DOCS_GRAPHS_DIR}")
+    print(f"Output: {OUTPUT_DIR}")
     print()
 
-    # Ensure output directories exist
-    MANUAL_GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
-    DOCS_GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    manual_generated = []
-    docs_generated = []
+    generated = []
     failed = []
 
     for name, generator_func in DIAGRAMS.items():
         try:
             print(f"Generating {name}...", end=" ")
             dot = generator_func()
-
-            # Generate to manual directory
-            manual_path = MANUAL_GRAPHS_DIR / name
-            dot.render(str(manual_path), cleanup=True)
-            manual_generated.append(name)
-
-            # Generate to docs directory
-            docs_path = DOCS_GRAPHS_DIR / name
-            dot.render(str(docs_path), cleanup=True)
-            docs_generated.append(name)
-
+            path = OUTPUT_DIR / name
+            dot.render(str(path), cleanup=True)
+            generated.append(name)
             print("✓")
         except Exception as e:
             failed.append((name, str(e)))
             print(f"✗ ({e})")
 
     print()
-    print(f"Generated {len(manual_generated)} diagrams to manual/graphs/")
-    print(f"Generated {len(docs_generated)} diagrams to docs/static/images/graphs/")
+    print(f"Generated {len(generated)} diagrams to {OUTPUT_DIR}")
 
     if failed:
         print()
