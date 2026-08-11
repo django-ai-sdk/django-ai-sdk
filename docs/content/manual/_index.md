@@ -6,7 +6,7 @@ weight: 100
 
 Internal documentation for contributors and advanced users: how the SDK works, its extension points, and how to test it.
 
-If you're building an application with the SDK, start with the [Quick Start](/docs/quickstart/) and [Guides](/docs/) instead.
+If you're building an application with the SDK, start with the [Quick Start](/quickstart/) and [Guides](/) instead.
 
 ## Dev Setup
 

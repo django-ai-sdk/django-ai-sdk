@@ -1,6 +1,6 @@
 # Django AI SDK - Documentation
 
-The documentation site for Django AI SDK, built with [Hugo](https://gohugo.io/) and the [Hextra](https://github.com/imfing/hextra) theme. It deploys alongside the handcrafted marketing site in `public/index.html`: the landing page lives at the GitHub Pages root (`https://<user>.github.io/<repo>/`) and the docs at the `/docs/` subpath (`https://<user>.github.io/<repo>/docs/`).
+The documentation site for Django AI SDK, built with [Hugo](https://gohugo.io/) and the [Hextra](https://github.com/imfing/hextra) theme. It deploys alongside the handcrafted marketing site in `public/index.html`: the landing page lives at the GitHub Pages root (`https://django-ai-sdk.github.io/django-ai-sdk/`) and the docs at the `/docs/` subpath (`https://django-ai-sdk.github.io/django-ai-sdk/docs/`).
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ make docs-serve
 
 `make docs-serve` builds the docs (and regenerates the diagrams) into `public/docs/`, then serves the whole `public/` directory, so you can browse the landing page at `http://localhost:1313/` and the docs at `http://localhost:1313/docs/` exactly as they will appear in production.
 
-The docs are built for the `/docs/` subpath (`baseURL: /docs/` in `docs/hugo.yaml`), so all internal links in the content are written as root-absolute `/docs/...` paths. Do not switch back to `relativeURLs: true` — it produces broken links for Hextra at a subpath.
+The docs use `canonifyURLs: true` with `baseURL: /docs/` (in `docs/hugo.yaml`), so all internal links in content are written as root-absolute paths like `/quickstart` or `/images/graphs/...`. Hugo resolves these against the baseURL: locally they become `/docs/quickstart`, in production `/django-ai-sdk/docs/quickstart`. The GitHub Actions workflow overrides `--baseURL /django-ai-sdk/docs/` for production. Do not switch back to `relativeURLs: true` — it produces broken links for Hextra at a subpath.
 
 ## Building for Production
 

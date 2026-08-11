@@ -6,10 +6,10 @@ weight: 2
 
 An **agent** is the core of the Django AI SDK. It's a plain Python class that describes how your AI behaves, what it can do, and how it streams responses.
 
-This guide covers everything about defining agents. See the [Protocols](/docs/protocols/) guide for how `Stream` and `Run` work, and [Views and Routing](/docs/views-and-routing/) for wiring agents to HTTP endpoints.
+This guide covers everything about defining agents. See the [Protocols](/protocols/) guide for how `Stream` and `Run` work, and [Views and Routing](/views-and-routing/) for wiring agents to HTTP endpoints.
 
 {{< callout type="info" >}}
-Contributor? The [Developer Manual](/docs/manual/) covers internals: [Agent](/docs/manual/agent/), [Agent Registry](/docs/manual/agent-registry/), [RAG](/docs/manual/rag/).
+Contributor? The [Developer Manual](/manual/) covers internals: [Agent](/manual/agent/), [Agent Registry](/manual/agent-registry/), [RAG](/manual/rag/).
 {{< /callout >}}
 
 ## Anatomy of an Agent
@@ -121,7 +121,7 @@ An agent exposes two adapter hooks. You implement them; the SDK uses them.
 A worker-only agent (`hidden = True`, never used in chat) can leave `get_pipeline_adapter()` unimplemented.
 {{< /callout >}}
 
-See the [Protocols guide](/docs/protocols/) for the full `Stream` and `Run` API.
+See the [Protocols guide](/protocols/) for the full `Stream` and `Run` API.
 
 ---
 
@@ -183,7 +183,7 @@ class MyAgent(Agent):
 
 ### Integration tools
 
-Declare `integrations = ["linear", "weather"]` and every tool that integration exposes reaches the model. Tools are namespaced (`linear_list_issues`) so unrelated integrations never collide. Unauthorized users' tools never reach the model. See the [Integrations guide](/docs/integrations/).
+Declare `integrations = ["linear", "weather"]` and every tool that integration exposes reaches the model. Tools are namespaced (`linear_list_issues`) so unrelated integrations never collide. Unauthorized users' tools never reach the model. See the [Integrations guide](/integrations/).
 
 ### Artifact tools
 
@@ -257,7 +257,7 @@ Override `get_rag_pipeline()` to return one of the variants. You can factor each
 - **Warm up**: `Agent.warmup(agent, memory_id)` pre-builds and caches pipelines.
 - **Reindex**: `Agent.reindex(agent, memory_id, force_rebuild)` rebuilds indexes (persistent backends like Qdrant delete and recreate).
 - **Clear cache**: `Agent.clear_rag_cache(agent)` drops cached pipelines.
-- **CLI**: `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](/docs/cli/)).
+- **CLI**: `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](/cli/)).
 
 ### Citations
 
@@ -324,7 +324,7 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-`Agent.as_view()` and `Agent.history()` check permissions before doing anything, raising `PermissionDenied` when the user lacks access. See the [Views and Routing guide](/docs/views-and-routing/) for wiring.
+`Agent.as_view()` and `Agent.history()` check permissions before doing anything, raising `PermissionDenied` when the user lacks access. See the [Views and Routing guide](/views-and-routing/) for wiring.
 
 ---
 
@@ -343,7 +343,7 @@ class MyAgent(Agent):
     ]
 ```
 
-See the [Files reference](/docs/manual/files/) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
+See the [Files reference](/manual/files/) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
 
 ---
 

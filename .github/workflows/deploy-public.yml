@@ -45,7 +45,7 @@ jobs:
       - name: Build docs
         run: |
           python docs/graph.py
-          hugo --source docs --baseURL /docs/ --destination ../public/docs
+          hugo --source docs --baseURL /django-ai-sdk/docs/ --destination ../public/docs
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

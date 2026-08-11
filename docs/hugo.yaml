@@ -1,11 +1,13 @@
 # Hugo configuration file
 title: Django AI SDK
 
-# The docs deploy to the GitHub Pages site under the /docs/ subpath
-# (e.g. https://<user>.github.io/<repo>/docs/). All links in content
-# are therefore written as /docs/... root-absolute paths and Hextra
-# resolves nav, assets and search against this baseURL.
+# The docs deploy to a GitHub Pages project site at
+# https://django-ai-sdk.github.io/django-ai-sdk/docs/.
+# canonifyURLs + baseURL make root-absolute links (/quickstart, /images/...)
+# resolve correctly under the /docs/ subpath locally and under
+# /django-ai-sdk/docs/ in production (the workflow overrides baseURL).
 baseURL: /docs/
+canonifyURLs: true
 
 # import hextra as module
 module:

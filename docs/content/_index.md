@@ -12,11 +12,11 @@ pip install "django-ai-sdk[haystack]"
 ```
 
 {{< cards >}}
-  {{< card link="/docs/quickstart" title="Quick Start" icon="cursor-click" subtitle="Build your first agent in 5 minutes" >}}
-  {{< card link="/docs/agents" title="Agents" icon="user" subtitle="Agents, tools, RAG, storage" >}}
-  {{< card link="/docs/protocols" title="Protocols" icon="globe-alt" subtitle="Stream and Run adapters" >}}
-  {{< card link="/docs/integrations" title="Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
-  {{< card link="/docs/views-and-routing" title="Views & Routing" icon="link" subtitle="Wire agents to HTTP endpoints" >}}
-  {{< card link="/docs/how-it-works" title="How It Works" icon="cube" subtitle="Requests flow through the SDK" >}}
-  {{< card link="/docs/manual" title="Developer Manual" icon="book-open" subtitle="Internals and contribution guide" >}}
+  {{< card link="/quickstart" title="Quick Start" icon="cursor-click" subtitle="Build your first agent in 5 minutes" >}}
+  {{< card link="/agents" title="Agents" icon="user" subtitle="Agents, tools, RAG, storage" >}}
+  {{< card link="/protocols" title="Protocols" icon="globe-alt" subtitle="Stream and Run adapters" >}}
+  {{< card link="/integrations" title="Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
+  {{< card link="/views-and-routing" title="Views & Routing" icon="link" subtitle="Wire agents to HTTP endpoints" >}}
+  {{< card link="/how-it-works" title="How It Works" icon="cube" subtitle="Requests flow through the SDK" >}}
+  {{< card link="/manual" title="Developer Manual" icon="book-open" subtitle="Internals and contribution guide" >}}
 {{< /cards >}}

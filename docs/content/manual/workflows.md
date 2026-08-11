@@ -4,7 +4,7 @@ type: docs
 weight: 121
 ---
 
-The workflow engine orchestrates multi-step agent tasks: sequential agent steps that pass results forward, then optional side-effect actions. The [Views and Routing guide](/docs/views-and-routing/#workflows) covers the public API; this page documents the definition schema, models, and executor.
+The workflow engine orchestrates multi-step agent tasks: sequential agent steps that pass results forward, then optional side-effect actions. The [Views and Routing guide](/views-and-routing/#workflows) covers the public API; this page documents the definition schema, models, and executor.
 
 ## The Definition
 

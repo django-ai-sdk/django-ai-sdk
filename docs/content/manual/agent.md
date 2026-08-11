@@ -7,7 +7,7 @@ weight: 102
 Deep dive into the `Agent` class: what it configures and which hooks the SDK calls.
 
 {{< callout type="info" >}}
-Building an app? See the [Agents guide](/docs/agents/). This page is the internal reference.
+Building an app? See the [Agents guide](/agents/). This page is the internal reference.
 {{< /callout >}}
 
 ## Responsibilities
@@ -21,7 +21,7 @@ The `Agent` is the coordinator. It:
 
 ## Configuration
 
-Key class attributes (full table in the [Agents guide](/docs/agents/)):
+Key class attributes (full table in the [Agents guide](/agents/)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

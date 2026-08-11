@@ -11,7 +11,7 @@ The SDK separates **how a model runs** from **how messages are formatted on the 
 - **Protocol handlers**: convert protocol messages (e.g. Vercel AI SDK) to internal `ChatMessage`s and back
 
 {{< callout type="info" >}}
-Contributor? Full API references live in the [Developer Manual](/docs/manual/): [Stream and Run](/docs/manual/stream-and-run/), [Stream Events](/docs/manual/stream-events/), [Protocol Handler](/docs/manual/protocol-handler/), [Protocol Parts](/docs/manual/protocol-parts/).
+Contributor? Full API references live in the [Developer Manual](/manual/): [Stream and Run](/manual/stream-and-run/), [Stream Events](/manual/stream-events/), [Protocol Handler](/manual/protocol-handler/), [Protocol Parts](/manual/protocol-parts/).
 {{< /callout >}}
 
 ```

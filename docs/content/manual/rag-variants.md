@@ -116,7 +116,7 @@ from django_ai_sdk.rags.config import QdrantStorageConfig
 config = QdrantStorageConfig.from_settings(memory_id="mem-1")
 ```
 
-See the [Settings Reference](/docs/manual/settings/) for both settings.
+See the [Settings Reference](/manual/settings/) for both settings.
 
 ## Documents
 

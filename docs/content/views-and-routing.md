@@ -77,10 +77,10 @@ The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then
 
 ## Threads and Messages
 
-Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](/docs/manual/memories/) for the full `MemoryService` API and the demo's memory endpoints.
+Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](/manual/memories/) for the full `MemoryService` API and the demo's memory endpoints.
 
 {{< callout type="info" >}}
-Contributor? The [ThreadService](/docs/manual/thread-service/) manual page documents every method and its permission checks.
+Contributor? The [ThreadService](/manual/thread-service/) manual page documents every method and its permission checks.
 {{< /callout >}}
 
 ```python
@@ -228,7 +228,7 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-See the [Agents guide](/docs/agents/#permissions) for declaring permissions on agents, and the [Permissions reference](/docs/manual/permissions/) for the operation enum, domains, and built-in classes.
+See the [Agents guide](/agents/#permissions) for declaring permissions on agents, and the [Permissions reference](/manual/permissions/) for the operation enum, domains, and built-in classes.
 
 ---
 

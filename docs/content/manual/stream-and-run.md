@@ -7,7 +7,7 @@ weight: 104
 The two adapters an `Agent` uses to talk to a Haystack model: `Stream` (streaming chat) and `Run` (non-streaming calls).
 
 {{< callout type="info" >}}
-Usage first? See the [Protocols guide](/docs/protocols/). This page is the API reference.
+Usage first? See the [Protocols guide](/protocols/). This page is the API reference.
 {{< /callout >}}
 
 ![Adapter Flow](/images/graphs/adapter_flow.png)

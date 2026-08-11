@@ -47,11 +47,11 @@ await MemoryService.add_memory_group(memory_id, group_id, can_manage=False, user
 await MemoryService.remove_memory_group(memory_id, group_id, user=request.user)
 ```
 
-Access is enforced by the domain's `MemoryDefaultPermission` (or your `AI_SDK_PERMISSIONS["memory"]` override): see [Permissions](/docs/manual/permissions/).
+Access is enforced by the domain's `MemoryDefaultPermission` (or your `AI_SDK_PERMISSIONS["memory"]` override): see [Permissions](/manual/permissions/).
 
 ## Documents
 
-File uploads are deduplicated by content hash and processed in the background. See [Files](/docs/manual/files/) for the processing lifecycle.
+File uploads are deduplicated by content hash and processed in the background. See [Files](/manual/files/) for the processing lifecycle.
 
 ```python
 resp = await MemoryService.upload_document(memory_id, file, user=request.user)
@@ -80,11 +80,11 @@ await MemoryService.toggle_memory_active(thread_id, memory_id, active=False, use
 await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=request.user)
 ```
 
-`link_memories(agent_id, thread_id)` / `unlink_memories(agent_id, thread_id)` (used in the [Views and Routing guide](/docs/views-and-routing/#threads-and-messages)) resolve the agent's configured default memories before linking.
+`link_memories(agent_id, thread_id)` / `unlink_memories(agent_id, thread_id)` (used in the [Views and Routing guide](/views-and-routing/#threads-and-messages)) resolve the agent's configured default memories before linking.
 
 ## Demo Endpoints
 
-The demo (`demo/apps/memories/views/`) implements a complete Ninja router (mounted at `/memories`) and a matching [experimental DRF router](/docs/views-and-routing/#ninja-or-drf). Responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed via `agent_permissions()`.
+The demo (`demo/apps/memories/views/`) implements a complete Ninja router (mounted at `/memories`) and a matching [experimental DRF router](/views-and-routing/#ninja-or-drf). Responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed via `agent_permissions()`.
 
 | Endpoint | Operation |
 | --- | --- |

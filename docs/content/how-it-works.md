@@ -9,7 +9,7 @@ This page explains what happens under the hood when a request flows through the 
 ![Request flow](/images/graphs/data_flow.png)
 
 {{< callout type="info" >}}
-Contributor? The [System Architecture](/docs/manual/architecture/) manual page goes deeper into components and design patterns.
+Contributor? The [System Architecture](/manual/architecture/) manual page goes deeper into components and design patterns.
 {{< /callout >}}
 
 ## Request Lifecycle

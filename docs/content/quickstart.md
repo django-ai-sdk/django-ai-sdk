@@ -27,7 +27,7 @@ pip install "django-ai-sdk[all]"
 ```
 
 {{< callout type="warning" >}}
-**DRF views are experimental.** The `all` extra includes DRF routers and serializers, but the DRF path is still in active development: use the [Ninja views](/docs/views-and-routing/#ninja-or-drf) for production.
+**DRF views are experimental.** The `all` extra includes DRF routers and serializers, but the DRF path is still in active development: use the [Ninja views](/views-and-routing/#ninja-or-drf) for production.
 {{< /callout >}}
 
 ## Configure Django
@@ -107,7 +107,7 @@ Three things to note:
 - **instructions**: How it should behave (the system prompt)
 - **get_pipeline_adapter**: Returns the `Stream` that powers streaming chat
 
-`OpenAIChatGenerator` works with any OpenAI-compatible endpoint. Point `OPENAI_API_URL` at a local server (vLLM, Ollama, llama.cpp) or leave it unset for OpenAI. Every other `AI_SDK_*` setting you might need is listed in the [Settings Reference](/docs/manual/settings/).
+`OpenAIChatGenerator` works with any OpenAI-compatible endpoint. Point `OPENAI_API_URL` at a local server (vLLM, Ollama, llama.cpp) or leave it unset for OpenAI. Every other `AI_SDK_*` setting you might need is listed in the [Settings Reference](/manual/settings/).
 
 That's it. No complex configuration. No framework setup.
 
@@ -216,10 +216,10 @@ data: [DONE]
 ## Next Steps
 
 {{< cards >}}
-  {{< card link="/docs/agents" title="Give It Tools" icon="cog" subtitle="Let it call Python functions" >}}
-  {{< card link="/docs/agents#retrieval-augmented-generation-rag" title="Add Knowledge" icon="search" subtitle="Connect a knowledge base with RAG" >}}
-  {{< card link="/docs/integrations" title="Add Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
-  {{< card link="/docs/views-and-routing" title="Add Persistence" icon="database" subtitle="Threads and message history" >}}
-  {{< card link="/docs/how-it-works" title="Go Deeper" icon="cube" subtitle="How requests flow through the SDK" >}}
-  {{< card link="/docs/manual" title="Developer Manual" icon="book-open" subtitle="Architecture details for contributors" >}}
+  {{< card link="/agents" title="Give It Tools" icon="cog" subtitle="Let it call Python functions" >}}
+  {{< card link="/agents#retrieval-augmented-generation-rag" title="Add Knowledge" icon="search" subtitle="Connect a knowledge base with RAG" >}}
+  {{< card link="/integrations" title="Add Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
+  {{< card link="/views-and-routing" title="Add Persistence" icon="database" subtitle="Threads and message history" >}}
+  {{< card link="/how-it-works" title="Go Deeper" icon="cube" subtitle="How requests flow through the SDK" >}}
+  {{< card link="/manual" title="Developer Manual" icon="book-open" subtitle="Architecture details for contributors" >}}
 {{< /cards >}}

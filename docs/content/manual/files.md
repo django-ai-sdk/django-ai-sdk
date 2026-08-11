@@ -4,7 +4,7 @@ type: docs
 weight: 118
 ---
 
-How uploaded files become searchable text: the processor → transforms pipeline, the upload/processing lifecycle, and the thread file memory. The public entry point is `FilePipeline`; agents declare one per supported file type via the `file_pipelines` attribute (see the [Agents guide](/docs/agents/#files)).
+How uploaded files become searchable text: the processor → transforms pipeline, the upload/processing lifecycle, and the thread file memory. The public entry point is `FilePipeline`; agents declare one per supported file type via the `file_pipelines` attribute (see the [Agents guide](/agents/#files)).
 
 ## The Pipeline
 
@@ -108,4 +108,4 @@ await MemoryService.delete_thread_file(thread_id, doc_id, user=request.user)
 await MemoryService.get_document_status(doc_id, user=request.user)           # DocumentStatusOut
 ```
 
-The demo wires this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`) so the frontend knows how many files a thread has and which memory holds them. See [Memories](/docs/manual/memories/) for the full API.
+The demo wires this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`) so the frontend knows how many files a thread has and which memory holds them. See [Memories](/manual/memories/) for the full API.

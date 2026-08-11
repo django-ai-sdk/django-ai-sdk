@@ -129,7 +129,7 @@ AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
 ```
 
-The full list (refresh thresholds, issuer allow-lists, client name, cache TTLs) is in the [Settings Reference](/docs/manual/settings/).
+The full list (refresh thresholds, issuer allow-lists, client name, cache TTLs) is in the [Settings Reference](/manual/settings/).
 
 ### Declaring MCP servers in the database
 

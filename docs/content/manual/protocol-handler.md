@@ -7,7 +7,7 @@ weight: 107
 The interface that converts internal events to your frontend's wire format.
 
 {{< callout type="info" >}}
-Usage first? See the [Protocols guide](/docs/protocols/). This page is the API reference.
+Usage first? See the [Protocols guide](/protocols/). This page is the API reference.
 {{< /callout >}}
 
 ## Interface

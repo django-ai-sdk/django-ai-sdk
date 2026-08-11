@@ -12,8 +12,8 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_AGENTS` | `[]` | Dotted module paths to import so their `Agent` subclasses auto-register. See the [Agents guide](/docs/agents/) and [Agent Registry](/docs/manual/agent-registry/). |
-| `AI_SDK_RUNTIME_AGENT_BASES` | `[]` | Base classes a DB-configured runtime agent can be built on, as dotted paths. See [Runtime-Configured Agents](/docs/views-and-routing/#runtime-configured-agents). |
+| `AI_SDK_AGENTS` | `[]` | Dotted module paths to import so their `Agent` subclasses auto-register. See the [Agents guide](/agents/) and [Agent Registry](/manual/agent-registry/). |
+| `AI_SDK_RUNTIME_AGENT_BASES` | `[]` | Base classes a DB-configured runtime agent can be built on, as dotted paths. See [Runtime-Configured Agents](/views-and-routing/#runtime-configured-agents). |
 | `AI_SDK_RUNTIME_AGENT_TOOLS` | `{}` | Tools selectable in runtime agent configuration: `{"key": "path.to.provider"}`. |
 
 ## Models
@@ -27,7 +27,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_VECTOR_STORE_PATH` | `None` | Base directory for persistent vector stores. Storage configs build per-backend, per-memory paths as `{path}/{backend}/{memory_id}`; unset means in-memory stores. See [RAG Variants](/docs/manual/rag-variants/). |
+| `AI_SDK_VECTOR_STORE_PATH` | `None` | Base directory for persistent vector stores. Storage configs build per-backend, per-memory paths as `{path}/{backend}/{memory_id}`; unset means in-memory stores. See [RAG Variants](/manual/rag-variants/). |
 | `AI_SDK_VECTOR_STORE_URL` | `None` | Qdrant server URL. When set, Qdrant storage uses `backend="server"` with collection index `memory_{memory_id}` (or `default`). |
 
 ## Files and Uploads
@@ -36,7 +36,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_ALLOWED_FILES` | `{}` | Extra file-extension → MIME mapping used as a fallback when magic-byte detection fails (`files/processors.py`). |
 | `AI_SDK_MAX_UPLOAD_SIZE` | `10 MB` | Upload size ceiling surfaced to the frontend by `get_upload_settings()`. |
-| `AI_SDK_MEMORY_FILE_PIPELINE` | `None` | Dotted path (or list of paths) to a zero-argument callable returning a `FilePipeline`: the default pipeline for uploads without agent context. The first pipeline whose `accepts(file)` matches is used. See [Files](/docs/manual/files/). |
+| `AI_SDK_MEMORY_FILE_PIPELINE` | `None` | Dotted path (or list of paths) to a zero-argument callable returning a `FilePipeline`: the default pipeline for uploads without agent context. The first pipeline whose `accepts(file)` matches is used. See [Files](/manual/files/). |
 | `AI_SDK_FILE_PIPELINE_TIMEOUT` | `900` | Seconds before a background document pipeline is failed. `django_tasks` has no native timeout, so this guards hung or wedged upload processing. |
 
 ## MCP Servers
@@ -55,7 +55,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_INTEGRATIONS` | `{}` | Per-integration configuration dict, keyed by registry name, in the shape of `DATABASES`/`CACHES`. Keys are upper-cased on read. Secrets are referenced inline, e.g. `{"github": {"TOKEN": env("GITHUB_MCP_TOKEN")}}`: there is no derived `AI_SDK_GITHUB_TOKEN` variable, because GitHub Actions already injects a conflicting `GITHUB_TOKEN`. See the [Integrations guide](/docs/integrations/). |
+| `AI_SDK_INTEGRATIONS` | `{}` | Per-integration configuration dict, keyed by registry name, in the shape of `DATABASES`/`CACHES`. Keys are upper-cased on read. Secrets are referenced inline, e.g. `{"github": {"TOKEN": env("GITHUB_MCP_TOKEN")}}`: there is no derived `AI_SDK_GITHUB_TOKEN` variable, because GitHub Actions already injects a conflicting `GITHUB_TOKEN`. See the [Integrations guide](/integrations/). |
 | `AI_SDK_INTEGRATION_TIMEOUT` | `3` | Seconds per integration tool call. |
 | `AI_SDK_INTEGRATION_CACHE_TTL` | `900` | Seconds tool lists and statuses are cached. |
 | `AI_SDK_INTEGRATION_CB_COOLDOWN` | `60` | Seconds a failed integration stays open-circuited before retry. |
@@ -64,13 +64,13 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`. See [Permissions](/docs/manual/permissions/). |
+| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`. See [Permissions](/manual/permissions/). |
 
 ## Workflows
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Workflow action registry: `{"console_log": "path.to.ConsoleLogAction"}`. See [Workflows](/docs/manual/workflows/). |
+| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Workflow action registry: `{"console_log": "path.to.ConsoleLogAction"}`. See [Workflows](/manual/workflows/). |
 
 ## Streaming and Titles
 

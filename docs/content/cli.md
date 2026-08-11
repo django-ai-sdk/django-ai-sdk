@@ -55,8 +55,8 @@ await Agent.reindex(agent, memory_id=None, force_rebuild=False)
 Agent.clear_rag_cache(agent)
 ```
 
-See the [RAG section of the Agents guide](/docs/agents/#lifecycle) for the full lifecycle.
+See the [RAG section of the Agents guide](/agents/#lifecycle) for the full lifecycle.
 
 {{< callout type="info" >}}
-Contributor? The [CLI Implementation](/docs/manual/cli/) manual page documents how the command works internally.
+Contributor? The [CLI Implementation](/manual/cli/) manual page documents how the command works internally.
 {{< /callout >}}
