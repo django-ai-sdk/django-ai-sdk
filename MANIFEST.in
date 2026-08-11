@@ -1,5 +1,6 @@
 prune .github
 prune demo
+prune docs
 prune public
 prune tests
 exclude lefthook.yml
