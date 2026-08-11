@@ -16,7 +16,7 @@ pip install "django-ai-sdk[haystack]"
   {{< card link="/docs/agents" title="Agents" icon="user" subtitle="Agents, tools, RAG, storage" >}}
   {{< card link="/docs/protocols" title="Protocols" icon="globe-alt" subtitle="Stream and Run adapters" >}}
   {{< card link="/docs/integrations" title="Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
-  {{< card link="/docs/views-and-routing" title="Views & Routing" icon="route" subtitle="Wire agents to HTTP endpoints" >}}
+  {{< card link="/docs/views-and-routing" title="Views & Routing" icon="link" subtitle="Wire agents to HTTP endpoints" >}}
   {{< card link="/docs/how-it-works" title="How It Works" icon="cube" subtitle="Requests flow through the SDK" >}}
   {{< card link="/docs/manual" title="Developer Manual" icon="book-open" subtitle="Internals and contribution guide" >}}
 {{< /cards >}}
