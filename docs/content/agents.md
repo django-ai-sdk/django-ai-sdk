@@ -311,6 +311,15 @@ class MyAgent(Agent):
 
 Pass `response_format=None` explicitly to `run()` to disable structured output for a single call.
 
+`run()` also takes `tools` (default `True`): the agent's `get_tools()` are attached to the adapter
+and a tool-calling loop runs to completion, capped by `AI_SDK_RUN_MAX_TOOL_STEPS`. Pass
+`tools=False` for a deliberately constrained call, as title and suggestion generation do. Setting a
+`response_format` skips them too, since the adapter ignores tools on a structured-output call.
+Either way the tools are never resolved, so no integration is contacted.
+
+A `get_run_adapter()` override that already sets `tools` keeps them. One that returns an adapter
+with no `tools` attribute at all is left alone rather than failing.
+
 ---
 
 ## Permissions

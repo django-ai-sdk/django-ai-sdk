@@ -612,6 +612,7 @@ class Agent(ABC, AgentInfoMixin):
         response_format: type[T] | None = _UNSET,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
+        tools: bool = True,
     ) -> T | str | None:
         """Run LLM calls directly from adapter.
 
@@ -623,12 +624,23 @@ class Agent(ABC, AgentInfoMixin):
                 default response_format set.
             thread_id: Optional thread ID (forwarded to get_run_adapter)
             user: Optional user (forwarded to get_run_adapter)
+            tools: Whether to resolve the agent's tools and run a tool-calling loop.
+                Pass False for a deliberately constrained call such as title
+                generation.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
         """
         resolved = self.response_format if response_format is self._UNSET else response_format
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
+        # Resolved here rather than in get_run_adapter, so an override does not have to
+        # thread the flag through, and an adapter that built its own tool list keeps it.
+        # Resolving reaches every integration, so it is skipped both when the caller
+        # opts out and when a response_format is set, since the adapter ignores tools
+        # there. getattr: get_run_adapter is an override point and an adapter need not
+        # carry tools at all.
+        if tools and resolved is None and not getattr(adapter, "tools", None):
+            adapter.tools = await self.get_tools(thread_id=thread_id or "", user=user)
         return await adapter.run(
             messages=messages,
             system_prompt=system_prompt if system_prompt is not None else self.get_system_prompt(),

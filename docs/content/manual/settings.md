@@ -22,6 +22,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_DEFAULT_MODEL` | `"gpt-4o-mini"` | Fallback model identifier for `llm_generator()`, and the usual value for an agent's `model` attribute. The [generator factories](/manual/generators/) never read it: an agent always passes its own model. |
 | `AI_SDK_EXTRACTION_MODEL` | `None` | Model used by the document-extraction generator (`agents/utils.py`). Falls back to `AI_SDK_DEFAULT_MODEL` when unset. |
+| `AI_SDK_RUN_MAX_TOOL_STEPS` | `10` | Maximum tool-calling round-trips in one `Run.run()` loop. Bounds the unattended path workflows and automations use; interactive streaming is unaffected. |
 
 ## RAG and Vector Stores
 

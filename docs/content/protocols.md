@@ -124,6 +124,19 @@ movie = await run.run(messages, response_format=Movie)
 
 `Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](/manual/generators/#structured-output).
 
+### Tools
+
+Pass `tools` and `Run` executes a tool-calling loop to completion, returning the final reply text:
+
+```python
+run = Run(generator=generator, tools=await agent.get_tools())
+reply = await run.run(messages)                # -> str | None
+```
+
+`response_format` takes precedence: when both are set, `Run` makes a plain structured-output call and the tools are ignored. Structured output and tool use together are not supported yet.
+
+The loop is bounded by `AI_SDK_RUN_MAX_TOOL_STEPS` (default `10`), rather than by Haystack's default of 100. Nothing cuts an unattended run short the way a reader cuts a streaming one short.
+
 ---
 
 ## Protocol Handlers

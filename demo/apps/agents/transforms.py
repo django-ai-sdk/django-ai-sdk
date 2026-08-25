@@ -44,5 +44,6 @@ class DocumentExtractionTransform(BaseTransform):
             [ChatMessage(role="user", content=content[:MAX_CONTENT_LENGTH])],
             system_prompt=EXTRACTION_PROMPT,
             response_format=DocumentExtraction,
+            tools=False,
         )
         return result if result is not None else data

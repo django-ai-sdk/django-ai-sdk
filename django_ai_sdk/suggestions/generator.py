@@ -97,6 +97,7 @@ class DefaultSuggestionGenerator:
                 messages=messages,
                 system_prompt=system_prompt,
                 response_format=FollowUpSuggestions,
+                tools=False,
             )
 
             return result.follow_ups[:3] if isinstance(result, FollowUpSuggestions) else []

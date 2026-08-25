@@ -98,16 +98,19 @@ class Run:
 
     model: str | None = None
     instructions: str | None = None
+    tools: list[Any]
 
     def __init__(
         self,
         generator: Any,
         model: str | None = None,
         instructions: str | None = None,
+        tools: list[Any] | None = None,
     ) -> None:
         self.generator = generator
         self.model = model
         self.instructions = instructions
+        self.tools = tools or []
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Quick conversion."""
@@ -144,6 +147,16 @@ class Run:
         response_format: type[T] | None = None,
     ) -> T | str | None:
         user_messages = self.get_messages(messages)
+
+        if self.tools and response_format:
+            logger.warning(
+                "Run was given {} tools and a response_format; the tools are ignored. "
+                "Structured output and tool use together are not supported yet.",
+                len(self.tools),
+            )
+        elif self.tools:
+            return await self._run_with_tools(user_messages, system_prompt)
+
         if system_prompt:
             user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
 
@@ -156,6 +169,29 @@ class Run:
 
         response = self.generator.run(messages=user_messages)
         return response["replies"][0].text
+
+    async def _run_with_tools(
+        self,
+        user_messages: list[HaystackChatMessage],
+        system_prompt: str | None,
+    ) -> str | None:
+        """Run a tool-calling loop to completion and return the final reply text.
+
+        Mirrors `pipelines.haystack.ToolAgent` without streaming, since callers of this
+        path have no SSE connection to stream chunks into. The step budget is set here
+        rather than left at Haystack's default of 100, because no reader cuts an
+        unattended run short.
+        """
+        agent = Agent(
+            chat_generator=self.generator,
+            tools=self.tools,
+            system_prompt=system_prompt,
+            exit_conditions=["text"],
+            max_agent_steps=resolve_setting("AI_SDK_RUN_MAX_TOOL_STEPS", 10),
+        )
+        result = await agent.run_async(messages=user_messages)
+        replies = result.get("messages", [])
+        return replies[-1].text if replies else None
 
 
 class Stream:

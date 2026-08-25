@@ -42,6 +42,7 @@ async def generate_thread_title(
             thread_id=thread_id,
             user=user,
             response_format=None,
+            tools=False,
         )
     except Exception:
         logger.warning("Thread title generation failed", exc_info=True)
