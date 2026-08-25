@@ -12,16 +12,16 @@ The workflow engine orchestrates multi-step agent tasks: sequential agent steps 
 from django_ai_sdk.workflows import WorkflowDefinition, WorkflowStep, WorkflowAction
 
 workflow = WorkflowDefinition(
-    name="Summarize and alert",
+    name="summarize-and-alert",
     steps=[
         WorkflowStep(
             name="summarize",
-            agent_id="summarizer",
+            agent_id=SummarizerAgent().agent_id,
             output_key="summary",
         ),
         WorkflowStep(
             name="classify",
-            agent_id="classifier",
+            agent_id=ClassifierAgent().agent_id,
             input_key="summary",                 # inject step 1's output
             output_key="priority",
             output_fields={                     # structured output
@@ -55,11 +55,72 @@ Each `WorkflowStep` runs its `agent_id` via `agent.run()` (non-streaming). Its r
 
 | Model | Purpose |
 | --- | --- |
-| `WorkflowSettings` | A persisted, named workflow: `name`, `definition` (JSON), `active`, `created_by`. |
+| `WorkflowSettings` | A persisted, named workflow: `name`, `slug` (registry key), `definition` (JSON), `active`, `created_by`. |
 | `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed`, `workflow_definition` snapshot, `input_messages`, `outputs`, `error`, `task_id`, `user`. |
 | `WorkflowRunStep` | Per-step progress: `sequence`, `step_name`, `output_key`, `output`, status `pending` / `completed` / `failed`, `error`, timestamps. |
 
 A `WorkflowSettings.to_workflow_definition()` round-trips the stored JSON.
+
+## Declaring a workflow
+
+Call `register()` in any installed app's `workflows.py`. It is autodiscovered on startup, the same way `agents.py` is — no settings entry, no `ready()` hook. Autodiscovery runs after the agent registry is built, so a declaration can name its agents as `MyAgent().agent_id`.
+
+```python
+# myapp/workflows.py
+from django_ai_sdk.workflows import WorkflowAction, WorkflowDefinition, WorkflowStep, register
+
+register(WorkflowDefinition(
+    name="weekly-triage",
+    steps=[
+        WorkflowStep(name="collect", agent_id=EngineeringAgent().agent_id, output_key="issues"),
+        WorkflowStep(name="rank", agent_id=OperationsAgent().agent_id,
+                     input_key="issues", output_key="triage"),
+    ],
+    actions=[WorkflowAction(type="thread_message", input_key="triage")],
+))
+```
+
+`name` is the registry key, and must be a slug of at most 100 characters — the same form as `WorkflowSettings.slug`, so a declaration and a row that share a name collide visibly instead of both being reachable. A registered workflow can be resolved by that name from anywhere (`aget_workflow`), rather than existing only inside whichever caller constructed it.
+
+A workflow is data, not behaviour, so it is registered by a call rather than by subclassing.
+
+### Validation
+
+`register()` validates, because the executor skips a step whose input is missing and only logs it — which turns a one-character typo into a silent half-run.
+
+- there is at least one step
+- every step has an `agent_id` and an `output_key`
+- no two steps share an `output_key`
+- every `input_key`, on a step or an action, names an `output_key` produced by an **earlier** step
+
+A definition that fails is left out of the registry and reported by a system check as `ai_sdk.workflows.E001`:
+
+```console
+$ ./manage.py check
+ERRORS:
+?: (ai_sdk.workflows.E001) Workflow 'weekly-triage' step 1 reads 'isues', which no
+earlier step produces. Available at that point: ['issues'].
+```
+
+An error, so `manage.py check` and `runserver` fail on it and it is caught before release; a warning is logged at startup too. It is deliberately not an exception: one app's typo must not stop the site from booting.
+
+`agent_id` is a registry id (`uuid5(AGENT_NAMESPACE, class_path)`) or an `AgentSettings` primary key. Rather than pasting a UUID into a declaration, take it from the class — `MyAgent().agent_id` — so a typo is an `ImportError` where the workflow is declared rather than a failure in a worker. Validation cannot check the id itself: the agent may live only in the database.
+
+### Database workflows
+
+Active `WorkflowSettings` rows are merged into the registry under their `slug`, exactly as the integrations registry merges `MCPServerConfig` rows. A code declaration always wins a collision and warns once — a row is for adding a workflow where there is no code, never for overriding one. A row whose definition fails the same validation is skipped and logged, so one bad row never takes the others with it.
+
+```python
+from django_ai_sdk.workflows import aget_workflow, aget_workflows, get_declared_workflows
+
+await aget_workflow("weekly-triage")   # code or database
+await aget_workflows()                 # merged
+get_declared_workflows()               # code only, synchronous
+```
+
+The merged lookups are async because they read the database. `get_declared_workflows()` is the synchronous view, for the system check and management commands that must not need one.
+
+`slug` is derived from `name` on first save and suffixed if taken, so two workflows may share a display name. Rows are read fresh on every dispatch, so an admin edit takes effect immediately. A database that cannot be read raises rather than quietly falling back to the code-declared workflows, so an outage fails a run the queue will retry instead of recording it as a workflow that does not exist.
 
 ## Running
 

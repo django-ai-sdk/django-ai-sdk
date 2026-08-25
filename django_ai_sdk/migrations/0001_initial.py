@@ -410,6 +410,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("name", models.CharField(max_length=255)),
+                ("slug", models.SlugField(max_length=100, unique=True)),
                 ("definition", models.JSONField(default=dict)),
                 ("active", models.BooleanField(db_index=True, default=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),

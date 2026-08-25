@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.apps import AppConfig
+from django.core.checks import register as register_check
 from django.utils.module_loading import autodiscover_modules
 
 
@@ -23,3 +24,11 @@ class DjangoAISDKConfig(AppConfig):
         from django_ai_sdk.agents.registry import registry
 
         registry.setup()
+
+        # After setup(), so a step can name its agent as `MyAgent().agent_id`.
+        autodiscover_modules("workflows")
+
+        from django_ai_sdk.workflows.checks import check_workflows
+
+        # A rejected declaration fails no request, so nothing else would surface it.
+        register_check(check_workflows)
