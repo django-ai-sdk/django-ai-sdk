@@ -109,6 +109,7 @@ class WorkflowRun(models.Model):
 
     if TYPE_CHECKING:
         steps: Manager[WorkflowRunStep]
+        user_id: Any
 
     class Meta:
         app_label = "django_ai_sdk"

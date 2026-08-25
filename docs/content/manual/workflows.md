@@ -145,6 +145,8 @@ runs = await WorkflowService.list_runs(workflow_id)
 run = await WorkflowService.get_run(run_id)      # prefetches steps
 ```
 
+The `user` passed here is stored on the `WorkflowRun` and reloaded in the worker, so every step runs as that user: their permissions are checked and their per-user integration credentials are available. A run created without a `user` is unowned and runs as anonymous, which a non-public agent rejects.
+
 ## Execution Model
 
 `WorkflowService.run()` creates a `WorkflowRun` in `pending`, then `WorkflowExecutor.enqueue()` schedules the `execute_workflow` background task (`django_tasks`), which runs `WorkflowExecutor.run()`. Whether that happens in a worker or inline in the calling request depends on the configured `TASKS` backend - see [Background Tasks](/manual/settings/#background-tasks).
