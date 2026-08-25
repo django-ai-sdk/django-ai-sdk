@@ -28,6 +28,9 @@ dependencies = [
   "django>=5.2.6,<6.1",
   "haystack-ai>=3.0.0",
   "django-tasks>=0.12.0",
+  # Module-level import in integrations/weather/tools.py, which ships in core, so it
+  # cannot live in the optional `mcp` extra alongside the other four importers.
+  "httpx>=0.28.0",
   "loguru>=0.7.3",
   "puremagic>=2.2.0",
   "pydantic>=2.13.4",
@@ -90,7 +93,6 @@ dev = [
   "django-stubs>=6.0.7",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
-  "httpx>=0.28.0",
   "pytest>=9.1.1",
   "pytest-asyncio>=1.4.0",
   "pytest-django>=4.12.0",
