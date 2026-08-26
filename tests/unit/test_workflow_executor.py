@@ -1,6 +1,4 @@
-"""
-Unit tests for WorkflowExecutor — step sequencing, context injection, actions.
-"""
+"""WorkflowExecutor: step sequencing, context injection, actions."""
 
 import json
 from contextlib import contextmanager
@@ -202,7 +200,7 @@ class TestWorkflowExecutorActions:
         received = []
 
         class CaptureAction:
-            async def execute(self, payload):
+            async def execute(self, payload, context):
                 received.append(payload)
 
         workflow = WorkflowDefinition(
@@ -226,7 +224,7 @@ class TestWorkflowExecutorActions:
         received = []
 
         class CaptureAction:
-            async def execute(self, payload):
+            async def execute(self, payload, context):
                 received.append(payload)
 
         workflow = WorkflowDefinition(
@@ -244,6 +242,34 @@ class TestWorkflowExecutorActions:
             await executor.run(workflow, [])
 
         assert received == ["step_data"]
+
+    async def test_an_action_is_told_which_agent_produced_the_payload(self, executor):
+        # The context is an action's only route to the run's user and storage adapter.
+        agent = make_agent("data")
+        received = []
+
+        class CaptureAction:
+            async def execute(self, payload, context):
+                received.append(context)
+
+        workflow = WorkflowDefinition(
+            name="nightly",
+            steps=[WorkflowStep(agent_id="a1", output_key="summary")],
+            actions=[WorkflowAction(type="capture", input_key="summary")],
+        )
+
+        with (
+            patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)),
+            patch(
+                "django_ai_sdk.workflows.executor.get_action_registry",
+                return_value={"capture": CaptureAction},
+            ),
+        ):
+            await executor.run(workflow, [])
+
+        [context] = received
+        assert context.agent_id == "a1"
+        assert context.source == "nightly"
 
     async def test_unknown_action_type_warns_and_skips(self, executor):
         agent = make_agent("data")
@@ -267,7 +293,7 @@ class TestWorkflowExecutorActions:
         executed = []
 
         class CaptureAction:
-            async def execute(self, payload):
+            async def execute(self, payload, context):
                 executed.append(payload)
 
         workflow = WorkflowDefinition(

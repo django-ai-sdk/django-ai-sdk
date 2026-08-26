@@ -159,17 +159,35 @@ The `user` passed here is stored on the `WorkflowRun` and reloaded in the worker
 4. Runs the registered actions.
 5. Marks the run `completed` with the full outputs; a step exception marks the run (and its step) `failed` and propagates.
 
-## Custom Actions
+## Actions
+
+An action decides where a finished run's output goes. `thread_message` ships built in: it
+opens a new chat thread for `context.user`, posts the payload into it, and gives it a
+generated title. A run started from a queue has nobody watching a response stream, so
+without it a scheduled workflow produces output nobody sees.
 
 ```python
-from django_ai_sdk.workflows.actions import BaseAction
+actions=[WorkflowAction(type="thread_message", input_key="triage")]
+```
+
+It needs someone to deliver to. A run with no user logs and returns rather than failing
+the run, on the grounds that the workflow itself succeeded.
+
+### Custom Actions
+
+```python
+from django_ai_sdk.workflows.actions import ActionContext
 
 class ConsoleLogAction:
     description = "Log the payload"
 
-    async def execute(self, payload) -> None:
-        print(payload)
+    async def execute(self, payload, context: ActionContext) -> None:
+        print(context.source, payload)
 ```
+
+`context` carries the run's `user` (`None` when nobody owns the run), the `agent_id` that
+produced the payload, and a human-readable `source`. Ignore it if you only need the
+payload — it is always passed.
 
 ```python
 # settings.py
@@ -177,5 +195,7 @@ AI_SDK_WORKFLOW_ACTIONS = {
     "console_log": "apps.agents.actions.ConsoleLogAction",
 }
 ```
+
+Declaring a built-in key shadows the built-in.
 
 `WorkflowService.list_actions()` returns `[{key, description}]` from the registry.

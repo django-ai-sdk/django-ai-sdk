@@ -71,7 +71,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Workflow action registry: `{"console_log": "path.to.ConsoleLogAction"}`. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Extra workflow actions: `{"console_log": "path.to.ConsoleLogAction"}`. Overlaid on the built-in `thread_message`. See [Workflows](/manual/workflows/). |
 
 ## Streaming and Titles
 

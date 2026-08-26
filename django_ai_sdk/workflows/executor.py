@@ -10,7 +10,7 @@ from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
-from django_ai_sdk.workflows.actions import get_action_registry
+from django_ai_sdk.workflows.actions import ActionContext, get_action_registry
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 from django_ai_sdk.workflows.tasks import execute_workflow
 
@@ -176,6 +176,10 @@ class WorkflowExecutor:
                     raise
 
             action_registry = get_action_registry()
+            # Which agent produced which output, for the action's storage adapter.
+            producer = {step.output_key: step.agent_id for step in workflow.steps}
+            last_agent_id = workflow.steps[-1].agent_id if workflow.steps else ""
+
             for action in workflow.actions:
                 runner_cls = action_registry.get(action.type)
                 if runner_cls is None:
@@ -189,7 +193,12 @@ class WorkflowExecutor:
                     )
                     continue
                 payload = outputs.get(action.input_key) if action.input_key else outputs
-                await runner_cls().execute(payload)
+                context = ActionContext(
+                    user=user,
+                    agent_id=producer.get(action.input_key or "", last_agent_id),
+                    source=workflow.name or f"workflow:{workflow_run.id}",
+                )
+                await runner_cls().execute(payload, context)
                 _logger.debug("Workflow action '{}' complete", action.type)
 
             workflow_run.status = WorkflowRun.Status.COMPLETED
