@@ -1344,3 +1344,145 @@ class TestAgentUserManagement:
                 await AgentService.add_agent_user(
                     str(config.id), str(new_user.id), can_manage=False, user=viewer
                 )
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestAgentDefaultPermissionUse:
+    """Tests for gating *use* of a DB-backed agent by its row."""
+
+    async def _runtime_agent(self, *, is_public=False):
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.agents.runtime import RuntimeAgent
+
+        config = AgentSettings(
+            name="Private Agent", slug=str(uuid4()), agent="test", is_public=is_public
+        )
+        await config.asave()
+        return RuntimeAgent(config), config
+
+    async def _user(self, username):
+        from django.contrib.auth import get_user_model
+
+        return await get_user_model().objects.acreate_user(username=username, password="x")
+
+    async def test_a_non_member_may_not_chat_with_a_private_agent(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        agent, _ = await self._runtime_agent()
+        outsider = await self._user("outsider")
+
+        allowed = await AgentDefaultPermission().has_permission(
+            outsider, Operation.CHAT, agent=agent
+        )
+        assert allowed is False
+
+    async def test_a_member_may_chat_with_a_private_agent(self):
+        from django_ai_sdk.agents.models import AgentUser
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        agent, config = await self._runtime_agent()
+        member = await self._user("member")
+        await AgentUser(agent=config, user=member).asave()
+
+        allowed = await AgentDefaultPermission().has_permission(member, Operation.CHAT, agent=agent)
+        assert allowed is True
+
+    async def test_a_group_member_may_chat_with_a_private_agent(self):
+        from asgiref.sync import sync_to_async
+        from django.contrib.auth.models import Group
+
+        from django_ai_sdk.agents.models import AgentGroup
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        agent, config = await self._runtime_agent()
+        member = await self._user("groupie")
+        group = await Group.objects.acreate(name="team")
+        await sync_to_async(member.groups.add)(group)
+        await AgentGroup(agent=config, group=group).asave()
+
+        allowed = await AgentDefaultPermission().has_permission(member, Operation.CHAT, agent=agent)
+        assert allowed is True
+
+    async def test_a_public_agent_admits_anyone(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        agent, _ = await self._runtime_agent(is_public=True)
+        outsider = await self._user("passerby")
+
+        allowed = await AgentDefaultPermission().has_permission(
+            outsider, Operation.CHAT, agent=agent
+        )
+        assert allowed is True
+
+    async def test_agent_crud_is_not_judged_by_the_use_branch(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        agent, _ = await self._runtime_agent()
+        outsider = await self._user("crud")
+
+        allowed = await AgentDefaultPermission().has_permission(
+            outsider, Operation.VIEW_AGENT, agent=agent
+        )
+        assert allowed is True
+
+    async def test_a_code_declared_agent_has_no_row_to_gate_on(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        outsider = await self._user("registry")
+        allowed = await AgentDefaultPermission().has_permission(
+            outsider, Operation.CHAT, agent=MagicMock(spec=[])
+        )
+        assert allowed is True
+
+    async def test_a_missing_agent_keyword_denies(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+        outsider = await self._user("forgetful")
+        allowed = await AgentDefaultPermission().has_permission(outsider, Operation.CHAT)
+        assert allowed is False
+
+
+class TestGetAgentPermissionsFallback:
+    """An empty list must fall back, not silently switch every check off.
+
+    The three resolvers used to disagree about what [] meant, and the agent one was the
+    outlier where it disabled gating.
+    """
+
+    def _resolve(self, perms):
+        from django_ai_sdk.permissions import get_agent_permissions
+
+        agent = MagicMock()
+        agent.permissions = perms
+        return get_agent_permissions(agent)
+
+    def test_an_empty_list_falls_back_to_the_domain_default(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission
+
+        assert self._resolve([]) == [AgentDefaultPermission]
+
+    def test_none_falls_back_to_the_domain_default(self):
+        from django_ai_sdk.permissions import AgentDefaultPermission
+
+        assert self._resolve(None) == [AgentDefaultPermission]
+
+    def test_a_non_empty_list_overrides_the_domain_default(self):
+        from django_ai_sdk.permissions import AllowAll
+
+        assert self._resolve([AllowAll]) == [AllowAll]
+
+    def test_the_agent_and_integration_resolvers_agree_on_an_empty_list(self):
+        from django_ai_sdk.permissions import (
+            PermissionDomain,
+            get_agent_permissions,
+            get_domain_permissions,
+            get_integration_permissions,
+        )
+
+        blank = MagicMock()
+        blank.permissions = []
+        assert get_agent_permissions(blank) == get_domain_permissions(PermissionDomain.AGENT)
+        assert get_integration_permissions(blank) == get_domain_permissions(
+            PermissionDomain.INTEGRATIONS
+        )

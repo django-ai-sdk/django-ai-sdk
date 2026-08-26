@@ -59,7 +59,7 @@ CHAT, REINDEX
 
 | Class | Behavior |
 | --- | --- |
-| `AllowAll` | Grants everything (the agent default). |
+| `AllowAll` | Grants everything. |
 | `DenyAll` | Denies everything. |
 | `IsAuthenticated` | Allows any authenticated user. |
 | `IsAdminUser` | Allows staff or superusers. |
@@ -72,7 +72,7 @@ Three built-ins expose `READ` / `WRITE` / `MANAGE` operation tiers:
 
 - **`ThreadDefaultPermission`**: authenticated users get full access to their own threads; anonymous users get none.
 - **`MemoryDefaultPermission`**: `can_manage` members get everything; `can_manage=False` members get read + write entries; public read-only is gated by `is_public`; anonymous is always blocked.
-- **`AgentDefaultPermission`**: `can_manage` members manage the agent; other members view and use it; anonymous is blocked for agent operations and passes through everything else.
+- **`AgentDefaultPermission`**: `can_manage` members manage the agent; other members view and use it; `is_public` grants read and use to anyone; anonymous is otherwise blocked for agent operations and passes through everything else. Chat, thread and file operations have no object to check, so they are gated on the agent passed as the `agent` keyword.
 
 `MemoryService.get_object_permissions_map()` and `agent_permissions()` auto-discover these `READ`/`WRITE`/`MANAGE` tiers and return an `ObjectPermissions` (`can_read` / `can_write` / `can_manage`) for the frontend.
 

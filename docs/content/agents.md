@@ -84,7 +84,7 @@ These class attributes configure an agent's behavior:
 | `rag_provider` | `None` | `RAGProvider` instance to enable RAG |
 | `rag_document_limit` | `10000` | Intended cap on documents fetched for RAG indexing (not yet enforced) |
 | `memories` | `[]` | Default connected memories |
-| `permissions` | `[AllowAll]` | Permission classes gating agent operations |
+| `permissions` | `None` | Permission classes gating agent operations; `None` or `[]` uses the `agent` domain default |
 | `max_history` | `None` | Cap on messages sent to the model |
 | `title_generation` | `True` | Auto-generate thread titles |
 | `response_format` | `None` | Pydantic model for structured `run()` output |
@@ -330,7 +330,7 @@ AI_SDK_PERMISSIONS = {
 
 ## Files
 
-Set `file_upload = True` to accept file uploads on threads. Each `FilePipeline` pairs a processor (e.g. `TextFileProcessor`) with optional transforms, including LLM extraction agents, that run over the uploaded file:
+Set `file_upload = True` to accept file uploads on threads; leaving it `False` rejects uploads to the agent's threads with a `PermissionDenied`. Each `FilePipeline` pairs a processor (e.g. `TextFileProcessor`) with optional transforms, including LLM extraction agents, that run over the uploaded file:
 
 ```python
 class MyAgent(Agent):

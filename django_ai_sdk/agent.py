@@ -20,11 +20,11 @@ from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sa
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
-    AllowAll,
     BasePermission,
     Operation,
     check_object_permissions,
     check_permissions,
+    get_agent_permissions,
 )
 from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -148,8 +148,9 @@ class Agent(ABC, AgentInfoMixin):
     # System prompt instructions for the agent.
     instructions: Prompt = prompt("You are a helpful agent.")
 
-    # Permission classes used to gate access to this agent's operations.
-    permissions: list[type[BasePermission]] = [AllowAll]
+    #: None or an empty list means "use the AGENT domain default"; a non-empty list
+    #: overrides it entirely. Disabling every check is [AllowAll], written out.
+    permissions: list[type[BasePermission]] | None = None
 
     # Default list of connected memories.
     memories: list[str] = []
@@ -673,7 +674,9 @@ class Agent(ABC, AgentInfoMixin):
         """
         logger.debug(f"Fetching history for thread: {thread_id}")
 
-        await check_permissions(user, Operation.VIEW_THREAD, self.permissions)
+        await check_permissions(
+            user, Operation.VIEW_THREAD, get_agent_permissions(self), agent=self
+        )
 
         storage = await self.get_storage_adapter(thread_id)
 
@@ -685,7 +688,9 @@ class Agent(ABC, AgentInfoMixin):
         if not thread_info:
             raise ValueError(f"Thread not found: {thread_id}")
 
-        await check_object_permissions(user, Operation.VIEW_THREAD, thread_info, self.permissions)
+        await check_object_permissions(
+            user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
+        )
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
@@ -733,7 +738,7 @@ class Agent(ABC, AgentInfoMixin):
             f"thread_id={thread_id}, user={user}"
         )
 
-        await check_permissions(user, Operation.CHAT, self.permissions)
+        await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
@@ -786,7 +791,9 @@ class Agent(ABC, AgentInfoMixin):
         if thread_id:
             thread = await ThreadService.get_thread(thread_id, user=user)
             if thread:
-                await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
+                await check_object_permissions(
+                    user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
+                )
             if self.title_generation and thread and not thread.title:
                 title = await generate_thread_title(
                     agent=self, messages=messages, thread_id=thread_id, user=user

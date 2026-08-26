@@ -628,3 +628,58 @@ class TestMemoryServiceListThreadMemories:
             result = await MemoryService.list_thread_memories(str(thread.id), user=None)
 
         assert len(result) == 0
+
+
+# ============================================================================
+# MemoryService -- thread file upload gate
+# ============================================================================
+
+
+# transaction=True so the AgentSettings row is flushed afterwards.
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+class TestUploadThreadFileRespectsAgentFileUpload:
+    async def _thread_for(self, *, file_upload):
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+        from django_ai_sdk.agents.models import AgentSettings, AgentUser
+        from django_ai_sdk.conversation.models import Thread
+
+        unique = str(uuid4())
+        user = await get_user_model().objects.acreate_user(username=unique, password="x")
+        config = await AgentSettings.objects.acreate(
+            name="Uploader", slug=unique, agent="test", file_upload=file_upload
+        )
+        await AgentUser.objects.acreate(agent=config, user=user)
+        thread = await Thread.objects.acreate(
+            user=user, metadata={"agent_id": str(config.id)}
+        )
+        return thread, user
+
+    async def test_an_agent_that_does_not_accept_files_rejects_the_upload(self):
+        from django.core.files.base import ContentFile
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        thread, user = await self._thread_for(file_upload=False)
+
+        with pytest.raises(PermissionDenied):
+            await MemoryService.upload_thread_file(
+                str(thread.id), ContentFile(b"hello", name="a.txt"), user=user
+            )
+
+    async def test_an_agent_that_accepts_files_gets_past_the_gate(self):
+        from django.core.files.base import ContentFile
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        thread, user = await self._thread_for(file_upload=True)
+
+        with patch.object(
+            MemoryService, "get_or_create_thread_file_memory", AsyncMock(side_effect=RuntimeError)
+        ):
+            with pytest.raises(RuntimeError):
+                await MemoryService.upload_thread_file(
+                    str(thread.id), ContentFile(b"hello", name="a.txt"), user=user
+                )

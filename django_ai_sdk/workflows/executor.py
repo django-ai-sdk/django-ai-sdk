@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, create_model
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 from django_ai_sdk.workflows.tasks import execute_workflow
@@ -100,6 +101,10 @@ class WorkflowExecutor:
 
                 try:
                     agent = await AgentService.get(step.agent_id)
+
+                    await check_permissions(
+                        user, Operation.CHAT, get_agent_permissions(agent), agent=agent
+                    )
 
                     if step.input_key:
                         if step.input_key not in outputs:

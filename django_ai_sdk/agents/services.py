@@ -220,7 +220,9 @@ class AgentService(PermissionsMixin):
     async def get_agent_info(cls, agent_id: str, user: UserType) -> AgentInfo:
         """Return agent info if user has VIEW_AGENT permission."""
         agent = await cls.get(agent_id)
-        await cls.has_perms(user, Operation.VIEW_AGENT, agent=agent)
+        await cls.has_perms(
+            user, Operation.VIEW_AGENT, obj=getattr(agent, "_config", None), agent=agent
+        )
         return agent.info()
 
     @classmethod
@@ -235,7 +237,9 @@ class AgentService(PermissionsMixin):
         (see django_ai_sdk.integrations.base). `type`/`tool_names` come from the
         Integration itself (`.kind`/`.get_tool_names()`).
         """
-        await cls.has_perms(user, Operation.VIEW_AGENT, agent=agent)
+        await cls.has_perms(
+            user, Operation.VIEW_AGENT, obj=getattr(agent, "_config", None), agent=agent
+        )
 
         integration_names: list[str] = list(getattr(agent, "integrations", []) or [])
         if not integration_names:
