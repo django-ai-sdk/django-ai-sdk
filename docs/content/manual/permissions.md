@@ -23,6 +23,9 @@ PermissionDomain.MEMORY   # "memory"
 | `thread` | `ThreadDefaultPermission` |
 | `memory` | `MemoryDefaultPermission` |
 | `integrations` | `IntegrationDefaultPermission` |
+| `automations` | `AutomationDefaultPermission` |
+
+`AutomationDefaultPermission` is read for any authenticated user, run and manage for staff — deliberately stricter than the others, because an automation acts on its own, on a schedule, potentially as other users. Run *history* is narrower still: a run's output is the workflow's result, so a caller sees only their own runs unless they may manage the automation. See [Automations](/manual/automations/).
 
 Override a domain globally via `AI_SDK_PERMISSIONS`:
 

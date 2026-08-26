@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.management.base import BaseCommand, CommandError
 
+from django_ai_sdk.automations.models import AutomationRun
+
 if TYPE_CHECKING:
     from argparse import ArgumentParser
 
@@ -59,10 +61,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: object, **options: Any) -> None:
-        if options["loop"] and options["dry_run"]:
-            raise CommandError("--loop and --dry-run do not make sense together.")
-
         interval = options["loop"]
+        if interval is not None and options["dry_run"]:
+            raise CommandError("--loop and --dry-run do not make sense together.")
+        if interval is not None and interval < 1:
+            raise CommandError("--loop needs a positive number of seconds.")
 
         if interval is None:
             asyncio.run(self._tick(options))
@@ -89,12 +92,12 @@ class Command(BaseCommand):
             force=options["force"],
             dry_run=options["dry_run"],
         )
-        self._report(results, verbosity=int(options.get("verbosity", 1)))
+        self._report(results, verbosity=options["verbosity"])
 
     def _report(self, results: list[Dispatched], *, verbosity: int) -> None:
         """Print dispatches; stay silent when nothing was due."""
         for result in results:
-            dispatched = [r for r in result.runs if r.status != "skipped"]
+            dispatched = [r for r in result.runs if r.status != AutomationRun.Status.SKIPPED]
             if dispatched:
                 self.stdout.write(
                     self.style.SUCCESS(f"→ {result.name}: dispatched {len(dispatched)} run(s)")

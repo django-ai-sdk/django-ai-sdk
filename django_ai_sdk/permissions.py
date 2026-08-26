@@ -71,6 +71,10 @@ class Operation(StrEnum):
     DELETE_AGENT = "delete_agent"
     USE_INTEGRATION = "use_integration"
     MANAGE_INTEGRATION = "manage_integration"
+    VIEW_AUTOMATION = "view_automation"
+    RUN_AUTOMATION = "run_automation"
+    MANAGE_AUTOMATION = "manage_automation"
+    SUBSCRIBE_AUTOMATION = "subscribe_automation"
 
 
 class PermissionDomain(StrEnum):
@@ -78,6 +82,7 @@ class PermissionDomain(StrEnum):
     THREAD = "thread"
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
+    AUTOMATIONS = "automations"
 
 
 class BasePermission(ABC):
@@ -106,7 +111,7 @@ class BasePermission(ABC):
         Implement this to let list endpoints apply your permission rules at the
         database level instead of post-filtering every row.
 
-        Return the filtered ``QuerySet`` or ``queryset.none()`` to deny all items.
+        Return the filtered `QuerySet` or `queryset.none()` to deny all items.
         The default implementation returns the queryset unchanged.
         """
         return queryset
@@ -146,7 +151,7 @@ class IsInAllowedGroups(BasePermission):
     """Allow only authenticated users belonging to one of the given auth groups.
 
     Parameterized: instantiate with the allowed group names, e.g.
-    ``IsInAllowedGroups(groups=["Sales"])``
+    `IsInAllowedGroups(groups=["Sales"])`
     """
 
     def __init__(self, groups: list[str] | None = None) -> None:
@@ -163,8 +168,8 @@ class IsInAllowedGroups(BasePermission):
 class IsOwner(BasePermission):
     """Allow only the authenticated owner of an object.
 
-    Parameterized: ``IsOwner(field="user_id")`` checks ``obj.user_id``.
-    Use ``IsOwner(field="owner_id")`` etc. for custom attribute names.
+    Parameterized: `IsOwner(field="user_id")` checks `obj.user_id`.
+    Use `IsOwner(field="owner_id")` etc. for custom attribute names.
     """
 
     def __init__(self, field: str = "user_id") -> None:
@@ -279,7 +284,7 @@ class MemoryDefaultPermission(BasePermission):
     ) -> QuerySet:
         """Filter *queryset* to memories this user may access for *operation*.
 
-        Applies the same rules as ``has_object_permission`` but at the
+        Applies the same rules as `has_object_permission` but at the
         database level so list views avoid iterating every row.
         """
         if user is None or not bool(user.is_authenticated):
@@ -417,12 +422,28 @@ class AgentDefaultPermission(BasePermission):
 class IntegrationDefaultPermission(BasePermission):
     """Default permission for integrations: any authenticated user may use them.
 
-    Override per-integration via ``Integration.permissions`` or globally via
-    ``AI_SDK_PERMISSIONS["integrations"]``.
+    Override per-integration via `Integration.permissions` or globally via
+    `AI_SDK_PERMISSIONS["integrations"]`.
     """
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         return user is not None and bool(user.is_authenticated)
+
+
+class AutomationDefaultPermission(BasePermission):
+    """Read and self-subscribe for any authenticated user; run and manage for staff.
+
+    Enabling or firing an automation acts on every other user; subscribing does not.
+    """
+
+    READ = frozenset({Operation.VIEW_AUTOMATION, Operation.SUBSCRIBE_AUTOMATION})
+
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        if user is None or not user.is_authenticated:
+            return False
+        if operation in self.READ:
+            return True
+        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
 
 
 DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
@@ -430,6 +451,7 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
+    PermissionDomain.AUTOMATIONS: ["django_ai_sdk.permissions.AutomationDefaultPermission"],
 }
 
 
@@ -450,7 +472,7 @@ def get_domain_permissions(domain: PermissionDomain) -> list[type[BasePermission
 
 class PermissionsMixin:
     """Mixin providing permission helpers for stateless service classes.
-    Subclasses must set ``domain`` to a :class:`PermissionDomain` value.
+    Subclasses must set `domain` to a `PermissionDomain` value.
     """
 
     domain: PermissionDomain
@@ -485,11 +507,11 @@ class PermissionsMixin:
     ) -> dict[str, bool]:
         """Auto-discover frozenset permission groups and check user against them.
 
-        Iterates the domain's permission classes, finds ``READ`` / ``WRITE`` /
-        ``MANAGE`` (and any other upper-case frozensets), and checks one
+        Iterates the domain's permission classes, finds `READ` / `WRITE` /
+        `MANAGE` (and any other upper-case frozensets), and checks one
         representative operation per group against the full permission chain.
 
-        Returns a dict like ``{"read": True, "write": False, "manage": False}``.
+        Returns a dict like `{"read": True, "write": False, "manage": False}`.
         """
         groups: dict[str, Operation] = {}
         for perm_cls in cls.get_default_permissions():
@@ -536,8 +558,8 @@ def ensure_permission_instance(
 ) -> BasePermission:
     """Normalise a permission class *or* instance to an instance.
 
-    Callers may store bare classes (e.g. ``[IsAuthenticated]``) or pre-built
-    instances (e.g. ``[IsInAllowedGroups(groups=["eng"])]``).  Both forms are
+    Callers may store bare classes (e.g. `[IsAuthenticated]`) or pre-built
+    instances (e.g. `[IsInAllowedGroups(groups=["eng"])]`).  Both forms are
     accepted throughout the permission-checking API; this helper enforces a
     consistent runtime type.
     """
@@ -561,13 +583,21 @@ def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
     """Resolve perms for an integration service.
 
     Resolution:
-    1. ``service.permissions`` if non-empty (per-integration override)
+    1. `service.permissions` if non-empty (per-integration override)
     2. Domain default for INTEGRATIONS (fallback)
     """
     perms = getattr(service, "permissions", None)
     if perms:
         return perms
     return get_domain_permissions(PermissionDomain.INTEGRATIONS)
+
+
+def get_automation_permissions(automation: Any) -> list[type[BasePermission]]:
+    """`automation.permissions` if set, else the AUTOMATIONS domain default."""
+    perms = getattr(automation, "permissions", None)
+    if perms:
+        return perms
+    return get_domain_permissions(PermissionDomain.AUTOMATIONS)
 
 
 async def has_perms(

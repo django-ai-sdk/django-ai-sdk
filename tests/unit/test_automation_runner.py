@@ -20,7 +20,10 @@ NOW = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
+    from django_ai_sdk.automations import runner
+
     reset_registry()
+    runner._warned_disabled = False
     yield
     reset_registry()
 
@@ -175,7 +178,6 @@ class TestDueness:
         from django_ai_sdk.automations import runner
 
         settings.AI_SDK_AUTOMATIONS_ENABLED = False
-        runner._warned_disabled = False
         declare()
 
         with caplog.at_level("INFO", logger="django_ai_sdk.automations.runner"):
@@ -365,10 +367,12 @@ class TestTheLeaseSurvivesAFanOut:
         return result.runs
 
     async def _finish_one(self, run, status=AutomationRun.Status.SUCCEEDED):
-        from django_ai_sdk.automations.tasks import _finish
+        """End one run the way run_automation does: terminal status, then the lease."""
+        from django_ai_sdk.automations.tasks import _finish, _release_if_dispatch_is_done
 
         loaded = await AutomationRun.objects.select_related("state").aget(id=run.id)
         await _finish(loaded, status=status, output={"ok": True})
+        await _release_if_dispatch_is_done(loaded)
 
     async def test_the_first_finisher_does_not_release_the_lease(self):
         runs = await self._fan_out()
@@ -546,3 +550,27 @@ class TestEnqueueWaitsForTheCommit:
         run.refresh_from_db()
         assert run.status == AutomationRun.Status.FAILED
         assert "task backend" in run.error
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAManualDispatchSaysSo:
+    """A run records the trigger it was dispatched by, including when it is skipped."""
+
+    async def test_a_manual_run_with_nobody_to_run_for_is_still_manual(self):
+        from django_ai_sdk.automations.runner import run_now
+
+        declare(audience=Audience.SUBSCRIBED)
+
+        [run] = await run_now("example")
+
+        assert run.status == AutomationRun.Status.SKIPPED
+        assert run.trigger == AutomationRun.Trigger.MANUAL
+
+    async def test_a_second_manual_run_reports_the_lease_by_name(self):
+        from django_ai_sdk.automations.runner import AutomationBusy, run_now
+
+        declare()
+        await run_now("example")
+
+        with pytest.raises(AutomationBusy):
+            await run_now("example")

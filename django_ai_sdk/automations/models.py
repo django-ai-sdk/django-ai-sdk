@@ -101,6 +101,7 @@ class AutomationRun(models.Model):
 
     if TYPE_CHECKING:
         user_id: Any
+        workflow_run_id: Any
 
     workflow_run = models.ForeignKey(
         "django_ai_sdk.WorkflowRun",

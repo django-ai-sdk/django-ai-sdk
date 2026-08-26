@@ -162,7 +162,19 @@ AI_SDK_AUTOMATIONS = {
 AI_SDK_AUTOMATIONS_ENABLED = True    # global kill switch
 ```
 
-Enabled-ness resolves **database row → settings → class attribute**, and the resolved value carries which layer decided so "why is this off?" has an answer. The database row is what an admin toggle writes; settings is what a deployer pins; the class is the shipped default.
+Enabled-ness resolves **database row → settings → class attribute**, and the API reports which layer decided so "why is this off?" has an answer. The database row is what an admin toggle writes; settings is what a deployer pins; the class is the shipped default.
+
+## HTTP
+
+The SDK ships no router; it does not pick your web framework. `AutomationService` is the seam, and `demo/apps/automations/views/ninja.py` is a complete reference implementation to copy:
+
+```
+GET    /automations/                    list, with live state
+PATCH  /automations/{name}              {"enabled": false}   staff only
+PATCH  /automations/{name}/subscription {"enabled": true}    any authenticated user, on their own row
+POST   /automations/{name}/run          dispatch now, to the whole audience; staff only
+GET    /automations/{name}/runs         history, newest first; your own runs, or all of them if you may manage
+```
 
 ## Limitations
 
@@ -173,4 +185,5 @@ Worth knowing before you depend on this:
 - **Granularity is whatever your clock gives you** — one minute, realistically. Sub-minute schedules are not honoured.
 - **Missed windows are not replayed.** A schedule that fell behind runs once, stamped with the window it missed, and then resumes at the next future occurrence. An outage does not produce a burst of catch-up runs.
 - **Scheduling arbitrary Python is out of scope**, by design. Use a management command.
-- **The dead-man's switch is yours to wire.** The most recent `AutomationRun` is what a health endpoint should watch; nothing pages you when a working scheduler stops.
+- **"Run now" dispatches to the whole audience, not to the caller.** A subscribed automation run by hand messages every subscriber, exactly as the schedule would: it is the schedule firing early, not a preview. To see what an automation produces without delivering it to anyone, run its workflow directly with `WorkflowService.run`. Put the confirmation step in your own UI: the SDK cannot know how many subscribers a button is about to message.
+- **The dead-man's switch is yours to wire.** `AutomationService.last_tick_at()` is exposed for a health endpoint; nothing pages you when a working scheduler stops.

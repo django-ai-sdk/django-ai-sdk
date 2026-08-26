@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 _warned_disabled = False
 
 
+class AutomationBusy(Exception):
+    """The lease is held, so a second copy of this payload cannot start."""
+
+
 class Dispatched(NamedTuple):
     """What one tick did to one automation."""
 
@@ -64,9 +68,10 @@ async def tick(
     now = now or timezone.now()
     automations = get_automations()
     if only:
-        automations = {name: a for name, a in automations.items() if name == only}
-        if not automations:
+        automation = automations.get(only)
+        if automation is None:
             return [Dispatched(only, [], "no automation with that name")]
+        automations = {only: automation}
 
     results: list[Dispatched] = []
     for name, automation in automations.items():
@@ -89,7 +94,7 @@ async def _dispatch_one(
     now: datetime,
     force: bool,
     dry_run: bool,
-    deliberate: bool = False,
+    deliberate: bool,
 ) -> Dispatched:
     name = automation.name
     state = await AutomationState.objects.filter(name=name).afirst()
@@ -118,21 +123,40 @@ async def _dispatch_one(
     if not await claim(automation, state, now=now, force=force):
         return Dispatched(name, [], "not claimed; another tick won it, or a run is in flight")
 
-    principals = await _resolve_audience(automation)
-    if not principals:
-        run = await _record_skip(automation, state, now=now, reason="audience resolved to nobody")
-        await release(state)
-        return Dispatched(name, [run], "audience empty")
-
     # The occurrence it is for, not the moment it ran.
     scheduled_for = now if force else due_at
+    runs, reason = await _fan_out(automation, state, now=scheduled_for)
+    return Dispatched(name, runs, reason)
+
+
+async def _fan_out(
+    automation: Automation,
+    state: AutomationState,
+    *,
+    now: datetime,
+    trigger: str = AutomationRun.Trigger.SCHEDULE,
+) -> tuple[list[AutomationRun], str]:
+    """One run per resolved principal, enqueued, plus a reason when there were none.
+
+    The lease is already held, so an empty audience releases it before returning.
+    """
+    principals = await _resolve_audience(automation)
+    if not principals:
+        run = await _record_skip(
+            automation, state, now=now, trigger=trigger, reason="audience resolved to nobody"
+        )
+        await release(state)
+        return [run], "audience empty"
+
     dispatch_id = uuid.uuid4()
     runs = [
-        await _create_run(automation, state, user=user, now=scheduled_for, dispatch_id=dispatch_id)
+        await _create_run(
+            automation, state, user=user, now=now, dispatch_id=dispatch_id, trigger=trigger
+        )
         for user in principals
     ]
     await _enqueue_all(runs)
-    return Dispatched(name, runs)
+    return runs, ""
 
 
 async def ensure_state(automation: Automation, *, now: datetime) -> tuple[AutomationState, bool]:
@@ -188,7 +212,7 @@ async def release(state: AutomationState, *, succeeded_at: datetime | None = Non
     if succeeded_at is not None:
         await AutomationState.objects.filter(id=state.id).aupdate(last_success_at=succeeded_at)
     await AutomationState.objects.filter(id=state.id, locked_until=state.locked_until).aupdate(
-        locked_until=None
+        locked_until=None, updated_at=timezone.now()
     )
 
 
@@ -224,7 +248,12 @@ async def _create_run(
 
 
 async def _record_skip(
-    automation: Automation, state: AutomationState, *, now: datetime, reason: str
+    automation: Automation,
+    state: AutomationState,
+    *,
+    now: datetime,
+    reason: str,
+    trigger: str = AutomationRun.Trigger.SCHEDULE,
 ) -> AutomationRun:
     """Write a SKIPPED run: silence is indistinguishable from a scheduler that is down."""
     logger.info("Automation %r skipped: %s", automation.name, reason)
@@ -233,7 +262,7 @@ async def _record_skip(
         state=state,
         dispatch_id=uuid.uuid4(),
         status=AutomationRun.Status.SKIPPED,
-        trigger=AutomationRun.Trigger.SCHEDULE,
+        trigger=trigger,
         scheduled_for=now,
         finished_at=now,
         skip_reason=reason[:255],
@@ -280,34 +309,17 @@ async def run_now(name: str) -> list[AutomationRun]:
     now = timezone.now()
     state, _ = await ensure_state(automation, now=now)
     if not await claim(automation, state, now=now, force=True):
-        raise RuntimeError(
+        raise AutomationBusy(
             f"Automation {name!r} is already running (its lease is held). Wait for it "
             "to finish, or set allow_overlap = True if concurrent runs are safe."
         )
 
-    principals = await _resolve_audience(automation)
-    if not principals:
-        run = await _record_skip(automation, state, now=now, reason="audience resolved to nobody")
-        await release(state)
-        return [run]
-
-    dispatch_id = uuid.uuid4()
-    runs = [
-        await _create_run(
-            automation,
-            state,
-            user=u,
-            now=now,
-            dispatch_id=dispatch_id,
-            trigger=AutomationRun.Trigger.MANUAL,
-        )
-        for u in principals
-    ]
-    await _enqueue_all(runs)
+    runs, _ = await _fan_out(automation, state, now=now, trigger=AutomationRun.Trigger.MANUAL)
     return runs
 
 
 __all__ = [
+    "AutomationBusy",
     "Dispatched",
     "claim",
     "ensure_state",

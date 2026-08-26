@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "apps.agents",
     "apps.memories",
     "apps.integrations",
+    "apps.automations",
 ]
 
 MIDDLEWARE = [

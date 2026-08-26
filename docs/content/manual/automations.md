@@ -22,6 +22,7 @@ The [Automations guide](/automations/) covers declaring and running them. This p
 | `enabled` | `True` | Shipped default; a database row or settings entry overrides it. |
 | `allow_overlap` | `False` | When `False`, a tick is skipped while a previous run holds the lease. A fan-out holds it until every run in the dispatch has finished, not until the first one has. |
 | `timeout` | `None` | Seconds; falls back to `AI_SDK_AUTOMATION_TIMEOUT` (900). |
+| `permissions` | `[]` | Permission classes gating this automation. |
 
 `cron` and `workflow` must both be non-empty. Both are enforced at registration: a half-specified declaration is kept out of the registry and reported as `W006`, rather than silently never firing. Registration itself does not raise, so one app's typo cannot stop the site from booting.
 
@@ -45,7 +46,9 @@ AI_SDK_AUTOMATIONS = {
 }
 ```
 
-Keys are upper-cased and the resolution never raises — a malformed entry is logged and ignored. The resolved value carries which layer decided: `"kill-switch"`, `"db"`, `"settings"` or `"code"`.
+Keys are upper-cased and the resolution never raises — a malformed entry is logged and ignored. `AutomationOut.enabled_source` reports which layer decided: `"kill-switch"`, `"db"`, `"settings"` or `"code"`.
+
+`run_now` raises `AutomationBusy` when the lease is already held, which a router answers as 409. `list_runs` and `get_run` scope to the caller's own runs unless they may manage the automation; a caller with no principal sees none, so an app-level run is never "theirs".
 
 Every layer governs *scheduled* dispatch. Naming one automation and asking for it explicitly — `run_automations --force --automation NAME`, or `POST /automations/{name}/run` — bypasses all of them, including the kill switch, because that is a person rather than the clock. A blanket `--force` does not.
 
@@ -118,7 +121,13 @@ All warnings, never errors: boot must not fail because a background job is misco
 
 `W003` and `W004` only consult code-declared workflows and integrations: the checks are synchronous and must not need a database, so a workflow living only in `WorkflowSettings` cannot be confirmed. `W003`'s message says so rather than asserting the name is wrong.
 
-There is no check for the scheduler itself never having run. The SDK cannot notice its own absence — if the cron entry was never added, no code of ours executes — so wire a dead-man's switch to the most recent `AutomationRun` instead.
+There is no check for the scheduler itself never having run. The SDK cannot notice its own absence — if the cron entry was never added, no code of ours executes — so wire a dead-man's switch to `AutomationService.last_tick_at()` instead.
+
+## Permissions
+
+Domain `PermissionDomain.AUTOMATIONS`, operations `VIEW_AUTOMATION` / `RUN_AUTOMATION` / `MANAGE_AUTOMATION` / `SUBSCRIBE_AUTOMATION`.
+
+`AutomationDefaultPermission` is read and self-subscribe for any authenticated user, run-now and enable/disable for staff — deliberately stricter than integrations for the operator actions, because running or globally enabling an automation acts potentially on every other user. Subscribing only ever touches the caller's own row, so it stays with read. Reading run history is narrower than `VIEW_AUTOMATION`: `list_runs` and `get_run` return only the caller's own runs unless they hold `MANAGE_AUTOMATION`, because a run's `output` is the workflow's result and a subscribed run's result belongs to one person. A run the caller may not see reads as absent rather than forbidden, so a 404 does not confirm an id. Override per-automation with `Automation.permissions`, or globally with `AI_SDK_PERMISSIONS["automations"]`.
 
 ## Extension points
 

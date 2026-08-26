@@ -19,16 +19,12 @@ from django_ai_sdk.automations.registry import get_automation
 from django_ai_sdk.tasks import aget_principal
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from django_ai_sdk.automations.base import Automation
 
 logger = logging.getLogger(__name__)
 
 
 class _MissingWorkflow(Exception):
-    """The named workflow is not registered."""
-
     def __init__(self, name: str) -> None:
         super().__init__(
             f"workflow {name!r} is not registered; declare it in an app's workflows.py"
@@ -49,55 +45,51 @@ async def run_automation(run_id: str) -> dict[str, Any] | None:
         # The run was deleted between enqueue and pickup.
         return None
 
-    # _finish releases the lease, so the cleanup below must know whether it ran.
-    finished = False
-
-    async def finish(**kwargs: Any) -> None:
-        nonlocal finished
-        await _finish(run, **kwargs)
-        finished = True
-
     automation = get_automation(run.name)
-    if automation is None:
-        # The declaration is gone but the queued task survived a deploy.
-        await finish(status=AutomationRun.Status.SKIPPED, skip_reason="no longer declared")
-        return None
-
-    await AutomationRun.objects.filter(id=run.id).aupdate(
-        status=AutomationRun.Status.RUNNING, started_at=timezone.now()
-    )
+    timeout = automation.get_timeout() if automation is not None else 0
 
     try:
+        if automation is None:
+            # The declaration is gone but the queued task survived a deploy.
+            await _finish(
+                run, status=AutomationRun.Status.SKIPPED, skip_reason="no longer declared"
+            )
+            return None
+
+        await AutomationRun.objects.filter(id=run.id).aupdate(
+            status=AutomationRun.Status.RUNNING, started_at=timezone.now()
+        )
+
         blocked = await _blocked_by_integrations(automation)
         if blocked:
-            await finish(status=AutomationRun.Status.SKIPPED, skip_reason=blocked)
+            await _finish(run, status=AutomationRun.Status.SKIPPED, skip_reason=blocked)
             return None
 
         user = await aget_principal(run.user_id, source=f"Automation run {run.id}")
-        outputs = await asyncio.wait_for(
-            _run_workflow(automation, run, user), timeout=automation.get_timeout()
-        )
-        await finish(status=AutomationRun.Status.SUCCEEDED, output=outputs)
+        outputs = await asyncio.wait_for(_run_workflow(automation, run, user), timeout=timeout)
+        await _finish(run, status=AutomationRun.Status.SUCCEEDED, output=outputs)
         return outputs
 
     except _MissingWorkflow as exc:
         # The automation is not broken, its dependency is absent.
-        await finish(status=AutomationRun.Status.SKIPPED, skip_reason=str(exc))
+        await _finish(run, status=AutomationRun.Status.SKIPPED, skip_reason=str(exc))
         return None
-    except TimeoutError as exc:
-        # asyncio.wait_for's own TimeoutError carries no message.
-        await finish(
+    except TimeoutError:
+        # wait_for's TimeoutError carries no message of its own.
+        await _finish(
+            run,
             status=AutomationRun.Status.FAILED,
-            error=str(exc) or f"Timed out after {automation.get_timeout()} seconds",
+            error=f"Timed out after {timeout} seconds",
         )
         raise
     except Exception as exc:
-        await finish(status=AutomationRun.Status.FAILED, error=str(exc))
+        await _finish(run, status=AutomationRun.Status.FAILED, error=str(exc))
         # Re-raise so django-tasks marks its own result FAILED too.
         raise
     finally:
-        # A cancelled task leaves its row RUNNING, so only the lease is dropped here.
-        if run.state and not finished:
+        # The only release site. A cancelled task leaves its row RUNNING, so the lease
+        # is dropped here and the row is what records that it stopped.
+        if run.state:
             await _release_if_dispatch_is_done(run)
 
 
@@ -155,7 +147,7 @@ async def _blocked_by_integrations(automation: Automation) -> str:
         try:
             status = await integrations[name].get_status()
         except Exception:
-            logger.warning("Could not read status for integration %r", name, exc_info=True)
+            logger.exception("Could not read status for integration %r", name)
             return f"{name} status could not be read"
         if status != IntegrationStatus.ACTIVE:
             return f"{name} is {status}"
@@ -170,22 +162,17 @@ async def _finish(
     error: str = "",
     skip_reason: str = "",
 ) -> None:
-    """Write the terminal state, then release the lease if the dispatch is finished."""
-    finished_at = timezone.now()
+    """Write the terminal state. Releasing the lease is run_automation's finally."""
     await AutomationRun.objects.filter(id=run.id).aupdate(
         status=status,
-        output=output if isinstance(output, (dict, list, str, int, float, bool)) else None,
+        output=output,
         error=error[:10000],
         skip_reason=skip_reason[:255],
-        finished_at=finished_at,
+        finished_at=timezone.now(),
     )
-    if run.state:
-        await _release_if_dispatch_is_done(run, finished_at=finished_at)
 
 
-async def _release_if_dispatch_is_done(
-    run: AutomationRun, *, finished_at: datetime | None = None
-) -> None:
+async def _release_if_dispatch_is_done(run: AutomationRun) -> None:
     """Drop the lease once no sibling from the same tick is still in flight.
 
     One claim fans out to one run per principal, so the first finisher freeing it would
@@ -205,7 +192,7 @@ async def _release_if_dispatch_is_done(
     succeeded = await AutomationRun.objects.filter(
         dispatch_id=run.dispatch_id, status=AutomationRun.Status.SUCCEEDED
     ).aexists()
-    await release(run.state, succeeded_at=(finished_at or timezone.now()) if succeeded else None)
+    await release(run.state, succeeded_at=timezone.now() if succeeded else None)
 
 
 __all__ = ["execute_automation", "run_automation"]

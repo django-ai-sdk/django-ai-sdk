@@ -301,6 +301,8 @@ generator, so declare that on the agent (`llm_kwargs`) when streaming through
   circuit breaking and OAuth built in. See [Integrations](#integrations).
 - **Tracing**: Opt-in Haystack tracing persisted to the ORM, with per-thread and
   per-message token accounting. See [Tracing](#tracing).
+- **Automations**: Run agent workflows on a cron schedule, either as the deployment
+  itself or once per user who opted in. You supply the clock.
 - **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
 
 ## Documentation

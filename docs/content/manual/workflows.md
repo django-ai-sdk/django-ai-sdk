@@ -122,6 +122,20 @@ The merged lookups are async because they read the database. `get_declared_workf
 
 `slug` is derived from `name` on first save and suffixed if taken, so two workflows may share a display name. Rows are read fresh on every dispatch, so an admin edit takes effect immediately. A database that cannot be read raises rather than quietly falling back to the code-declared workflows, so an outage fails a run the queue will retry instead of recording it as a workflow that does not exist.
 
+## Triggering on a schedule
+
+A workflow has no opinion about what starts it. To run one on a clock, declare an [automation](/manual/automations/) that names it: the automation resolves *when* and *as whom*, and supplies the input turn.
+
+```python
+class WeeklyTriage(Automation):
+    name = "weekly-triage"
+    cron = "0 9 * * 1"
+    workflow = "weekly-triage"
+    input = "Triage everything since {last_run_at}."
+```
+
+Not a second engine: one executor, one run history. An `AutomationRun` links to the `WorkflowRun` it produced.
+
 ## Running
 
 ```python

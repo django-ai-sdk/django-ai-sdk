@@ -13,12 +13,17 @@ from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.automations.audience import Audience
 from django_ai_sdk.automations.schedule import Cron
+from django_ai_sdk.permissions import Operation, PermissionDomain
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import AnonymousUser
+
     from django_ai_sdk.automations.audience import AudienceResolver
+    from django_ai_sdk.permissions import BasePermission
 
 
 class Automation:
@@ -54,6 +59,9 @@ class Automation:
 
     timeout: int | None = None  # seconds; falls back to AI_SDK_AUTOMATION_TIMEOUT
 
+    permissions: ClassVar[list[type[BasePermission] | BasePermission]] = []
+    domain: PermissionDomain = PermissionDomain.AUTOMATIONS
+
     # Bare `{word}` only: str.format would reach `{name.__class__}` and raise on prose.
     _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -85,6 +93,24 @@ class Automation:
             "name": self.name,
         }
         return self._PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), self.input)
+
+    async def has_perms(
+        self,
+        user: AbstractBaseUser | AnonymousUser | None,
+        operation: Operation = Operation.VIEW_AUTOMATION,
+        *,
+        raise_on_deny: bool = False,
+    ) -> bool:
+        """Whether `user` may see, run or manage this automation."""
+        from django_ai_sdk.permissions import get_automation_permissions
+        from django_ai_sdk.permissions import has_perms as _has_perms
+
+        return await _has_perms(
+            user,
+            operation,
+            permissions=get_automation_permissions(self),
+            raise_on_deny=raise_on_deny,
+        )
 
     def __str__(self) -> str:
         return self.label or self.name or type(self).__name__

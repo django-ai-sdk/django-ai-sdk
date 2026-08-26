@@ -60,7 +60,10 @@ def lease_seconds() -> int:
 
 
 def is_enabled(name: str, *, code_default: bool, db_value: bool | None) -> tuple[bool, str]:
-    """Resolve enabled-ness and report which layer decided it."""
+    """Resolve enabled-ness and report which layer decided it.
+
+    The source is surfaced through AutomationOut.enabled_source.
+    """
     if not automations_enabled():
         return False, "kill-switch"
     if db_value is not None:

@@ -1,4 +1,8 @@
-"""Workflow declarations for the demo application, autodiscovered on startup."""
+"""Workflow declarations for the demo application, autodiscovered on startup.
+
+A workflow declared here is reachable from the chat API, the workflow endpoints, and the
+automations in automations.py that name it.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from .pirate_basic import PirateBasicAgent
 PIRATE = PirateBasicAgent().agent_id
 
 # Open-Meteo needs no API key, so this runs with no credentials configured.
+# The agent id comes from the class, so a typo is an ImportError here.
 register(
     WorkflowDefinition(
         name="harbour-report",
@@ -33,7 +38,8 @@ register(
     )
 )
 
-# No action, so the result is read back from the WorkflowRun.
+# Two steps, the second returning typed fields. No action: the automation running this
+# one is app-level, so its result is recorded on the AutomationRun.
 register(
     WorkflowDefinition(
         name="sailing-verdict",

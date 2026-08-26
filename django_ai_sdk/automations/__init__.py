@@ -28,12 +28,17 @@ from .registry import (
     reset_registry,
 )
 from .schedule import Cron
+from .schemas import AutomationOut, AutomationRunOut
+from .services import AutomationService
 
 __all__ = [
     "Audience",
     "AudienceResolver",
     "Automation",
+    "AutomationOut",
     "AutomationRun",
+    "AutomationRunOut",
+    "AutomationService",
     "AutomationState",
     "AutomationSubscription",
     "Cron",
