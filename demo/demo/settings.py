@@ -278,6 +278,14 @@ AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
 AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
 
 
+# Declared but off, so the demo makes no model calls on a timer. Turn one on here or
+# from the admin.
+AI_SDK_AUTOMATIONS = {
+    "daily-harbour-report": {"ENABLED": False},
+    "weekly-sailing-verdict": {"ENABLED": False},
+}
+
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",

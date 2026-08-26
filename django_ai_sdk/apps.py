@@ -26,9 +26,14 @@ class DjangoAISDKConfig(AppConfig):
         registry.setup()
 
         # After setup(), so a step can name its agent as `MyAgent().agent_id`.
+        # Workflows before automations: an automation's workflow name is checked
+        # against the populated registry.
         autodiscover_modules("workflows")
+        autodiscover_modules("automations")
 
+        from django_ai_sdk.automations.checks import check_automations
         from django_ai_sdk.workflows.checks import check_workflows
 
         # A rejected declaration fails no request, so nothing else would surface it.
         register_check(check_workflows)
+        register_check(check_automations)

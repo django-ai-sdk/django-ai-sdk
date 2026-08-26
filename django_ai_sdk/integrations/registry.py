@@ -152,6 +152,15 @@ async def _db_integrations() -> dict[str, Integration]:
     return result
 
 
+def get_declared_integrations() -> dict[str, Integration]:
+    """Integrations registered by an installed app, keyed by name.
+
+    Synchronous, and therefore code-only: system checks need a view that cannot touch
+    the database. Use get_all_integrations() to include database rows.
+    """
+    return dict(_registry)
+
+
 async def get_all_integrations() -> dict[str, Integration]:
     """Return every registered integration service, keyed by name."""
     _warn_orphaned_config()

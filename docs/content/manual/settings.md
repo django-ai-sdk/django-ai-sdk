@@ -73,6 +73,15 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Extra workflow actions: `{"console_log": "path.to.ConsoleLogAction"}`. Overlaid on the built-in `thread_message`. See [Workflows](/manual/workflows/). |
 
+## Automations
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_AUTOMATIONS` | `{}` | Per-automation overrides: `{"morning-digest": {"CRON": "0 8 * * *", "TIMEZONE": "Europe/Amsterdam", "ENABLED": False}}`. Outranked only by a database row. |
+| `AI_SDK_AUTOMATIONS_ENABLED` | `True` | Global kill switch. `False` stops every automation whatever its own setting says. |
+
+See [Automations](/manual/automations/).
+
 ## Streaming and Titles
 
 | Setting | Default | Purpose |

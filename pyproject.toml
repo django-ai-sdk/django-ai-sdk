@@ -28,6 +28,9 @@ dependencies = [
   "django>=5.2.6,<6.1",
   "haystack-ai>=3.0.0",
   "django-tasks>=0.12.0",
+  # Automations only support cron scheduling, so this is load-bearing for the
+  # `automations` app, not an opt-in extra.
+  "croniter>=6.2",
   # Module-level import in integrations/weather/tools.py, which ships in core, so it
   # cannot live in the optional `mcp` extra alongside the other four importers.
   "httpx>=0.28.0",

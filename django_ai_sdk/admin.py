@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib import admin
 
+from django_ai_sdk.automations.models import AutomationSubscription
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
 
@@ -103,3 +104,18 @@ class WorkflowRunAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
         return False
+
+
+@admin.register(AutomationSubscription)
+class AutomationSubscriptionAdmin(admin.ModelAdmin):
+    """Who receives an Audience.SUBSCRIBED automation.
+
+    Editable, and until an app offers its users a subscribe control it is the only way
+    to put anyone in that audience.
+    """
+
+    list_display = ("name", "user", "enabled", "updated_at")
+    list_filter = ("enabled", "name")
+    search_fields = ("name",)
+    autocomplete_fields = ("user",)
+    readonly_fields = ("id", "created_at", "updated_at")

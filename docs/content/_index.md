@@ -18,5 +18,6 @@ pip install django-ai-sdk
   {{< card link="/integrations" title="Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
   {{< card link="/views-and-routing" title="Views & Routing" icon="link" subtitle="Wire agents to HTTP endpoints" >}}
   {{< card link="/how-it-works" title="How It Works" icon="cube" subtitle="Requests flow through the SDK" >}}
+  {{< card link="/automations" title="Automations" icon="clock" subtitle="Run workflows on a schedule" >}}
   {{< card link="/manual" title="Developer Manual" icon="book-open" subtitle="Internals and contribution guide" >}}
 {{< /cards >}}

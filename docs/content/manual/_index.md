@@ -51,6 +51,7 @@ django_ai_sdk/
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
 ├── workflows/            # definition, executor, actions
+├── automations/          # declaration, schedule, audience, runner
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
@@ -109,4 +110,5 @@ django_ai_sdk/
   {{< card link="memories/" title="Memories" icon="folder" subtitle="MemoryService, documents, thread linking" >}}
   {{< card link="files/" title="Files" icon="document" subtitle="Processors, transforms, upload lifecycle" >}}
   {{< card link="workflows/" title="Workflows" icon="server" subtitle="Definition schema, models, executor" >}}
+  {{< card link="automations/" title="Automations" icon="clock" subtitle="Schedule, audience, lease, checks" >}}
 {{< /cards >}}

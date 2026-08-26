@@ -9,6 +9,10 @@ from .agents.models import (
 
 # Conversation models from chats app
 from .artifacts.models import Artifact
+
+# Django only imports `<app>/models.py`, so this import is what registers the
+# automations models.
+from .automations.models import AutomationRun, AutomationState, AutomationSubscription
 from .conversation.models import (
     Message,
     Thread,
@@ -28,21 +32,20 @@ from .memories.models import (
 from .workflows.models import WorkflowSettings
 
 __all__ = [
-    # Conversation models
+    "AgentGroup",
+    "AgentSettings",
+    "AgentUser",
     "Artifact",
-    "Thread",
-    "Message",
-    # Memories models
+    "AutomationRun",
+    "AutomationState",
+    "AutomationSubscription",
     "Entry",
     "EntryDocument",
     "Memory",
     "MemoryGroup",
     "MemoryUser",
+    "Message",
+    "Thread",
     "ThreadMemory",
-    # Agent Settings
-    "AgentGroup",
-    "AgentSettings",
-    "AgentUser",
-    # Workflows
     "WorkflowSettings",
 ]
