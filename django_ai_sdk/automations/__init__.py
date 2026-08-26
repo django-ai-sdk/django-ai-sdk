@@ -1,7 +1,8 @@
 """Scheduled workflows: run agent work on a clock, for a resolved audience.
 
-An automation says when it runs, as whom, and which workflow; the deployment provides
-the tick. Declare them in any installed app's `automations.py`.
+An automation says when it runs, as whom, and which workflow. The SDK claims and
+dispatches due work; the deployment provides the tick (`manage.py run_automations`) and a
+django-tasks worker. Declare them in any installed app's `automations.py`.
 
     from django_ai_sdk.automations import Audience, Automation, register
 

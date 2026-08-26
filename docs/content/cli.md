@@ -4,7 +4,7 @@ type: docs
 weight: 7
 ---
 
-The SDK ships two management commands. **`warmup_rag`** pre-builds RAG pipelines so the first chat request doesn't pay the indexing cost, and **`refresh_integrations`** refreshes MCP integration tool lists.
+The SDK ships three management commands. **`warmup_rag`** pre-builds RAG pipelines so the first chat request doesn't pay the indexing cost, **`run_automations`** dispatches the automations that are due, and **`refresh_integrations`** refreshes MCP integration tool lists.
 
 ## `warmup_rag`: Pre-warm RAG Indexes
 
@@ -38,7 +38,7 @@ python manage.py warmup_rag --memory <memory-uuid>
 python manage.py warmup_rag --force-rebuild
 ```
 
-## When to Use It
+## When to Warm Up
 
 - **Before deploying a new RAG setup**: so indexes are ready when traffic arrives.
 - **After document changes**: to keep retrieval current.
@@ -57,6 +57,38 @@ Agent.clear_rag_cache(agent)
 
 See the [RAG section of the Agents guide](/agents/#lifecycle) for the full lifecycle.
 
+## `run_automations`: Dispatch Due Automations
+
+```bash
+python manage.py run_automations
+```
+
+One pass over every registered automation: claim the ones that are due, create a run per resolved principal, and hand each to the task backend. It never executes a workflow itself, so a [django-tasks](https://pypi.org/project/django-tasks/) worker has to be running too.
+
+**Options:**
+
+| Option | Description |
+| --- | --- |
+| `--automation NAME` | Only consider this automation |
+| `--force` | Dispatch regardless of whether it is due |
+| `--dry-run` | Report what would be dispatched without writing anything |
+| `--loop [SECONDS]` | Keep ticking every SECONDS (default 60) instead of exiting; development only |
+
+**Examples:**
+
+```bash
+# One pass, the way a crontab entry runs it
+python manage.py run_automations
+
+# Keep ticking in a development shell
+python manage.py run_automations --loop 60
+
+# Dispatch one automation by hand, ignoring its schedule
+python manage.py run_automations --force --automation morning-digest
+```
+
+The [Automations guide](/automations/#running-the-scheduler) covers what `--force` overrides, why the tick is safe to run on several hosts at once, and how to see why an automation did not fire.
+
 {{< callout type="info" >}}
-Contributor? The [CLI Implementation](/manual/cli/) manual page documents how the command works internally.
+Contributor? The [CLI Implementation](/manual/cli/) manual page documents how the commands work internally.
 {{< /callout >}}

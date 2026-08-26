@@ -6,7 +6,7 @@ weight: 116
 
 Internals of the `warmup_rag` management command. User-facing usage lives in the [CLI guide](/cli/).
 
-File: `django_ai_sdk/management/commands/warmup_rag.py`. The SDK also ships `refresh_integrations` (`django_ai_sdk/integrations/mcp/management/commands/refresh_integrations.py`) for MCP integrations.
+File: `django_ai_sdk/management/commands/warmup_rag.py`. The SDK also ships `run_automations` (`django_ai_sdk/management/commands/run_automations.py`, documented under [Automations](/manual/automations/#the-tick)) and `refresh_integrations` (`django_ai_sdk/integrations/mcp/management/commands/refresh_integrations.py`) for MCP integrations.
 
 ## Overview
 

@@ -51,6 +51,14 @@ def automations_enabled() -> bool:
     return bool(resolve_setting("AI_SDK_AUTOMATIONS_ENABLED", True))
 
 
+def lease_seconds() -> int:
+    """How long a claimed automation stays locked, AI_SDK_AUTOMATION_LEASE.
+
+    The bound on how long a crashed worker blocks the next run.
+    """
+    return int(resolve_setting("AI_SDK_AUTOMATION_LEASE", 3600))
+
+
 def is_enabled(name: str, *, code_default: bool, db_value: bool | None) -> tuple[bool, str]:
     """Resolve enabled-ness and report which layer decided it."""
     if not automations_enabled():
@@ -68,4 +76,5 @@ __all__ = [
     "configured_names",
     "get_automation_config",
     "is_enabled",
+    "lease_seconds",
 ]

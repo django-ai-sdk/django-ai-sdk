@@ -279,7 +279,7 @@ AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
 
 
 # Declared but off, so the demo makes no model calls on a timer. Turn one on here or
-# from the admin.
+# from the admin, and run `manage.py run_automations --loop 60`.
 AI_SDK_AUTOMATIONS = {
     "daily-harbour-report": {"ENABLED": False},
     "weekly-sailing-verdict": {"ENABLED": False},

@@ -56,7 +56,7 @@ django_ai_sdk/
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
 ├── tracing/              # opt-in Haystack spans persisted to the ORM
-└── management/commands/  # warmup_rag
+└── management/commands/  # warmup_rag, run_automations
 ```
 
 ## Core Concepts

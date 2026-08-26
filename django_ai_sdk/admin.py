@@ -3,8 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.contrib import admin
+from django.utils import timezone
 
-from django_ai_sdk.automations.models import AutomationSubscription
+from django_ai_sdk.automations.models import (
+    AutomationRun,
+    AutomationState,
+    AutomationSubscription,
+)
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
 
@@ -51,6 +56,82 @@ class ThreadAdmin(admin.ModelAdmin):
     list_display = ("id", "title", "user", "message_count", "created_at")
     search_fields = ("title",)
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+class AutomationRunInline(admin.TabularInline):
+    """Recent runs, read-only: a run is a record of what happened."""
+
+    model = AutomationRun
+    extra = 0
+    can_delete = False
+    fields = ("scheduled_for", "status", "trigger", "user", "finished_at", "skip_reason")
+    readonly_fields = fields
+    ordering = ("-scheduled_for",)
+
+    def has_add_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+
+@admin.register(AutomationState)
+class AutomationStateAdmin(admin.ModelAdmin):
+    """The scheduler's cursor.
+
+    Only `enabled` and `next_run_at` are editable; a hand-edited lease would let two
+    copies of one payload run at once.
+    """
+
+    list_display = (
+        "name",
+        "enabled",
+        "schedule_repr",
+        "next_run_at",
+        "last_success_at",
+        "is_locked",
+    )
+    list_filter = ("enabled",)
+    search_fields = ("name",)
+    fields = (
+        "id",
+        "name",
+        "enabled",
+        "schedule_repr",
+        "next_run_at",
+        "last_dispatched_at",
+        "last_success_at",
+        "locked_until",
+    )
+    readonly_fields = (
+        "id",
+        "name",
+        "schedule_repr",
+        "last_dispatched_at",
+        "last_success_at",
+        "locked_until",
+    )
+    inlines = (AutomationRunInline,)
+
+    @admin.display(boolean=True, description="Running")
+    def is_locked(self, obj: AutomationState) -> bool:
+        return bool(obj.locked_until and obj.locked_until > timezone.now())
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        # Bootstrapped by the tick; a row typed in here would name nothing.
+        return False
+
+
+@admin.register(AutomationRun)
+class AutomationRunAdmin(admin.ModelAdmin):
+    list_display = ("name", "status", "trigger", "user", "scheduled_for", "finished_at")
+    list_filter = ("status", "trigger", "name")
+    search_fields = ("name", "error", "skip_reason")
+    date_hierarchy = "scheduled_for"
+    readonly_fields = tuple(f.name for f in AutomationRun._meta.fields)
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
 
 
 class WorkflowRunStepInline(admin.TabularInline):

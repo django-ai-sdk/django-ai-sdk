@@ -4,7 +4,7 @@ type: docs
 weight: 8
 ---
 
-**Automations** run agent work on a schedule. An automation says *when* it is due, *as whom* it acts, and *which workflow* to run.
+**Automations** run agent work on a schedule. An automation says *when* it is due, *as whom* it acts, and *which workflow* to run — and the SDK claims it, resolves the audience, and hands it to your task worker.
 
 Work starts three ways: someone asks for it, an event happens, or the clock says so. Chat covers the first. Automations cover the third.
 
@@ -125,6 +125,33 @@ AI_SDK_WORKFLOW_ACTIONS = {"slack_post": "apps.alerts.actions.SlackPostAction"}
 
 An action is a class with an `async def execute(self, payload, context)`. The context carries the run's user, the agent that produced the payload, and where it came from.
 
+## Running the scheduler
+
+**The SDK owns no clock.** Your deployment already has one — a crontab, a container CronJob, a platform scheduler, a celery beat entry — and already has opinions about supervision, restarts and log shipping. Django's own Tasks framework ships no worker for the same reason.
+
+```
+* * * * *  /path/to/manage.py run_automations       # production
+manage.py run_automations --loop 60                  # local development only
+```
+
+You also need a [django-tasks](https://pypi.org/project/django-tasks/) worker, because the tick only claims and enqueues; it never executes a workflow itself. That split is what stops a slow automation from delaying the tick and a crashed workflow from taking the scheduler with it.
+
+`run_automations` is idempotent and safe to run concurrently on as many hosts as you like — each automation is claimed by a single conditional `UPDATE`, so overlapping ticks cannot double-dispatch. It is cheap when nothing is due, so per-minute is the intended cadence.
+
+While developing a single automation you usually want neither: dispatch it by hand and watch what comes out.
+
+```
+manage.py run_automations --force --automation morning-digest
+```
+
+Naming one automation and forcing it ignores due-ness, whether it is enabled, and the global kill switch — that combination is a person asking for this run, not the schedule firing, and it is exactly what `POST /automations/{name}/run` does. A *blanket* `--force` still respects the kill switch, so an environment that is deliberately quiet cannot be set going by one mistyped command. Either way the lease is taken, so a forced run cannot start a second copy of one already in flight.
+
+## Why isn't it running?
+
+`manage.py check` reports the answerable cases at deploy time, as warnings that never block boot: an unusable cron expression, an unknown timezone, a workflow or integration nothing declares, and settings left behind for an automation that no longer exists.
+
+`GET /automations/` answers the rest at runtime — whether an automation is enabled and which layer decided that, when it next runs, and how the last run went.
+
 ## Configuration
 
 ```python
@@ -136,3 +163,14 @@ AI_SDK_AUTOMATIONS_ENABLED = True    # global kill switch
 ```
 
 Enabled-ness resolves **database row → settings → class attribute**, and the resolved value carries which layer decided so "why is this off?" has an answer. The database row is what an admin toggle writes; settings is what a deployer pins; the class is the shipped default.
+
+## Limitations
+
+Worth knowing before you depend on this:
+
+- **Delivery is at-least-once.** A worker that dies after the enqueue gets its run re-dispatched once the lease expires. Write idempotent payloads. This is a property of every queue that survives crashes.
+- **A run is one-shot.** There is no retry: for a recurring automation, the next occurrence *is* the retry. A failure is recorded on the run with its error.
+- **Granularity is whatever your clock gives you** — one minute, realistically. Sub-minute schedules are not honoured.
+- **Missed windows are not replayed.** A schedule that fell behind runs once, stamped with the window it missed, and then resumes at the next future occurrence. An outage does not produce a burst of catch-up runs.
+- **Scheduling arbitrary Python is out of scope**, by design. Use a management command.
+- **The dead-man's switch is yours to wire.** The most recent `AutomationRun` is what a health endpoint should watch; nothing pages you when a working scheduler stops.

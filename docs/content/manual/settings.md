@@ -79,6 +79,8 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_AUTOMATIONS` | `{}` | Per-automation overrides: `{"morning-digest": {"CRON": "0 8 * * *", "TIMEZONE": "Europe/Amsterdam", "ENABLED": False}}`. Outranked only by a database row. |
 | `AI_SDK_AUTOMATIONS_ENABLED` | `True` | Global kill switch. `False` stops every automation whatever its own setting says. |
+| `AI_SDK_AUTOMATION_TIMEOUT` | `900` | Seconds before a run is abandoned. `Automation.timeout` overrides per automation. |
+| `AI_SDK_AUTOMATION_LEASE` | `3600` | Seconds a claimed automation stays locked. The upper bound on how long a crashed worker blocks the next run, so set it comfortably above the slowest payload. |
 
 See [Automations](/manual/automations/).
 
