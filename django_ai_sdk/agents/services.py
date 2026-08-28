@@ -221,7 +221,7 @@ class AgentService(PermissionsMixin):
         """Return agent info if user has VIEW_AGENT permission."""
         agent = await cls.get(agent_id)
         await cls.has_perms(
-            user, Operation.VIEW_AGENT, obj=getattr(agent, "_config", None), agent=agent
+            user, Operation.VIEW_AGENT, obj=agent.config if agent.is_runtime else None, agent=agent
         )
         return agent.info()
 
@@ -238,7 +238,7 @@ class AgentService(PermissionsMixin):
         Integration itself (`.kind`/`.get_tool_names()`).
         """
         await cls.has_perms(
-            user, Operation.VIEW_AGENT, obj=getattr(agent, "_config", None), agent=agent
+            user, Operation.VIEW_AGENT, obj=agent.config if agent.is_runtime else None, agent=agent
         )
 
         integration_names: list[str] = list(getattr(agent, "integrations", []) or [])

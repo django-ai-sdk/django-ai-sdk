@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
@@ -148,8 +149,8 @@ class Agent(ABC, AgentInfoMixin):
     # System prompt instructions for the agent.
     instructions: Prompt = prompt("You are a helpful agent.")
 
-    #: None or an empty list means "use the AGENT domain default"; a non-empty list
-    #: overrides it entirely. Disabling every check is [AllowAll], written out.
+    # Permission classes used to gate access to this agent's operations.
+    # None or empty means no permissions are required.
     permissions: list[type[BasePermission]] | None = None
 
     # Default list of connected memories.
@@ -295,6 +296,16 @@ class Agent(ABC, AgentInfoMixin):
                 asyncio.get_running_loop().create_task(self.rag_provider.warmup(self, None))
             except RuntimeError:
                 pass  # No running loop (e.g. management command) — warmup skipped
+
+    @property
+    def is_runtime(self) -> bool:
+        """Return false by default, override in subclasses that are runtime agents."""
+        return False
+
+    @property
+    def config(self) -> AgentSettings | None:
+        """Return the AgentSettings for runtime agents"""
+        return None
 
     async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
         """

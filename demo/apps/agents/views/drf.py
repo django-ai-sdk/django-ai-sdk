@@ -368,7 +368,7 @@ class AgentToolsAPIView(APIView):
             await AgentService.has_perms(
                 request.user,
                 Operation.VIEW_AGENT,
-                obj=getattr(agent, "_config", None),
+                obj=agent.config if agent.is_runtime else None,
                 agent=agent,
             )
         except ValueError as e:

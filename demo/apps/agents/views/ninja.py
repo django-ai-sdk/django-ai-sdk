@@ -866,7 +866,7 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
         await AgentService.has_perms(
             request.user,
             Operation.VIEW_AGENT,
-            obj=getattr(agent, "_config", None),
+            obj=agent.config if agent.is_runtime else None,
             agent=agent,
         )
     except ValueError as e:
