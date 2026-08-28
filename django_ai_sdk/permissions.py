@@ -366,23 +366,23 @@ class AgentDefaultPermission(BasePermission):
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if operation in _USE_OPERATIONS:
-            return await self._can_use(user, operation, **kwargs)
+            if "agent" not in kwargs:
+                return False
+
+            agent = kwargs["agent"]
+            config = agent.config if agent.is_runtime else None
+
+            if config is None:
+                return True  # code-related, so no gate
+            if config.is_public:
+                return True
+            if user is None or not bool(user.is_authenticated):
+                return False
+
+            return await self._membership_allows(user, operation, config)
         if operation not in self.AGENT_OPS:
             return True
         return user is not None and bool(user.is_authenticated)
-
-    async def _can_use(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
-        if "agent" not in kwargs:
-            return False
-        config = getattr(kwargs["agent"], "_config", None)
-        if config is None:
-            # Code-declared agent: no row to gate on.
-            return True
-        if config.is_public:
-            return True
-        if user is None or not bool(user.is_authenticated):
-            return False
-        return await self._membership_allows(user, operation, config)
 
     async def _membership_allows(self, user: UserType, operation: Operation, config: Any) -> bool:
         from django_ai_sdk.agents.models import AgentGroup, AgentUser

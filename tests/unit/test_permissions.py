@@ -1431,7 +1431,7 @@ class TestAgentDefaultPermissionUse:
 
         outsider = await self._user("registry")
         allowed = await AgentDefaultPermission().has_permission(
-            outsider, Operation.CHAT, agent=MagicMock(spec=[])
+            outsider, Operation.CHAT, agent=MagicMock(spec=[], is_runtime=False)
         )
         assert allowed is True
 
