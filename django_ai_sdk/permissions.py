@@ -319,13 +319,30 @@ class MemoryDefaultPermission(BasePermission):
         return False
 
 
+# Not a class attribute: get_object_permissions_map() auto-discovers upper-case
+# frozensets as READ/WRITE/MANAGE-style tiers, and this is dispatch, not a tier.
+_USE_OPERATIONS: frozenset[Operation] = frozenset(
+    {
+        Operation.CHAT,
+        Operation.VIEW_THREAD,
+        Operation.UPLOAD_FILE,
+        Operation.VIEW_FILE,
+        Operation.DELETE_FILE,
+    }
+)
+
+
 class AgentDefaultPermission(BasePermission):
-    """Three-tier permission for runtime agents.
+    """Three-tier permission for agents.
 
     - Manager (can_manage=True): full access to update/delete.
     - Owner (can_manage=False): can view and use the agent.
     - Group members: can view and use the agent.
+    - Public (is_public on the row): read and use, never manage.
     - Anonymous: blocked for agent ops, pass-through for everything else.
+
+    Administering an agent carries the row as `obj`; using one has no such object,
+    so there the row arrives as the `agent` keyword the agent services pass.
     """
 
     READ: frozenset[Operation] = frozenset(
@@ -348,9 +365,33 @@ class AgentDefaultPermission(BasePermission):
     AGENT_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        if operation in _USE_OPERATIONS:
+            if "agent" not in kwargs:
+                return False
+
+            agent = kwargs["agent"]
+            config = agent.config if agent.is_runtime else None
+
+            if config is None:
+                return True  # code-related, so no gate
+            if config.is_public:
+                return True
+            if user is None or not bool(user.is_authenticated):
+                return False
+
+            return await self._membership_allows(user, operation, config)
         if operation not in self.AGENT_OPS:
             return True
         return user is not None and bool(user.is_authenticated)
+
+    async def _membership_allows(self, user: UserType, operation: Operation, config: Any) -> bool:
+        from django_ai_sdk.agents.models import AgentGroup, AgentUser
+
+        user_entry = await AgentUser.objects.filter(agent=config, user=user).afirst()
+        if user_entry is not None and (operation not in self.MANAGE or user_entry.can_manage):
+            return True
+        group_entry = await AgentGroup.objects.filter(agent=config, group__user=user).afirst()
+        return group_entry is not None and (operation not in self.MANAGE or group_entry.can_manage)
 
     async def has_object_permission(
         self,
@@ -365,24 +406,11 @@ class AgentDefaultPermission(BasePermission):
         if not isinstance(obj, AgentSettings):
             return True
 
+        if operation in self.READ and obj.is_public:
+            return True
         if user is None or not bool(user.is_authenticated):
             return False
-
-        # Check direct user membership
-        from django_ai_sdk.agents.models import AgentUser
-
-        user_entry = await AgentUser.objects.filter(agent=obj, user=user).afirst()
-        if user_entry is not None and (operation not in self.MANAGE or user_entry.can_manage):
-            return True
-
-        # Check group membership
-        from django_ai_sdk.agents.models import AgentGroup
-
-        group_entry = await AgentGroup.objects.filter(agent=obj, group__user=user).afirst()
-        if group_entry is not None and (operation not in self.MANAGE or group_entry.can_manage):
-            return True
-
-        return False
+        return await self._membership_allows(user, operation, obj)
 
 
 class IntegrationDefaultPermission(BasePermission):
@@ -516,14 +544,14 @@ def ensure_permission_instance(
 
 
 def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
-    """Resolve perms for an agent.
+    """`agent.permissions` if non-empty, else the AGENT domain default.
 
-    Resolution:
-    1. agent.permissions if set (per-agent override)
-    2. Domain default for AGENT (fallback)
+    An empty list falls back rather than disabling every check, matching
+    get_integration_permissions and get_automation_permissions. An agent that really
+    wants no gating says so with [AllowAll].
     """
     perms = getattr(agent, "permissions", None) if agent is not None else None
-    if perms is not None:
+    if perms:
         return perms
     return get_domain_permissions(PermissionDomain.AGENT)
 

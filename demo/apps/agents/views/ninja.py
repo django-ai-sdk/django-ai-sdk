@@ -12,7 +12,7 @@ from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import ObjectPermissions, PermissionDenied
+from django_ai_sdk.permissions import ObjectPermissions, Operation, PermissionDenied
 from django_ai_sdk.storage.schemas import (
     ThreadInfo,  # noqa: TC002 — needed at runtime for Pydantic schema
 )
@@ -857,14 +857,22 @@ async def get_agent_info(request: HttpRequest, agent_id: str) -> Any:
 
 @router.get(
     "/agents/{agent_id}/tools/",
-    response={200: ToolsResponse, 404: Error},
+    response={200: ToolsResponse, 403: Error, 404: Error},
     operation_id="get_agent_tools",
 )
 async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
     try:
         agent = await AgentService.get(agent_id)
+        await AgentService.has_perms(
+            request.user,
+            Operation.VIEW_AGENT,
+            obj=agent.config if agent.is_runtime else None,
+            agent=agent,
+        )
     except ValueError as e:
         return 404, Error(message=str(e))
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
 
     tools_data = []
     try:

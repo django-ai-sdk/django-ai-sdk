@@ -21,7 +21,7 @@ from django_ai_sdk.agents.services import (
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
     create_thread,
@@ -365,8 +365,16 @@ class AgentToolsAPIView(APIView):
     async def get(self, request: Request, agent_id: str) -> Response:
         try:
             agent = await AgentService.get(agent_id)
+            await AgentService.has_perms(
+                request.user,
+                Operation.VIEW_AGENT,
+                obj=agent.config if agent.is_runtime else None,
+                agent=agent,
+            )
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
 
         tools_data = []
         try:

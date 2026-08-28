@@ -34,6 +34,7 @@ from django_ai_sdk.memories.tasks import PIPELINE_TIMEOUT_SECONDS, process_docum
 from django_ai_sdk.permissions import (
     ConflictError,
     Operation,
+    PermissionDenied,
     PermissionDomain,
     PermissionsMixin,
     get_agent_permissions,
@@ -759,7 +760,10 @@ class MemoryService(PermissionsMixin):
             Operation.UPLOAD_FILE,
             thread,
             permissions=get_agent_permissions(agent),
+            agent=agent,
         )
+        if not agent.file_upload:
+            raise PermissionDenied("Not permitted to upload files")
         memory = await cls.get_or_create_thread_file_memory(thread_id)
 
         file_name = file.name or ""
@@ -829,6 +833,7 @@ class MemoryService(PermissionsMixin):
             Operation.VIEW_FILE,
             thread,
             permissions=get_agent_permissions(agent),
+            agent=agent,
         )
 
         if not thread.file_memory_id:
@@ -860,6 +865,7 @@ class MemoryService(PermissionsMixin):
             Operation.DELETE_FILE,
             thread,
             permissions=get_agent_permissions(agent),
+            agent=agent,
         )
         if not thread.file_memory_id:
             return
@@ -968,6 +974,7 @@ class MemoryService(PermissionsMixin):
                 Operation.UPLOAD_FILE,
                 thread,
                 permissions=get_agent_permissions(agent),
+                agent=agent,
             )
         else:
             await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
@@ -1035,6 +1042,7 @@ class MemoryService(PermissionsMixin):
                 Operation.UPLOAD_FILE,
                 thread,
                 permissions=get_agent_permissions(agent),
+                agent=agent,
             )
         else:
             await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)

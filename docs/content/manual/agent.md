@@ -38,7 +38,7 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 | `max_history` | `None` | Cap on messages sent to the model |
 | `response_format` | `None` | Pydantic model for structured `run()` output |
 | `title_generation` | `True` | Auto-generate thread titles |
-| `permissions` | `[AllowAll]` | Permission classes gating operations |
+| `permissions` | `None` | Permission classes gating operations; `None` or `[]` uses the `agent` domain default |
 | `warmup_on_init` | `False` | Warm up RAG on instantiation |
 | `hidden` / `abstract` | `False` | Registry behavior flags |
 

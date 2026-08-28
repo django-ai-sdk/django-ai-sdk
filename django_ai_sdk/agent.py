@@ -20,11 +20,11 @@ from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sa
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
-    AllowAll,
     BasePermission,
     Operation,
     check_object_permissions,
     check_permissions,
+    get_agent_permissions,
 )
 from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
@@ -149,7 +150,8 @@ class Agent(ABC, AgentInfoMixin):
     instructions: Prompt = prompt("You are a helpful agent.")
 
     # Permission classes used to gate access to this agent's operations.
-    permissions: list[type[BasePermission]] = [AllowAll]
+    # None or empty means no permissions are required.
+    permissions: list[type[BasePermission]] | None = None
 
     # Default list of connected memories.
     memories: list[str] = []
@@ -294,6 +296,16 @@ class Agent(ABC, AgentInfoMixin):
                 asyncio.get_running_loop().create_task(self.rag_provider.warmup(self, None))
             except RuntimeError:
                 pass  # No running loop (e.g. management command) — warmup skipped
+
+    @property
+    def is_runtime(self) -> bool:
+        """Return false by default, override in subclasses that are runtime agents."""
+        return False
+
+    @property
+    def config(self) -> AgentSettings | None:
+        """Return the AgentSettings for runtime agents"""
+        return None
 
     async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
         """
@@ -673,7 +685,9 @@ class Agent(ABC, AgentInfoMixin):
         """
         logger.debug(f"Fetching history for thread: {thread_id}")
 
-        await check_permissions(user, Operation.VIEW_THREAD, self.permissions)
+        await check_permissions(
+            user, Operation.VIEW_THREAD, get_agent_permissions(self), agent=self
+        )
 
         storage = await self.get_storage_adapter(thread_id)
 
@@ -685,7 +699,9 @@ class Agent(ABC, AgentInfoMixin):
         if not thread_info:
             raise ValueError(f"Thread not found: {thread_id}")
 
-        await check_object_permissions(user, Operation.VIEW_THREAD, thread_info, self.permissions)
+        await check_object_permissions(
+            user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
+        )
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
@@ -733,7 +749,7 @@ class Agent(ABC, AgentInfoMixin):
             f"thread_id={thread_id}, user={user}"
         )
 
-        await check_permissions(user, Operation.CHAT, self.permissions)
+        await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
@@ -786,7 +802,9 @@ class Agent(ABC, AgentInfoMixin):
         if thread_id:
             thread = await ThreadService.get_thread(thread_id, user=user)
             if thread:
-                await check_object_permissions(user, Operation.CHAT, thread, self.permissions)
+                await check_object_permissions(
+                    user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
+                )
             if self.title_generation and thread and not thread.title:
                 title = await generate_thread_title(
                     agent=self, messages=messages, thread_id=thread_id, user=user

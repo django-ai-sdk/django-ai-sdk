@@ -50,6 +50,14 @@ class RuntimeAgent(Agent):
         super().__init__()
 
     @property
+    def is_runtime(self) -> bool:
+        return True
+
+    @property
+    def config(self) -> AgentSettings:
+        return self._config
+
+    @property
     def agent_id(self) -> str:
         return str(self._config.id)
 
