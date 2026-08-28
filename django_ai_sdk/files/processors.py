@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import IO, Any, ClassVar, Protocol
 
 import aiofiles
+import anydoc
 import puremagic
 from django.conf import settings
 from django.core.files.base import File
@@ -231,3 +232,75 @@ class XlsxFileProcessor(BaseBinaryFileProcessor):
             for row in sheet.iter_rows(values_only=True):
                 rows.append(" | ".join(str(c) if c is not None else "" for c in row))
         return "\n".join(rows)
+
+
+class AnyDocFileProcessor(BaseFileProcessor):
+    """Converts many document formats to Markdown using anydoc."""
+
+    step: ClassVar[str | None] = "anydoc"
+
+    ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.oasis.opendocument.presentation",
+        "application/rtf",
+        "application/epub+zip",
+        "text/csv",
+        "application/pdf",
+    )
+
+    EXTENSIONS: ClassVar[tuple[str, ...]] = (
+        ".doc",
+        ".docx",
+        ".docm",
+        ".ppt",
+        ".pps",
+        ".pot",
+        ".pptx",
+        ".pptm",
+        ".ppsx",
+        ".ppsm",
+        ".xls",
+        ".xlsx",
+        ".xlsm",
+        ".xlsb",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".rtf",
+        ".epub",
+        ".csv",
+        ".pdf",
+    )
+
+    async def is_valid(self, file: FileSource) -> bool:
+        """Validate by extension."""
+        name = get_file_name(file)
+        if not name:
+            return False
+
+        # Check if the file extension is in the allowed list
+        return any(name.lower().endswith(ext) for ext in self.EXTENSIONS)
+
+    async def run(self, file: FileSource) -> str | None:
+        data = await read_aio_bytes(file)
+        if data is None:
+            return None
+        name = get_file_name(file)
+        return await asyncio.to_thread(self._extract_text, data, name)
+
+    @staticmethod
+    def _extract_text(data: bytes, name: str | None) -> str | None:
+
+        fmt: str | None = anydoc.format_from_path(name) if name else None
+
+        try:
+            return anydoc.to_markdown_bytes(data, fmt) if fmt else anydoc.to_markdown_bytes(data)
+        except anydoc.ConvertError:
+            return None

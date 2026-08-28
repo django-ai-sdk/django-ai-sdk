@@ -61,7 +61,12 @@ haystack = [
 ]
 mcp = ["mcp-haystack>=1.4.1", "authlib>=1.7.2"]
 restframework = ["djangorestframework>=3.17.1"]
-files = ["python-docx>=1.2.0", "python-pptx>=1.0.2", "openpyxl>=3.1.5"]
+files = [
+  "firecrawl-anydoc>=0.2.4",
+  "openpyxl>=3.1.5",
+  "python-docx>=1.2.0",
+  "python-pptx>=1.0.2",
+]
 [dependency-groups]
 dev = [
   "django-ninja>=1.6.2",
