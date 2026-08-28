@@ -3,6 +3,7 @@ from __future__ import annotations
 from django_ai_sdk.files.common import UploadSettings, get_upload_settings
 from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult, parse_data
 from django_ai_sdk.files.processors import (
+    AnyDocFileProcessor,
     BaseBinaryFileProcessor,
     BaseFileProcessor,
     CSVFileProcessor,
@@ -20,6 +21,7 @@ from django_ai_sdk.files.transforms import (
 )
 
 __all__ = [
+    "AnyDocFileProcessor",
     "BaseBinaryFileProcessor",
     "BaseFileProcessor",
     "BaseTransform",
