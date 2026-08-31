@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.agents import Agent
+from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
 
@@ -32,6 +33,7 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.tracing import bind as bind_trace
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -86,6 +88,13 @@ def get_error_chunk(e: Exception) -> MessageChunk:
         type="error",
         content={"error_message": str(e), "error_type": type(e).__name__},
     )
+
+
+# TODO: remove when SDK generators land
+def _request_usage_reporting(generator: Any) -> None:
+    """Temporary: report token usage on a streamed response."""
+    if isinstance(generator, OpenAIChatGenerator):
+        generator.generation_kwargs.setdefault("stream_options", {"include_usage": True})
 
 
 class Run:
@@ -200,6 +209,7 @@ class Stream:
         self.agent_component = None
         self.model_name = None
 
+        _request_usage_reporting(generator)
         if self.first_component:
             component = pipeline.get_component(self.first_component)
             if isinstance(component, Agent):
@@ -207,6 +217,7 @@ class Stream:
                 if hasattr(component, "chat_generator"):
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
+                    _request_usage_reporting(cg)
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Convert internal messages to Haystack ChatMessage format."""
@@ -291,9 +302,7 @@ class Stream:
                 messages=haystack_messages, streaming_callback=streaming_callback
             )
         else:
-            coro = self.pipeline.run_async(
-                {"messages": haystack_messages}, streaming_callback=streaming_callback
-            )
+            coro = self.pipeline.run_async({"messages": haystack_messages})
         return asyncio.create_task(coro)
 
     async def get_events(
@@ -468,7 +477,11 @@ class Stream:
         try:
             yield MessageStartEvent(message_id=message_id)
 
-            pipeline_task = self.get_task(haystack_messages, streaming_callback)
+            # take snapshots of current contextvars
+            with bind_trace(
+                thread_id=getattr(self.storage_adapter, "thread_id", None), message_id=message_id
+            ):
+                pipeline_task = self.get_task(haystack_messages, streaming_callback)
             pipeline_task.add_done_callback(lambda _: queue.put_nowait(_SENTINEL))
 
             async for event in self.get_events(queue, stream_writer):
@@ -477,9 +490,6 @@ class Stream:
             try:
                 await self.get_pipeline_result(pipeline_task, stream_writer)
             except Exception as pipeline_error:
-                # Don't f-string `pipeline_error`: its text can contain braces,
-                # which would crash this logging call itself (see suggestions
-                # generator for the same fix and rationale).
                 logger.error("Pipeline task failed: {}", pipeline_error, exc_info=True)
                 if stream_writer:
                     stream_writer.add_chunk(get_error_chunk(pipeline_error))

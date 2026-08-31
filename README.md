@@ -187,6 +187,113 @@ the OAuth callback, which must sit at a fixed URL:
 (path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),)
 ```
 
+## Tracing
+
+Every Haystack span of a run — the agent, each step, each LLM call, each tool
+call — persisted as a `Trace` row and linked to the `Thread` and `Message` it was
+produced for. Opt in the same way Haystack itself treats tracing: installing the
+SDK changes nothing until you add the app.
+
+```python
+INSTALLED_APPS = [
+    "django_ai_sdk",
+    "django_ai_sdk.tracing",
+]
+```
+
+That's the whole switch. The app ships the model plus migrations, and its
+`AppConfig.ready()` enables the tracer at startup. If you'd rather call it
+yourself, `tracing.enable_tracing(DefaultTracer())` swaps Haystack's single
+global tracer — last call wins.
+
+Spans record timing, hierarchy, model name and token counts. They do **not**
+record prompts or replies unless you set `HAYSTACK_CONTENT_TRACING_ENABLED=true`,
+which stores the content of queries, documents and answers in the `tags` JSON
+column — treat that data as sensitive, and note that deleting a `Thread` or
+`Message` cascades to its traces. Token counts are captured either way: Haystack
+reports usage through the same content tags it gates, so the numbers are
+harvested before the flag decides whether the payload is kept. That flag is read
+once, when `haystack.tracing` is first imported, so it must be a real environment
+variable set before the process starts — assigning it in `settings.py` does
+nothing.
+
+Some tags are static configuration rather than observability data, and they are
+large: `haystack.agent.tools` serializes every tool definition in full. Drop them
+by key:
+
+```python
+AI_SDK_TRACING_EXCLUDED_TAGS = [
+    "haystack.agent.tools",
+    "haystack.agent.state_schema",
+]
+```
+
+### Reading traces
+
+`TraceService` is the permission-checked entry point. A trace belongs to its
+thread, so every method resolves the thread through `ThreadService` — enforcing
+`VIEW_THREAD` and raising `PermissionDenied` — and raises `ValueError` when the
+thread or message doesn't exist. There's no separate trace permission domain.
+
+```python
+from django_ai_sdk.tracing.services import TraceService
+
+await TraceService.thread_traces(
+    thread_id, user=user, message_id=None, operation_name=None, limit=100, offset=0
+)
+await TraceService.message_traces(message_id, user=user)
+await TraceService.thread_token_usage(thread_id, user=user)
+await TraceService.message_token_usage(message_id, user=user)
+```
+
+Message-scoped calls resolve the owning thread themselves, so a caller holding
+only a message id doesn't need to know its thread. All four return pydantic
+schemas from `django_ai_sdk.tracing.schemas`. For sync contexts (DRF
+class-based views), import the module-level `thread_traces` /
+`thread_token_usage` aliases instead.
+
+For direct ORM work, where you're doing your own access control, the manager
+carries the same query helpers:
+
+```python
+Trace.objects.for_thread(thread.id).token_usage()
+# {'prompt_tokens': 1841, 'completion_tokens': 317, 'total_tokens': 2158}
+
+Trace.objects.for_message(message.id).roots()  # the top span of the run
+Trace.objects.llm_calls()  # one row per LLM call
+```
+
+**Never `Sum` the token columns over raw rows.** Usage is recorded on every span
+that wraps an LLM call *and* aggregated again onto the agent's own
+`haystack.agent.run` span, so a plain sum counts each call twice — three times
+for an Agent inside a Pipeline. `.llm_calls()` selects leaf spans, which are
+exactly the LLM calls in every path and never a rollup. Both the service and
+`token_usage()` already count that way.
+
+### Behaviour worth knowing
+
+Correlation is automatic for anything streamed through the SDK: each run stamps
+its spans with the assistant `Message` it mints and the `Thread` it belongs to.
+For pipelines you run yourself, wrap them in `bind()`:
+
+```python
+from django_ai_sdk.tracing import bind
+
+with bind(thread_id=thread.id, message_id=message.id):
+    await pipeline.run_async({"messages": messages})
+```
+
+Writes are buffered: a whole trace tree lands in one `bulk_create` when its root
+span exits, scheduled on the event loop so the ORM never blocks it. **Spans
+appear only once the run completes** — a hung pipeline has no rows yet, so this
+is not a live view. `await aflush()` is the barrier when you need one (tests,
+shutdown).
+
+One provider caveat: OpenAI omits usage entirely from a *streamed* response
+unless `stream_options.include_usage` is requested. The `Stream` adapter sets
+that default on OpenAI-compatible generators; a custom streaming generator that
+reports no usage leaves the token columns null.
+
 ## Features
 
 - **RAG Pipelines**: BM25, ChromaDB, and Qdrant hybrid search with query expansion.
@@ -199,6 +306,8 @@ the OAuth callback, which must sit at a fixed URL:
   DOCX, PPTX, XLSX. Extraction transforms for metadata embedding.
 - **Integrations**: Third-party tools as self-registering Django apps, with caching,
   circuit breaking and OAuth built in. See [Integrations](#integrations).
+- **Tracing**: Opt-in Haystack tracing persisted to the ORM, with per-thread and
+  per-message token accounting. See [Tracing](#tracing).
 - **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
 
 ## Documentation

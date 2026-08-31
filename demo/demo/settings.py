@@ -60,6 +60,8 @@ INSTALLED_APPS = [
     "django_tasks_db",
     # sdk
     "django_ai_sdk",
+    # tracing
+    "django_ai_sdk.tracing",
     # mcp integration
     "django_ai_sdk.integrations.mcp",
     # default integrations
@@ -294,6 +296,12 @@ AI_SDK_ALLOWED_FILES = {
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
+
+# Tracing
+AI_SDK_TRACING_EXCLUDED_TAGS = [
+    "haystack.agent.tools",
+    "haystack.agent.state_schema",
+]
 
 # HuggingFace models to pre-download for offline embedding use
 HF_PRELOAD_MODELS = [
