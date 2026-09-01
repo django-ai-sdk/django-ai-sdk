@@ -53,6 +53,7 @@ django_ai_sdk/
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
+├── tracing/              # opt-in Haystack spans persisted to the ORM
 └── management/commands/  # warmup_rag
 ```
 
@@ -94,6 +95,7 @@ django_ai_sdk/
 {{< cards >}}
   {{< card link="testing/" title="Testing" icon="check-circle" subtitle="Strategy, setup, structure, patterns" >}}
   {{< card link="test-tooling/" title="Test Tooling" icon="cog" subtitle="Fixtures, factories, and mocks" >}}
+  {{< card link="tracing/" title="Tracing" icon="chart-square-bar" subtitle="Haystack spans in the ORM, token accounting" >}}
   {{< card link="cli/" title="CLI" icon="terminal" subtitle="warmup_rag implementation" >}}
 {{< /cards >}}
 

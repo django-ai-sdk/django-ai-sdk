@@ -1222,9 +1222,9 @@ urlpatterns = [
         name="thread-traces",
     ),
     path(
-        "threads/<str:thread_id>/traces/tokens/",
+        "threads/<str:thread_id>/tokens/",
         ThreadTokenUsageAPIView.as_view(),
-        name="thread-traces-tokens",
+        name="thread-tokens",
     ),
     path(
         "messages/<str:message_id>/traces/",
@@ -1232,9 +1232,9 @@ urlpatterns = [
         name="message-traces",
     ),
     path(
-        "messages/<str:message_id>/traces/tokens/",
+        "messages/<str:message_id>/tokens/",
         MessageTokenUsageAPIView.as_view(),
-        name="message-traces-tokens",
+        name="message-tokens",
     ),
     path("threads/", ThreadCreateAPIView.as_view(), name="thread-create"),
     path("threads/<str:thread_id>/delete/", ThreadDeleteAPIView.as_view(), name="thread-delete"),

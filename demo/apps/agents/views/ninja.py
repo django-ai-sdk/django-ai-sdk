@@ -276,7 +276,7 @@ async def get_thread_traces(
 
 
 @router.get(
-    "/threads/{thread_id}/traces/tokens/",
+    "/threads/{thread_id}/tokens/",
     response={200: TokenUsage, 403: Error, 404: Error, 500: Error},
     operation_id="get_thread_token_usage",
 )
@@ -321,7 +321,7 @@ async def get_message_traces(
 
 
 @router.get(
-    "/messages/{message_id}/traces/tokens/",
+    "/messages/{message_id}/tokens/",
     response={200: TokenUsage, 403: Error, 404: Error, 500: Error},
     operation_id="get_message_token_usage",
 )
