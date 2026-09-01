@@ -384,8 +384,6 @@ class TestMemoryDefaultPermission:
     async def test_has_permission_returns_true_for_authenticated(self):
         from django_ai_sdk.permissions import MemoryDefaultPermission, Operation, check_permissions
 
-        from django.contrib.auth.models import User
-
         authenticated = MagicMock(is_authenticated=True)
         await check_permissions(
             authenticated, Operation.VIEW_MEMORY, [MemoryDefaultPermission]
@@ -1364,7 +1362,7 @@ class TestAgentDefaultPermissionUse:
     async def _user(self, username):
         from django.contrib.auth import get_user_model
 
-        return await get_user_model().objects.acreate_user(username=username, password="x")
+        return await get_user_model().objects.acreate_user(email=f"{username}@example.com", password="x")
 
     async def test_a_non_member_may_not_chat_with_a_private_agent(self):
         from django_ai_sdk.permissions import AgentDefaultPermission, Operation

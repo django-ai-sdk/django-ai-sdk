@@ -647,7 +647,7 @@ class TestUploadThreadFileRespectsAgentFileUpload:
         from django_ai_sdk.conversation.models import Thread
 
         unique = str(uuid4())
-        user = await get_user_model().objects.acreate_user(username=unique, password="x")
+        user = await get_user_model().objects.acreate_user(email=f"{unique}@example.com", password="x")
         config = await AgentSettings.objects.acreate(
             name="Uploader", slug=unique, agent="test", file_upload=file_upload
         )

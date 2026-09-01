@@ -12,7 +12,7 @@ from django_ai_sdk.permissions import PermissionDenied
 async def make_user(name):
     from django.contrib.auth import get_user_model
 
-    return await get_user_model().objects.acreate(username=f"{name}-{uuid.uuid4().hex[:8]}")
+    return await get_user_model().objects.acreate(email=f"{name}-{uuid.uuid4().hex[:8]}@example.com")
 
 
 async def make_agent(name="Secret", *, is_public=False):

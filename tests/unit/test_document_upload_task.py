@@ -700,7 +700,7 @@ class TestCancelDocument:
         from django_ai_sdk.memories.models import EntryDocument, Memory, MemoryUser
 
         UserModel = get_user_model()
-        user = await UserModel.objects.acreate(username=f"owner-{uuid.uuid4()}")
+        user = await UserModel.objects.acreate(email=f"owner-{uuid.uuid4()}@example.com")
         # Private memory — an unrelated authenticated user must still be denied.
         memory = await Memory.objects.acreate(name="cancel-test", is_public=False)
         await MemoryUser.objects.acreate(memory=memory, user=user, can_manage=True)
@@ -760,7 +760,7 @@ class TestCancelDocument:
         from django_ai_sdk.permissions import PermissionDenied
 
         UserModel = get_user_model()
-        other_user = await UserModel.objects.acreate(username="not-the-owner")
+        other_user = await UserModel.objects.acreate(email="not-the-owner@example.com")
         _, entry_doc = await self._make_owned_entry_doc(
             status=EntryDocument.ProcessingStatus.PROCESSING
         )

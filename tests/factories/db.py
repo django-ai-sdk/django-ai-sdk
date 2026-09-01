@@ -3,7 +3,9 @@ Django model factories for database-backed tests.
 """
 
 from asgiref.sync import sync_to_async
-from django.contrib.auth.models import User
+
+import factory
+from django.contrib.auth import get_user_model
 from factory.django import DjangoModelFactory
 from factory.declarations import Trait, SubFactory
 from factory.faker import Faker
@@ -20,10 +22,10 @@ class AsyncFactoryMixin:
 
 class UserFactory(AsyncFactoryMixin, DjangoModelFactory):
     class Meta:
-        model = User
-        django_get_or_create = ("username",)
+        model = get_user_model()
+        django_get_or_create = ("email",)
 
-    username = Faker("user_name")
+    email = factory.Sequence(lambda n: f"user{n}@example.com")
 
     class Params:
         staff = Trait(is_staff=True)

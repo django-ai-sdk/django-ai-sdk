@@ -1,35 +1,33 @@
 from __future__ import annotations
 
-from django.contrib.auth.models import Group, User
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.management.base import BaseCommand
+
+User = get_user_model()
 
 _USERS = [
     {
-        "username": "alice",
         "email": "alice@example.com",
         "first_name": "Alice",
         "last_name": "Johnson",
     },
     {
-        "username": "bob",
         "email": "bob@example.com",
         "first_name": "Bob",
         "last_name": "Smith",
     },
     {
-        "username": "carol",
         "email": "carol@example.com",
         "first_name": "Carol",
         "last_name": "Williams",
     },
     {
-        "username": "dave",
         "email": "dave@example.com",
         "first_name": "Dave",
         "last_name": "Brown",
     },
     {
-        "username": "eve",
         "email": "eve@example.com",
         "first_name": "Eve",
         "last_name": "Davis",
@@ -57,9 +55,8 @@ class Command(BaseCommand):
 
         for data in _USERS:
             user, created = User.objects.get_or_create(
-                username=data["username"],
+                email=data["email"],
                 defaults={
-                    "email": data["email"],
                     "first_name": data["first_name"],
                     "last_name": data["last_name"],
                 },
@@ -67,9 +64,9 @@ class Command(BaseCommand):
             if created:
                 user.set_password(password)
                 user.save()
-                self.stdout.write(f"  User: {data['username']} ({data['email']})")
+                self.stdout.write(f"  User: {data['email']}")
             else:
-                self.stdout.write(f"  Skipped (exists): {data['username']}")
+                self.stdout.write(f"  Skipped (exists): {data['email']}")
 
         self.stdout.write(
             self.style.SUCCESS(
