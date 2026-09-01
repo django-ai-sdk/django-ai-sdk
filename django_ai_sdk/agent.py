@@ -35,6 +35,8 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
@@ -206,6 +208,14 @@ class Agent(ABC, AgentInfoMixin):
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
 
+    # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
+    # Assign the factory itself, never call it: get_llm() builds it with this
+    # agent's model.
+    llm: Callable[..., Any] | None = None
+
+    # Vendor generation parameters, mapped onto Haystack's `generation_kwargs`.
+    llm_kwargs: dict[str, Any] | None = None
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register Agent subclasses in the registry.
 
@@ -214,6 +224,11 @@ class Agent(ABC, AgentInfoMixin):
         - Works together with @auto_register decorator
         """
         super().__init_subclass__(**kwargs)
+        # A plain function set as a class attribute would bind as a method and
+        # receive `self` as its first argument, so keep `llm` unbound.
+        llm = cls.__dict__.get("llm")
+        if callable(llm) and not isinstance(llm, staticmethod):
+            cls.llm = staticmethod(llm)
         # Don't register the base Agent class itself, or classes that
         # manage their own registration (e.g. RuntimeAgent).
         if cls.__name__ != "Agent" and not getattr(cls, "_skip_auto_register", False):
@@ -385,6 +400,23 @@ class Agent(ABC, AgentInfoMixin):
     def get_citation_registry(self) -> CitationRegistry:
         """Return a fresh per-turn registry so citation indices reset between turns."""
         return CitationRegistry()
+
+    def get_llm(self, **kwargs: Any) -> Any:
+        """Build this agent's chat generator.
+
+        Uses the `llm` factory if set, otherwise OpenAI's Responses API. Keyword
+        arguments override `llm_kwargs`, and the agent always supplies the model.
+        """
+        from django_ai_sdk.generators import merge_generation_kwargs, openai_responses_chat
+
+        factory = self.llm or openai_responses_chat
+        if not callable(factory):
+            raise TypeError(f"{self.__class__.__name__}.llm must be a generator factory.")
+        if self.llm_kwargs:
+            kwargs["generation_kwargs"] = merge_generation_kwargs(
+                self.llm_kwargs, kwargs.get("generation_kwargs")
+            )
+        return factory(model=self.get_model() or None, **kwargs)
 
     def get_suggestion_generator(self) -> SuggestionGenerator | None:
         """Return a configured SuggestionGenerator, or None to disable.
