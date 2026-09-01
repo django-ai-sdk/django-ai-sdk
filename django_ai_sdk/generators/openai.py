@@ -38,13 +38,3 @@ def openai_responses_chat(**kwargs: Any) -> OpenAIResponsesChatGenerator:
             kwargs,
         )
     )
-
-
-def add_usage_reporting(generator: Any) -> None:
-    """Request token usage on streamed Chat Completions responses.
-
-    The Responses API reports usage without asking, and other vendors have no
-    equivalent switch, so only OpenAI-compatible chat generators are touched.
-    """
-    if isinstance(generator, OpenAIChatGenerator):
-        generator.generation_kwargs.setdefault("stream_options", {"include_usage": True})

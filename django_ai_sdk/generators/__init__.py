@@ -10,16 +10,11 @@ from django_ai_sdk.generators.base import (
 from django_ai_sdk.generators.huggingface import huggingface_api_chat, transformers_chat
 from django_ai_sdk.generators.mistral import mistral_chat
 from django_ai_sdk.generators.ollama import ollama_chat
-from django_ai_sdk.generators.openai import (
-    add_usage_reporting,
-    openai_chat,
-    openai_responses_chat,
-)
+from django_ai_sdk.generators.openai import openai_chat, openai_responses_chat
 from django_ai_sdk.generators.openrouter import openrouter_chat
 from django_ai_sdk.generators.schema import schema_kwargs
 
 __all__ = [
-    "add_usage_reporting",
     "anthropic_chat",
     "azure_openai_chat",
     "azure_openai_responses_chat",

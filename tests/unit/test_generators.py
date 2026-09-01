@@ -10,7 +10,6 @@ from django_ai_sdk import generators
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.agent import Agent
 from django_ai_sdk.generators import (
-    add_usage_reporting,
     anthropic_chat,
     azure_openai_chat,
     azure_openai_responses_chat,
@@ -254,23 +253,6 @@ class TestStructuredOutput:
 
         with pytest.raises(ValueError, match=f"{class_name} takes no structured-output kwarg"):
             schema_kwargs(generator, Answer)
-
-
-class TestUsageReporting:
-    """Streamed responses need an explicit ask for usage on Chat Completions."""
-
-    @override_settings(OPENAI_API_KEY="sk-test")
-    def test_chat_generator_gets_include_usage(self):
-        generator = openai_chat()
-        add_usage_reporting(generator)
-
-        assert generator.generation_kwargs["stream_options"] == {"include_usage": True}
-
-    def test_other_generators_are_left_alone(self):
-        generator = object()
-        add_usage_reporting(generator)
-
-        assert not hasattr(generator, "generation_kwargs")
 
 
 class TestAgentHook:

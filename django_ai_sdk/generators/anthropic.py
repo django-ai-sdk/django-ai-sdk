@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.generators.base import (
-    build_kwargs,
-    requires_generator,
-    resolve_secret,
-    resolve_setting,
-)
+from django_ai_sdk.generators.base import build_kwargs, requires_generator, resolve_secret
 
 if TYPE_CHECKING:
     from haystack_integrations.components.generators.anthropic import AnthropicChatGenerator
@@ -21,12 +16,8 @@ def anthropic_chat(**kwargs: Any) -> AnthropicChatGenerator:
     with requires_generator("anthropic"):
         from haystack_integrations.components.generators.anthropic import AnthropicChatGenerator
 
+    # AnthropicChatGenerator has no base-URL parameter, so there is no
+    # ANTHROPIC_API_URL setting to honour.
     return AnthropicChatGenerator(
-        **build_kwargs(
-            {
-                "api_key": resolve_secret("ANTHROPIC_API_KEY"),
-                "api_base_url": resolve_setting("ANTHROPIC_API_URL"),
-            },
-            kwargs,
-        )
+        **build_kwargs({"api_key": resolve_secret("ANTHROPIC_API_KEY")}, kwargs)
     )

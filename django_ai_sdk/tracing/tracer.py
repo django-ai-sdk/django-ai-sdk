@@ -92,9 +92,17 @@ class TelemetrySpan(Span):
         usage = meta.get("usage") or value.get("token_usage") or {}
         if not isinstance(usage, dict):
             return
-        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            if isinstance(count := usage.get(field), int):
-                setattr(self._trace, field, count)
+        # The Responses API names them input/output tokens, Chat Completions
+        # prompt/completion; both fill the same columns.
+        for field, aliases in (
+            ("prompt_tokens", ("prompt_tokens", "input_tokens")),
+            ("completion_tokens", ("completion_tokens", "output_tokens")),
+            ("total_tokens", ("total_tokens",)),
+        ):
+            for alias in aliases:
+                if isinstance(count := usage.get(alias), int):
+                    setattr(self._trace, field, count)
+                    break
 
     def _end(self) -> None:
         self._trace.ended_at = timezone.now()

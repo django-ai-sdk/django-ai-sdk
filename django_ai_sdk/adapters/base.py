@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from django.conf import settings
 from haystack import Pipeline
 from haystack.components.agents import Agent
-from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk
 
@@ -32,6 +31,7 @@ from django_ai_sdk.events import (
     ToolInputCompleteEvent,
     ToolOutputEvent,
 )
+from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.tracing import bind as bind_trace
 
@@ -88,13 +88,6 @@ def get_error_chunk(e: Exception) -> MessageChunk:
         type="error",
         content={"error_message": str(e), "error_type": type(e).__name__},
     )
-
-
-# TODO: remove when SDK generators land
-def _request_usage_reporting(generator: Any) -> None:
-    """Temporary: report token usage on a streamed response."""
-    if isinstance(generator, OpenAIChatGenerator):
-        generator.generation_kwargs.setdefault("stream_options", {"include_usage": True})
 
 
 class Run:
@@ -154,15 +147,9 @@ class Run:
             user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
 
         if response_format:
-            schema = response_format.model_json_schema()
             response = self.generator.run(
                 messages=user_messages,
-                generation_kwargs={
-                    "response_format": {
-                        "type": "json_schema",
-                        "json_schema": {"name": response_format.__name__, "schema": schema},
-                    }
-                },
+                generation_kwargs=schema_kwargs(self.generator, response_format),
             )
             return response_format.model_validate_json(response["replies"][0].text)
 
@@ -209,7 +196,6 @@ class Stream:
         self.agent_component = None
         self.model_name = None
 
-        _request_usage_reporting(generator)
         if self.first_component:
             component = pipeline.get_component(self.first_component)
             if isinstance(component, Agent):
@@ -217,7 +203,6 @@ class Stream:
                 if hasattr(component, "chat_generator"):
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
-                    _request_usage_reporting(cg)
 
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Convert internal messages to Haystack ChatMessage format."""
