@@ -50,7 +50,7 @@ Issues = "https://github.com/django-ai-sdk/django-ai-sdk/issues"
 Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
-all = ["django-ai-sdk[haystack,restframework,mcp,files]"]
+all = ["django-ai-sdk[haystack,restframework,mcp,files,anthropic,mistral,ollama,huggingface,openrouter]"]
 haystack = [
   "chroma-haystack>=4.4.0",
   "fastembed-haystack>=2.4.0",
@@ -67,6 +67,11 @@ files = [
   "python-docx>=1.2.0",
   "python-pptx>=1.0.2",
 ]
+anthropic = ["anthropic-haystack>=5.17.0"]
+huggingface = ["huggingface-api-haystack>=0.6.0", "transformers-haystack>=0.3.0"]
+mistral = ["mistral-haystack>=1.5.0"]
+ollama = ["ollama-haystack>=6.8.0"]
+openrouter = ["openrouter-haystack>=1.2.0"]
 [dependency-groups]
 dev = [
   "django-ninja>=1.6.2",
