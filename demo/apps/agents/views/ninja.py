@@ -21,6 +21,8 @@ from django_ai_sdk.storage.services import (
     aget_thread_file_meta,
     aget_thread_history,
 )
+from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
+from django_ai_sdk.tracing.services import TraceService
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
 from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 from django_ai_sdk.workflows.models import WorkflowSettings
@@ -159,6 +161,10 @@ class RunResponse(Schema):
     thread_id: str
 
 
+class ThreadTracesResponse(Schema):
+    traces: list[TraceOut]
+
+
 @router.get("/health/", response={200: HealthResponse}, operation_id="health_check")
 def health_check(request: HttpRequest) -> HealthResponse:
     return HealthResponse(status="ok", service="django-ai-sdk")
@@ -236,6 +242,98 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
         return 403, Error(message=str(e))
     except ValueError as e:
         return 404, Error(message=str(e))
+
+
+@router.get(
+    "/threads/{thread_id}/traces/",
+    response={200: ThreadTracesResponse, 403: Error, 404: Error, 500: Error},
+    operation_id="get_thread_traces",
+)
+async def get_thread_traces(
+    request: HttpRequest,
+    thread_id: str,
+    message_id: str | None = None,
+    operation_name: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> Any:
+    try:
+        traces = await TraceService.thread_traces(
+            thread_id,
+            user=request.user,
+            message_id=message_id,
+            operation_name=operation_name,
+            limit=limit,
+            offset=offset,
+        )
+        return ThreadTracesResponse(traces=traces)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/threads/{thread_id}/traces/tokens/",
+    response={200: TokenUsage, 403: Error, 404: Error, 500: Error},
+    operation_id="get_thread_token_usage",
+)
+async def get_thread_token_usage(request: HttpRequest, thread_id: str) -> Any:
+    try:
+        return await TraceService.thread_token_usage(thread_id, user=request.user)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/messages/{message_id}/traces/",
+    response={200: ThreadTracesResponse, 403: Error, 404: Error, 500: Error},
+    operation_id="get_message_traces",
+)
+async def get_message_traces(
+    request: HttpRequest,
+    message_id: str,
+    operation_name: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> Any:
+    try:
+        traces = await TraceService.message_traces(
+            message_id,
+            user=request.user,
+            operation_name=operation_name,
+            limit=limit,
+            offset=offset,
+        )
+        return ThreadTracesResponse(traces=traces)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
+@router.get(
+    "/messages/{message_id}/traces/tokens/",
+    response={200: TokenUsage, 403: Error, 404: Error, 500: Error},
+    operation_id="get_message_token_usage",
+)
+async def get_message_token_usage(request: HttpRequest, message_id: str) -> Any:
+    try:
+        return await TraceService.message_token_usage(message_id, user=request.user)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
 
 
 @router.get(
