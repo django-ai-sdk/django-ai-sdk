@@ -244,7 +244,7 @@ def generate_adapter_flow() -> graphviz.Digraph:
     generator = add_component(
         dot,
         "generator",
-        "Generator\nOpenAIChatGenerator (OpenAI-compatible)",
+        "Generator\ndjango_ai_sdk.generators (multi-vendor)",
         fillcolor="#f3e5f5",
         color="#7b1fa2",
     )

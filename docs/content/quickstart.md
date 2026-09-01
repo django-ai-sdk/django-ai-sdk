@@ -61,11 +61,10 @@ from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Stream
 from django_ai_sdk.agents import auto_register
 from django_ai_sdk.common import prompt
+from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 @auto_register
 class ShakespeareAgent(Agent):
@@ -80,13 +79,10 @@ class ShakespeareAgent(Agent):
     )
     protocol = VercelProtocolHandler
     storage_adapter = DbStorageAdapter
+    llm = openai_responses_chat
 
     async def get_pipeline_adapter(self, thread_id=None, user=None):
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        generator = self.get_llm()
         tool_agent = ToolAgent(
             config=ToolAgentConfig(
                 model=self.get_model(),
@@ -106,8 +102,9 @@ Three things to note:
 - **name**: What to call your agent
 - **instructions**: How it should behave (the system prompt)
 - **get_pipeline_adapter**: Returns the `Stream` that powers streaming chat
+- **llm**: The generator factory `get_llm()` builds - it defaults to `openai_responses_chat`, so you can leave it out for OpenAI
 
-`OpenAIChatGenerator` works with any OpenAI-compatible endpoint. Point `OPENAI_API_URL` at a local server (vLLM, Ollama, llama.cpp) or leave it unset for OpenAI. Every other `AI_SDK_*` setting you might need is listed in the [Settings Reference](/manual/settings/).
+`openai_responses_chat` works with any endpoint that speaks the OpenAI Responses API. Point `OPENAI_API_URL` at a local server (vLLM, llama.cpp) or leave it unset for OpenAI, and use `openai_chat` for a Chat Completions-only endpoint. Other providers get their own factory - see [Generators](/manual/generators/). Every `AI_SDK_*` setting is listed in the [Settings Reference](/manual/settings/).
 
 That's it. No complex configuration. No framework setup.
 

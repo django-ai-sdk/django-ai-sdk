@@ -25,7 +25,7 @@ An agent exposes one of each via `get_pipeline_adapter()` and `get_run_adapter()
 
 ```python
 Run(
-    generator: Any,        # Haystack chat generator with .run()
+    generator: Any,        # Haystack chat generator with .run(), e.g. self.get_llm()
     model: str | None = None,
     instructions: str | None = None,
 )
@@ -51,8 +51,7 @@ class Movie(BaseModel):
 
 class MyAgent(Agent):
     async def get_run_adapter(self, thread_id=None, user=None):
-        generator = OpenAIChatGenerator(...)
-        return Run(generator=generator)
+        return Run(generator=self.get_llm())
 
     # agent.run(messages, response_format=Movie) -> Movie
     # agent.run(messages) -> str

@@ -66,7 +66,7 @@ Wire the retrieval tools into the `ToolAgent` inside `get_pipeline_adapter()`:
 
 ```python
 async def get_pipeline_adapter(self, thread_id=None, user=None):
-    generator = OpenAIChatGenerator(...)
+    generator = self.get_llm()
     citation_registry = self.get_citation_registry()
 
     rag_tools = await self.get_rag_tools(

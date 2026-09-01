@@ -20,7 +20,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_DEFAULT_MODEL` | `"gpt-4o-mini"` | Fallback model identifier for `llm_generator()` when no model is otherwise configured. |
+| `AI_SDK_DEFAULT_MODEL` | `"gpt-4o-mini"` | Fallback model identifier for `llm_generator()`, and the usual value for an agent's `model` attribute. The [generator factories](/manual/generators/) never read it: an agent always passes its own model. |
 | `AI_SDK_EXTRACTION_MODEL` | `None` | Model used by the document-extraction generator (`agents/utils.py`). Falls back to `AI_SDK_DEFAULT_MODEL` when unset. |
 
 ## RAG and Vector Stores
@@ -105,9 +105,24 @@ changing it needs a restart. Assigning it in `settings.py` does nothing.
 
 ## Provider Credentials
 
-Not `AI_SDK_*` prefixed, but part of the same surface: the generator and RAG libraries read them directly:
+Not `AI_SDK_*` prefixed, but part of the same surface: the [generator
+factories](/manual/generators/) read them at call time. Every key is optional - when
+one is unset the factory omits it, so Haystack falls back to its own environment
+variable of the same name.
 
-| Setting | Purpose |
-| --- | --- |
-| `OPENAI_API_KEY` | Provider API key (often injected as an environment variable). |
-| `OPENAI_API_URL` | Optional custom API base URL (`rags` pipelines and `agents/utils.py` read it). |
+| Setting | Used by | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | `openai_chat`, `openai_responses_chat` | OpenAI API key. |
+| `OPENAI_API_URL` | same | Custom base URL, e.g. a self-hosted OpenAI-compatible endpoint. |
+| `ANTHROPIC_API_KEY` | `anthropic_chat` | Anthropic API key. `AnthropicChatGenerator` has no base-URL parameter, so there is no `ANTHROPIC_API_URL`. |
+| `MISTRAL_API_KEY` | `mistral_chat` | Mistral API key. |
+| `MISTRAL_API_URL` | same | Custom base URL. |
+| `OPENROUTER_API_KEY` | `openrouter_chat` | OpenRouter API key. |
+| `OPENROUTER_API_URL` | same | Custom base URL. |
+| `OLLAMA_API_URL` | `ollama_chat` | Ollama server URL. Defaults to `http://localhost:11434`. |
+| `HUGGINGFACE_API_KEY` | `huggingface_api_chat`, `transformers_chat` | Hugging Face token. |
+| `HUGGINGFACE_API_URL` | `huggingface_api_chat` | Dedicated inference endpoint URL. When unset, serverless inference is used with the requested model. |
+| `AZURE_OPENAI_API_KEY` | `azure_openai_chat`, `azure_openai_responses_chat` | Azure OpenAI key. |
+| `AZURE_OPENAI_ENDPOINT` | same | Azure resource endpoint. |
+| `AZURE_OPENAI_DEPLOYMENT` | same | Deployment name used when no model is passed. |
+| `AZURE_OPENAI_API_VERSION` | `azure_openai_chat` | API version override. |

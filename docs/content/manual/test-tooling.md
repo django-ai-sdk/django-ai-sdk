@@ -79,7 +79,7 @@ with thread_permissions("apps.agents.permissions.DemoThreadPermission"):
 
 ### Mocking the model generator
 
-Never construct a real `OpenAIChatGenerator`. Use a stub object with the shape `Stream`/`Run` expect:
+Never construct a real generator - not `openai_responses_chat()`, not the Haystack class behind it. Use a stub object with the shape `Stream`/`Run` expect:
 
 ```python
 class FakeGenerator:

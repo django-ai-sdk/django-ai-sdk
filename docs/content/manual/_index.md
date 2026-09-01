@@ -64,6 +64,7 @@ django_ai_sdk/
   {{< card link="agent/" title="Agent" icon="user" subtitle="Configuration, lifecycle hooks, as_view()" >}}
   {{< card link="agent-registry/" title="Agent Registry" icon="finger-print" subtitle="Registration and stable-ID resolution" >}}
   {{< card link="stream-and-run/" title="Stream and Run" icon="lightning-bolt" subtitle="Haystack integration adapters" >}}
+  {{< card link="generators/" title="Generators" icon="chip" subtitle="Per-vendor chat generator factories" >}}
   {{< card link="stream-events/" title="Stream Events" icon="mail" subtitle="The 13 normalized events, tool calls, errors" >}}
   {{< card link="id-generation/" title="ID Generation" icon="hashtag" subtitle="One message_id through SSE, storage, APIs" >}}
 {{< /cards >}}
