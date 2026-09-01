@@ -58,6 +58,7 @@ class Trace(models.Model):
 
     class Meta:
         app_label = "django_ai_sdk_tracing"
+        db_table = "django_ai_sdk_traces"
         indexes = [
             models.Index(fields=["operation_name", "started_at"]),
             models.Index(fields=["thread", "started_at"]),
