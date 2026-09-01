@@ -36,6 +36,12 @@ from django_ai_sdk.storage.services import (
     restore_message,
     update_thread,
 )
+from django_ai_sdk.tracing.services import (
+    message_token_usage,
+    message_traces,
+    thread_token_usage,
+    thread_traces,
+)
 from django_ai_sdk.views.schemas import Message
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -258,6 +264,71 @@ class ThreadFileMetaAPIView(APIView):
             return Response(ThreadFileMetaSerializer(data).data)
         except ValueError as e:
             return Response({"message": str(e)}, status=404)
+
+
+class ThreadTracesAPIView(APIView):
+    def get(self, request: Request, thread_id: str) -> Response:
+        try:
+            traces = thread_traces(
+                thread_id,
+                user=request.user,
+                message_id=request.query_params.get("message_id"),
+                operation_name=request.query_params.get("operation_name"),
+                limit=int(request.query_params.get("limit", 100)),
+                offset=int(request.query_params.get("offset", 0)),
+            )
+            return Response({"traces": [t.model_dump(mode="json") for t in traces]})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class MessageTracesAPIView(APIView):
+    def get(self, request: Request, message_id: str) -> Response:
+        try:
+            traces = message_traces(
+                message_id,
+                user=request.user,
+                operation_name=request.query_params.get("operation_name"),
+                limit=int(request.query_params.get("limit", 100)),
+                offset=int(request.query_params.get("offset", 0)),
+            )
+            return Response({"traces": [t.model_dump(mode="json") for t in traces]})
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class ThreadTokenUsageAPIView(APIView):
+    def get(self, request: Request, thread_id: str) -> Response:
+        try:
+            usage = thread_token_usage(thread_id, user=request.user)
+            return Response(usage.model_dump())
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
+
+
+class MessageTokenUsageAPIView(APIView):
+    def get(self, request: Request, message_id: str) -> Response:
+        try:
+            usage = message_token_usage(message_id, user=request.user)
+            return Response(usage.model_dump())
+        except PermissionDenied as e:
+            return Response({"message": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"message": str(e)}, status=404)
+        except Exception as e:
+            return Response({"message": str(e)}, status=500)
 
 
 class ThreadDeleteAPIView(APIView):
@@ -1144,6 +1215,26 @@ urlpatterns = [
         "threads/<str:thread_id>/file-meta/",
         ThreadFileMetaAPIView.as_view(),
         name="thread-file-meta",
+    ),
+    path(
+        "threads/<str:thread_id>/traces/",
+        ThreadTracesAPIView.as_view(),
+        name="thread-traces",
+    ),
+    path(
+        "threads/<str:thread_id>/tokens/",
+        ThreadTokenUsageAPIView.as_view(),
+        name="thread-tokens",
+    ),
+    path(
+        "messages/<str:message_id>/traces/",
+        MessageTracesAPIView.as_view(),
+        name="message-traces",
+    ),
+    path(
+        "messages/<str:message_id>/tokens/",
+        MessageTokenUsageAPIView.as_view(),
+        name="message-tokens",
     ),
     path("threads/", ThreadCreateAPIView.as_view(), name="thread-create"),
     path("threads/<str:thread_id>/delete/", ThreadDeleteAPIView.as_view(), name="thread-delete"),

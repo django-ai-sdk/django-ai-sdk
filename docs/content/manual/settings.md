@@ -80,6 +80,23 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_SUGGESTION_TIMEOUT` | `5.0` | Seconds before suggestion generation is abandoned. |
 | `AI_SDK_TITLE_SANITY_LIMIT` | `80` | Character ceiling for auto-generated thread titles. |
 
+## Tracing
+
+Requires the opt-in `django_ai_sdk.tracing` app in `INSTALLED_APPS`.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_TRACING_EXCLUDED_TAGS` | `[]` | Span tag keys to drop before storing, by exact key (no wildcards). Useful for static configuration that repeats identically on every run and is large: `["haystack.agent.tools", "haystack.agent.state_schema"]`. Applies to content tags too, and excluding one never affects the token columns. See [Tracing](/manual/tracing/). |
+
+One Haystack environment variable shapes what the tracer records. Unlike the
+settings above, it is read **once**, when `haystack.tracing` is first imported:
+it must be a real environment variable set before the process starts, and
+changing it needs a restart. Assigning it in `settings.py` does nothing.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HAYSTACK_CONTENT_TRACING_ENABLED` | `false` | When `true`, prompts, documents and replies are stored in the `tags` JSON column. Token counts and `model_name` are recorded either way. Treat the stored content as sensitive. |
+
 ## Logging
 
 | Setting | Default | Purpose |
