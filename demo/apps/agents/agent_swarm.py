@@ -10,13 +10,12 @@ from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agents import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
+from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.permissions import IsAdminUser
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
-from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.tools import Tool
-from haystack.utils import Secret
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -59,6 +58,10 @@ class AgentSwarmAgent(Agent):
     name = "Pirate Agent Swarm"
     description = "An agent swarm agent with specialized pirate expertise."
     model = settings.AI_SDK_DEFAULT_MODEL
+    # Factory reference, not a call: get_llm() builds it with the agent's model.
+    llm = openai_responses_chat
+    # Demo runs reasoning on every agent; the factories ship it off.
+    llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
     permissions = [IsAdminUser]
     instructions = prompt("""\
         You are a Triage Agent for a crew of pirate specialists.
@@ -139,12 +142,7 @@ class AgentSwarmAgent(Agent):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Run:
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
-        return Run(generator=generator)
+        return Run(generator=self.get_llm())
 
     async def get_pipeline_adapter(
         self,
@@ -158,11 +156,7 @@ class AgentSwarmAgent(Agent):
 
         # Create triage agent
         triage_agent = HaystackAgent(
-            chat_generator=OpenAIChatGenerator(
-                model=self.get_model(),
-                api_key=Secret.from_token(settings.OPENAI_API_KEY),
-                api_base_url=getattr(settings, "OPENAI_API_URL", None),
-            ),
+            chat_generator=self.get_llm(),
             tools=await self.get_tools(thread_id=thread_id or "", user=user),
             system_prompt=self.get_system_prompt(),
             exit_conditions=["text"],

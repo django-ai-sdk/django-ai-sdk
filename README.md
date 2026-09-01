@@ -45,25 +45,21 @@ Then run `python manage.py migrate`.
 
 ```python
 # agents.py
-from django.conf import settings
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Stream
+from django_ai_sdk.generators import openai_responses_chat
 from haystack import Pipeline
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 
 class HelpDeskAgent(Agent):
     name = "Help Desk"
-    model = "gpt-4o"
+    model = "gpt-5-mini"
     instructions = "You are a helpful support agent."
+    llm = openai_responses_chat
 
     async def get_pipeline_adapter(self, thread_id=None, user=None):
         storage_adapter = await self.get_storage_adapter(thread_id)
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-        )
+        generator = self.get_llm()
         return Stream(
             pipeline=Pipeline(),
             generator=generator,
@@ -77,11 +73,7 @@ For non-streaming tasks (title generation, structured output), use `Run` instead
 from django_ai_sdk.adapters.base import Run
 
     async def get_run_adapter(self, thread_id=None, user=None):
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-        )
-        return Run(generator=generator)
+        return Run(generator=self.get_llm())
 ```
 
 ### 3. Return a streaming response
@@ -289,10 +281,11 @@ appear only once the run completes** — a hung pipeline has no rows yet, so thi
 is not a live view. `await aflush()` is the barrier when you need one (tests,
 shutdown).
 
-One provider caveat: OpenAI omits usage entirely from a *streamed* response
-unless `stream_options.include_usage` is requested. The `Stream` adapter sets
-that default on OpenAI-compatible generators; a custom streaming generator that
-reports no usage leaves the token columns null.
+One provider caveat: the OpenAI Responses API reports usage on a streamed
+response without being asked, but Chat Completions omits it unless
+`stream_options.include_usage` is requested. The adapters never reconfigure a
+generator, so declare that on the agent (`llm_kwargs`) when streaming through
+`openai_chat`; a generator that reports no usage leaves the token columns null.
 
 ## Features
 

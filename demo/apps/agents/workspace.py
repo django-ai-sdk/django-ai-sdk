@@ -25,11 +25,10 @@ from django_ai_sdk import (
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agents import auto_register
 from django_ai_sdk.common import prompt
+from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 from .tools import get_today
 
@@ -42,6 +41,10 @@ if TYPE_CHECKING:
 class WorkspaceAgent(Agent):
     name = "Workspace Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
+    # Factory reference, not a call: get_llm() builds it with the agent's model.
+    llm = openai_responses_chat
+    # Demo runs reasoning on every agent; the factories ship it off.
+    llm_kwargs = {"reasoning": {"effort": "medium", "summary": "auto"}}
     instructions = prompt("""\
         You are a professional AI agent for workplace productivity.
         Help with tasks like drafting messages, summarising content, planning,
@@ -80,19 +83,12 @@ class WorkspaceAgent(Agent):
         TestResultsArtifact,
     ]
 
-    def _build_generator(self) -> OpenAIChatGenerator:
-        return OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
-
     async def get_run_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Run:
-        return Run(generator=self._build_generator())
+        return Run(generator=self.get_llm())
 
     async def get_pipeline_adapter(
         self,
@@ -100,7 +96,7 @@ class WorkspaceAgent(Agent):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
 
-        generator = self._build_generator()
+        generator = self.get_llm()
         storage_adapter = await self.get_storage_adapter(thread_id)
 
         tools = await self.get_tools(thread_id=thread_id or "", user=user)
