@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.files.processors import TextFileProcessor, get_allowed_files
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     import io
@@ -46,12 +46,12 @@ class UploadSettings:
 def get_upload_settings() -> UploadSettings:
     """Collect upload limits from Django settings and file processors."""
 
-    max_size = getattr(settings, "AI_SDK_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
+    max_size = resolve_setting("AI_SDK_MAX_UPLOAD_SIZE", 10 * 1024 * 1024)
 
     allowed: set[str] = set()
     allowed.update(get_allowed_files().values())
 
-    pipeline_setting = getattr(settings, "AI_SDK_MEMORY_FILE_PIPELINE", None)
+    pipeline_setting = resolve_setting("AI_SDK_MEMORY_FILE_PIPELINE")
     if pipeline_setting:
         paths = [pipeline_setting] if isinstance(pipeline_setting, str) else pipeline_setting
         for path in paths:
@@ -80,7 +80,7 @@ async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
     """
     from django_ai_sdk.files.pipeline import FilePipeline
 
-    setting = getattr(settings, "AI_SDK_MEMORY_FILE_PIPELINE", None)
+    setting = resolve_setting("AI_SDK_MEMORY_FILE_PIPELINE")
     if setting:
         paths = [setting] if isinstance(setting, str) else setting
         for path in paths:

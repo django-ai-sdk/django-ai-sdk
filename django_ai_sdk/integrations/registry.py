@@ -15,8 +15,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.core.cache import cache
+
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -118,7 +119,7 @@ async def _db_integrations() -> dict[str, Integration]:
 
     from django_ai_sdk.integrations.mcp.models import MCPServerConfig
 
-    ttl = getattr(settings, "AI_SDK_MCP_SERVER_LIST_CACHE_TTL", 30)
+    ttl = resolve_setting("AI_SDK_MCP_SERVER_LIST_CACHE_TTL", 30)
     rows = await cache.aget(_ROWS_CACHE_KEY)
     if rows is None:
         try:

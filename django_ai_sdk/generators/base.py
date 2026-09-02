@@ -2,21 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.conf import settings
 from haystack.utils import Secret
+
+from django_ai_sdk.utils import resolve_setting
 
 
 def resolve_secret(setting_name: str) -> Secret | None:
     """Wrap a Django setting as a Secret, or None when it is unset."""
-    value = getattr(settings, setting_name, None)
+    value = resolve_setting(setting_name)
     if not value:
         return None
     return Secret.from_token(value)
-
-
-def resolve_setting(setting_name: str) -> Any:
-    """Read an optional Django setting."""
-    return getattr(settings, setting_name, None)
 
 
 def build_kwargs(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:

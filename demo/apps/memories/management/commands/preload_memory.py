@@ -11,6 +11,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django_ai_sdk.memories.models import Memory
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import ConflictError
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -44,9 +45,7 @@ class Command(BaseCommand):
         if user is None:
             raise CommandError("No superuser found.")
 
-        from django.conf import settings
-
-        base_path: str = getattr(settings, "AI_SDK_VECTOR_STORE_PATH", ".")
+        base_path: str = resolve_setting("AI_SDK_VECTOR_STORE_PATH", ".")
         folder = Path(base_path).parent / "knowledge" / str(relative_path)
         if not folder.is_dir():
             raise CommandError(f"Folder not found: {folder}")

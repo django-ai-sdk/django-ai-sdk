@@ -5,10 +5,11 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
-from django.conf import settings
 from django.db.models import Q
 from django.utils.module_loading import import_string
 from pydantic import BaseModel
+
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -440,7 +441,7 @@ def get_domain_permissions(domain: PermissionDomain) -> list[type[BasePermission
     1. AI_SDK_PERMISSIONS setting (per-domain override), or
     2. Built-in DOMAIN_PERMISSION_DEFAULTS (defaults)
     """
-    overrides = getattr(settings, "AI_SDK_PERMISSIONS", {}).get(domain.value)
+    overrides = resolve_setting("AI_SDK_PERMISSIONS", {}).get(domain.value)
     if overrides is not None:
         return [import_string(p) for p in overrides] if overrides else []
     paths = DOMAIN_PERMISSION_DEFAULTS.get(domain, [])

@@ -3,8 +3,9 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from django.utils.module_loading import import_string
+
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django_ai_sdk.agents.runtime import RuntimeAgent
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 @lru_cache(maxsize=1)
 def get_runtime_agent_bases() -> list[type[RuntimeAgent]]:
     """Return allowed RuntimeAgent subclasses from AI_SDK_RUNTIME_AGENT_BASES."""
-    paths: list[str] = getattr(settings, "AI_SDK_RUNTIME_AGENT_BASES", [])
+    paths: list[str] = resolve_setting("AI_SDK_RUNTIME_AGENT_BASES", [])
     if not paths:
         from django_ai_sdk.agents.runtime import RuntimeAgent as _RuntimeAgent
 
@@ -35,4 +36,4 @@ def get_runtime_agent_class(agent: str | None = None) -> type[RuntimeAgent]:
 @lru_cache(maxsize=1)
 def get_tool_registry() -> dict[str, str]:
     """Return AI_SDK_RUNTIME_AGENT_TOOLS mapping of key → dotted path."""
-    return dict(getattr(settings, "AI_SDK_RUNTIME_AGENT_TOOLS", {}))
+    return dict(resolve_setting("AI_SDK_RUNTIME_AGENT_TOOLS", {}))

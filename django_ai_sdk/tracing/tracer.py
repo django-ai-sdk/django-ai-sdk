@@ -4,7 +4,6 @@ import contextlib
 import time
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
 from django.utils import timezone
 from haystack.tracing import Span, Tracer
 from haystack.tracing.utils import coerce_tag_value
@@ -12,6 +11,7 @@ from haystack.tracing.utils import coerce_tag_value
 from django_ai_sdk.logger import logger
 from django_ai_sdk.tracing import context
 from django_ai_sdk.tracing.models import Trace
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -51,7 +51,7 @@ class TelemetrySpan(Span):
     def __init__(self, operation_name: str, parent_span: Span | None = None) -> None:
         self._t0 = time.monotonic()
         self._trace = Trace(operation_name=operation_name, started_at=timezone.now(), tags={})
-        self._excluded = frozenset(getattr(settings, "AI_SDK_TRACING_EXCLUDED_TAGS", ()))
+        self._excluded = frozenset(resolve_setting("AI_SDK_TRACING_EXCLUDED_TAGS", ()))
 
         if isinstance(parent_span, TelemetrySpan):
             parent = parent_span._trace

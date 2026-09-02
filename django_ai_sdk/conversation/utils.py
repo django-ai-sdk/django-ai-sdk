@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.conf import settings
-
 from django_ai_sdk.common import get_logger
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -21,7 +20,7 @@ TITLE_SANITY_LIMIT_DEFAULT = 80
 
 def get_title_sanity_limit() -> int:
     """Overridable via `AI_SDK_TITLE_SANITY_LIMIT` setting."""
-    return getattr(settings, "AI_SDK_TITLE_SANITY_LIMIT", TITLE_SANITY_LIMIT_DEFAULT)
+    return resolve_setting("AI_SDK_TITLE_SANITY_LIMIT", TITLE_SANITY_LIMIT_DEFAULT)
 
 
 async def generate_thread_title(

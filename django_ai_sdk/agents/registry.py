@@ -6,6 +6,8 @@ import threading
 import uuid
 from typing import TYPE_CHECKING, TypeVar
 
+from django_ai_sdk.utils import resolve_setting
+
 if TYPE_CHECKING:
     from ..agent import Agent
 
@@ -77,7 +79,7 @@ class AgentRegistry:
         from django.conf import settings
 
         # Load from settings
-        for path in getattr(settings, 'AI_SDK_AGENTS', []):
+        for path in resolve_setting('AI_SDK_AGENTS', []):
             import_string(path)
 
         # Setup instantiates all registered agents
@@ -159,10 +161,9 @@ class AgentRegistry:
 
         # Load agents from settings
         if load_from_settings:
-            from django.conf import settings
             from django.utils.module_loading import import_string
 
-            agent_paths = getattr(settings, "AI_SDK_AGENTS", [])
+            agent_paths = resolve_setting("AI_SDK_AGENTS", [])
             for path in agent_paths:
                 try:
                     import_string(path)

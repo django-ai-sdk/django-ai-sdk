@@ -22,7 +22,6 @@ from http import HTTPStatus
 
 import httpx
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.http import HttpRequest, HttpResponseRedirect, JsonResponse
 from django.utils.http import url_has_allowed_host_and_scheme
 
@@ -36,6 +35,7 @@ from django_ai_sdk.integrations.mcp.loader import (
     resolve_client_credentials,
 )
 from django_ai_sdk.integrations.mcp.schemas import OAuthMCPIntegrationConfig
+from django_ai_sdk.utils import resolve_setting
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ async def oauth_callback(
         # (e.g. the "Reconnect" button) happens to invalidate it.
         await integration.reconnect(user)
 
-        success_url = getattr(settings, "AI_SDK_MCP_OAUTH_SUCCESS_URL", "/")
+        success_url = resolve_setting("AI_SDK_MCP_OAUTH_SUCCESS_URL", "/")
         if not url_has_allowed_host_and_scheme(success_url, allowed_hosts={request.get_host()}):
             success_url = "/"
         sep = "&" if "?" in success_url else "?"

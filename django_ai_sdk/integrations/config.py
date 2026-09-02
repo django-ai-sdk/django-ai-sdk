@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from django.conf import settings
+from django_ai_sdk.utils import resolve_setting
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def get_integration_config(integration_name: str) -> dict[str, Any]:
     the wrong type -- an unconfigured integration must report that it needs setup, not
     break app boot.
     """
-    configured = getattr(settings, "AI_SDK_INTEGRATIONS", None) or {}
+    configured = resolve_setting("AI_SDK_INTEGRATIONS") or {}
     if not isinstance(configured, dict):
         logger.error(
             "AI_SDK_INTEGRATIONS must be a dict of {name: {KEY: value}}, got %s; "
@@ -72,5 +72,5 @@ def configured_names() -> set[str]:
     Used to warn about config left for an integration whose app was never installed;
     see registry.get_all_integrations().
     """
-    configured = getattr(settings, "AI_SDK_INTEGRATIONS", None) or {}
+    configured = resolve_setting("AI_SDK_INTEGRATIONS") or {}
     return set(configured) if isinstance(configured, dict) else set()

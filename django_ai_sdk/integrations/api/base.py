@@ -5,13 +5,12 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
-
 from django_ai_sdk.integrations.base import (
     Integration,
     IntegrationStatus,
     ResilientCache,
 )
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -113,9 +112,9 @@ class APIIntegration(Integration):
         # attribute (as in the docstring example), not on an instance after __init__.
         self._cache: ResilientCache | None = (
             ResilientCache(
-                ttl=getattr(settings, "AI_SDK_INTEGRATION_CACHE_TTL", 900),
-                timeout=getattr(settings, "AI_SDK_INTEGRATION_TIMEOUT", 3),
-                cb_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
+                ttl=resolve_setting("AI_SDK_INTEGRATION_CACHE_TTL", 900),
+                timeout=resolve_setting("AI_SDK_INTEGRATION_TIMEOUT", 3),
+                cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
             )
             if self.health_check is not None
             else None

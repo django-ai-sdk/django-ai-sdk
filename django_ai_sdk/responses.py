@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from django.conf import settings
 from django.http import StreamingHttpResponse
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.utils import format_sse
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Coroutine
@@ -72,7 +72,7 @@ async def stream_response(
 
     # Default SSE headers
     response["Cache-Control"] = "no-cache"
-    cors_origin = getattr(settings, "AI_SDK_STREAM_CORS_ORIGIN", None)
+    cors_origin = resolve_setting("AI_SDK_STREAM_CORS_ORIGIN")
     if cors_origin:
         response["Access-Control-Allow-Origin"] = cors_origin
     response["Access-Control-Allow-Headers"] = "Cache-Control"

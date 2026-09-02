@@ -6,7 +6,8 @@ from haystack_integrations.components.generators.huggingface_api import (
     HuggingFaceAPIChatGenerator,
 )
 
-from django_ai_sdk.generators.base import build_kwargs, resolve_secret, resolve_setting
+from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.utils import resolve_setting
 
 
 def huggingface_api_chat(**kwargs: Any) -> HuggingFaceAPIChatGenerator:
