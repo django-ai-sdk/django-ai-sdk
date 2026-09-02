@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import importlib
-import pkgutil
-from pathlib import Path
+import sys
 
 import pytest
 from django.test import override_settings
-from django_ai_sdk import generators
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.agent import Agent
 from django_ai_sdk.generators import (
@@ -20,10 +18,7 @@ from django_ai_sdk.generators import (
     openai_responses_chat,
     openrouter_chat,
     schema_kwargs,
-    transformers_chat,
 )
-from django_ai_sdk.generators import schema
-from django_ai_sdk.generators.base import requires_generator
 from haystack.components.generators.chat import OpenAIChatGenerator, OpenAIResponsesChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from pydantic import BaseModel
@@ -151,29 +146,15 @@ class TestOptionalVendors:
         assert generator.think is True
         assert "think" not in (generator.generation_kwargs or {})
 
-    def test_missing_package_names_the_extra(self):
-        # The install hint is what a project without the extra sees; simulate the
-        # failing import so the test does not depend on what is installed here.
-        with pytest.raises(ImportError, match=r"django-ai-sdk\[deepseek\]"):
-            with requires_generator("deepseek"):
-                raise ImportError("No module named 'haystack_integrations...deepseek'")
+    def test_importing_one_vendor_does_not_import_the_others(self):
+        # Each vendor ships in its own package.
+        for module in [m for m in sys.modules if m.startswith("django_ai_sdk.generators.")]:
+            del sys.modules[module]
 
-    @pytest.mark.parametrize(
-        ("module_name", "extra"),
-        [
-            ("anthropic", "anthropic"),
-            ("mistral", "mistral"),
-            ("ollama", "ollama"),
-            ("openrouter", "openrouter"),
-            ("huggingface", "huggingface"),
-        ],
-    )
-    def test_every_vendor_module_names_an_extra(self, module_name, extra):
-        # Each vendor module must wrap its import with the extra that provides it,
-        # so a project missing the package gets the install hint.
-        source = (Path(generators.__path__[0]) / f"{module_name}.py").read_text()
+        importlib.import_module("django_ai_sdk.generators").openai_chat
 
-        assert f'requires_generator("{extra}")' in source
+        loaded = {m.rsplit(".", 1)[-1] for m in sys.modules if m.startswith("django_ai_sdk.generators.")}
+        assert not loaded & {"anthropic", "mistral", "ollama", "openrouter", "huggingface", "transformers"}
 
 
 class TestStructuredOutput:
@@ -224,20 +205,6 @@ class TestStructuredOutput:
         generator = VendorChatGenerator.__new__(VendorChatGenerator)
 
         assert schema_kwargs(generator, Answer) == {"response_format": Answer}
-
-    def test_every_vendor_declaration_is_merged(self):
-        # A new vendor module declares SCHEMA_KWARGS next to its factories; this
-        # fails if it was never merged into the resolver, which would otherwise
-        # silently fall back to `response_format`.
-        declared = {}
-        for module in pkgutil.iter_modules(generators.__path__):
-            vendor = importlib.import_module(f"{generators.__name__}.{module.name}")
-            if vendor.__name__.endswith((".base", ".schema")):
-                continue
-            declared.update(getattr(vendor, "SCHEMA_KWARGS", {}))
-
-        assert declared, "no vendor module declares SCHEMA_KWARGS"
-        assert declared == schema.SCHEMA_KWARGS
 
     def test_unlisted_generator_assumes_openai_compatible(self):
         assert schema_kwargs(object(), Answer) == {"response_format": Answer}

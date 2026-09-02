@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import IO, Any, ClassVar, Protocol
 
 import aiofiles
-import anydoc
 import puremagic
 from django.conf import settings
 from django.core.files.base import File
@@ -173,6 +172,7 @@ class DocxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
+        # Local import: docx ships in the `files` extra
         from docx import Document
 
         doc = Document(stream)
@@ -196,6 +196,7 @@ class PptxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
+        # Local import: pptx ships in the `files` extra
         from pptx import Presentation
 
         prs = Presentation(stream)
@@ -224,6 +225,7 @@ class XlsxFileProcessor(BaseBinaryFileProcessor):
 
     @staticmethod
     def _extract_text(stream: Any) -> str:
+        # Local import: openpyxl ships in the `files` extra
         import openpyxl
 
         wb = openpyxl.load_workbook(stream, read_only=True, data_only=True)
@@ -297,6 +299,8 @@ class AnyDocFileProcessor(BaseFileProcessor):
 
     @staticmethod
     def _extract_text(data: bytes, name: str | None) -> str | None:
+        # Local import: anydoc ships in the `files` extra
+        import anydoc
 
         fmt: str | None = anydoc.format_from_path(name) if name else None
 

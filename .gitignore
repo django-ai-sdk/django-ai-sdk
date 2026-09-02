@@ -226,6 +226,9 @@ tmp/
 demo/memories
 demo/stores
 
+# Internal dev checks, not part of the published package or CI
+check-extras.sh
+
 # Ideas and plans directory for exploration documents
 ideas/
 plans/

@@ -1,22 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from django_ai_sdk.generators.base import build_kwargs, requires_generator, resolve_setting
+from haystack_integrations.components.generators.ollama import OllamaChatGenerator
 
-if TYPE_CHECKING:
-    from haystack_integrations.components.generators.ollama import OllamaChatGenerator
-
-# Ollama wants a JSON schema at construction, not a run-time kwarg:
-# ollama_chat(response_format=Schema.model_json_schema()).
-SCHEMA_KWARGS: dict[str, str | None] = {"OllamaChatGenerator": None}
+from django_ai_sdk.generators.base import build_kwargs, resolve_setting
 
 
 def ollama_chat(**kwargs: Any) -> OllamaChatGenerator:
     """Ollama chat generator wired to Django settings."""
-    with requires_generator("ollama"):
-        from haystack_integrations.components.generators.ollama import OllamaChatGenerator
-
     # Ollama takes reasoning as an init param, so lift it out of the generation
     # kwargs an agent declares in `llm_kwargs`.
     generation_kwargs = dict(kwargs.pop("generation_kwargs", None) or {})

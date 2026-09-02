@@ -9,10 +9,6 @@ from haystack.components.generators.chat import (
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret, resolve_setting
 
-# Both Azure classes subclass their OpenAI counterpart, so the structured-output
-# kwarg is inherited through the MRO.
-SCHEMA_KWARGS: dict[str, str | None] = {}
-
 
 def _deployment(kwargs: dict[str, Any]) -> str | None:
     """Azure names the model a deployment, so accept either spelling."""

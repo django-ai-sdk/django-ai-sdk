@@ -15,7 +15,36 @@ A simple agent that responds to messages with streaming AI responses. By the end
 ## Install
 
 ```bash
-pip install "django-ai-sdk[haystack]"
+pip install django-ai-sdk
+```
+
+The Haystack runtime is a plain dependency, not an extra: the adapters, pipelines
+and generators are Haystack components. Everything else is opt-in, so you install
+only what you use:
+
+| Extra | Brings | Cost |
+| --- | --- | --- |
+| `qdrant` / `chroma` | a vector store for RAG, plus fastembed | `chroma` also pulls kubernetes, grpc and uvicorn[standard] |
+| `rag` | both vector stores | |
+| `mcp`, `files` | MCP integrations, document extraction | small |
+| `anthropic`, `mistral`, `ollama`, `openrouter`, `huggingface` | one hosted provider each (see [Generators](/manual/generators/)) | small |
+| `providers` | all five of those | small |
+| `transformers` | runs a Hugging Face model locally | **pulls torch (~500 MB)** |
+| `all` | everything above | |
+
+Each optional feature lives in its own module that imports its package at the top,
+and those modules are loaded on first use - so a Qdrant project never installs
+chromadb, and an OpenAI project never installs mistral. Reach for a feature whose
+extra is missing and you get the import error naming the package, e.g.
+`No module named 'haystack_integrations.document_stores.qdrant'`; the table above
+says which extra provides it.
+
+Streaming needs an ASGI server, but the SDK does not choose one for you: install
+daphne, uvicorn or hypercorn yourself. Nothing the demo project happens to use -
+allauth, DRF, django-cors-headers, a `django-tasks` backend - is a dependency of the
+SDK either.
+
+```bash
 ```
 
 The `haystack` extra pulls in Haystack and the components agents run on. That's all you need to start.

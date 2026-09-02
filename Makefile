@@ -1,6 +1,13 @@
-PHONY: setup format test typecheck tag build publish release docs-graphs docs-build docs-serve
+PHONY: setup setup-all format test typecheck tag build publish release docs-graphs docs-build docs-serve
+
+DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group demo
+TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers
 
 setup:
+	uv sync $(DEMO_EXTRAS)
+	uv run lefthook install
+
+setup-all:
 	uv sync --all-extras
 	uv run lefthook install
 
@@ -14,10 +21,10 @@ format:
 	uv run ruff format .
 
 test:
-	PYTHONPATH=demo uv run pytest tests -v
+	PYTHONPATH=demo uv run $(TEST_EXTRAS) pytest tests -v
 
 typecheck:
-	uv run ty check
+	uv run $(TEST_EXTRAS) ty check
 
 tag:
 	@read -p "Tag (e.g. v0.1.0rc1): " TAG; \

@@ -99,11 +99,10 @@ generator = self.get_llm(generation_kwargs={})
 ## Structured output
 
 `Agent.run(response_format=Schema)` and `Run.run(response_format=Schema)` are
-vendor-neutral, but providers disagree on how a schema is passed. Each vendor module
-declares its own answer in a `SCHEMA_KWARGS` mapping next to its factories, keyed by
-generator class name so an uninstalled vendor needs no import;
-`django_ai_sdk/generators/schema.py` merges those declarations and walks the MRO, so
-subclasses inherit.
+vendor-neutral, but providers disagree on how a schema is passed. `Run` resolves that
+through the `SCHEMA_KWARGS` table in `django_ai_sdk/generators/schema.py`, keyed by
+generator class name - so resolving one vendor imports none of them - and walked over
+the MRO, so subclasses inherit.
 
 | Generator | How a schema is passed | Works with `response_format=` |
 | --- | --- | --- |
@@ -138,21 +137,17 @@ An unlisted generator class is assumed OpenAI-compatible and gets `response_form
 
 Everything a vendor needs lives in its own module. To add DeepSeek:
 
-1. Create `django_ai_sdk/generators/deepseek.py` with the factory and the vendor's
-   structured-output declaration:
+1. Create `django_ai_sdk/generators/deepseek.py`. One module per vendor is what
+   makes the extra optional, so import the integration at the top:
 
    ```python
-   if TYPE_CHECKING:
-       from haystack_integrations.components.generators.deepseek import DeepSeekChatGenerator
+   from haystack_integrations.components.generators.deepseek import DeepSeekChatGenerator
+
+   from django_ai_sdk.generators.base import build_kwargs, resolve_secret, resolve_setting
 
 
    def deepseek_chat(**kwargs: Any) -> DeepSeekChatGenerator:
        """DeepSeek chat generator wired to Django settings."""
-       with requires_generator("deepseek"):
-           from haystack_integrations.components.generators.deepseek import (
-               DeepSeekChatGenerator,
-           )
-
        return DeepSeekChatGenerator(
            **build_kwargs(
                {
@@ -162,17 +157,14 @@ Everything a vendor needs lives in its own module. To add DeepSeek:
                kwargs,
            )
        )
-
-
-   # Subclasses OpenAIChatGenerator, so `response_format` is inherited via the MRO.
-   SCHEMA_KWARGS: dict[str, str | None] = {}
    ```
 
 2. Add `deepseek = ["deepseek-haystack>=..."]` to `[project.optional-dependencies]`
    in `pyproject.toml`, and to the `all` extra.
-3. Export `deepseek_chat` from `django_ai_sdk/generators/__init__.py`, and merge
-   `SCHEMA_KWARGS` in `schema.py`. A unit test fails if the declaration is not
-   merged, so a forgotten wiring is caught rather than silently defaulting.
+3. Add `deepseek_chat` to `_LAZY` and `__all__` in
+   `django_ai_sdk/generators/__init__.py` so it resolves on first use, and add a
+   `SCHEMA_KWARGS` row in `schema.py` only if DeepSeek's structured-output keyword
+   differs from `response_format`.
 
 Nothing in `Run`, `Agent`, or the adapters changes.
 
@@ -215,20 +207,21 @@ class MyAgent(Agent):
     llm = cheap_openai_chat
 ```
 
-For a vendor that needs its own package, wrap the import so a missing install
-explains itself instead of raising a bare `ModuleNotFoundError`:
+A factory for a vendor that ships in its own package imports it at module scope,
+like the built-in ones - keep the factory in its own module so importing it is what
+requires the package:
 
 ```python
-from django_ai_sdk.generators import build_kwargs, requires_generator
+# myapp/generators/vertex.py
+from haystack_integrations.components.generators.anthropic import (
+    AnthropicVertexChatGenerator,
+)
+
+from django_ai_sdk.generators import build_kwargs
 
 
 def vertex_chat(**kwargs):
-    """Anthropic on Vertex AI."""
-    with requires_generator("anthropic"):
-        from haystack_integrations.components.generators.anthropic import (
-            AnthropicVertexChatGenerator,
-        )
-
+    """Anthropic on Vertex AI - needs django-ai-sdk[anthropic]."""
     return AnthropicVertexChatGenerator(**build_kwargs({"region": "europe-west1"}, kwargs))
 ```
 
@@ -237,5 +230,4 @@ def vertex_chat(**kwargs):
 | Helper | Purpose |
 | --- | --- |
 | `merge_generation_kwargs(base, extra)` | Shallow merge where `extra` wins. |
-| `schema_kwargs(generator, schema)` | The structured-output generation kwargs for that generator, resolved from the vendor declarations. `Run` calls it for you. |
-| `requires_generator(extra)` | Context manager that turns a missing integration package into `ImportError: This generator needs: pip install django-ai-sdk[<extra>]`. Wrap the import in a custom factory for an optional vendor. |
+| `schema_kwargs(generator, schema)` | The structured-output generation kwargs for that generator, from the `SCHEMA_KWARGS` table in `generators/schema.py`. `Run` calls it for you. |

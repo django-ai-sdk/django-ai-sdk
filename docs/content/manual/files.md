@@ -92,6 +92,7 @@ status = await aget_task_status(task_id)  # from DocumentUploadResponse.task_id
 
 Key behaviors:
 
+- **Where it runs**: with the default `django_tasks` backend the pipeline runs inline in the upload request; a worker only picks it up once you configure a durable `TASKS` backend. See [Background Tasks](/manual/settings/#background-tasks).
 - **Timeouts**: a run is failed after `AI_SDK_FILE_PIPELINE_TIMEOUT` seconds (default 900); `django_tasks` has no native timeout.
 - **Stale processing**: a document stuck in `processing` past its deadline (timeout + 60s) is failed as orphaned when its status is polled via `get_document_status()` / `get_task_status()`.
 - **Cancellation**: `cancelled_at` is checked at each `on_step` checkpoint (between processor/transforms), never mid-call.
