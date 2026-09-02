@@ -7,7 +7,8 @@ from haystack.components.generators.chat import (
     AzureOpenAIResponsesChatGenerator,
 )
 
-from django_ai_sdk.generators.base import build_kwargs, resolve_secret, resolve_setting
+from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.utils import resolve_setting
 
 
 def _deployment(kwargs: dict[str, Any]) -> str | None:

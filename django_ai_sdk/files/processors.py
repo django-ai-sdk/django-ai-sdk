@@ -8,15 +8,16 @@ from typing import IO, Any, ClassVar, Protocol
 
 import aiofiles
 import puremagic
-from django.conf import settings
 from django.core.files.base import File
+
+from django_ai_sdk.utils import resolve_setting
 
 type FileSource = str | Path | File | IO[bytes]
 
 
 @lru_cache
 def get_allowed_files() -> dict[str, str]:
-    return getattr(settings, "AI_SDK_ALLOWED_FILES", {})
+    return resolve_setting("AI_SDK_ALLOWED_FILES", {})
 
 
 def get_file_name(file: FileSource) -> str | None:

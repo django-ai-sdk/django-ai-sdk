@@ -4,7 +4,8 @@ from typing import Any
 
 from haystack_integrations.components.generators.ollama import OllamaChatGenerator
 
-from django_ai_sdk.generators.base import build_kwargs, resolve_setting
+from django_ai_sdk.generators.base import build_kwargs
+from django_ai_sdk.utils import resolve_setting
 
 
 def ollama_chat(**kwargs: Any) -> OllamaChatGenerator:

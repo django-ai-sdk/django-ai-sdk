@@ -3,8 +3,9 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from loguru import logger
+
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from loguru import Logger
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 logger.remove()
 
 
-if getattr(settings, "AI_SDK_ENABLE_LOGS", False):
+if resolve_setting("AI_SDK_ENABLE_LOGS", False):
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",

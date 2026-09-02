@@ -21,7 +21,6 @@ from urllib.parse import urlencode
 import httpx
 from asgiref.sync import async_to_sync
 from authlib.integrations.base_client.errors import OAuthError
-from django.conf import settings
 from mcp.client.auth import OAuthRegistrationError
 from mcp.client.auth.oauth2 import PKCEParameters
 from mcp.client.auth.utils import handle_registration_response
@@ -30,6 +29,7 @@ from pydantic import AnyUrl
 
 from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
 from django_ai_sdk.integrations.mcp.models import MCPOAuthClient, MCPOAuthToken
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django_ai_sdk.integrations.mcp.schemas import MCPIntegrationConfig
@@ -137,7 +137,7 @@ async def get_or_register_client(
         )
 
     client_metadata = OAuthClientMetadata(
-        client_name=getattr(settings, "AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client"),
+        client_name=resolve_setting("AI_SDK_MCP_CLIENT_NAME", "MCP OAuth Client"),
         redirect_uris=[AnyUrl(redirect_uri)],
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],

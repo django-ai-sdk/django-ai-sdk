@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
-
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.prompts import prompt
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django_ai_sdk.artifacts import ArtifactSchema
@@ -23,8 +22,8 @@ def llm_generator() -> Any:
     """
     Build a dedicated generator
     """
-    model = getattr(settings, EXTRACTION_MODEL_SETTING, None) or getattr(
-        settings, "AI_SDK_DEFAULT_MODEL", "gpt-4o-mini"
+    model = resolve_setting(EXTRACTION_MODEL_SETTING) or resolve_setting(
+        "AI_SDK_DEFAULT_MODEL", "gpt-4o-mini"
     )
     return openai_responses_chat(model=model)
 

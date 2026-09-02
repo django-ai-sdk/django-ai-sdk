@@ -105,7 +105,7 @@ class Agent(ABC, AgentInfoMixin):
         from django.conf import settings
         from django_ai_sdk.agents.registry import registry
 
-        for path in getattr(settings, 'AI_SDK_AGENTS', []):
+        for path in resolve_setting('AI_SDK_AGENTS', []):
             import_string(path)
         registry.setup()
 

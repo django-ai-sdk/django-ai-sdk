@@ -4,13 +4,14 @@ import asyncio
 from typing import Any
 
 from asgiref.sync import async_to_sync
-from django.conf import settings
 from django_tasks import task
+
+from django_ai_sdk.utils import resolve_setting
 
 # No pipeline step reports progress within this ceiling; a hung/leaked
 # connection or a wedged upstream call fails the task instead of leaving the
 # document stuck in PROCESSING forever (django_tasks has no native timeout).
-PIPELINE_TIMEOUT_SECONDS = getattr(settings, "AI_SDK_FILE_PIPELINE_TIMEOUT", 900)
+PIPELINE_TIMEOUT_SECONDS = resolve_setting("AI_SDK_FILE_PIPELINE_TIMEOUT", 900)
 
 
 class _Cancelled(Exception):

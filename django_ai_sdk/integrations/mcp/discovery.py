@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
-from django.conf import settings
 from mcp.client.auth.utils import (
     build_oauth_authorization_server_metadata_discovery_urls,
     build_protected_resource_metadata_discovery_urls,
@@ -27,6 +26,8 @@ from mcp.client.auth.utils import (
     handle_protected_resource_response,
 )
 from mcp.shared.auth_utils import check_resource_allowed
+
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from mcp.shared.auth import OAuthMetadata, ProtectedResourceMetadata
@@ -39,15 +40,15 @@ _cache: dict[str, tuple[float, OAuthDiscovery]] = {}
 
 
 def _cache_ttl() -> int:
-    return getattr(settings, "AI_SDK_MCP_DISCOVERY_CACHE_TTL", 3600)
+    return resolve_setting("AI_SDK_MCP_DISCOVERY_CACHE_TTL", 3600)
 
 
 def _discovery_timeout() -> int:
-    return getattr(settings, "AI_SDK_MCP_DISCOVERY_TIMEOUT", 10)
+    return resolve_setting("AI_SDK_MCP_DISCOVERY_TIMEOUT", 10)
 
 
 def _allowed_issuer_domains() -> list[str] | None:
-    return getattr(settings, "AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS", None)
+    return resolve_setting("AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS")
 
 
 def _is_unsafe_ip(ip_str: str) -> bool:

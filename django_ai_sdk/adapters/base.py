@@ -6,7 +6,6 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any, cast, overload
 
-from django.conf import settings
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
@@ -35,6 +34,7 @@ from django_ai_sdk.events import (
 from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.tracing import bind as bind_trace
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -417,7 +417,7 @@ class Stream:
             return None
         try:
             recent_messages = messages[-6:] if len(messages) > 6 else messages
-            timeout = getattr(settings, "AI_SDK_SUGGESTION_TIMEOUT", 5.0)
+            timeout = resolve_setting("AI_SDK_SUGGESTION_TIMEOUT", 5.0)
             suggestions = await asyncio.wait_for(
                 self.suggestion_generator.generate(
                     messages=recent_messages,

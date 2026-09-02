@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from django.conf import settings
 from pydantic import BaseModel, ConfigDict, Field
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,7 @@ class BaseStorageConfig(BaseModel):
     @classmethod
     def _build_path(cls, backend: str, memory_id: str | None) -> str | None:
         """Build the persistence path for a given backend and memory_id."""
-        persist_path = getattr(settings, "AI_SDK_VECTOR_STORE_PATH", None)
+        persist_path = resolve_setting("AI_SDK_VECTOR_STORE_PATH")
         if not persist_path:
             return None
         base_path = str(persist_path).rstrip("/")
@@ -72,7 +72,7 @@ class QdrantStorageConfig(BaseStorageConfig):
                      (e.g. prefer_grpc, https, api_key=Secret.from_token(...),
                      grpc_port, index, timeout).
         """
-        url = getattr(settings, "AI_SDK_VECTOR_STORE_URL", None)
+        url = resolve_setting("AI_SDK_VECTOR_STORE_URL")
         if url:
             kwargs.setdefault("index", f"memory_{memory_id}" if memory_id else "default")
             return cls(

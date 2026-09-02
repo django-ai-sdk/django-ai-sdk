@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
 from django_ai_sdk.agents.models import AgentSettings
+from django_ai_sdk.utils import resolve_setting
 
-_MODEL = getattr(settings, "AI_SDK_DEFAULT_MODEL", "gpt-4o")
+_MODEL = resolve_setting("AI_SDK_DEFAULT_MODEL", "gpt-4o")
 
 _AGENTS = [
     {
@@ -60,7 +60,7 @@ class Command(BaseCommand):
         self.stdout.write("Deleted existing runtime agents.")
 
         base_class = ""
-        bases = getattr(settings, "AI_SDK_RUNTIME_AGENT_BASES", [])
+        bases = resolve_setting("AI_SDK_RUNTIME_AGENT_BASES", [])
         if bases:
             cls_path = bases[0]
             parts = cls_path.rsplit(".", 1)

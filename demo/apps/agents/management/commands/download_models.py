@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -24,7 +24,7 @@ class Command(BaseCommand):
         from huggingface_hub.errors import HfHubHTTPError
 
         models: list[Any] = cast("list[Any]", options.get("models")) or list(
-            getattr(settings, "HF_PRELOAD_MODELS", [])
+            resolve_setting("HF_PRELOAD_MODELS", [])
         )
         if not models:
             self.stdout.write("No models to download (HF_PRELOAD_MODELS is empty)")

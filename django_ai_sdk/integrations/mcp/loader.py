@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
-from django.conf import settings
 from pydantic import SecretStr, ValidationError
 
 from django_ai_sdk.integrations.base import (
@@ -29,6 +28,7 @@ from django_ai_sdk.integrations.mcp.schemas import (
     StaticMCPIntegrationConfig,
     TokenMCPIntegrationConfig,
 )
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -77,11 +77,11 @@ class DynamicMCPIntegration(Integration):
         intended_kind: str | None = None,
     ) -> None:
         self.name = name
-        self._timeout = getattr(settings, "AI_SDK_INTEGRATION_TIMEOUT", 3)
+        self._timeout = resolve_setting("AI_SDK_INTEGRATION_TIMEOUT", 3)
         self._cache = ResilientCache(
-            ttl=getattr(settings, "AI_SDK_INTEGRATION_CACHE_TTL", 900),
+            ttl=resolve_setting("AI_SDK_INTEGRATION_CACHE_TTL", 900),
             timeout=self._timeout,
-            cb_cooldown=getattr(settings, "AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
+            cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
         )
         self.label = config.label or name.title()
         self.hint = config.hint
@@ -244,7 +244,7 @@ class DynamicMCPIntegration(Integration):
         if user is not None:
             qs = qs.filter(user=user)
         else:
-            threshold = getattr(settings, "AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES", 10)
+            threshold = resolve_setting("AI_SDK_MCP_REFRESH_THRESHOLD_MINUTES", 10)
             qs = qs.filter(expires_at__lte=timezone.now() + timedelta(minutes=threshold))
         async for token_obj in qs:
             refreshed = await refresh_oauth_token(token_obj, self.config)
