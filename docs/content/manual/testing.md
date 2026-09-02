@@ -33,7 +33,8 @@ Principles:
 ## Setup
 
 ```bash
-uv sync --all-extras --group dev
+make setup      # demo/runtime extras only
+make setup-all  # every extra, including the torch-based transformers stack
 ```
 
 Pytest config (`pyproject.toml`):

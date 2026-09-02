@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 from django_ai_sdk.adapters.base import Run
+from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.prompts import prompt
 
@@ -27,11 +26,7 @@ def llm_generator() -> Any:
     model = getattr(settings, EXTRACTION_MODEL_SETTING, None) or getattr(
         settings, "AI_SDK_DEFAULT_MODEL", "gpt-4o-mini"
     )
-    return OpenAIChatGenerator(
-        model=model,
-        api_key=Secret.from_token(settings.OPENAI_API_KEY),
-        api_base_url=getattr(settings, "OPENAI_API_URL", None),
-    )
+    return openai_responses_chat(model=model)
 
 
 async def extract_artifact(

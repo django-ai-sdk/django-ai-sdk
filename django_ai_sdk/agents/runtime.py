@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from django.conf import settings as django_settings
 from django.utils.module_loading import import_string
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agent import Agent
@@ -61,26 +58,19 @@ class RuntimeAgent(Agent):
     def agent_id(self) -> str:
         return str(self._config.id)
 
-    def _build_generator(self) -> OpenAIChatGenerator:
-        return OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(django_settings.OPENAI_API_KEY),
-            api_base_url=getattr(django_settings, "OPENAI_API_URL", None),
-        )
-
     async def get_run_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Run:
-        return Run(generator=self._build_generator())
+        return Run(generator=self.get_llm())
 
     async def get_pipeline_adapter(
         self,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
-        generator = self._build_generator()
+        generator = self.get_llm()
         storage_adapter = await self.get_storage_adapter(thread_id)
         tools = await self.get_tools(thread_id=thread_id or "", user=user)
 

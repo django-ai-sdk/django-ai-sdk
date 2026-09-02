@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django.conf import settings
 from haystack import Pipeline
-from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack.tools import ComponentTool
-from haystack.utils import Secret
 
+from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import MultiQueryBM25Retriever
@@ -144,11 +142,7 @@ class BM25QueryExpanderRAG(RAGBase):
                 haystack_docs = self._convert_documents()
                 self._write_documents(haystack_docs, document_store)
 
-        expander_generator = OpenAIChatGenerator(
-            model=self.config.expander_model,
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        expander_generator = openai_chat(model=self.config.expander_model)
 
         query_expander = QueryExpander(
             chat_generator=expander_generator,

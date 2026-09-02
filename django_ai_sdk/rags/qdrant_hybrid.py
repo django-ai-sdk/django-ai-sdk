@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
-from haystack import Pipeline
-from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack import Pipeline, component
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
+from haystack.dataclasses import Document as HaystackDocument
 from haystack.document_stores.types import DuplicatePolicy
 from haystack.tools import ComponentTool
-from haystack.utils import Secret
 from haystack_integrations.components.embedders.fastembed import (
     FastembedDocumentEmbedder,
     FastembedSparseDocumentEmbedder,
+    FastembedSparseTextEmbedder,
+    FastembedTextEmbedder,
 )
+from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetriever
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 from pydantic import Field
 from tenacity import (
@@ -27,15 +28,14 @@ from tenacity import (
     wait_exponential,
 )
 
+from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
-from django_ai_sdk.rags.components import MultiQueryQdrantHybridRetriever
+from django_ai_sdk.rags.components import MultiQueryDeduplicationMixin
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
 
 if TYPE_CHECKING:
-    from haystack.dataclasses import Document as HaystackDocument
-
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
@@ -309,11 +309,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
-        expander_generator = OpenAIChatGenerator(
-            model=self.config.expander_model,
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        expander_generator = openai_chat(model=self.config.expander_model)
 
         query_expander = QueryExpander(
             chat_generator=expander_generator,
@@ -415,3 +411,130 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             return None
         docs = self._cached_document_store.get_documents_by_id([chunk_id])
         return docs[0].content if docs else None
+
+
+@component
+class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
+    """
+    Retriever that runs multiple queries with hybrid search and deduplicates results.
+
+    This retriever is more complex than Chroma/BM25 because it requires:
+    1. Embedding generation (sparse + dense)
+    2. Warmup for embedders
+    3. Special handling for query preprocessing
+
+    Uses MultiQueryDeduplicationMixin directly (not BaseMultiQueryRetriever)
+    because it needs custom run() logic for embeddings.
+
+    Example:
+        retriever = MultiQueryQdrantHybridRetriever(
+            document_store=qdrant_store,
+            top_k=3
+        )
+        retriever.warm_up()  # Load embedders
+        result = retriever.run(queries=["query1", "query2"])
+    """
+
+    def __init__(
+        self,
+        document_store: Any,
+        top_k: int = 3,
+        min_score: float | None = None,
+        sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
+        dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    ) -> None:
+        self.document_store = document_store
+        self.top_k = top_k
+        self.min_score = min_score
+        self.sparse_embedder_model = sparse_embedder_model
+        self.dense_embedder_model = dense_embedder_model
+        self._sparse_embedder: Any | None = None
+        self._dense_embedder: Any | None = None
+
+    def warm_up(self) -> None:
+        """Initialize and warm up the embedding models."""
+
+        self._sparse_embedder = FastembedSparseTextEmbedder(
+            model=self.sparse_embedder_model,
+        )
+        self._sparse_embedder.warm_up()
+
+        self._dense_embedder = FastembedTextEmbedder(
+            model=self.dense_embedder_model,
+        )
+        self._dense_embedder.warm_up()
+
+    @component.output_types(documents=list[HaystackDocument])
+    def run(
+        self, queries: str | list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        """
+        Run hybrid search with multiple queries.
+
+        Args:
+            queries: Single query string or list of query strings
+            top_k: Maximum documents to return
+
+        Returns:
+            Dict with deduplicated documents sorted by score
+        """
+        if self._sparse_embedder is None:
+            self.warm_up()
+
+        if self._sparse_embedder is None or self._dense_embedder is None:
+            raise ValueError("Embedders not initialized after warm_up()")
+
+        # Convert single query to list
+        if isinstance(queries, str):
+            queries = [queries]
+
+        k = top_k if top_k is not None else self.top_k
+
+        # Run hybrid search for all queries
+        results: list[dict[str, list[HaystackDocument]]] = []
+        for query in queries:
+            sparse_result = self._sparse_embedder.run(text=query)
+            dense_result = self._dense_embedder.run(text=query)
+            retriever = QdrantHybridRetriever(
+                document_store=self.document_store,
+                score_threshold=self.min_score,
+            )
+            result = retriever.run(
+                query_sparse_embedding=sparse_result["sparse_embedding"],
+                query_embedding=dense_result["embedding"],
+                top_k=k,
+            )
+            results.append(result)
+
+        # Deduplicate and rank using mixin
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        return {"documents": docs}
+
+    @component.output_types(documents=list[HaystackDocument])
+    async def run_async(
+        self, queries: str | list[str], top_k: int | None = None
+    ) -> dict[str, list[HaystackDocument]]:
+        if isinstance(queries, str):
+            queries = [queries]
+        k = top_k if top_k is not None else self.top_k
+        if self._sparse_embedder is None:
+            await asyncio.to_thread(self.warm_up)
+        if self._sparse_embedder is None or self._dense_embedder is None:
+            raise ValueError("Embedders not initialized after warm_up()")
+        results: list[dict[str, list[HaystackDocument]]] = []
+        for query in queries:
+            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=query)
+            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=query)
+            retriever = QdrantHybridRetriever(
+                document_store=self.document_store,
+                score_threshold=self.min_score,
+            )
+            result = await asyncio.to_thread(
+                retriever.run,
+                query_sparse_embedding=sparse_result["sparse_embedding"],
+                query_embedding=dense_result["embedding"],
+                top_k=k,
+            )
+            results.append(result)
+        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        return {"documents": docs}

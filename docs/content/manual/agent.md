@@ -27,6 +27,8 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 | --- | --- | --- |
 | `name` | None | Display name |
 | `model` | `None` | Model identifier passed to the generator |
+| `llm` | `openai_responses_chat` | Generator factory, assigned uncalled |
+| `llm_kwargs` | `None` | Vendor generation parameters for that factory |
 | `instructions` | built-in prompt | System prompt, built with `prompt()` |
 | `protocol` | `VercelProtocolHandler` | Wire-format handler class |
 | `storage_adapter` | `MemoryStorageAdapter` | Fallback storage class |
@@ -55,7 +57,7 @@ The SDK calls two abstract hooks; you implement them:
 
 ```python
 async def get_pipeline_adapter(self, thread_id=None, user=None):
-    generator = OpenAIChatGenerator(...)
+    generator = self.get_llm()
     tool_agent = ToolAgent(
         config=ToolAgentConfig(
             model=self.get_model(),
@@ -104,6 +106,12 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 | `get_citation_registry()` | Fresh per-turn `CitationRegistry` |
 | `get_citation_formatter()` | From `citation_formatter_class` |
 | `get_suggestion_generator()` | `self.suggestion_generator(agent=self)` |
+
+## Generator
+
+| Hook | Returns |
+| --- | --- |
+| `get_llm(**kwargs)` | A chat generator built by the `llm` factory (default `openai_responses_chat`), with this agent's model and `llm_kwargs` applied. See [Generators](/manual/generators/). |
 
 ## Entry Point
 

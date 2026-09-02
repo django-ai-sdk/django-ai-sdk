@@ -9,14 +9,13 @@ from django_ai_sdk.agents import auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.files import FilePipeline, TextFileProcessor
+from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
-    ChromaDBQueryExpanderRAG,
-    ChromaDBQueryExpanderRAGConfig,
     QdrantBM25HybridRAG,
     QdrantBM25HybridRAGConfig,
 )
@@ -24,8 +23,6 @@ from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
 
 from .extraction import PirateExtractionAgent
 from .tools import get_memory_files, get_today
@@ -41,6 +38,8 @@ if TYPE_CHECKING:
 class PirateBasicAgent(Agent):
     name = "Basic Pirate Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
+    llm = openai_responses_chat
+    llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
     instructions = prompt("""\
         You are a helpful AI agent who always responds like a pirate.
         Use pirate language, expressions, and mannerisms in all your responses.
@@ -104,23 +103,6 @@ class PirateBasicAgent(Agent):
             ),
         )
 
-    async def get_rag_pipeline_chromadb(
-        self, memory_id: str | None = None
-    ) -> ChromaDBQueryExpanderRAG | None:
-        """Build ChromaDB RAG pipeline for document retrieval."""
-        documents = await self.get_rag_documents(memory_id)
-        if not documents:
-            return None
-
-        return ChromaDBQueryExpanderRAG(
-            documents=documents,
-            config=ChromaDBQueryExpanderRAGConfig(
-                top_k=5,
-                n_expansions=4,
-                expander_model="openai/gpt-oss-120b",
-            ),
-        )
-
     async def get_rag_pipeline_qdrant(
         self, memory_id: str | None = None
     ) -> QdrantBM25HybridRAG | None:
@@ -149,11 +131,7 @@ class PirateBasicAgent(Agent):
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Run:
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        generator = self.get_llm()
         return Run(generator=generator)
 
     async def get_pipeline_adapter(
@@ -163,12 +141,7 @@ class PirateBasicAgent(Agent):
     ) -> Stream:
         """Create Haystack pipeline adapter with multi-memory RAG tools."""
 
-        # Build generator
-        generator = OpenAIChatGenerator(
-            model=self.get_model(),
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        generator = self.get_llm()
 
         # Get storage adapter
         storage_adapter = await self.get_storage_adapter(thread_id)

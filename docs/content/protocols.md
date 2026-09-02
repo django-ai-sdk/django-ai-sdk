@@ -40,7 +40,7 @@ from django_ai_sdk.adapters.base import Stream
 
 stream = Stream(
     pipeline=pipeline,            # haystack.Pipeline (required)
-    generator=generator,          # OpenAIChatGenerator (required)
+    generator=generator,          # chat generator, e.g. self.get_llm() (required)
     store=True,                   # persist the assistant message
     storage_adapter=storage,      # where to persist it
     citation_registry=registry,   # citation numbering (RAG)
@@ -122,7 +122,7 @@ class Movie(BaseModel):
 movie = await run.run(messages, response_format=Movie)
 ```
 
-`Run` sends the model's JSON schema as a `response_format` on the OpenAI-compatible generator, then validates the reply. The generator must support JSON-schema responses (any `OpenAIChatGenerator`-compatible endpoint does).
+`Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](/manual/generators/#structured-output).
 
 ---
 

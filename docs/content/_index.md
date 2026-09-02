@@ -8,7 +8,7 @@ Django AI SDK brings the same simplicity Django is known for to AI development. 
 ## Getting Started
 
 ```bash
-pip install "django-ai-sdk[haystack]"
+pip install django-ai-sdk
 ```
 
 {{< cards >}}

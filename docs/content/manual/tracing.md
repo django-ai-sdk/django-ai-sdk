@@ -120,7 +120,7 @@ The rule is to count **leaf spans only**, which are exactly the LLM calls in eve
 
 ### Provider caveat
 
-OpenAI omits usage entirely from a *streamed* response unless `stream_options.include_usage` is requested. The `Stream` adapter sets that default on OpenAI-compatible generators at construction; a custom streaming generator that reports no usage leaves the token columns null.
+The Responses API reports usage on a streamed response without being asked, so the default `openai_responses_chat` needs no configuration - the tracer accepts its `input_tokens`/`output_tokens` names alongside the `prompt_tokens`/`completion_tokens` of Chat Completions. Chat Completions omits usage from a *streamed* response entirely unless `stream_options.include_usage` is requested; the adapters do not add it, because the option is invalid on a non-streaming call. Declare it on the agent instead - see [Generators](/manual/generators/#token-usage-while-streaming). A generator that reports no usage leaves the token columns null.
 
 ## TraceService
 

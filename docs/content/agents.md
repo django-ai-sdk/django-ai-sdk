@@ -75,6 +75,8 @@ These class attributes configure an agent's behavior:
 | `name` | None | Display name |
 | `description` | `None` | Short description, surfaced in agent listings |
 | `model` | `None` | Model identifier passed to the generator |
+| `llm` | `openai_responses_chat` | Generator factory from [`django_ai_sdk.generators`](/manual/generators/), assigned uncalled |
+| `llm_kwargs` | `None` | Vendor generation parameters, e.g. `{"reasoning": {"effort": "low"}}` |
 | `instructions` | `"You are a helpful agent."` | System prompt, built with `prompt()` |
 | `protocol` | `VercelProtocolHandler` | Protocol handler for message conversion |
 | `storage_adapter` | `MemoryStorageAdapter` | Storage used when a thread isn't found elsewhere |
@@ -302,8 +304,7 @@ class MyAgent(Agent):
     response_format = Movie
 
     async def get_run_adapter(self, thread_id=None, user=None):
-        generator = OpenAIChatGenerator(...)
-        return Run(generator=generator)
+        return Run(generator=self.get_llm())
 
 # agent.run(messages) -> Movie | str
 ```

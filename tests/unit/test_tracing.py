@@ -244,23 +244,15 @@ class TestCorrelation:
 class TestStreamAdapter:
     """The streaming adapter's tracing touchpoints."""
 
-    def test_openai_generator_gets_include_usage(self):
-        # OpenAI sends no usage chunk on a streamed response unless asked, which
-        # would leave every token column null.
+    def test_generator_is_not_mutated(self):
+        # The adapter configures nothing on the generator: what a factory built is
+        # what runs, so streaming usage is the generator's own configuration.
         generator = OpenAIChatGenerator(api_key=Secret.from_token("test"))
         pipeline = Pipeline()
         pipeline.add_component("gen", generator)
         Stream(pipeline=pipeline, generator=generator, store=False)
 
-        assert generator.generation_kwargs["stream_options"] == {"include_usage": True}
-
-    def test_non_openai_generator_is_left_alone(self):
-        # stream_options is OpenAI-specific; other generators would reject it.
-        pipeline = _build_pipeline()
-        generator = pipeline.get_component("stub")
-        Stream(pipeline=pipeline, generator=generator, store=False)
-
-        assert not hasattr(generator, "generation_kwargs")
+        assert generator.generation_kwargs == {}
 
     @pytest.mark.django_db(transaction=True)
     async def test_stream_stamps_spans_with_its_thread_and_message(self, orm_tracer):
@@ -314,6 +306,24 @@ class TestUsageHarvesting:
         assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (11, 7, 18)
         # The payload itself stays out of the DB while content tracing is off.
         assert row.tags == {}
+
+    @pytest.mark.django_db
+    def test_responses_api_token_names_are_recorded(self, orm_tracer):
+        # The Responses API reports input/output tokens where Chat Completions
+        # reports prompt/completion; both fill the same columns.
+        reply = HaystackChatMessage.from_assistant(
+            "hi",
+            meta={
+                "model": "gpt-5-mini",
+                "usage": {"input_tokens": 21, "output_tokens": 9, "total_tokens": 30},
+            },
+        )
+        tracer = DefaultTracer()
+        with tracer.trace("haystack.agent.step.llm") as span:
+            span.set_content_tag("haystack.agent.step.llm.output", {"replies": [reply]})
+
+        row = Trace.objects.get(operation_name="haystack.agent.step.llm")
+        assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (21, 9, 30)
 
     @pytest.mark.django_db
     def test_agent_step_llm_payload_stored_with_content_tracing(self, orm_tracer, monkeypatch):

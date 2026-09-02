@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from django.conf import settings
-from haystack import Pipeline
-from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack import Pipeline, component
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.document_stores.types import DuplicatePolicy
 from haystack.tools import ComponentTool
-from haystack.utils import Secret
 from haystack_integrations.components.embedders.fastembed import FastembedDocumentEmbedder
+from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRetriever
+from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
+from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
-from django_ai_sdk.rags.components import MultiQueryChromaRetriever
+from django_ai_sdk.rags.components import BaseMultiQueryRetriever
 from django_ai_sdk.rags.config import ChromaStorageConfig
 from django_ai_sdk.rags.utils import to_document
 
@@ -28,15 +28,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
-
-try:
-    from haystack_integrations.document_stores.chroma import ChromaDocumentStore  # noqa: PLC0415
-
-    _CHROMA_AVAILABLE = True
-except RuntimeError as _chroma_err:
-    logger.warning("ChromaDB unavailable, ChromaDBQueryExpanderRAG disabled: %s", _chroma_err)
-    ChromaDocumentStore = None  # ty: ignore[invalid-assignment]
-    _CHROMA_AVAILABLE = False
 
 
 class ChromaDBQueryExpanderRAGConfig(RAGConfig):
@@ -60,8 +51,6 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         documents: list[RagDocument],
         config: ChromaDBQueryExpanderRAGConfig | None = None,
     ) -> None:
-        if not _CHROMA_AVAILABLE:
-            raise RuntimeError("ChromaDB unavailable on this system.")
         self.config: ChromaDBQueryExpanderRAGConfig = config or ChromaDBQueryExpanderRAGConfig()
         self.documents = documents
         self._cached_document_store = None
@@ -237,12 +226,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
-        expander_generator = OpenAIChatGenerator(
-            model=self.config.expander_model,
-            # TODO: we need to fix this
-            api_key=Secret.from_token(settings.OPENAI_API_KEY),
-            api_base_url=getattr(settings, "OPENAI_API_URL", None),
-        )
+        expander_generator = openai_chat(model=self.config.expander_model)
 
         query_expander = QueryExpander(
             chat_generator=expander_generator,
@@ -325,3 +309,36 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
                 "required": ["query"],
             },
         )
+
+
+@component
+class MultiQueryChromaRetriever(BaseMultiQueryRetriever):
+    """
+    Retriever that runs multiple queries and deduplicates results for ChromaDB.
+
+    Uses BaseMultiQueryRetriever to handle multi-query logic.
+    Just implements retrieve() with ChromaQueryTextRetriever.
+
+    Example:
+        retriever = MultiQueryChromaRetriever(
+            document_store=chroma_store,
+            top_k=3
+        )
+        result = retriever.run(queries=["query1", "query2", "query3"])
+    """
+
+    def __init__(
+        self,
+        document_store: Any,
+        top_k: int = 3,
+    ) -> None:
+        super().__init__(document_store, top_k)
+
+        self._retriever = ChromaQueryTextRetriever(
+            document_store=document_store,
+            top_k=top_k,
+        )
+
+    def retrieve(self, query: str, top_k: int) -> dict[str, list[HaystackDocument]]:
+        """Retrieve documents for a single query using ChromaDB."""
+        return self._retriever.run(query=query, top_k=top_k)
