@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from django.conf import settings
 from haystack.utils import Secret
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 
 def resolve_secret(setting_name: str) -> Secret | None:
@@ -34,12 +30,3 @@ def merge_generation_kwargs(
 ) -> dict[str, Any]:
     """Shallow-merge generation kwargs, `extra` wins."""
     return {**(base or {}), **(extra or {})}
-
-
-@contextmanager
-def requires_generator(extra: str) -> Generator[None]:
-    """Wrap an optional generator import and name the extra that provides it."""
-    try:
-        yield
-    except ImportError as e:
-        raise ImportError(f"This generator needs: pip install django-ai-sdk[{extra}]") from e
