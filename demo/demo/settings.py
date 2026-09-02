@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "piratespeak.integrations.linear",
     "django_ai_sdk.integrations.weather",
     # local
+    "apps.users",
     "apps.agents",
     "apps.memories",
     "apps.integrations",
@@ -166,7 +167,9 @@ HEADLESS_FRONTEND_URLS = {
 CSRF_TRUSTED_ORIGINS = ["http://localhost:3000"]
 
 # Accounts
+AUTH_USER_MODEL = "users.User"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_LOGIN_METHODS = {"email"}
 
