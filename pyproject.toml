@@ -25,13 +25,9 @@ keywords = ["django", "ai", "agent", "rag", "llm", "streaming", "sse"]
 dependencies = [
   "aiofiles>=25.1.0",
   "cashews>=7.5.0,<9",
-  "daphne>=4.2.3",
   "django>=5.2.6,<6.1",
-  "django-allauth[headless]>=65.18.0",
-  "django-cors-headers>=4.9.0",
-  "django-environ>=0.14.0",
+  "haystack-ai>=3.0.0",
   "django-tasks>=0.12.0",
-  "django-tasks-db>=0.12.0",
   "loguru>=0.7.3",
   "puremagic>=2.2.0",
   "pydantic>=2.13.4",
@@ -50,31 +46,47 @@ Issues = "https://github.com/django-ai-sdk/django-ai-sdk/issues"
 Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
-all = ["django-ai-sdk[haystack,restframework,mcp,files,anthropic,mistral,ollama,huggingface,openrouter]"]
-haystack = [
-  "chroma-haystack>=4.4.0",
-  "fastembed-haystack>=2.4.0",
-  "haystack-ai>=3.0.0",
-  "huggingface-hub>=1.26.0",
-  "qdrant-haystack>=10.4.0",
-  "sentence-transformers>=5.6.1",
-]
+all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers]"]
+providers = ["django-ai-sdk[anthropic,huggingface,mistral,ollama,openrouter]"]
+rag = ["django-ai-sdk[chroma,qdrant]"]
+# Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
+# dependency now.
+haystack = ["haystack-ai>=3.0.0"]
 mcp = ["mcp-haystack>=1.4.1", "authlib>=1.7.2"]
-restframework = ["djangorestframework>=3.17.1"]
+# Files support
 files = [
   "firecrawl-anydoc>=0.2.4",
   "openpyxl>=3.1.5",
   "python-docx>=1.2.0",
   "python-pptx>=1.0.2",
 ]
+
+# Vector stores
+embeddings = ["fastembed-haystack>=2.4.0", "django-ai-sdk[haystack]"]
+chroma = ["chroma-haystack>=4.4.0", "django-ai-sdk[embeddings]"]
+qdrant = ["qdrant-haystack>=10.4.0", "django-ai-sdk[embeddings]"]
+# Model providers, one integration package each.
 anthropic = ["anthropic-haystack>=5.17.0"]
-huggingface = ["huggingface-api-haystack>=0.6.0", "transformers-haystack>=0.3.0"]
+huggingface = ["huggingface-api-haystack>=0.6.0"]
 mistral = ["mistral-haystack>=1.5.0"]
 ollama = ["ollama-haystack>=6.8.0"]
 openrouter = ["openrouter-haystack>=1.2.0"]
+# Runs a model locally
+transformers = ["transformers-haystack>=0.3.0"]
+
 [dependency-groups]
-dev = [
+# The demo project stack.
+demo = [
+  "daphne>=4.2.3",
+  "django-allauth[headless]>=65.18.0",
+  "django-cors-headers>=4.9.0",
+  "django-environ>=0.14.0",
   "django-ninja>=1.6.2",
+  "django-tasks-db>=0.12.0",
+  "django-watchfiles>=1.4.0",
+  "djangorestframework>=3.17.1",
+]
+dev = [
   "django-stubs>=6.0.7",
   "factory-boy>=3.3.3",
   "graphviz>=0.21",
@@ -85,7 +97,6 @@ dev = [
   "pytest-mock>=3.15.1",
   "ruff>=0.16.1",
   "lefthook>=2.1.10",
-  "django-watchfiles>=1.4.0",
   "polyfactory>=3.3.0",
   "ty>=0.0.65",
 ]
