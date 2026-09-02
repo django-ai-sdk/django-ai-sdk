@@ -103,6 +103,47 @@ changing it needs a restart. Assigning it in `settings.py` does nothing.
 | --- | --- | --- |
 | `AI_SDK_ENABLE_LOGS` | `False` | When `True`, adds a DEBUG-level loguru handler to stderr. File logging to `logs/django_ai_sdk.log` runs regardless. |
 
+## Background Tasks
+
+Document processing (`memories/tasks.py`) and workflow runs (`workflows/tasks.py`)
+are enqueued with [django-tasks](https://pypi.org/project/django-tasks/), which the
+SDK depends on directly. It is **not** an `AI_SDK_*` setting: the backend is Django's
+`TASKS` setting, and which one you pick is a deployment decision the SDK does not
+make for you.
+
+With no `TASKS` setting at all, django-tasks defaults to
+`django_tasks.backends.immediate.ImmediateBackend` - tasks run **inline, in the
+calling request**. That works out of the box and needs no extra package, but it means
+a document upload processes synchronously while the user waits.
+
+For durable processing with a separate worker, install a backend that provides one.
+The database backend ships separately:
+
+```bash
+pip install django-tasks-db
+```
+
+```python
+INSTALLED_APPS = [
+    # ...
+    "django_tasks",
+    "django_tasks_db",
+]
+
+TASKS = {
+    "default": {
+        "BACKEND": (
+            "django_tasks.backends.immediate.ImmediateBackend"
+            if DEBUG
+            else "django_tasks_db.DatabaseBackend"
+        ),
+    }
+}
+```
+
+Then run the worker: `./manage.py db_worker`. The demo project uses exactly this
+split - immediate in `DEBUG`, the database backend otherwise.
+
 ## Provider Credentials
 
 Not `AI_SDK_*` prefixed, but part of the same surface: the [generator

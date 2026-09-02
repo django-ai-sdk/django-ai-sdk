@@ -86,7 +86,7 @@ run = await WorkflowService.get_run(run_id)      # prefetches steps
 
 ## Execution Model
 
-`WorkflowService.run()` creates a `WorkflowRun` in `pending`, then `WorkflowExecutor.enqueue()` schedules the `execute_workflow` background task (`django_tasks`), which runs `WorkflowExecutor.run()` in the worker.
+`WorkflowService.run()` creates a `WorkflowRun` in `pending`, then `WorkflowExecutor.enqueue()` schedules the `execute_workflow` background task (`django_tasks`), which runs `WorkflowExecutor.run()`. Whether that happens in a worker or inline in the calling request depends on the configured `TASKS` backend - see [Background Tasks](/manual/settings/#background-tasks).
 
 `WorkflowExecutor.run()`:
 
