@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 
 import pytest
 from django.test import override_settings
 from django_ai_sdk.adapters.base import Run
+from django_ai_sdk.adapters import base
+from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agent import Agent
 from django_ai_sdk.generators import (
     anthropic_chat,
@@ -21,6 +24,7 @@ from django_ai_sdk.generators import (
 )
 from haystack.components.generators.chat import OpenAIChatGenerator, OpenAIResponsesChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
+from haystack.dataclasses import ReasoningContent, StreamingChunk
 from pydantic import BaseModel
 
 
@@ -220,6 +224,44 @@ class TestStructuredOutput:
 
         with pytest.raises(ValueError, match=f"{class_name} takes no structured-output kwarg"):
             schema_kwargs(generator, Answer)
+
+
+class TestReasoningStream:
+    """Reasoning models stream their summary separately from the answer."""
+
+    @staticmethod
+    async def _events(*chunks):
+        """Feed StreamingChunks through Stream.get_events."""
+        queue: asyncio.Queue = asyncio.Queue()
+        for chunk in chunks:
+            await queue.put(chunk)
+        await queue.put(base._SENTINEL)
+        stream = Stream.__new__(Stream)
+        stream.citation_registry = None
+        return [event async for event in stream.get_events(queue, None)]
+
+    async def test_reasoning_chunk_becomes_an_event(self):
+        # Haystack carries the summary on StreamingChunk.reasoning; without this
+        # the protocol's reasoning parts never fire and the reasoning tokens are
+        # paid for nothing.
+        chunk = StreamingChunk(content="", index=0, reasoning=ReasoningContent(reasoning_text="because"))
+
+        events = await self._events(chunk)
+
+        assert [(e.event_type, e.content) for e in events] == [("reasoning_chunk", "because")]
+
+    async def test_answer_and_reasoning_arrive_as_their_own_events(self):
+        # A StreamingChunk may carry content or reasoning, never both, so the
+        # summary and the answer reach the client as distinct events.
+        events = await self._events(
+            StreamingChunk(content="", index=0, reasoning=ReasoningContent(reasoning_text="because")),
+            StreamingChunk(content="answer"),
+        )
+
+        assert [(e.event_type, e.content) for e in events] == [
+            ("reasoning_chunk", "because"),
+            ("text_chunk", "answer"),
+        ]
 
 
 class TestAgentHook:

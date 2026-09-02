@@ -22,6 +22,7 @@ from django_ai_sdk.events import (
     ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
+    ReasoningChunkEvent,
     SourceEvent,
     StreamEndEvent,
     StreamEvent,
@@ -307,6 +308,14 @@ class Stream:
                 if stream_writer:
                     stream_writer.add_chunk(self.get_text_chunk(chunk.content))
                 yield TextChunkEvent(content=chunk.content)
+
+            # Reasoning models stream their summary separately from the answer.
+            if chunk.reasoning and chunk.reasoning.reasoning_text:
+                if stream_writer:
+                    stream_writer.add_chunk(
+                        MessageChunk(type="reasoning", content=chunk.reasoning.reasoning_text)
+                    )
+                yield ReasoningChunkEvent(content=chunk.reasoning.reasoning_text)
 
             if chunk.tool_calls:
                 for tc in chunk.tool_calls:
