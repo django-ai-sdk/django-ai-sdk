@@ -41,9 +41,7 @@ if TYPE_CHECKING:
 class WorkspaceAgent(Agent):
     name = "Workspace Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
-    # Factory reference, not a call: get_llm() builds it with the agent's model.
     llm = openai_responses_chat
-    # Demo runs reasoning on every agent; the factories ship it off.
     llm_kwargs = {"reasoning": {"effort": "medium", "summary": "auto"}}
     instructions = prompt("""\
         You are a professional AI agent for workplace productivity.

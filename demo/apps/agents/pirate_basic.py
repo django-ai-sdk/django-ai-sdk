@@ -16,8 +16,6 @@ from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25QueryExpanderRAG,
     BM25QueryExpanderRAGConfig,
-    ChromaDBQueryExpanderRAG,
-    ChromaDBQueryExpanderRAGConfig,
     QdrantBM25HybridRAG,
     QdrantBM25HybridRAGConfig,
 )
@@ -40,9 +38,7 @@ if TYPE_CHECKING:
 class PirateBasicAgent(Agent):
     name = "Basic Pirate Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
-    # Factory reference, not a call: get_llm() builds it with the agent's model.
     llm = openai_responses_chat
-    # Demo runs reasoning on every agent; the factories ship it off.
     llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
     instructions = prompt("""\
         You are a helpful AI agent who always responds like a pirate.
@@ -104,23 +100,6 @@ class PirateBasicAgent(Agent):
             config=BM25QueryExpanderRAGConfig(
                 top_k=5,
                 n_expansions=4,
-            ),
-        )
-
-    async def get_rag_pipeline_chromadb(
-        self, memory_id: str | None = None
-    ) -> ChromaDBQueryExpanderRAG | None:
-        """Build ChromaDB RAG pipeline for document retrieval."""
-        documents = await self.get_rag_documents(memory_id)
-        if not documents:
-            return None
-
-        return ChromaDBQueryExpanderRAG(
-            documents=documents,
-            config=ChromaDBQueryExpanderRAGConfig(
-                top_k=5,
-                n_expansions=4,
-                expander_model="openai/gpt-oss-120b",
             ),
         )
 

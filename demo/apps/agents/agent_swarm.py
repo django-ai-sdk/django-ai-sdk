@@ -58,9 +58,7 @@ class AgentSwarmAgent(Agent):
     name = "Pirate Agent Swarm"
     description = "An agent swarm agent with specialized pirate expertise."
     model = settings.AI_SDK_DEFAULT_MODEL
-    # Factory reference, not a call: get_llm() builds it with the agent's model.
     llm = openai_responses_chat
-    # Demo runs reasoning on every agent; the factories ship it off.
     llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
     permissions = [IsAdminUser]
     instructions = prompt("""\
