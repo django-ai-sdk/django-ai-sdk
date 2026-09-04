@@ -178,12 +178,8 @@ class TestVercelProtocolHandler:
         assert len(reasoning_ends) == 1
 
         # Reasoning should end before text starts
-        reasoning_end_idx = next(
-            i for i, c in enumerate(chunks) if isinstance(c, ReasoningEndPart)
-        )
-        text_start_idx = next(
-            i for i, c in enumerate(chunks) if isinstance(c, TextStartPart)
-        )
+        reasoning_end_idx = next(i for i, c in enumerate(chunks) if isinstance(c, ReasoningEndPart))
+        text_start_idx = next(i for i, c in enumerate(chunks) if isinstance(c, TextStartPart))
         assert reasoning_end_idx < text_start_idx
 
     @pytest.mark.asyncio
@@ -216,15 +212,39 @@ class TestVercelProtocolHandler:
         assert tool_inputs[0].input == {"query": "test"}
 
     @pytest.mark.asyncio
+    async def test_handle_stream_tool_output_preserves_error_flag(self, handler):
+        """Test that tool output preserves the error flag from Haystack."""
+        from django_ai_sdk.protocols.vercel import ToolOutputAvailablePart
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_123")
+            yield ToolOutputEvent(
+                tool_call_id="call_1",
+                tool_output={
+                    "result": "Rate limit exceeded",
+                    "origin": {"tool_name": "search", "arguments": {}},
+                    "error": True,
+                },
+            )
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = []
+        async for chunk in handler.handle_stream(event_generator()):
+            chunks.append(chunk)
+
+        tool_outputs = [c for c in chunks if isinstance(c, ToolOutputAvailablePart)]
+        assert len(tool_outputs) == 1
+        assert tool_outputs[0].output["result"] == "Rate limit exceeded"
+        assert tool_outputs[0].output["error"] is True
+
+    @pytest.mark.asyncio
     async def test_handle_stream_data_event(self, handler):
         """Test handling data events."""
         from django_ai_sdk.protocols.vercel import DataPart
 
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
-            yield DataEvent(
-                data_type="rag-retrieval", data={"documents_found": 3, "query": "test"}
-            )
+            yield DataEvent(data_type="rag-retrieval", data={"documents_found": 3, "query": "test"})
             yield MessageEndEvent(finish_reason="stop")
 
         chunks = []
@@ -355,3 +375,104 @@ class TestVercelProtocolHandler:
         assert source_part.media_type == "file"
         assert source_part.title == "Sales Q3 Report"
 
+
+class TestVercelAgentAttribution:
+    """Tool calls carry which agent ran them, so the client can label a
+    subagent's work instead of crediting it to the coordinator."""
+
+    @pytest.fixture
+    def handler(self):
+        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+
+        return VercelProtocolHandler()
+
+    @pytest.mark.asyncio
+    async def test_subagent_tool_carries_provider_metadata(self, handler):
+        from django_ai_sdk.protocols.vercel import (
+            ToolInputAvailablePart,
+            ToolInputStartPart,
+        )
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_1")
+            yield ToolCallStartEvent(
+                tool_call_id="call_1", tool_name="search_web", agent="Research Planner"
+            )
+            yield ToolInputCompleteEvent(
+                tool_call_id="call_1",
+                tool_name="search_web",
+                tool_input={"query": "x"},
+                agent="Research Planner",
+            )
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = [c async for c in handler.handle_stream(event_generator())]
+
+        start = next(c for c in chunks if isinstance(c, ToolInputStartPart))
+        available = next(c for c in chunks if isinstance(c, ToolInputAvailablePart))
+        assert start.provider_metadata == {"sdk": {"agent": "Research Planner"}}
+        assert available.provider_metadata == {"sdk": {"agent": "Research Planner"}}
+        # Serialized under the name the AI SDK reads.
+        assert start.model_dump(exclude_none=True, by_alias=True)["providerMetadata"] == {
+            "sdk": {"agent": "Research Planner"}
+        }
+
+    @pytest.mark.asyncio
+    async def test_handoff_call_is_marked(self, handler):
+        from django_ai_sdk.protocols.vercel import ToolInputStartPart
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_1")
+            yield ToolCallStartEvent(
+                tool_call_id="call_1",
+                tool_name="research_planner",
+                handoff="Research Planner",
+            )
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = [c async for c in handler.handle_stream(event_generator())]
+
+        start = next(c for c in chunks if isinstance(c, ToolInputStartPart))
+        assert start.provider_metadata == {"sdk": {"handoff": "Research Planner"}}
+
+    @pytest.mark.asyncio
+    async def test_plain_tool_call_payload_is_unchanged(self, handler):
+        from django_ai_sdk.protocols.vercel import ToolInputStartPart
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_1")
+            yield ToolCallStartEvent(tool_call_id="call_1", tool_name="get_today")
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = [c async for c in handler.handle_stream(event_generator())]
+
+        start = next(c for c in chunks if isinstance(c, ToolInputStartPart))
+        assert start.provider_metadata is None
+        assert "providerMetadata" not in start.model_dump(exclude_none=True, by_alias=True)
+
+    def test_history_rebuild_keeps_the_label(self, handler):
+        from django_ai_sdk.common import ChatMessage
+
+        message = ChatMessage(
+            role="assistant",
+            id="m1",
+            content="Summary.",
+            tool_calls=[
+                {
+                    "id": "call_1",
+                    "name": "search_web",
+                    "arguments": {"query": "x"},
+                    "result": {"hits": 1},
+                    "agent": "Research Planner",
+                },
+                {"id": "call_2", "name": "get_today", "arguments": {}, "result": {}},
+            ],
+        )
+
+        parts = handler.from_chat_messages([message])[0]["parts"]
+        tool_parts = [p for p in parts if p["type"].startswith("tool-")]
+
+        assert tool_parts[0]["callProviderMetadata"] == {
+            "sdk": {"agent": "Research Planner"}
+        }
+        assert "callProviderMetadata" not in tool_parts[1]

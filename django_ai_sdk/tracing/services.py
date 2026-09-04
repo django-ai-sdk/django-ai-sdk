@@ -94,42 +94,62 @@ class TraceService:
     @classmethod
     async def thread_token_usage(cls, thread_id: str | uuid.UUID, *, user: UserType) -> TokenUsage:
         """
-        Token totals across every run in one thread.
+        Token totals across every run in one thread, broken down per subagent.
 
         Args:
             thread_id: Thread to total
             user: User for permission checking
 
         Returns:
-            TokenUsage with prompt, completion and overall totals
+            TokenUsage with prompt, completion, overall totals and by_subagent
 
         Raises:
             PermissionDenied: If user has no VIEW_THREAD permission for the thread
             ValueError: If the thread does not exist
         """
         await cls.get_permissions(thread_id, user=user)
-        return TokenUsage(**await Trace.objects.for_thread(thread_id).atoken_usage())
+        return await cls._usage(Trace.objects.for_thread(thread_id))
 
     @classmethod
     async def message_token_usage(
         cls, message_id: str | uuid.UUID, *, user: UserType
     ) -> TokenUsage:
         """
-        Token totals for one message's run.
+        Token totals for one message's run, broken down per subagent.
 
         Args:
             message_id: Message to total
             user: User for permission checking
 
         Returns:
-            TokenUsage with prompt, completion and overall totals
+            TokenUsage with prompt, completion, overall totals and by_subagent
 
         Raises:
             PermissionDenied: If user has no VIEW_THREAD permission for the thread
             ValueError: If the message does not exist
         """
         await cls.get_permissions(await cls._thread_message(message_id), user=user)
-        return TokenUsage(**await Trace.objects.for_message(message_id).atoken_usage())
+        return await cls._usage(Trace.objects.for_message(message_id))
+
+    @classmethod
+    async def _usage(cls, qs: TraceQuerySet) -> TokenUsage:
+        """Combine the plain total with the per-subagent breakdown."""
+        totals = await qs.atoken_usage()
+        by_subagent = await qs.asubagent_usage()
+        return TokenUsage(
+            prompt_tokens=totals["prompt_tokens"],
+            completion_tokens=totals["completion_tokens"],
+            total_tokens=totals["total_tokens"],
+            by_subagent={
+                agent_id: TokenUsage(
+                    agent_name=usage["agent_name"],
+                    prompt_tokens=usage["prompt_tokens"],
+                    completion_tokens=usage["completion_tokens"],
+                    total_tokens=usage["total_tokens"],
+                )
+                for agent_id, usage in by_subagent.items()
+            },
+        )
 
     @classmethod
     async def get_permissions(cls, thread_id: str | uuid.UUID, *, user: UserType) -> None:

@@ -164,6 +164,13 @@ class Agent(ABC, AgentInfoMixin):
     # ArtifactSchema subclasses to register as tools in stream pipelines.
     artifacts: list[type[BaseModel]] = []
 
+    # Delegate-able subagent classes.
+    agents: list[type[Agent]] = []
+
+    # Loop limits when this agent runs as a subagent.
+    max_agent_steps: int = 6
+    max_tool_calls: int | None = 6
+
     # Protocol handler class for converting protocol messages
     protocol = None
 
@@ -371,7 +378,18 @@ class Agent(ABC, AgentInfoMixin):
         """
         Alias for get_instructions()
         """
-        return self.get_instructions()
+        base = self.get_instructions()
+        if not self.agents:
+            return base
+
+        delgators = "\n".join(
+            f"- {subagent.name}: {subagent.description or subagent.__doc__ or 'no description'}"
+            for subagent in self.agents
+            if subagent is not self.__class__
+        )
+        if not delgators:
+            return base
+        return f"{base}\n\nAvailable subagents:\n{delgators}"
 
     def get_title_generation_prompt(self) -> Prompt:
         """Return the system prompt used to generate a thread title.
@@ -457,7 +475,107 @@ class Agent(ABC, AgentInfoMixin):
         # artifact tools
         result.extend(await self.get_artifact_tools(thread_id=thread_id, user=user))
 
+        # subagent tools
+        result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
+
         return result
+
+    async def get_agent_tools(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Any]:
+        """Build one ComponentTool per subagent declared in ``self.agents``.
+
+        Each subagent becomes a native Haystack tool the coordinator can call
+        to delegate a sub-task. Guards:
+
+        - The agent itself and duplicate classes are skipped.
+        - Subagents the user lacks ``VIEW_AGENT`` permission on are skipped.
+        - Tool names are derived from the subagent display name and deduped.
+
+        The conversation is mapped into the subagent via ``inputs_from_state``,
+        so it receives the same thread context as the coordinator; its final
+        ``last_message`` text is returned to the coordinator as the tool output.
+        """
+        from haystack.tools.component_tool import ComponentTool
+
+        from django_ai_sdk.agents.services import AgentService
+        from django_ai_sdk.agents.subagent import (
+            SubagentStreamFilter,
+            build_subagent,
+            subagent_response,
+            subagent_tool_name,
+        )
+        from django_ai_sdk.permissions import PermissionDenied
+
+        tools: list[Any] = []
+        seen_classes: set[str] = set()
+        used_names: set[str] = set()
+
+        for subagent_cls in self.agents:
+            path = f"{subagent_cls.__module__}.{subagent_cls.__qualname__}"
+            if path in seen_classes or subagent_cls is self.__class__:
+                continue
+            seen_classes.add(path)
+
+            try:
+                await AgentService.has_perms(user, Operation.VIEW_AGENT, agent=subagent_cls)
+            except PermissionDenied:
+                logger.info(
+                    f"Skipping subagent {subagent_cls.__name__!r}: user lacks VIEW_AGENT permission"
+                )
+                continue
+
+            built = await build_subagent(subagent_cls, thread_id=thread_id, user=user)
+            if built is None:
+                continue
+            sub_agent, agent_id = built
+
+            name = subagent_tool_name(subagent_cls)
+            if name in used_names:
+                original, name = name, f"{name}_{agent_id.replace('-', '')[:6]}"
+                logger.warning(f"Subagent tool name {original!r} collided, renamed to {name!r}")
+            used_names.add(name)
+            logger.info(
+                f"Enabled subagent tool {name!r} ({subagent_cls.__name__}) on coordinator {self.__class__.__name__}"
+            )
+
+            tools.append(
+                ComponentTool(
+                    component=SubagentStreamFilter(
+                        sub_agent, name=subagent_cls.name or name, agent_id=agent_id
+                    ),
+                    name=name,
+                    description=(
+                        subagent_cls.description
+                        or f"Delegate this task to {subagent_cls.__name__}."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": (
+                                    "A self-contained description of the task to delegate "
+                                    "to this subagent. Copy the user's request verbatim"
+                                    "do not paraphrase, autocorrect, or expand it."
+                                ),
+                            }
+                        },
+                        "required": ["task"],
+                    },
+                    # whole conversation, not just the last message: a subagent
+                    # that ran out of budget or steps still did the work.
+                    outputs_to_string={
+                        "source": "messages",
+                        "handler": subagent_response,
+                    },
+                    inputs_from_state={"messages": "messages"},
+                )
+            )
+
+        return tools
 
     async def get_artifact_tools(
         self,
@@ -612,6 +730,7 @@ class Agent(ABC, AgentInfoMixin):
         response_format: type[T] | None = _UNSET,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
+        tools: bool = False,
     ) -> T | str | None:
         """Run LLM calls directly from adapter.
 
@@ -623,17 +742,65 @@ class Agent(ABC, AgentInfoMixin):
                 default response_format set.
             thread_id: Optional thread ID (forwarded to get_run_adapter)
             user: Optional user (forwarded to get_run_adapter)
+            tools: Whether to resolve the agent's tools and run a tool-calling loop,
+                governed by this agent's own max_agent_steps/max_tool_calls — the
+                same limits a streamed subagent delegation uses, not a generic
+                default. Opt-in: resolving tools reaches every configured
+                integration, so a one-shot call (title generation, structured
+                extraction, ...) does not pay that cost unless it explicitly asks
+                for it. Ignored when response_format is set — tools and structured
+                output together are not supported yet (see Run.run).
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
         """
         resolved = self.response_format if response_format is self._UNSET else response_format
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
+        rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
+
+        # Only the SDK's own plain Run is ours to add a tool loop to. A custom
+        # get_run_adapter() override returns something else on purpose — it is
+        # left alone, calling its own .run() unchanged, rather than having a
+        # tool loop forced onto it.
+        from django_ai_sdk.adapters.base import Run
+
+        if tools and resolved is None and isinstance(adapter, Run):
+            return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
+
         return await adapter.run(
             messages=messages,
-            system_prompt=system_prompt if system_prompt is not None else self.get_system_prompt(),
+            system_prompt=rendered_prompt,
             response_format=resolved,
         )
+
+    async def _run_own_tools(
+        self,
+        adapter: Any,
+        messages: list[ChatMessage],
+        system_prompt: str,
+        thread_id: str | None,
+        user: AbstractBaseUser | AnonymousUser | None,
+    ) -> str | None:
+        """Run this agent's own tools to completion, headless (no streaming).
+
+        Governed by this agent's own `max_agent_steps`/`max_tool_calls`/hooks —
+        the same assembly `build_subagent` uses for a streamed delegation — so a
+        headless one-shot run and a streamed subagent are never governed
+        differently.
+        """
+        from django_ai_sdk.agents.tool_agent import ToolAgent, default_hooks
+
+        haystack_agent = ToolAgent.build_agent(
+            getattr(adapter, "generator", None) or self.get_llm(),
+            await self.get_tools(thread_id=thread_id or "", user=user),
+            system_prompt,
+            max_agent_steps=self.max_agent_steps,
+            hooks=default_hooks(self),
+        )
+        haystack_messages = adapter.get_messages(messages)
+        result = await haystack_agent.run_async(messages=haystack_messages)
+        replies = result.get("messages", [])
+        return replies[-1].text if replies else None
 
     async def get_run_adapter(
         self,

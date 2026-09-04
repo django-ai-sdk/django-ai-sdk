@@ -8,6 +8,7 @@ from django.utils import timezone
 from haystack.tracing import Span, Tracer
 from haystack.tracing.utils import coerce_tag_value
 
+from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
 from django_ai_sdk.logger import logger
 from django_ai_sdk.tracing import context
 from django_ai_sdk.tracing.models import Trace
@@ -72,7 +73,12 @@ class TelemetrySpan(Span):
 
     def set_tag(self, key: str, value: Any) -> None:
         """Set a single tag on the span"""
-        # Checked before coercion
+        # read before the exclusion check
+        if key == SUBAGENT_NAME_TAG and isinstance(value, str):
+            self._trace.agent_name = value
+        if key == SUBAGENT_ID_TAG and isinstance(value, str):
+            self._trace.agent_id = value or None
+        # checked before coercion
         if key in self._excluded:
             return
         self._trace.tags[key] = coerce_tag_value(value)
