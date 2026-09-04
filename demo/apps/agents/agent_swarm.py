@@ -7,14 +7,12 @@ from django.conf import settings
 from django.utils import timezone
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.agents import auto_register
+from django_ai_sdk.agents import LogToolCallsHook, ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.permissions import IsAdminUser
 from django_ai_sdk.suggestions import DefaultSuggestionGenerator
-from haystack import Pipeline
-from haystack.components.agents import Agent as HaystackAgent
 from haystack.tools import Tool
 
 if TYPE_CHECKING:
@@ -22,12 +20,31 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
 
-def pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
+def _pirate_boat_expert(topic: Annotated[str, "Topic about pirate boats"]) -> str:
     """Provide expert lore about pirate boats."""
     return f"Aye! On pirate boats: {topic}! They be swift and full o' tales."
 
 
-def find_treasure(location: Annotated[str, "Location to search for treasure"]) -> dict:
+def pirate_boat_expert_tool(**kwargs: object) -> Tool:
+    """Expert knowledge about pirate boats."""
+    return Tool(
+        name="pirate_boat_expert",
+        description="Expert knowledge about pirate boats",
+        parameters={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Subject about pirate boats",
+                }
+            },
+            "required": ["topic"],
+        },
+        function=_pirate_boat_expert,
+    )
+
+
+def _find_treasure(location: Annotated[str, "Location to search for treasure"]) -> dict:
     """Simulate treasure discovery."""
     treasure_id = random.randint(1000, 9999)
     value = random.randint(5000, 50000)
@@ -36,6 +53,25 @@ def find_treasure(location: Annotated[str, "Location to search for treasure"]) -
         "treasure_id": treasure_id,
         "value": f"{value} gold coins",
     }
+
+
+def find_treasure_tool(**kwargs: object) -> Tool:
+    """Find treasure at a given location."""
+    return Tool(
+        name="find_treasure",
+        description="Find treasure at a given location",
+        parameters={
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "Location to search for treasure",
+                }
+            },
+            "required": ["location"],
+        },
+        function=_find_treasure,
+    )
 
 
 def get_datetime() -> dict:
@@ -49,91 +85,83 @@ def get_datetime() -> dict:
     }
 
 
+def get_datetime_tool(**kwargs: object) -> Tool:
+    """Current date and time tool."""
+    return Tool(
+        name="get_datetime",
+        parameters={},
+        description="Get current date and time",
+        function=get_datetime,
+    )
+
+
 @auto_register
-class AgentSwarmAgent(Agent):
+class PirateBoatExpertAgent(Agent):
+    """Expert on pirate boats, galleons, and seafaring lore."""
+
+    name = "Pirate Boat Expert"
+    description = "Deep knowledge about pirate boats and seafaring lore."
+    model = settings.AI_SDK_DEFAULT_MODEL
+    hidden = True
+    tools: list = [pirate_boat_expert_tool]
+    instructions = prompt("""\
+        You are the crew's pirate boat expert.
+
+        Use the pirate_boat_expert tool to answer any question about pirate
+        boats, galleons, rigging, or seafaring lore.
+        Reply with a concise summary in pirate style.
+    """)
+
+
+@auto_register
+class TreasureHunterAgent(Agent):
+    """Hunts for treasure at a given location."""
+
+    name = "Treasure Hunter"
+    description = "Simulates discovering treasure at a location."
+    model = settings.AI_SDK_DEFAULT_MODEL
+    hidden = True
+    tools: list = [find_treasure_tool]
+    instructions = prompt("""\
+        You are the crew's treasure hunter.
+
+        Use the find_treasure tool to search for treasure at a location.
+        Reply with a concise summary of what you found in pirate style.
+    """)
+
+
+@auto_register
+class PirateSwarmAgent(Agent):
     """
-    Agent swarm agent with specialized pirate expertise.
+    Agent swarm agent with a crew of specialized pirate agents.
     """
 
     name = "Pirate Agent Swarm"
-    description = "An agent swarm agent with specialized pirate expertise."
+    description = "An agent swarm agent that delegates to a crew of pirate subagents."
     model = settings.AI_SDK_DEFAULT_MODEL
     llm = openai_responses_chat
     llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
     permissions = [IsAdminUser]
     instructions = prompt("""\
-        You are a Triage Agent for a crew of pirate specialists.
+        You are a Triage Agent for a crew of pirate subagents.
 
         Decide whether the user wants:
-        - pirate boat expertise (call pirate_boat_expert)
-        - treasure finding (call find_treasure)
+        - pirate boat expertise (delegate to the Pirate Boat Expert)
+        - treasure finding (delegate to the Treasure Hunter)
         - date and time information (call get_datetime)
         - or general pirate help
 
-        Always respond as a pirate and use your tools when appropriate.
-        Respond with text or tool calls as needed.
+        Always respond as a pirate and delegate to the subagents via the
+        available subagent tools when appropriate. Summarize their findings
+        for the user. Respond with text or tool calls as needed.
     """)
+
+    agents = [PirateBoatExpertAgent, TreasureHunterAgent]
+
+    tools: list = [get_datetime_tool]
 
     citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
-
-    async def get_tools(
-        self,
-        thread_id: str = "",
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> list:
-        """Return Haystack-compatible tools for agent swarm."""
-        return [
-            self._create_boat_expert_tool(),
-            self._create_treasure_tool(),
-            self._create_date_tool(),
-        ]
-
-    # TODO: convert in utility function
-    def _create_boat_expert_tool(self, **kwargs: object) -> Tool:
-        """Create Haystack tool for boat expertise."""
-        return Tool(
-            name="pirate_boat_expert",
-            description="Expert knowledge about pirate boats",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "topic": {
-                        "type": "string",
-                        "description": "Subject about pirate boats",
-                    }
-                },
-                "required": ["topic"],
-            },
-            function=pirate_boat_expert,
-        )
-
-    def _create_treasure_tool(self, **kwargs: object) -> Tool:
-        """Create Haystack tool for treasure finding."""
-        return Tool(
-            name="find_treasure",
-            description="Find treasure at a given location",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "Location to search for treasure",
-                    }
-                },
-                "required": ["location"],
-            },
-            function=find_treasure,
-        )
-
-    def _create_date_tool(self, **kwargs: object) -> Tool:
-        """Get current time and date in Europe/Amsterdam timezone."""
-        return Tool(
-            name="Today, current date",
-            description="Get current date and time",
-            parameters={},
-            function=get_datetime,
-        )
 
     async def get_run_adapter(
         self,
@@ -148,23 +176,27 @@ class AgentSwarmAgent(Agent):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Stream:
         """Create Haystack agent swarm adapter."""
+
+        generator = self.get_llm()
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        pipeline = Pipeline()
-
-        # Create triage agent
-        triage_agent = HaystackAgent(
-            chat_generator=self.get_llm(),
-            tools=await self.get_tools(thread_id=thread_id or "", user=user),
-            system_prompt=self.get_system_prompt(),
-            exit_conditions=["text"],
+        tool_agent = ToolAgent(
+            config=ToolAgentConfig(
+                model=self.get_model(),
+                system_prompt=self.get_system_prompt(),
+                tools=await self.get_tools(thread_id=thread_id or "", user=user),
+                exit_conditions=["text"],
+                max_agent_steps=10,
+                hooks={"before_tool": [LogToolCallsHook()]},
+            ),
+            generator=generator,
         )
 
-        pipeline.add_component("triage_agent", triage_agent)
+        pipeline = tool_agent.pipeline()
 
         return Stream(
             pipeline=pipeline,
-            generator=triage_agent.chat_generator,
+            generator=generator,
             storage_adapter=storage_adapter,
             citation_registry=self.get_citation_registry(),
             suggestion_generator=self.get_suggestion_generator(),
