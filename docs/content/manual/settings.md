@@ -79,6 +79,8 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_STREAM_CORS_ORIGIN` | `None` | Allowed origin for SSE stream responses (used alongside `django-cors-headers`). |
 | `AI_SDK_SUGGESTION_TIMEOUT` | `5.0` | Seconds before suggestion generation is abandoned. |
 | `AI_SDK_TITLE_SANITY_LIMIT` | `80` | Character ceiling for auto-generated thread titles. |
+| `AI_SDK_SUBAGENT_DIGEST_LIMIT` | `6000` | Character budget for the digest of a subagent's tool results, used when its run ended without a written report. Shared across all results; `0` or below disables truncation. See [Handoff output](/manual/agent/#handoff-output). |
+| `AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT` | `4000` | Character cap per subagent handoff result replayed into a later turn. `0` or below disables truncation. See [Subagent Delegation](/manual/agent/#handoff-history). |
 
 ## Tracing
 
@@ -86,7 +88,7 @@ Requires the opt-in `django_ai_sdk.tracing` app in `INSTALLED_APPS`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_TRACING_EXCLUDED_TAGS` | `[]` | Span tag keys to drop before storing, by exact key (no wildcards). Useful for static configuration that repeats identically on every run and is large: `["haystack.agent.tools", "haystack.agent.state_schema"]`. Applies to content tags too, and excluding one never affects the token columns. See [Tracing](/manual/tracing/). |
+| `AI_SDK_TRACING_EXCLUDED_TAGS` | `[]` | Span tag keys to drop before storing, by exact key (no wildcards). Useful for static configuration that repeats identically on every run and is large: `["haystack.agent.tools", "haystack.agent.state_schema"]`. Applies to content tags too, and excluding one never affects the token columns or the `agent_id`/`agent_name` columns. See [Tracing](/manual/tracing/). |
 
 One Haystack environment variable shapes what the tracer records. Unlike the
 settings above, it is read **once**, when `haystack.tracing` is first imported:

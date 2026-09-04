@@ -81,6 +81,9 @@ These class attributes configure an agent's behavior:
 | `protocol` | `VercelProtocolHandler` | Protocol handler for message conversion |
 | `storage_adapter` | `MemoryStorageAdapter` | Storage used when a thread isn't found elsewhere |
 | `tools` | `[]` | Class-level tool providers |
+| `agents` | `[]` | Delegate-able subagent agent classes (see [Multi-Agent Swarms](#multi-agent-swarms)) |
+| `max_agent_steps` | `6` | Loop limit when this agent runs as a subagent (`build_subagent`) |
+| `max_tool_calls` | `6` | Tool-call cap as a subagent; `None` disables it |
 | `integrations` | `[]` | Integration names whose tools reach this agent |
 | `artifacts` | `[]` | `ArtifactSchema` subclasses exposed as submission tools |
 | `rag_provider` | `None` | `RAGProvider` instance to enable RAG |
@@ -167,6 +170,70 @@ def get_memory_files(thread_id="", user_id="", **kwargs) -> Tool:
     """List files attached to the current thread."""
 ```
 
+### Multi-Agent Swarms
+
+A single agent can delegate sub-tasks to a team of **subagent agents**. Any `Agent` subclass can declare a crew with the `agents` class attribute:
+
+```python
+class PirateBoatExpertAgent(Agent):
+    """Expert on pirate boats and seafaring lore."""
+    name = "Pirate Boat Expert"
+    model = settings.AI_SDK_DEFAULT_MODEL
+    hidden = True          # worker-only: never listed in the registry
+    tools = [pirate_boat_expert_tool]
+    instructions = prompt("You are the crew's pirate boat expert. ...")
+
+
+class TreasureHunterAgent(Agent):
+    name = "Treasure Hunter"
+    model = settings.AI_SDK_DEFAULT_MODEL
+    hidden = True
+    tools = [find_treasure_tool]
+    instructions = prompt("You are the crew's treasure hunter. ...")
+
+
+class PirateSwarmAgent(Agent):
+    name = "Pirate Agent Swarm"
+    model = settings.AI_SDK_DEFAULT_MODEL
+    agents = [PirateBoatExpertAgent, TreasureHunterAgent]  # the crew
+    instructions = prompt("You are a triage agent for a crew of pirate subagents. ...")
+```
+
+When the coordinator builds its tools, each subagent becomes a **native Haystack `ComponentTool`** the coordinator can call to delegate a sub-task:
+
+- The subagent runs its **own agent loop** — its own generator, tools, and system prompt — and its final message is returned to the coordinator as the tool output. Subagents are ephemeral and stateless; the coordinator's `Stream` remains the single source of streamed *text*, but the subagent's **tool calls stream too** (see [Observability](#observability)), so sub-agent activity is visible in the UI while the report text stays single-sourced.
+- The tool schema is a single `task` parameter; the coordinator is instructed to delegate with a self-contained task description.
+- Subagent tool names are derived from the subagent display name (slugified), deduped with a numeric suffix on collision.
+- Subagents the user lacks `VIEW_AGENT` permission on are skipped automatically.
+- Cyclic crews (A delegates to B, B back to A) are detected at build time and the back-edge is skipped.
+- The coordinator's `get_system_prompt()` automatically appends an `Available subagents:` roster.
+
+Subagents are ordinary `Agent` subclasses with `hidden = True` — they keep the `name`/`description`/`model`/`tools`/`instructions` attributes, so they only need a `tools` list and an instructions prompt:
+
+```python
+class MySubagent(Agent):
+    name = "My Subagent"
+    description = "What it does"
+    model = settings.AI_SDK_DEFAULT_MODEL
+    hidden = True
+    tools = [my_tool]
+    instructions = prompt("You are a subagent. Complete delegated tasks concisely.")
+```
+
+Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+
+### Observability
+
+`LogToolCallsHook` (a `before_tool` hook) logs every tool call an agent makes, so you can confirm delegation from the server console even when the frontend doesn't render tool events:
+
+```python
+config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
+```
+
+The two swarm demos wire it into both the coordinator and (via `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls **and** for the subagent's calls: the coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default), and `SubagentStreamFilter` passes only tool-related chunks through — the subagent's raw text tokens are dropped so the report isn't streamed twice. Those forwarded chunks are persisted into the conversation history as they happen — in the order the calls actually start, so the stored history matches the streamed one and subagent tool activity survives a page reload.
+
+Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+
 ### Overriding `get_tools()`
 
 For full control, override `get_tools()` on your agent. The default implementation combines:
@@ -174,6 +241,7 @@ For full control, override `get_tools()` on your agent. The default implementati
 1. Class-level `tools` providers
 2. Integration tools (`integrations` list, resolved via the integrations registry)
 3. Artifact submission tools (`artifacts` list)
+4. Subagent agent tools (`agents` list, one `ComponentTool` per subagent)
 
 ```python
 class MyAgent(Agent):
@@ -311,6 +379,22 @@ class MyAgent(Agent):
 
 Pass `response_format=None` explicitly to `run()` to disable structured output for a single call.
 
+`run()` also takes `tools` (default `False`): pass `tools=True` and the agent's own
+`get_tools()` are resolved and run to completion headless - no streaming, one call in,
+one final answer out. Opt-in, not opt-out: resolving tools reaches every configured
+integration, so a one-shot call (title generation, structured extraction, a workflow
+step) does not pay that cost unless it explicitly asks for it. Setting a
+`response_format` skips tools regardless of the flag - structured output and a tool
+loop together aren't supported yet, see
+[Structured output from a tool loop](/manual/generators/#structured-output-from-a-tool-loop).
+
+This only ever applies to the SDK's own `Run` adapter - a `get_run_adapter()` override
+that returns something else is left alone, rather than a tool loop being forced onto
+it. See [Headless tool runs](/manual/stream-and-run/#headless-tool-runs) for the exact
+call chain and the diagram: it's governed by *this* agent's own `max_agent_steps` and
+`max_tool_calls`, via the same assembly a streamed subagent delegation uses - never a
+generic default.
+
 ---
 
 ## Permissions
@@ -363,14 +447,16 @@ class MyAgent(Agent):
 
 ## Reference Agents
 
-The demo project ships five agents in `demo/apps/agents/`, each showcasing a different pattern:
+The demo project ships seven agents in `demo/apps/agents/`, each showcasing a different pattern:
 
 | Agent | Pattern |
 | --- | --- |
 | `PirateBasicAgent` | Full-featured agent: RAG, tools, integrations, citations, suggestions, files |
-| `AgentSwarmAgent` | Multiple tool agents composing one response |
+| `PirateSwarmAgent` | Coordinator + hidden pirate subagents (`agents = [...]`) |
+| `DeepResearchAgent` | Coordinator + hidden web-research subagent |
 | `DefaultRuntimeAgent` | Base for DB-configured runtime agents |
 | `WorkspaceAgent` | Artifact-based workspace workflows |
 | `PirateExtractionAgent` | Structured extraction used inside file pipelines |
+| `ResearchPlannerAgent` | Hidden web-research worker (search + fetch tools) |
 
 Browse them in the repository for working examples of everything in this guide.

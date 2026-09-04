@@ -169,4 +169,70 @@ Trace.objects.llm_calls().exclude(total_tokens__isnull=True).annotate(
 ).values("day", "model_name").annotate(tokens=Sum("total_tokens")).order_by("day")
 ```
 
+## Subagents in a trace
+
+A coordinator and each of its subagents run the same Haystack `Agent`, so both
+emit `haystack.agent.run` and a raw tree cannot say which is which. Every
+subagent run is therefore wrapped in one named span, tagged with both the
+subagent's id and its display name:
+
+```
+haystack.agent.run                    the coordinator
+└─ django_ai_sdk.subagent.run         tags: django_ai_sdk.subagent.id = "7f3a2c11-..."
+   │                                        django_ai_sdk.subagent.name = "Research Planner"
+   └─ haystack.agent.run              the subagent's own loop
+      ├─ haystack.agent.step.llm
+      └─ haystack.component.run       its tools
+```
+
+Nesting comes from the active-span contextvar, so it holds across the
+`ComponentTool` boundary without extra wiring.
+
+Both tags are lifted onto indexed `Trace` columns — `agent_id` and
+`agent_name` — so neither needs digging out of `tags`. **Use `agent_id` for
+lookups.** It's the subagent's `Agent.agent_id`: a UUID derived from the
+class's module path (or the `AgentSettings` row for a `RuntimeAgent`), stable
+across a rename of the display name. `agent_name` is a label only — two
+different subagent classes can share one, and grouping by it would silently
+merge their totals.
+
+Ask what the crew cost and the ids come back as the keys:
+
+```python
+Trace.objects.for_thread(thread.id).subagent_usage()
+# {'7f3a2c11-...': {'agent_name': 'Research Planner', 'prompt_tokens': 8210,
+#                    'completion_tokens': 1932, 'total_tokens': 10142},
+#  '9c04e8aa-...': {'agent_name': 'Fact Checker', 'prompt_tokens': 412, ...}}
+
+Trace.objects.subagent_ids()                      # ['7f3a2c11-...', '9c04e8aa-...']
+Trace.objects.subagent_names()                    # ['Fact Checker', 'Research Planner'] — display only
+Trace.objects.subagents("7f3a2c11-...")           # just that subagent's wrapper spans
+```
+
+`subagent_usage()` walks each subagent's whole subtree, because the wrapper span
+itself carries no tokens — its LLM calls are descendants. A nested subagent is
+attributed to its own id rather than counted into the crew that delegated to
+it. A span with no `agent_id` — recorded before this column existed, or one
+that otherwise never got tagged — is excluded, since there is no stable key to
+group it under. Every helper chains after any filter, like the rest of the
+queryset, and has an `a`-prefixed async twin.
+
+Through the service layer this rides the same call as the plain total — no
+separate round trip. `thread_token_usage()` / `message_token_usage()` set
+`TokenUsage.by_subagent`, keyed by id with `agent_name` carried on each entry
+for display, computed from the identical queryset the top-level totals come
+from, with the thread's permissions enforced once for both:
+
+```python
+usage = await TraceService.thread_token_usage(thread.id, user=request.user)
+usage.total_tokens        # 10142 — the whole thread, subagents included
+usage.by_subagent
+# {'7f3a2c11-...': TokenUsage(agent_name='Research Planner', prompt_tokens=8210,
+#                              completion_tokens=1932, total_tokens=10142)}
+```
+
+A subagent's tokens are counted twice on purpose: once in its own
+`by_subagent` entry, once folded into the outer total — the same span, two
+questions.
+
 Next: [Settings Reference](../settings/), for the tracing settings and every other `AI_SDK_*` value.

@@ -205,6 +205,195 @@ def generate_data_flow() -> graphviz.Digraph:
     return dot
 
 
+def generate_subagent_flow() -> graphviz.Digraph:
+    """Coordinator delegating to a subagent, in call order."""
+    dot = create_graph(
+        "subagent_flow", graph_attr={"rankdir": "TB", "nodesep": "0.5", "ranksep": "0.6"}
+    )
+
+    coordinator = add_component(
+        dot,
+        "coordinator",
+        "Coordinator's ToolAgent loop\nits own Haystack Agent, its own tools",
+        fillcolor="#fff3e0",
+        color="#e65100",
+        fontcolor="#e65100",
+    )
+    tool_call = add_flow_node(
+        dot, "tool_call", 'LLM calls a subagent tool\ne.g. "research_planner"'
+    )
+    component_tool = add_component(
+        dot,
+        "component_tool",
+        "ComponentTool\ncomponent = SubagentStreamFilter\n(built agent, name, agent_id)",
+        fillcolor="#e1f5fe",
+        color="#1565c0",
+        fontcolor="#1565c0",
+    )
+
+    with dot.subgraph(name="cluster_subagent") as c:
+        c.attr(
+            label="Subagent's OWN Haystack Agent loop  (built once, in build_subagent())",
+            style="rounded",
+            fillcolor="#f5f5f5",
+            color="#666666",
+        )
+        span = c.node(
+            "span",
+            "tracing span:\ndjango_ai_sdk.subagent.run",
+            fillcolor="#fff9c4",
+            color="#f57f17",
+            fontcolor="#f57f17",
+        )
+        own_loop = c.node(
+            "own_loop",
+            "own tools · own hooks (default_hooks)\nown max_agent_steps · own generator",
+            fillcolor="#e1f5fe",
+            color="#1565c0",
+        )
+        recovery = c.node(
+            "recovery",
+            "no response yet?\nONE more tool-less call\n(FINAL_PROMPT)",
+            fillcolor="#fff9c4",
+            color="#f57f17",
+            fontcolor="#f57f17",
+        )
+        flush = c.node(
+            "flush",
+            "any tool result never streamed?\nflushed through the callback now",
+            fillcolor="#fff9c4",
+            color="#f57f17",
+            fontcolor="#f57f17",
+        )
+        c.edge("span", "own_loop")
+        c.edge("own_loop", "recovery", style="dashed", label="loop exits")
+        c.edge("recovery", "flush")
+
+    response = add_component(
+        dot,
+        "response",
+        "subagent_response(messages)\nresponse text (or a digest)\n+ Sources consulted",
+        fillcolor="#fce4ec",
+        color="#c2185b",
+        fontcolor="#c2185b",
+    )
+    tool_result = add_flow_node(
+        dot,
+        "tool_result",
+        'ToolCallResult on the COORDINATOR\'s\nconversation, tagged "handoff"\n(coordinator\'s loop continues from here)',
+    )
+    persist = add_component(
+        dot,
+        "persist",
+        'Stream persists everything\ntool_call["agent"/"handoff"] stored',
+        fillcolor="#f3e5f5",
+        color="#7b1fa2",
+        fontcolor="#7b1fa2",
+    )
+    replay = add_component(
+        dot,
+        "replay",
+        "Next turn: replay_handoff()\nreal assistant(tool_calls) + tool(result)\nnot flattened to text",
+        fillcolor="#e8f5e9",
+        color="#2e7d32",
+        fontcolor="#2e7d32",
+    )
+
+    dot.edge("coordinator", "tool_call")
+    dot.edge("tool_call", "component_tool")
+    dot.edge("component_tool", "span", lhead="cluster_subagent")
+    dot.edge("flush", "response", ltail="cluster_subagent")
+    dot.edge("response", "tool_result")
+    dot.edge("tool_result", "persist")
+    dot.edge("persist", "replay")
+
+    dot.attr(compound="true")
+
+    return dot
+
+
+def generate_headless_tool_run_flow() -> graphviz.Digraph:
+    """Agent.run(tools=True): the unattended, non-streaming equivalent."""
+    dot = create_graph(
+        "headless_tool_run_flow", graph_attr={"rankdir": "TB", "nodesep": "0.5", "ranksep": "0.6"}
+    )
+
+    call = add_flow_node(dot, "call", "await agent.run(messages, tools=True)")
+
+    agent_run = add_component(
+        dot,
+        "agent_run",
+        "Agent.run()\nresolved = response_format\nadapter = get_run_adapter()",
+        fillcolor="#fff3e0",
+        color="#e65100",
+        fontcolor="#e65100",
+    )
+
+    gate = add_note(
+        dot,
+        "gate",
+        "tools=True\nAND response_format is None\nAND isinstance(adapter, Run)",
+    )
+
+    own_tools = add_component(
+        dot,
+        "own_tools",
+        "Agent._run_own_tools()\ntools = await self.get_tools()\nhooks = default_hooks(self)",
+        fillcolor="#fce4ec",
+        color="#c2185b",
+        fontcolor="#c2185b",
+    )
+
+    build_agent = add_component(
+        dot,
+        "build_agent",
+        "ToolAgent.build_agent(\n  generator, tools, system_prompt,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)",
+        fillcolor="#e1f5fe",
+        color="#1565c0",
+        fontcolor="#1565c0",
+    )
+
+    run_async = add_flow_node(
+        dot, "run_async", "haystack_agent.run_async(...)\nno streaming callback"
+    )
+
+    result = add_component(
+        dot,
+        "result",
+        'result["messages"][-1].text\nthe final answer, plain string',
+        fillcolor="#e8f5e9",
+        color="#2e7d32",
+        fontcolor="#2e7d32",
+    )
+
+    not_run = add_component(
+        dot,
+        "not_run",
+        "adapter.run(...)\nplain / structured, unchanged",
+        fillcolor="#f5f5f5",
+        color="#666666",
+    )
+
+    shared_note = add_note(
+        dot,
+        "shared_note",
+        "default_hooks() + ToolAgent.build_agent()\nare the SAME assembly build_subagent()\nuses for a streamed delegation",
+    )
+
+    dot.edge("call", "agent_run")
+    dot.edge("agent_run", "gate")
+    dot.edge("gate", "own_tools", label="yes")
+    dot.edge("gate", "not_run", label="no", style="dashed")
+    dot.edge("own_tools", "build_agent")
+    dot.edge("build_agent", "run_async")
+    dot.edge("run_async", "result")
+    dot.edge(
+        "build_agent", "shared_note", style="dotted", arrowhead="none", constraint="false"
+    )
+
+    return dot
+
+
 def generate_adapter_flow() -> graphviz.Digraph:
     """Stream/Run adapters over haystack components."""
     dot = create_graph("adapter_flow")
@@ -443,6 +632,8 @@ DIAGRAMS = {
     "overview_architecture": generate_overview_architecture,
     "data_flow": generate_data_flow,
     "adapter_flow": generate_adapter_flow,
+    "subagent_flow": generate_subagent_flow,
+    "headless_tool_run_flow": generate_headless_tool_run_flow,
     "id_generation": generate_id_generation,
     "storage_architecture": generate_storage_architecture,
     "rag_architecture": generate_rag_architecture,

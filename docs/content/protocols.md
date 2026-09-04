@@ -51,7 +51,7 @@ stream = Stream(
 `Stream` requires an actual `haystack.Pipeline`: a bare generator isn't enough. The typical pipeline is built by `ToolAgent`:
 
 ```python
-from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
+from django_ai_sdk.agents import ToolAgent, ToolAgentConfig
 
 tool_agent = ToolAgent(
     config=ToolAgentConfig(
@@ -123,6 +123,26 @@ movie = await run.run(messages, response_format=Movie)
 ```
 
 `Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](/manual/generators/#structured-output).
+
+### Tools
+
+`Run` itself has no notion of tools - it only ever wraps a plain generator. Pass
+`tools=True` to `Agent.run()` instead: it resolves `self.get_tools()` and runs them to
+completion via `ToolAgent.build_agent` - the same assembly a streamed subagent
+delegation uses (`build_subagent`) - governed by this agent's own `max_agent_steps`
+and `max_tool_calls` (as a `ToolCallBudgetHook`), never a generic default:
+
+```python
+reply = await agent.run(messages, tools=True)   # -> str | None
+```
+
+The flag defaults to `False` so a one-shot call (title generation, structured
+extraction) never reaches every configured integration unless it explicitly asks to.
+Passing a `response_format` skips tool resolution regardless of `tools` - structured
+output and tool use together are not supported yet, see
+[Structured output from a tool loop](/manual/generators/#structured-output-from-a-tool-loop)
+for the two-call alternative. See [Headless tool runs](/manual/stream-and-run/#headless-tool-runs)
+for the full call chain and a diagram.
 
 ---
 
