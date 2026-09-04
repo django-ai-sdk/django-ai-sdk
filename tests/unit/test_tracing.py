@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from asgiref.sync import sync_to_async
+from django.utils import timezone
 from django_ai_sdk.adapters.base import Stream
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.conversation.models import Message, Thread
@@ -513,9 +514,7 @@ class TestTagHandling:
         assert row.tags["haystack.agent.max_steps"] == 100
 
     @pytest.mark.django_db
-    def test_excluding_a_content_tag_keeps_its_token_usage(
-        self, orm_tracer, settings, monkeypatch
-    ):
+    def test_excluding_a_content_tag_keeps_its_token_usage(self, orm_tracer, settings, monkeypatch):
         # Usage is harvested before the exclusion guard, so the counts survive
         # even when the payload carrying them is dropped.
         monkeypatch.setattr(haystack_tracer, "is_content_tracing_enabled", True)
@@ -538,3 +537,283 @@ class TestTagHandling:
 
         row = Trace.objects.get(operation_name="span")
         assert "nested" in row.tags["plain"]
+
+
+class TestSubagentSpan:
+    """A coordinator and its subagent both emit `haystack.agent.run`; the
+    named wrapper span is what tells the two subtrees apart."""
+
+    @pytest.mark.django_db
+    def test_subagent_run_is_a_named_child_span(self, orm_tracer):
+        from django_ai_sdk.agents.subagent import SubagentStreamFilter
+
+        class _StubAgent:
+            def run(self, messages, streaming_callback=None, task=None, **kwargs):
+                with haystack_tracer.trace("haystack.agent.run"):
+                    return {"last_message": HaystackChatMessage.from_assistant("report")}
+
+        wrapper = SubagentStreamFilter(_StubAgent(), name="Research Planner")
+
+        with haystack_tracer.trace("haystack.agent.run"):
+            result = wrapper.run(messages=[HaystackChatMessage.from_user("hi")], task="research")
+
+        assert result["last_message"].text == "report"
+
+        span = Trace.objects.get(operation_name="django_ai_sdk.subagent.run")
+        assert span.tags["django_ai_sdk.subagent.name"] == "Research Planner"
+
+        coordinator = Trace.objects.get(parent_id=None)
+        assert coordinator.operation_name == "haystack.agent.run"
+        assert span.parent_id == coordinator.id
+        # The subagent's own loop nests under the named span, not the coordinator.
+        inner = Trace.objects.get(operation_name="haystack.agent.run", parent_id=span.id)
+        assert inner.parent_id == span.id
+
+
+def _span(operation_name, *, parent=None, agent_id="", agent_name="", tokens=None, thread=None):
+    """Create a Trace row directly — cheaper than driving a real agent loop.
+
+    Inherits the parent's thread the way TelemetrySpan does for real spans.
+    """
+    prompt, completion, total = tokens or (None, None, None)
+    return Trace.objects.create(
+        operation_name=operation_name,
+        started_at=timezone.now(),
+        parent=parent,
+        thread=thread or (parent.thread if parent else None),
+        agent_id=agent_id or None,
+        agent_name=agent_name,
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        total_tokens=total,
+    )
+
+
+PLANNER_ID = "11111111-1111-1111-1111-111111111111"
+CHECKER_ID = "22222222-2222-2222-2222-222222222222"
+
+
+class TestSubagentColumn:
+    @pytest.mark.django_db
+    def test_span_tags_fill_agent_id_and_name(self, orm_tracer):
+        from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
+
+        with haystack_tracer.trace(
+            "django_ai_sdk.subagent.run",
+            tags={SUBAGENT_NAME_TAG: "Research Planner", SUBAGENT_ID_TAG: PLANNER_ID},
+        ):
+            pass
+
+        row = Trace.objects.get(operation_name="django_ai_sdk.subagent.run")
+        assert row.agent_name == "Research Planner"
+        assert str(row.agent_id) == PLANNER_ID
+        assert row.tags[SUBAGENT_NAME_TAG] == "Research Planner"
+        assert row.tags[SUBAGENT_ID_TAG] == PLANNER_ID
+
+    @pytest.mark.django_db
+    def test_excluded_tags_still_fill_the_columns(self, orm_tracer, settings):
+        """Excluding a tag from storage must not empty its column, the same
+        way excluding a tag never affects the token columns."""
+        from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
+
+        settings.AI_SDK_TRACING_EXCLUDED_TAGS = [SUBAGENT_NAME_TAG, SUBAGENT_ID_TAG]
+
+        with haystack_tracer.trace(
+            "django_ai_sdk.subagent.run",
+            tags={SUBAGENT_NAME_TAG: "Research Planner", SUBAGENT_ID_TAG: PLANNER_ID},
+        ):
+            pass
+
+        row = Trace.objects.get(operation_name="django_ai_sdk.subagent.run")
+        assert row.agent_name == "Research Planner"
+        assert str(row.agent_id) == PLANNER_ID
+        assert SUBAGENT_NAME_TAG not in row.tags
+        assert SUBAGENT_ID_TAG not in row.tags
+
+
+class TestSubagentQueries:
+    @pytest.mark.django_db
+    def test_subagent_ids_lists_what_ran(self):
+        root = _span("haystack.agent.run")
+        _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=CHECKER_ID,
+            agent_name="Fact Checker",
+        )
+        _span("haystack.component.run", parent=root)
+
+        assert Trace.objects.subagent_ids() == sorted([PLANNER_ID, CHECKER_ID])
+        assert Trace.objects.subagent_names() == ["Fact Checker", "Research Planner"]
+
+    @pytest.mark.django_db
+    def test_subagents_filters_by_id(self):
+        root = _span("haystack.agent.run")
+        planner = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=CHECKER_ID,
+            agent_name="Fact Checker",
+        )
+
+        found = Trace.objects.subagents(PLANNER_ID)
+        assert [row.id for row in found] == [planner.id]
+        assert Trace.objects.subagents().count() == 2
+
+    @pytest.mark.django_db
+    def test_two_subagents_sharing_a_name_do_not_merge(self):
+        """The bug agent_name-keying had: two different classes can share a
+        display name, and their totals must not collapse into one entry."""
+        root = _span("haystack.agent.run")
+        first = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        second = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=CHECKER_ID,
+            agent_name="Research Planner",
+        )
+        _span("haystack.agent.step.llm", parent=first, tokens=(10, 5, 15))
+        _span("haystack.agent.step.llm", parent=second, tokens=(100, 50, 150))
+
+        usage = Trace.objects.subagent_usage()
+        assert set(usage) == {PLANNER_ID, CHECKER_ID}
+        assert usage[PLANNER_ID]["total_tokens"] == 15
+        assert usage[CHECKER_ID]["total_tokens"] == 150
+        assert (
+            usage[PLANNER_ID]["agent_name"] == usage[CHECKER_ID]["agent_name"] == "Research Planner"
+        )
+
+    @pytest.mark.django_db
+    def test_usage_sums_the_subtree_not_the_wrapper(self):
+        """The wrapper span carries no tokens; its LLM calls are descendants."""
+        root = _span("haystack.agent.run")
+        planner = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        inner = _span("haystack.agent.run", parent=planner)
+        _span("haystack.agent.step.llm", parent=inner, tokens=(10, 5, 15))
+        _span("haystack.agent.step.llm", parent=inner, tokens=(20, 7, 27))
+        # The coordinator's own call must not be attributed to the subagent.
+        _span("haystack.agent.step.llm", parent=root, tokens=(99, 99, 198))
+
+        assert Trace.objects.subagent_usage() == {
+            PLANNER_ID: {
+                "agent_name": "Research Planner",
+                "prompt_tokens": 30,
+                "completion_tokens": 12,
+                "total_tokens": 42,
+            }
+        }
+
+    @pytest.mark.django_db
+    def test_nested_subagent_is_not_double_counted(self):
+        root = _span("haystack.agent.run")
+        planner = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        _span("haystack.agent.step.llm", parent=planner, tokens=(10, 5, 15))
+        checker = _span(
+            "django_ai_sdk.subagent.run",
+            parent=planner,
+            agent_id=CHECKER_ID,
+            agent_name="Fact Checker",
+        )
+        _span("haystack.agent.step.llm", parent=checker, tokens=(100, 50, 150))
+
+        usage = Trace.objects.subagent_usage()
+        assert usage[PLANNER_ID]["total_tokens"] == 15
+        assert usage[CHECKER_ID]["total_tokens"] == 150
+
+    @pytest.mark.django_db
+    def test_span_without_an_id_is_excluded(self):
+        """Data recorded before agent_id existed, or a span that otherwise never
+        got tagged, cannot be attributed to a stable key."""
+        root = _span("haystack.agent.run")
+        _span("django_ai_sdk.subagent.run", parent=root, agent_name="Research Planner")
+
+        assert Trace.objects.subagent_usage() == {}
+        assert Trace.objects.subagent_ids() == []
+        # Still visible by name, since that column is unaffected.
+        assert Trace.objects.subagent_names() == ["Research Planner"]
+
+    @pytest.mark.django_db
+    def test_usage_is_empty_without_subagents(self):
+        root = _span("haystack.agent.run")
+        _span("haystack.agent.step.llm", parent=root, tokens=(10, 5, 15))
+
+        assert Trace.objects.subagent_usage() == {}
+        assert Trace.objects.subagent_ids() == []
+
+    @pytest.mark.django_db
+    def test_chains_after_a_thread_filter(self):
+        thread, _ = _make_thread_and_message()
+        root = _span("haystack.agent.run", thread=thread)
+        planner = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        _span("haystack.agent.step.llm", parent=planner, tokens=(10, 5, 15))
+        # A second thread's subagent must not leak in.
+        other_root = _span("haystack.agent.run")
+        other = _span(
+            "django_ai_sdk.subagent.run",
+            parent=other_root,
+            agent_id=CHECKER_ID,
+            agent_name="Fact Checker",
+        )
+        _span("haystack.agent.step.llm", parent=other, tokens=(1, 1, 2))
+
+        assert Trace.objects.for_thread(thread.id).subagent_ids() == [PLANNER_ID]
+        assert Trace.objects.for_thread(thread.id).subagent_usage() == {
+            PLANNER_ID: {
+                "agent_name": "Research Planner",
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            }
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.django_db(transaction=True)
+    async def test_async_twins(self):
+        def build():
+            root = _span("haystack.agent.run")
+            planner = _span(
+                "django_ai_sdk.subagent.run",
+                parent=root,
+                agent_id=PLANNER_ID,
+                agent_name="Research Planner",
+            )
+            _span("haystack.agent.step.llm", parent=planner, tokens=(10, 5, 15))
+
+        await sync_to_async(build)()
+
+        assert await Trace.objects.asubagent_ids() == [PLANNER_ID]
+        assert await Trace.objects.asubagent_names() == ["Research Planner"]
+        usage = await Trace.objects.asubagent_usage()
+        assert usage[PLANNER_ID]["total_tokens"] == 15

@@ -31,6 +31,19 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
+# Namespace inside the metadata
+AGENT_METADATA_NAMESPACE = "sdk"
+
+
+def agent_provider_metadata(
+    agent: str | None = None, handoff: str | None = None
+) -> dict[str, Any] | None:
+    """Wrap call attribution in provider metadata."""
+    marks = {key: value for key, value in (("agent", agent), ("handoff", handoff)) if value}
+    return {AGENT_METADATA_NAMESPACE: marks} if marks else None
+
+
 # === Base Schema Classes ===
 
 
@@ -170,6 +183,11 @@ class ToolInputStartPart(Schema):
     type: Literal["tool-input-start"] = "tool-input-start"
     tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
     tool_name: str = Field(validation_alias="tool_name", serialization_alias="toolName")
+    provider_metadata: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias="provider_metadata",
+        serialization_alias="providerMetadata",
+    )
 
 
 class ToolInputDeltaPart(Schema):
@@ -190,6 +208,11 @@ class ToolInputAvailablePart(Schema):
     tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
     tool_name: str = Field(validation_alias="tool_name", serialization_alias="toolName")
     input: dict[str, Any]
+    provider_metadata: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias="provider_metadata",
+        serialization_alias="providerMetadata",
+    )
 
 
 class ToolOutputAvailablePart(Schema):
@@ -314,15 +337,20 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.tool_calls:
                 for tool_call in chat_message.tool_calls:
-                    parts.append(
-                        {
-                            "type": f"tool-{tool_call.get('name', 'unknown')}",
-                            "toolCallId": tool_call.get("id"),
-                            "state": "output-available",
-                            "input": tool_call.get("arguments", {}),
-                            "output": tool_call.get("result", {}),
-                        }
-                    )
+                    part = {
+                        "type": f"tool-{tool_call.get('name', 'unknown')}",
+                        "toolCallId": tool_call.get("id"),
+                        "state": "output-available",
+                        "input": tool_call.get("arguments", {}),
+                        "output": tool_call.get("result", {}),
+                    }
+
+                    # add metadata about the agent that made the call
+                    if who := agent_provider_metadata(
+                        tool_call.get("agent"), tool_call.get("handoff")
+                    ):
+                        part["callProviderMetadata"] = who
+                    parts.append(part)
 
             result.append(
                 {
@@ -430,6 +458,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     yield ToolInputStartPart(
                         tool_call_id=tool_start_event.tool_call_id,
                         tool_name=tool_start_event.tool_name,
+                        provider_metadata=agent_provider_metadata(
+                            tool_start_event.agent, tool_start_event.handoff
+                        ),
                     )
 
                 case "tool_input_complete":
@@ -443,6 +474,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         tool_call_id=tool_input_event.tool_call_id,
                         tool_name=tool_input_event.tool_name,
                         input=tool_input,
+                        provider_metadata=agent_provider_metadata(
+                            tool_input_event.agent, tool_input_event.handoff
+                        ),
                     )
 
                 case "tool_output":
@@ -453,6 +487,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     output = raw.get("result", raw) if isinstance(raw, dict) else raw
                     if not isinstance(output, dict):
                         output = {"result": output}
+                    # Preserve the error flag so the frontend knows this tool failed.
+                    if isinstance(raw, dict) and "error" in raw:
+                        output["error"] = raw["error"]
                     yield ToolOutputAvailablePart(
                         tool_call_id=tool_output_event.tool_call_id,
                         output=output,

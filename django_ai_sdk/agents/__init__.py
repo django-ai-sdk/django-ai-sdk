@@ -37,6 +37,17 @@ from .registry import (
     auto_register,
     registry,
 )
+from .subagent import (
+    build_subagent,
+    subagent_response,
+    subagent_tool_name,
+)
+from .tool_agent import (
+    LogToolCallsHook,
+    ToolAgent,
+    ToolAgentConfig,
+    ToolCallBudgetHook,
+)
 
 __all__ = [
     "AgentInfo",
@@ -45,4 +56,11 @@ __all__ = [
     "AgentRegistrationError",
     "auto_register",
     "registry",
+    "LogToolCallsHook",
+    "ToolAgent",
+    "ToolAgentConfig",
+    "ToolCallBudgetHook",
+    "build_subagent",
+    "subagent_response",
+    "subagent_tool_name",
 ]

@@ -122,13 +122,23 @@ class StreamWriter:
 
         elif chunk.type == "tool_call_start":
             tool_call_id = chunk.content["tool_call_id"]
+            if tool_call_id in self._pending_tool_calls:
+                return self.message
             tool_name = chunk.content["tool_name"]
-            self._pending_tool_calls[tool_call_id] = {
+            tool_call = {
                 "id": tool_call_id,
                 "name": tool_name,
                 "arguments": {},
                 "result": None,
             }
+            # Which agent ran this: "agent" for a subagent's own tool, "handoff"
+            # for the coordinator delegating to one. Absent for a plain call.
+            for key in ("agent", "handoff"):
+                if value := chunk.metadata.get(key):
+                    tool_call[key] = value
+            # Append at start time so stored tool_calls are chronological.
+            self._pending_tool_calls[tool_call_id] = tool_call
+            self.message.tool_calls.append(tool_call)
             logger.debug(f"Started tool call: {tool_name} (ID: {tool_call_id})")
 
         elif chunk.type == "tool_input":
@@ -143,11 +153,8 @@ class StreamWriter:
             tool_call_id = chunk.content["tool_call_id"]
             if tool_call_id in self._pending_tool_calls:
                 self._pending_tool_calls[tool_call_id]["result"] = chunk.content["tool_output"]
-                # Move completed tool call to message
-                completed_tool = self._pending_tool_calls[tool_call_id]
-                self.message.tool_calls.append(completed_tool)
                 del self._pending_tool_calls[tool_call_id]
-                logger.debug(f"Completed tool call: {completed_tool['name']} (ID: {tool_call_id})")
+                logger.debug(f"Completed tool call (ID: {tool_call_id})")
             else:
                 logger.debug(f"Received tool output for unknown tool call ID: {tool_call_id}")
 
@@ -170,15 +177,14 @@ class StreamWriter:
         if self._reasoning_chunks:
             self.message.reasoning = "".join(self._reasoning_chunks)
 
-        # Add any remaining pending tool calls (in casse tool_output never came)
+        # Any remaining pending tool calls never received an output chunk; they
+        # were already appended to message.tool_calls at start time.
         pending_tools_count = len(self._pending_tool_calls)
         if pending_tools_count > 0:
-            logger.debug(f"Adding {pending_tools_count} pending tool calls to final message")
-            for tool_call in self._pending_tool_calls.values():
-                self.message.tool_calls.append(tool_call)
-                logger.debug(
-                    f"Added pending tool call: {tool_call['name']} (ID: {tool_call['id']})"
-                )
+            logger.debug(
+                f"Finalizing {pending_tools_count} tool calls without output "
+                f"(stored with result=None)"
+            )
         self._pending_tool_calls.clear()
 
         # Finalize message

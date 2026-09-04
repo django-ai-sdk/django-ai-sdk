@@ -46,6 +46,9 @@ class ToolCallStartEvent(StreamEvent):
     event_type: Literal["tool_call_start"] = "tool_call_start"
     tool_call_id: str
     tool_name: str
+    # `agent` for a subagent's own tool, `handoff` for the coordinator delegating to one.
+    agent: str | None = None
+    handoff: str | None = None
 
 
 class ToolInputChunkEvent(StreamEvent):
@@ -63,6 +66,8 @@ class ToolInputCompleteEvent(StreamEvent):
     tool_call_id: str
     tool_name: str
     tool_input: dict[str, Any] | str
+    agent: str | None = None
+    handoff: str | None = None
 
 
 class ToolOutputEvent(StreamEvent):

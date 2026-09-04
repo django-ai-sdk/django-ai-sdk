@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import StreamingChunk
+from haystack.dataclasses import StreamingChunk, ToolCall
 
 from django_ai_sdk.adapters.utils import merge_messages
+from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -37,7 +38,7 @@ from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
 
     from django_ai_sdk.adapters.protocols import T
     from django_ai_sdk.citations import CitationRegistry, NumberedSource
@@ -84,6 +85,52 @@ def parse_tool_output(obj: Any) -> Any:
     return str(obj)
 
 
+# Marker appended when a tool result is cut to the size limit.
+_TRUNCATION_NOTE = "\n\n... truncated, {omitted} chars omitted"
+
+
+def get_tool_result_text(tool_call: dict[str, Any]) -> str:
+    """Return a stored tool call's result as plain text for history."""
+    result = tool_call.get("result")
+    if result is None:
+        return ""
+    if isinstance(result, dict) and "result" in result:
+        result = result["result"]
+    return result if isinstance(result, str) else json.dumps(result, default=str)
+
+
+def truncate_tool_result(text: str) -> str:
+    """Cap a replayed tool result so one big response cannot own the context.
+
+    Limit comes from ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables
+    truncation entirely.
+    """
+    limit = resolve_setting("AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT", 4000)
+    if not isinstance(limit, int) or limit <= 0 or len(text) <= limit:
+        return text
+    return text[:limit] + _TRUNCATION_NOTE.format(omitted=len(text) - limit)
+
+
+def _get_message_pairs(
+    messages: list[ChatMessage],
+    has_handoff: Callable[[ChatMessage], list[dict[str, Any]]],
+) -> list[tuple[ChatMessage | None, list[ChatMessage]]]:
+    """Split a conversation into handoff messages and the plain runs between."""
+    runs: list[tuple[ChatMessage | None, list[ChatMessage]]] = []
+    current: list[ChatMessage] = []
+    for message in messages:
+        if has_handoff(message):
+            if current:
+                runs.append((None, current))
+                current = []
+            runs.append((message, []))
+        else:
+            current.append(message)
+    if current:
+        runs.append((None, current))
+    return runs
+
+
 def get_error_chunk(e: Exception) -> MessageChunk:
     return MessageChunk(
         type="error",
@@ -102,6 +149,7 @@ class Run:
     def __init__(
         self,
         generator: Any,
+        *,
         model: str | None = None,
         instructions: str | None = None,
     ) -> None:
@@ -191,6 +239,8 @@ class Stream:
         self.citation_registry = citation_registry
         self.suggestion_generator = suggestion_generator
         self._sources_emitted = 0
+        self._persisted_tool_ids: set[str] = set()
+        self._persisted_tool_output_ids: set[str] = set()
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
@@ -205,21 +255,60 @@ class Stream:
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
 
+        # Tool name and subagent name, for all subagents this agent delegated to.
+        self._handoff_tools: dict[str, str] = {
+            tool.name: getattr(tool._component, "name", "") or tool.name
+            for tool in (getattr(self.agent_component, "tools", None) or [])
+            if isinstance(getattr(tool, "_component", None), SubagentStreamFilter)
+        }
+
+    @staticmethod
+    def get_handoff_calls(message: ChatMessage) -> list[dict[str, Any]]:
+        """Return the subagent delegations recorded on an assistant message."""
+        if message.role != "assistant":
+            return []
+        return [tc for tc in message.tool_calls if tc.get("handoff")]
+
+    def replay_handoff(self, message: ChatMessage) -> list[HaystackChatMessage]:
+        """Rebuild a delegation as the agent tool pair."""
+        calls = [
+            ToolCall(
+                id=tc.get("id") or str(uuid.uuid4()),
+                tool_name=tc.get("name") or "",
+                arguments=tc.get("arguments") or {},
+            )
+            for tc in self.get_handoff_calls(message)
+        ]
+        replayed = [HaystackChatMessage.from_assistant(message.content or None, tool_calls=calls)]
+        for tool_call, call in zip(self.get_handoff_calls(message), calls, strict=True):
+            replayed.append(
+                HaystackChatMessage.from_tool(
+                    truncate_tool_result(get_tool_result_text(tool_call)),
+                    origin=call,
+                )
+            )
+        return replayed
+
     def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
         """Convert internal messages to Haystack ChatMessage format."""
         conversation = [m for m in messages if m.role in ("user", "assistant")]
         converted_messages: list[HaystackChatMessage] = []
 
-        if self.merge_messages:
-            filtered_messages = merge_messages(conversation)
-        else:
-            filtered_messages = [(msg.role, msg.content) for msg in conversation]
-
-        for role, content in filtered_messages:
-            if role == "user":
-                converted_messages.append(HaystackChatMessage.from_user(content))
-            elif role == "assistant":
-                converted_messages.append(HaystackChatMessage.from_assistant(content))
+        # A handoff replays as an assistant/tool pair
+        for message, group in _get_message_pairs(conversation, self.get_handoff_calls):
+            if message is not None:
+                converted_messages.extend(self.replay_handoff(message))
+                continue
+            pairs = (
+                merge_messages(group)
+                if self.merge_messages
+                else [(msg.role, msg.content) for msg in group]
+            )
+            for role, content in pairs:
+                if role == "user":
+                    converted_messages.append(HaystackChatMessage.from_user(content))
+                elif role == "assistant":
+                    converted_messages.append(HaystackChatMessage.from_assistant(content))
 
         # Ensure we have at least one message
         # TODO: we now return a system message instead of a user message, this is a temporary fix
@@ -239,6 +328,14 @@ class Stream:
             return f"{source.doc_id}:{source.chunk_id}"
         return source.doc_id
 
+    def get_attribution(self, tool_name: str, subagent: str | None = None) -> dict[str, str]:
+        """Metadata naming attribution ran a tool call."""
+        if subagent:
+            return {"agent": subagent}
+        if handoff := self._handoff_tools.get(tool_name):
+            return {"handoff": handoff}
+        return {}
+
     def get_text_chunk(self, content: str) -> MessageChunk:
         """Create a text MessageChunk."""
         return MessageChunk(type="text", content=content)
@@ -253,6 +350,7 @@ class Stream:
                 MessageChunk(
                     type="tool_call_start",
                     content={"tool_call_id": tool_call.id, "tool_name": tool_call.tool_name},
+                    metadata=self.get_attribution(tool_call.tool_name),
                 )
             )
             chunks.append(
@@ -276,6 +374,58 @@ class Stream:
             )
 
         return chunks
+
+    def get_streaming_tool_chunks(self, chunk: StreamingChunk) -> list[MessageChunk]:
+        """Convert a streamed tool chunk into the MessageChunks for history."""
+        chunks = []
+        subagent = chunk.meta.get(SUBAGENT_META_KEY)
+
+        for tc in chunk.tool_calls or []:
+            tc_id = tc.id or str(uuid.uuid4())
+            chunks.append(
+                MessageChunk(
+                    type="tool_call_start",
+                    content={"tool_call_id": tc_id, "tool_name": tc.tool_name},
+                    metadata=self.get_attribution(tc.tool_name or "", subagent),
+                )
+            )
+            if tc.arguments:
+                chunks.append(
+                    MessageChunk(
+                        type="tool_input",
+                        content={
+                            "tool_call_id": tc_id,
+                            "tool_name": tc.tool_name,
+                            "tool_input": parse_tool_input(tc.arguments),
+                        },
+                    )
+                )
+
+        if chunk.tool_call_result:
+            result = chunk.tool_call_result
+            tool_output = parse_tool_output(result.to_dict())
+            chunks.append(
+                MessageChunk(
+                    type="tool_output",
+                    content={"tool_call_id": result.origin.id, "tool_output": tool_output},
+                )
+            )
+
+        return chunks
+
+    def _persist_streamed_tool_chunks(
+        self, chunk: StreamingChunk, stream_writer: StreamWriter | None
+    ) -> None:
+        """Persist streamed tool chunks live, recording their ids for dedupe."""
+        if not stream_writer:
+            return
+        for c in self.get_streaming_tool_chunks(chunk):
+            cid = c.content["tool_call_id"]
+            if c.type == "tool_output":
+                self._persisted_tool_output_ids.add(cid)
+            else:
+                self._persisted_tool_ids.add(cid)
+            stream_writer.add_chunk(c)
 
     def get_task(
         self,
@@ -318,16 +468,26 @@ class Stream:
                 yield ReasoningChunkEvent(content=chunk.reasoning.reasoning_text)
 
             if chunk.tool_calls:
+                subagent = chunk.meta.get(SUBAGENT_META_KEY)
                 for tc in chunk.tool_calls:
                     if not tc.tool_name:
                         continue
                     tc_id = tc.id or str(uuid.uuid4())
-                    yield ToolCallStartEvent(tool_call_id=tc_id, tool_name=tc.tool_name)
+                    # marks the stored history
+                    attribution = self.get_attribution(tc.tool_name, subagent)
+                    yield ToolCallStartEvent(
+                        tool_call_id=tc_id,
+                        tool_name=tc.tool_name,
+                        agent=attribution.get("agent"),
+                        handoff=attribution.get("handoff"),
+                    )
                     if tc.arguments:
                         yield ToolInputCompleteEvent(
                             tool_call_id=tc_id,
                             tool_name=tc.tool_name,
                             tool_input=parse_tool_input(tc.arguments),
+                            agent=attribution.get("agent"),
+                            handoff=attribution.get("handoff"),
                         )
 
             if chunk.tool_call_result:
@@ -357,6 +517,8 @@ class Stream:
                             )
                     self._sources_emitted = len(all_sources)
 
+            self._persist_streamed_tool_chunks(chunk, stream_writer)
+
     async def get_pipeline_result(
         self,
         pipeline_task: asyncio.Task[Any],
@@ -374,6 +536,12 @@ class Stream:
             if hasattr(message, "tool_calls") or hasattr(message, "tool_call_results"):
                 if stream_writer:
                     for chunk in self.get_tool_chunks(message):
+                        cid = chunk.content["tool_call_id"]
+                        if chunk.type == "tool_output":
+                            if cid in self._persisted_tool_output_ids:
+                                continue
+                        elif cid in self._persisted_tool_ids:
+                            continue
                         stream_writer.add_chunk(chunk)
 
     async def get_final_message(

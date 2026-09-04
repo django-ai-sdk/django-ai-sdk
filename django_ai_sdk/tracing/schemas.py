@@ -20,6 +20,8 @@ class TraceOut(BaseModel):
     parent_id: uuid.UUID | None = None
     thread_id: uuid.UUID | None = None
     message_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    agent_name: str = ""
     model_name: str = ""
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -33,3 +35,5 @@ class TokenUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    agent_name: str = ""
+    by_subagent: dict[str, TokenUsage] = Field(default_factory=dict)

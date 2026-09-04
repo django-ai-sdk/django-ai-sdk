@@ -48,6 +48,8 @@ class Trace(models.Model):
     message_id: uuid.UUID | None
 
     tags = models.JSONField(default=dict, blank=True)
+    agent_id = models.UUIDField(null=True, blank=True, db_index=True)
+    agent_name = models.CharField(max_length=255, blank=True, db_index=True)
     model_name = models.CharField(max_length=255, blank=True)
     prompt_tokens = models.IntegerField(null=True, blank=True)
     completion_tokens = models.IntegerField(null=True, blank=True)
