@@ -6,6 +6,7 @@ import uuid
 from abc import ABC
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from django.http import HttpResponse, HttpResponseBase, StreamingHttpResponse
 from pydantic import BaseModel
 
 from django_ai_sdk.agents.mixins import AgentInfoMixin
@@ -33,6 +34,15 @@ from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
+from django_ai_sdk.streams import (
+    StreamSync,
+    clear_active_stream,
+    get_store,
+    run_durable_stream,
+    spawn_background,
+    tail_stream,
+)
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1013,5 +1023,63 @@ class Agent(ABC, AgentInfoMixin):
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
+        if thread_id and resolve_setting("AI_SDK_DURABLE_STREAMS_PATH"):
+            logger.debug("Initiating durable stream response")
+
+            # ponytail: message_id generated here, might be overlooked
+            message_id = str(uuid.uuid4())
+            adapter.message_id = message_id
+
+            # get streaming store and create a new stream for this message_id
+            store = get_store()
+            await store.create(message_id, "text/event-stream")
+            # mark the thread resumable before the response starts.
+            await ThreadService.update_thread(
+                thread_id, user=user, metadata={"active_stream_id": message_id}
+            )
+            sync = StreamSync()
+            sse_gen = self.protocol_handler.sse(adapter, messages)
+            spawn_background(run_durable_stream(sse_gen, store, message_id, thread_id, sync))
+            # bytes come straight from the stream sync
+            response = StreamingHttpResponse(sync.stream(), content_type="text/event-stream")
+            response["Cache-Control"] = "no-cache"
+            response["x-vercel-ai-ui-message-stream"] = "v1"
+            return response
+
         logger.debug("Initiating stream response")
         return await stream_response(adapter, messages, self.protocol_handler)
+
+    async def resume_view(
+        self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> HttpResponseBase:
+        """
+        Resume an in-flight synced chat stream for a thread, if one exists.
+        """
+        await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
+
+        storage = await self.get_storage_adapter(thread_id)
+        if not storage:
+            raise ValueError(f"No storage adapter found for thread: {thread_id}")
+
+        thread_info = await storage.__class__.get_thread(thread_id)
+        if not thread_info:
+            raise ValueError(f"Thread not found: {thread_id}")
+
+        await check_object_permissions(
+            user, Operation.CHAT, thread_info, get_agent_permissions(self), agent=self
+        )
+
+        active = thread_info.metadata.get("active_stream_id")
+        if not active:
+            return HttpResponse(status=204)
+
+        store = get_store()
+        try:
+            await store.open(active)
+        except KeyError:
+            # The log is gone but the thread still points at it.
+            logger.warning(f"Thread {thread_id} references missing stream {active}.")
+            await clear_active_stream(thread_id)
+            return HttpResponse(status=204)
+
+        return StreamingHttpResponse(tail_stream(store, active), content_type="text/event-stream")

@@ -242,6 +242,7 @@ class Stream:
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
         self.message_result: ChatMessage | None = None
+        self.message_id: str | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
         self.agent_component = None
@@ -606,7 +607,7 @@ class Stream:
         messages: list[ChatMessage],
     ) -> AsyncGenerator[StreamEvent, None]:
         haystack_messages = self.get_messages(messages)
-        message_id = str(uuid.uuid4())
+        message_id = self.message_id or str(uuid.uuid4())
 
         stream_writer = None
         if self.store and self.storage_adapter:

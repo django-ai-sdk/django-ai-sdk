@@ -900,6 +900,7 @@ dependencies = [
     { name = "cashews" },
     { name = "django" },
     { name = "django-tasks" },
+    { name = "durastream" },
     { name = "haystack-ai" },
     { name = "loguru" },
     { name = "puremagic" },
@@ -1028,6 +1029,7 @@ requires-dist = [
     { name = "django-ai-sdk", extras = ["files", "haystack", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
     { name = "django-tasks", specifier = ">=0.12.0" },
+    { name = "durastream", specifier = ">=0.0.1a2" },
     { name = "fastembed-haystack", marker = "extra == 'embeddings'", specifier = ">=2.4.0" },
     { name = "firecrawl-anydoc", marker = "extra == 'files'", specifier = ">=0.2.4" },
     { name = "haystack-ai", specifier = ">=3.0.0" },
@@ -1219,6 +1221,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2d2ff91cf2674415cc7cddab2ca1b01ae29774bd5fdf/docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015", size = 29341, upload-time = "2026-04-14T04:09:19.867Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b", size = 22484, upload-time = "2026-04-14T04:09:18.638Z" },
+]
+
+[[package]]
+name = "durastream"
+version = "0.0.1a2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/93/fda66ec290dd705edb243fddae58f463c7e021752b70d2fc6cba434817b7/durastream-0.0.1a2.tar.gz", hash = "sha256:b97d8bd6c874024576f78de76d3a96bc2e94f091546a0d9c644704eea9bcfe0a", size = 23937, upload-time = "2026-08-27T11:07:07.394Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cc/85/4b8d78bae2711b1f10b00d58c62154128755f8f2066135bacbff7faa5148/durastream-0.0.1a2-py3-none-any.whl", hash = "sha256:403705a376f69971316402aa5059385e66000fc69e37f33861f216a93812d6e6", size = 9889, upload-time = "2026-08-27T11:07:06.584Z" },
 ]
 
 [[package]]

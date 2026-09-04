@@ -406,6 +406,21 @@ async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: C
         return 404, Error(message=str(e))
 
 
+@router.get(
+    "/threads/{thread_id}/resume/",
+    response={403: Error, 404: Error, 500: Error},
+    operation_id="resume_thread_stream",
+)
+async def resume_thread_stream(request: HttpRequest, thread_id: str) -> Any:
+    try:
+        agent = await AgentService.get_agent(thread_id, user=request.user)
+        return await agent.resume_view(thread_id, user=request.user)
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+
+
 @router.delete(
     "/threads/{thread_id}/",
     response={200: Success, 403: Error, 404: Error, 500: Error},

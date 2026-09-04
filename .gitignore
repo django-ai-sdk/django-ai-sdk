@@ -224,7 +224,7 @@ tmp/
 
 # Local
 demo/memories
-demo/stores
+demo/tmp
 
 # Internal dev checks, not part of the published package or CI
 check-extras.sh
