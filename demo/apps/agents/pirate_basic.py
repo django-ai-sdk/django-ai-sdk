@@ -5,13 +5,12 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.agents import auto_register
+from django_ai_sdk.agents import ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.citations import DefaultCitationFormatter
 from django_ai_sdk.common import prompt
 from django_ai_sdk.files import FilePipeline, TextFileProcessor
 from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.memories.models import Entry
-from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import (
     BM25QueryExpanderRAG,

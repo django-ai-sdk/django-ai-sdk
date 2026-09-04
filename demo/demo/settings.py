@@ -237,7 +237,8 @@ AI_SDK_WORKFLOW_ACTIONS = {
 # Default asssitants
 AI_SDK_AGENTS = [
     "apps.agents.pirate_basic.PirateBasicAgent",
-    "apps.agents.agent_swarm.AgentSwarmAgent",
+    "apps.agents.agent_swarm.PirateSwarmAgent",
+    "apps.agents.deep_research.DeepResearchAgent",
 ]
 
 # Permission overrides by domain

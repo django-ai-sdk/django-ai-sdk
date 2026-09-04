@@ -23,10 +23,9 @@ from django_ai_sdk import (
     TestResultsArtifact,
 )
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.agents import auto_register
+from django_ai_sdk.agents import ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.common import prompt
 from django_ai_sdk.generators import openai_responses_chat
-from django_ai_sdk.pipelines.haystack import ToolAgent, ToolAgentConfig
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
 
