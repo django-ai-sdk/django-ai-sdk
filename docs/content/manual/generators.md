@@ -133,6 +133,28 @@ yourself, or route that one call through an OpenAI-compatible generator.
 
 An unlisted generator class is assumed OpenAI-compatible and gets `response_format`.
 
+### Structured output from a tool loop
+
+`agent.run(tools=True, response_format=Schema)` is not supported - deliberately, not
+a gap left unfinished. `response_format` is implemented as a generation kwarg (the
+table above), and a Haystack `Agent`'s tool loop applies its generation kwargs to
+*every* step, not just the final answer. Turning on structured output for the whole
+run would force early steps - "should I call `search_web`?" - into your final
+answer's schema too, and several generators (the last two rows above) accept no
+schema kwarg at all, at any step. Passing both does not raise: `response_format`
+wins and tools are skipped entirely - see [Tools](/protocols/#tools).
+
+The supported shape is two calls instead of one: run the tool loop free-form, then
+make one more tool-less call to shape the finished text:
+
+```python
+text = await agent.run(messages, tools=True)
+report = await Run(generator=agent.get_llm()).run(
+    [ChatMessage(role="assistant", content=text)],
+    response_format=ResearchSummary,
+)
+```
+
 ## Adding a vendor
 
 Everything a vendor needs lives in its own module. To add DeepSeek:

@@ -59,6 +59,82 @@ class MyAgent(Agent):
 
 `Run.get_messages()` keeps only `user` and `assistant` messages and converts them to Haystack `ChatMessage`s; a `system_prompt` passed to `run()` is prepended as a system message.
 
+{{< callout type="info" >}}
+`Run` only ever wraps a plain generator — it has no notion of tools, and never
+has. Two earlier shapes tried to give it one (`Run(agent=prebuilt_agent)`, then
+`Run(generator, tools=[...])`) and were both deleted: both had zero real
+callers, and the second built an *ungoverned* Haystack Agent from a generic
+step-cap setting instead of the calling agent's own limits — a real subagent
+class run headless would have silently lost its own `max_agent_steps`. See
+[Headless tool runs](#headless-tool-runs) below for the shape that replaced
+them.
+{{< /callout >}}
+
+## Headless tool runs
+
+![Headless Tool Run Flow](/images/graphs/headless_tool_run_flow.png)
+
+An `Agent` can run its own tools to completion **without streaming** — no
+`Stream`, no SSE connection, no client reading chunks. One call in, one final
+answer out: a workflow step, a scheduled job, a management command — anything
+that needs tool access but has nobody watching a live response.
+
+```python
+answer = await agent.run(messages, tools=True)
+```
+
+`Agent.run()` takes the headless path only when three conditions all hold:
+
+```python
+resolved = self.response_format if response_format is self._UNSET else response_format
+adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
+
+if tools and resolved is None and isinstance(adapter, Run):
+    return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
+
+return await adapter.run(messages=messages, system_prompt=rendered_prompt, response_format=resolved)
+```
+
+- **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
+- **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
+- **`isinstance(adapter, Run)`** — only the SDK's own plain `Run` is ours to add a tool loop to. A `get_run_adapter()` override that returns something else made that choice on purpose and is left alone, calling its own `.run()` unchanged.
+
+`Agent._run_own_tools()` then builds the loop:
+
+```python
+haystack_agent = ToolAgent.build_agent(
+    getattr(adapter, "generator", None) or self.get_llm(),
+    await self.get_tools(thread_id=thread_id or "", user=user),
+    system_prompt,
+    max_agent_steps=self.max_agent_steps,
+    hooks=default_hooks(self),
+)
+result = await haystack_agent.run_async(messages=adapter.get_messages(messages))
+return result["messages"][-1].text if result.get("messages") else None
+```
+
+This is **the same assembly** `build_subagent()` uses to turn a subagent into
+a real Haystack `Agent` for streamed delegation (see [Subagent
+Delegation](../agent/#subagent-delegation)) — `default_hooks(self)` and
+`max_agent_steps=self.max_agent_steps` are the calling agent's own governance,
+not a generic constant. A class with `max_agent_steps = 4` gets 4 steps
+whether it's delegated to live or run headless by itself; one function,
+`default_hooks()`, is the single place that assembly exists.
+
+The return is just the last message's text — no digest, no sources-consulted
+list, no synthesis-pass recovery if the loop got cut short. That machinery
+(`subagent_response()`) exists specifically for the coordinator/subagent
+handoff, where a lost result means a lost answer to the user mid-conversation.
+A headless run has no ongoing conversation to lose context from — the caller
+gets back whatever the last message says, cut short or not.
+
+{{< callout type="warning" >}}
+No shipped code calls `agent.run(tools=True)` yet — not in `django_ai_sdk`,
+not in the demo project. The mechanism is tested and correct, but there's no
+example to copy from; a workflow step that needs tool access is the obvious
+first real caller.
+{{< /callout >}}
+
 ## Stream
 
 `Stream` wraps a Haystack pipeline and normalizes its streaming output into `StreamEvent`s.

@@ -41,12 +41,11 @@ django_ai_sdk/
 ├── responses.py          # stream_response()
 ├── permissions.py        # BasePermission, built-ins, Operation enum
 ├── adapters/             # Stream, Run
-├── agents/               # registry, services, runtime, config
+├── agents/               # registry, services, runtime, config, ToolAgent + subagent engine
 ├── protocols/            # Vercel + OpenAI handlers
 ├── storage/              # memory + db adapters, ThreadService
 ├── rags/                 # BM25, ChromaDB, Qdrant hybrid, provider
 ├── integrations/         # mcp, github, linear, notion, weather
-├── pipelines/            # Haystack ToolAgent
 ├── conversation/         # Thread + Message models
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
