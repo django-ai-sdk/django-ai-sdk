@@ -7,9 +7,13 @@ from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
+from django_ai_sdk.managers import NaturalKeyManager
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import Group
     from django.db.models.base import ModelBase
 
 
@@ -36,6 +40,8 @@ class AgentSettings(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = NaturalKeyManager("slug")
 
     class Meta:
         app_label = "django_ai_sdk"
@@ -64,6 +70,9 @@ class AgentSettings(models.Model):
             update_fields=update_fields,
         )
 
+    def natural_key(self) -> tuple[str]:
+        return (self.slug,)
+
 
 class AgentUser(models.Model):
     agent = models.ForeignKey(
@@ -83,6 +92,8 @@ class AgentUser(models.Model):
     agent_id: int
     user_id: int
 
+    objects = NaturalKeyManager("agent", "user")
+
     class Meta:
         app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_runtime_agent_users"
@@ -90,6 +101,9 @@ class AgentUser(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} - {self.agent.name}"
+
+    def natural_key(self) -> tuple[AgentSettings, AbstractBaseUser]:
+        return (self.agent, self.user)
 
 
 class AgentGroup(models.Model):
@@ -109,6 +123,8 @@ class AgentGroup(models.Model):
     agent_id: int
     group_id: int
 
+    objects = NaturalKeyManager("agent", "group")
+
     class Meta:
         app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_runtime_agent_groups"
@@ -116,3 +132,6 @@ class AgentGroup(models.Model):
 
     def __str__(self) -> str:
         return f"{self.group} - {self.agent.name}"
+
+    def natural_key(self) -> tuple[AgentSettings, Group]:
+        return (self.agent, self.group)
