@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from django.conf import DEFAULT_STORAGE_ALIAS
+from django.core.files.storage import InvalidStorageError, Storage, storages
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.files.processors import TextFileProcessor, get_allowed_files
@@ -65,6 +67,25 @@ def get_upload_settings() -> UploadSettings:
         max_upload_size=max_size,
         allowed_mime_types=sorted(allowed) if allowed else ["*/*"],
     )
+
+
+AI_SDK_STORAGE_ALIAS = "django_ai_sdk"
+
+
+def get_entry_document_storage() -> Storage:
+    """Storage backend for documents."""
+    try:
+        return storages[AI_SDK_STORAGE_ALIAS]
+    except InvalidStorageError:
+        return storages[DEFAULT_STORAGE_ALIAS]
+
+
+DEFAULT_ENTRY_DOCUMENT_UPLOAD_TO = "memories/documents/"
+
+
+def get_entry_document_upload_to() -> str:
+    """model upload_to path for documents, with default fallback"""
+    return resolve_setting("AI_SDK_FILE_UPLOAD_TO", DEFAULT_ENTRY_DOCUMENT_UPLOAD_TO)
 
 
 async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:

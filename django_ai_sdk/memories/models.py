@@ -9,6 +9,7 @@ from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
 
+from django_ai_sdk.files.common import get_entry_document_storage, get_entry_document_upload_to
 from django_ai_sdk.memories.schemas import DocumentExtraction
 from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
@@ -225,7 +226,9 @@ class EntryDocument(models.Model):
         null=True,
         blank=True,
     )
-    file = models.FileField(upload_to="memories/documents/")
+    file = models.FileField(
+        upload_to=get_entry_document_upload_to(), storage=get_entry_document_storage
+    )
     file_name = models.CharField(max_length=255, blank=True, default="")
     file_size = models.PositiveIntegerField(default=0)
     content_type = models.CharField(max_length=100, blank=True, default="")

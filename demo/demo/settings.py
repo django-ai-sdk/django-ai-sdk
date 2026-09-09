@@ -205,6 +205,22 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# File storage
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+    "django_ai_sdk": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "location": BASE_DIR,  # put into base for demo
+        },
+    },
+}
+
 
 # AI SDK Configuration
 

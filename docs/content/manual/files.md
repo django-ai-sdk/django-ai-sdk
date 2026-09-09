@@ -98,6 +98,34 @@ Key behaviors:
 - **Cancellation**: `cancelled_at` is checked at each `on_step` checkpoint (between processor/transforms), never mid-call.
 - **Retry**: `retry_document()` re-enqueues `failed` / `pending` / `cancelled` documents (not `processing` or `completed`).
 
+## Storage
+
+`EntryDocument.file` uses `STORAGES["default"]` by default, same as any other Django `FileField` — public media root included.
+
+To keep AI-uploaded documents out of public media without touching the site-wide default, define a `"django_ai_sdk"` entry in `STORAGES` — a reserved alias django-ai-sdk checks for, the same convention Django itself uses for `"default"`/`"staticfiles"`:
+
+```python
+# settings.py
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+    "django_ai_sdk": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {
+            "location": BASE_DIR / "private_media",
+        },
+    },
+}
+```
+
+```python
+AI_SDK_FILE_UPLOAD_TO = "my/custom/path/"
+```
+
 ## Thread File Memory
 
 Thread uploads are backed by a hidden memory created on demand per thread:
