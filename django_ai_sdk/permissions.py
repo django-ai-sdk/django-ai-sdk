@@ -237,7 +237,7 @@ class ThreadDefaultPermission(BasePermission):
 
 
 class MemoryDefaultPermission(BasePermission):
-    """Three-tier permission for memories.
+    """Tiered permission for memories.
 
     - Manager (can_manage=True): full access.
     - Owner (can_manage=False): read + write entries (not update/delete memory).
@@ -264,6 +264,10 @@ class MemoryDefaultPermission(BasePermission):
     MANAGE: frozenset[Operation] = frozenset(
         {
             Operation.UPDATE_MEMORY,
+        }
+    )
+    DELETE: frozenset[Operation] = frozenset(
+        {
             Operation.DELETE_MEMORY,
         }
     )
@@ -305,13 +309,16 @@ class MemoryDefaultPermission(BasePermission):
         obj: Memory,
         **kwargs: Any,
     ) -> bool:
+
+        restricted = self.MANAGE | self.DELETE
+
         ownership = await obj.memory_users.filter(user=user).afirst()
-        if ownership is not None and (operation not in self.MANAGE or ownership.can_manage):
+        if ownership is not None and (operation not in restricted or ownership.can_manage):
             return True
 
         group_ownership = await obj.memory_groups.filter(group__user=user).afirst()
         if group_ownership is not None and (
-            operation not in self.MANAGE or group_ownership.can_manage
+            operation not in restricted or group_ownership.can_manage
         ):
             return True
 
@@ -636,3 +643,4 @@ class ObjectPermissions(BaseModel):
     can_read: bool = False
     can_write: bool = False
     can_manage: bool = False
+    can_delete: bool = False
