@@ -616,6 +616,50 @@ class TestAgentDefaultPermission:
         for op in AgentDefaultPermission.MANAGE:
             await check_object_permissions(user, op, config, [AgentDefaultPermission])
 
+    async def test_multiple_groups_manage_granted_when_any_can_manage(self):
+        """Manage is granted when *any* group linking the user to the agent
+        has can_manage=True, even when weaker sibling groups exist.
+
+        Regression test: the check must aggregate across all group rows,
+        not gate on an arbitrary single one."""
+        from django_ai_sdk.permissions import (
+            AgentDefaultPermission,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        config = await self._make_private_agent()
+        await self._make_agent_group(user, can_manage=False, agent=config)
+        await self._make_agent_group(user, can_manage=True, agent=config)
+
+        for op in AgentDefaultPermission.MANAGE:
+            await check_object_permissions(user, op, config, [AgentDefaultPermission])
+
+    async def test_multiple_groups_manage_denied_when_none_can_manage(self):
+        """All-weak groups deny manage but still allow view/use access."""
+        from django_ai_sdk.permissions import (
+            AgentDefaultPermission,
+            Operation,
+            PermissionDenied,
+            check_object_permissions,
+        )
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        config = await self._make_private_agent()
+        await self._make_agent_group(user, can_manage=False, agent=config)
+        await self._make_agent_group(user, can_manage=False, agent=config)
+
+        for op in AgentDefaultPermission.MANAGE:
+            with pytest.raises(PermissionDenied):
+                await check_object_permissions(
+                    user, op, config, [AgentDefaultPermission]
+                )
+        await check_object_permissions(
+            user, Operation.VIEW_AGENT, config, [AgentDefaultPermission]
+        )
+
     async def test_anonymous_denied(self):
         from django_ai_sdk.permissions import (
             AgentDefaultPermission,

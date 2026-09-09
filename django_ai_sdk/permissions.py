@@ -390,8 +390,10 @@ class AgentDefaultPermission(BasePermission):
         user_entry = await AgentUser.objects.filter(agent=config, user=user).afirst()
         if user_entry is not None and (operation not in self.MANAGE or user_entry.can_manage):
             return True
-        group_entry = await AgentGroup.objects.filter(agent=config, group__user=user).afirst()
-        return group_entry is not None and (operation not in self.MANAGE or group_entry.can_manage)
+        agent_groups = AgentGroup.objects.filter(agent=config, group__user=user)
+        if operation not in self.MANAGE:
+            return await agent_groups.aexists()
+        return await agent_groups.filter(can_manage=True).aexists()
 
     async def has_object_permission(
         self,
