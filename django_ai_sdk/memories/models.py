@@ -21,6 +21,8 @@ class Memory(models.Model):
     description = models.TextField(blank=True, default="")
     is_hidden = models.BooleanField(default=False)
     is_public = models.BooleanField(default=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
