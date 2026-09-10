@@ -320,6 +320,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
         for chat_message in chat_messages:
             parts = []
 
+            if chat_message.reasoning:
+                parts.append({"type": "reasoning", "text": chat_message.reasoning, "state": "done"})
+
             if chat_message.content:
                 parts.append({"type": "text", "text": chat_message.content})
 

@@ -117,6 +117,36 @@ class TestVercelProtocolHandler:
         assert protocol_messages[1]["role"] == "assistant"
 
     @pytest.mark.asyncio
+    async def test_from_chat_messages_reconstructs_reasoning_part(self, handler):
+        """Persisted reasoning must round-trip into a history reasoning part.
+        """
+        chat_messages = [
+            ChatMessageFactory.build(
+                role="assistant", content="Answer!", reasoning="Let me think..."
+            ),
+        ]
+
+        protocol_messages = handler.from_chat_messages(chat_messages)
+
+        parts = protocol_messages[0]["parts"]
+        reasoning_parts = [p for p in parts if p["type"] == "reasoning"]
+        assert len(reasoning_parts) == 1
+        assert reasoning_parts[0]["text"] == "Let me think..."
+        assert reasoning_parts[0]["state"] == "done"
+        # Reasoning precedes the text part, matching the live-streaming order.
+        assert parts.index(reasoning_parts[0]) < next(
+            i for i, p in enumerate(parts) if p["type"] == "text"
+        )
+
+    @pytest.mark.asyncio
+    async def test_from_chat_messages_omits_reasoning_part_when_absent(self, handler):
+        chat_messages = [ChatMessageFactory.build(role="assistant", content="Answer!")]
+
+        parts = handler.from_chat_messages(chat_messages)[0]["parts"]
+
+        assert not any(p["type"] == "reasoning" for p in parts)
+
+    @pytest.mark.asyncio
     async def test_handle_stream_message_start_event(self, handler):
         """Test handling message start event."""
 
