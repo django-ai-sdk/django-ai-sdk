@@ -36,6 +36,11 @@ menu:
       weight: 3
       params:
         type: search
+    - name: GitHub
+      weight: 4
+      url: "https://github.com/django-ai-sdk/django-ai-sdk/"
+      params:
+        icon: github
 
 params:
   navbar:
