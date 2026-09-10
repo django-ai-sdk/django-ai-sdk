@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.db import models
@@ -10,8 +10,13 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from django_ai_sdk.files.common import get_entry_document_storage, get_entry_document_upload_to
+from django_ai_sdk.managers import NaturalKeyManager
 from django_ai_sdk.memories.schemas import DocumentExtraction
 from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.contrib.auth.models import Group
 
 
 class Memory(models.Model):
@@ -34,6 +39,8 @@ class Memory(models.Model):
     # Annotated field from queries
     document_count: int
 
+    objects = NaturalKeyManager("slug")
+
     class Meta:
         db_table = "django_ai_sdk_memories"
         indexes = [
@@ -55,6 +62,9 @@ class Memory(models.Model):
                     counter += 1
                 self.slug = slug
         super().save(*args, **kwargs)
+
+    def natural_key(self) -> tuple[str]:
+        return (self.slug,)
 
     @property
     def tool_name(self) -> str:
@@ -102,6 +112,8 @@ class MemoryUser(models.Model):
     memory_id: int
     user_id: int
 
+    objects = NaturalKeyManager("memory", "user")
+
     class Meta:
         app_label = "django_ai_sdk"
         unique_together = [["memory", "user"]]
@@ -109,6 +121,9 @@ class MemoryUser(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} - {self.memory.name}"
+
+    def natural_key(self) -> tuple[Memory, AbstractBaseUser]:
+        return (self.memory, self.user)
 
 
 class MemoryGroup(models.Model):
@@ -125,6 +140,8 @@ class MemoryGroup(models.Model):
     memory_id: int
     group_id: int
 
+    objects = NaturalKeyManager("memory", "group")
+
     class Meta:
         app_label = "django_ai_sdk"
         db_table = "django_ai_sdk_memory_groups"
@@ -132,6 +149,9 @@ class MemoryGroup(models.Model):
 
     def __str__(self) -> str:
         return f"{self.group} - {self.memory.name}"
+
+    def natural_key(self) -> tuple[Memory, Group]:
+        return (self.memory, self.group)
 
 
 class Entry(models.Model):
