@@ -272,7 +272,7 @@ class TestMemoryDefaultPermission:
         contributor = await UserFactory.acreate()
         memory = await self._make_memory_user(contributor, can_manage=False)
 
-        for op in MemoryDefaultPermission.MANAGE:
+        for op in MemoryDefaultPermission.MANAGE | MemoryDefaultPermission.DELETE:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     contributor, op, memory, [MemoryDefaultPermission]
@@ -308,7 +308,7 @@ class TestMemoryDefaultPermission:
         memory = await self._make_memory_user(user, can_manage=False)
         await self._make_memory_group(user, can_manage=True, memory=memory)
 
-        for op in MemoryDefaultPermission.MANAGE:
+        for op in MemoryDefaultPermission.MANAGE | MemoryDefaultPermission.DELETE:
             await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_direct_manage_grant_overrides_weaker_group_membership(self):
@@ -324,7 +324,7 @@ class TestMemoryDefaultPermission:
         memory = await self._make_memory_user(user, can_manage=True)
         await self._make_memory_group(user, can_manage=False, memory=memory)
 
-        for op in MemoryDefaultPermission.MANAGE:
+        for op in MemoryDefaultPermission.MANAGE | MemoryDefaultPermission.DELETE:
             await check_object_permissions(user, op, memory, [MemoryDefaultPermission])
 
     async def test_stranger_cannot_access_private_memory(self):
@@ -362,7 +362,12 @@ class TestMemoryDefaultPermission:
                 stranger, op, memory, [MemoryDefaultPermission]
             )
 
-        for op in MemoryDefaultPermission.WRITE | MemoryDefaultPermission.MANAGE:
+        restricted_ops = (
+            MemoryDefaultPermission.WRITE
+            | MemoryDefaultPermission.MANAGE
+            | MemoryDefaultPermission.DELETE
+        )
+        for op in restricted_ops:
             with pytest.raises(PermissionDenied):
                 await check_object_permissions(
                     stranger, op, memory, [MemoryDefaultPermission]
@@ -878,7 +883,12 @@ class TestObjectPermissionsSchema:
 
         perms = ObjectPermissions(can_read=True, can_write=True, can_manage=False)
         d = perms.model_dump()
-        assert d == {"can_read": True, "can_write": True, "can_manage": False}
+        assert d == {
+            "can_read": True,
+            "can_write": True,
+            "can_manage": False,
+            "can_delete": False,
+        }
 
     async def test_memory_out_response_has_permissions_field(self):
         from apps.memories.views.ninja import MemoryOutResponse
