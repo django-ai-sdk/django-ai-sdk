@@ -11,6 +11,7 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
 from django_ai_sdk.workflows.actions import get_action_registry
+from django_ai_sdk.workflows.inputs import normalize_workflow_inputs
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 from django_ai_sdk.workflows.tasks import execute_workflow
 
@@ -30,6 +31,26 @@ _TYPE_MAP: dict[str, type] = {
 }
 
 
+def _required_context(step: Any, outputs: dict[str, Any]) -> list[ChatMessage]:
+    """Each name the step requires, rendered as a `[name]` user message.
+
+    A name the run state does not hold is skipped with a warning, so one absent
+    input does not fail the step.
+    """
+    context: list[ChatMessage] = []
+    for name in step.requires:
+        if name not in outputs:
+            _logger.warning(
+                "Workflow step '{}' requires '{}', which the run has not produced — skipping",
+                step.output_key,
+                name,
+            )
+            continue
+        rendered = json.dumps(outputs[name], default=str, indent=2)
+        context.append(ChatMessage(role="user", content=f"[{name}]\n{rendered}"))
+    return context
+
+
 # ---------------------------------------------------------------------------
 # Executor
 # ---------------------------------------------------------------------------
@@ -46,8 +67,9 @@ class WorkflowExecutor:
     async def run(
         self,
         workflow: WorkflowDefinition,
-        messages: list[ChatMessage],
+        messages: list[ChatMessage] | None = None,
         *,
+        inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         workflow_run: WorkflowRun | None = None,
     ) -> tuple[dict[str, Any], WorkflowRun]:
@@ -55,13 +77,19 @@ class WorkflowExecutor:
         if workflow_run is not None and workflow_run.status == WorkflowRun.Status.COMPLETED:
             return workflow_run.outputs or {}, workflow_run
 
+        # Resuming: the row's persisted inputs sit underneath, the caller's overlay them.
+        persisted = dict(workflow_run.inputs) if workflow_run and workflow_run.inputs else {}
+        seeded = normalize_workflow_inputs(inputs=inputs, messages=messages)
+        seeded = normalize_workflow_inputs(inputs={**persisted, **seeded}, ensure_messages=True)
+        messages = [ChatMessage(**m) for m in seeded["messages"]]
+
         # Transition / create the run record
         if workflow_run is None:
             workflow_run = await WorkflowRun.objects.acreate(
                 workflow=None,
                 workflow_definition=workflow.model_dump(),
                 status=WorkflowRun.Status.RUNNING,
-                input_messages=[m.model_dump() for m in messages],
+                inputs=seeded,
                 user_id=user.pk if user and not getattr(user, "is_anonymous", True) else None,
                 started_at=timezone.now(),
             )
@@ -69,10 +97,12 @@ class WorkflowExecutor:
             workflow_run.status = WorkflowRun.Status.RUNNING
             if not workflow_run.started_at:
                 workflow_run.started_at = timezone.now()
-            await workflow_run.asave(update_fields=["status", "started_at", "updated_at"])
+            if not workflow_run.inputs:
+                workflow_run.inputs = seeded
+            await workflow_run.asave(update_fields=["status", "started_at", "inputs", "updated_at"])
 
-        # Replay: load already-completed steps into outputs
-        outputs: dict[str, Any] = {}
+        # Replay: the inputs bag seeds run state, then already-completed steps.
+        outputs: dict[str, Any] = {k: v for k, v in seeded.items() if k != "messages"}
         completed_seqs: set[int] = set()
         async for s in workflow_run.steps.filter(status=WorkflowRunStep.Status.COMPLETED).order_by(
             "sequence"
@@ -106,23 +136,7 @@ class WorkflowExecutor:
                         user, Operation.CHAT, get_agent_permissions(agent), agent=agent
                     )
 
-                    if step.input_key:
-                        if step.input_key not in outputs:
-                            _logger.warning(
-                                "Workflow step '{}' input_key '{}' not found in outputs — skipping context injection",
-                                step.output_key,
-                                step.input_key,
-                            )
-                            step_messages = list(messages)
-                        else:
-                            prior = outputs[step.input_key]
-                            context = ChatMessage(
-                                role="user",
-                                content=f"[Workflow context] Previous step '{step.input_key}' result:\n{json.dumps(prior, default=str, indent=2)}",
-                            )
-                            step_messages = [*messages, context]
-                    else:
-                        step_messages = list(messages)
+                    step_messages = [*messages, *_required_context(step, outputs)]
 
                     system_prompt = step.system_prompt_override or None
 

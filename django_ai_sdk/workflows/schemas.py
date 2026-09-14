@@ -16,7 +16,9 @@ class WorkflowStep(BaseModel):
     name: str = ""
     agent_id: str
     output_key: str
-    input_key: str | None = None
+    # Run-state names this step reads: an earlier step's output_key, or a key
+    # of the run's inputs.
+    requires: list[str] = []
     system_prompt_override: str | None = None
     output_fields: dict[str, StepField] = {}
 

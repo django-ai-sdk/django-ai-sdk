@@ -22,7 +22,7 @@ workflow = WorkflowDefinition(
         WorkflowStep(
             name="classify",
             agent_id="classifier",
-            input_key="summary",                 # inject step 1's output
+            requires=["summary"],                # read step 1's output
             output_key="priority",
             output_fields={                     # structured output
                 "priority": {"type": "str", "description": "high|low"},
@@ -43,7 +43,7 @@ Each `WorkflowStep` runs its `agent_id` via `agent.run()` (non-streaming). Its r
 | `name` | Display name for the step record. |
 | `agent_id` | Agent to run (resolved through `AgentService`). |
 | `output_key` | Where the result is stored in the run's outputs. |
-| `input_key` | Optional: a prior step's `output_key` injected as a `[Workflow context]` user message (missing keys are skipped with a warning). |
+| `requires` | Run-state names this step reads: an earlier step's `output_key`, or a key of the run's inputs. Each is injected as a `[name]` user message (missing names are skipped with a warning). Definitions stored with the older `input_key` are rewritten into `requires` by migration `0003`. |
 | `system_prompt_override` | Optional system prompt for this step. |
 | `output_fields` | When set, the agent runs with structured output: a dynamic Pydantic model is built from the `{name: {type, description}}` map (`type` ∈ `str` / `int` / `float` / `bool`). |
 
@@ -56,7 +56,7 @@ Each `WorkflowStep` runs its `agent_id` via `agent.run()` (non-streaming). Its r
 | Model | Purpose |
 | --- | --- |
 | `WorkflowSettings` | A persisted, named workflow: `name`, `definition` (JSON), `active`, `created_by`. |
-| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed`, `workflow_definition` snapshot, `input_messages`, `outputs`, `error`, `task_id`, `user`. |
+| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed`, `workflow_definition` snapshot, `inputs` (run-state seed, including `messages` for chat-shaped runs), `outputs`, `error`, `task_id`, `user`. |
 | `WorkflowRunStep` | Per-step progress: `sequence`, `step_name`, `output_key`, `output`, status `pending` / `completed` / `failed`, `error`, timestamps. |
 
 A `WorkflowSettings.to_workflow_definition()` round-trips the stored JSON.
@@ -68,6 +68,7 @@ from django_ai_sdk.workflows import WorkflowService
 
 # Ad-hoc run (inline definition, no persisted record)
 run = await WorkflowService.run(workflow, messages, user=request.user)
+run = await WorkflowService.run(workflow, inputs={"document": doc_id}, user=request.user)
 
 # Persisted workflows
 record = await WorkflowService.create("My workflow", workflow, user=request.user)
@@ -76,8 +77,11 @@ await WorkflowService.delete(workflow_id)
 await WorkflowService.get(workflow_id)
 await WorkflowService.list_workflows(active_only=True)
 
-# Run a persisted workflow (optionally resuming an existing run)
-run = await WorkflowService.run_by_id(workflow_id, messages, user=request.user, run_id=None)
+# Run a persisted workflow. Pass run_id only to resume that row, which reuses
+# the run's stored inputs; completed runs short-circuit.
+run = await WorkflowService.run_by_id(
+    workflow_id, messages, inputs={"document": doc_id}, user=request.user, run_id=None
+)
 
 # Run history
 runs = await WorkflowService.list_runs(workflow_id)

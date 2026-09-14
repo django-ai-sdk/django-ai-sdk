@@ -69,7 +69,8 @@ class WorkflowRun(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     workflow_definition = models.JSONField(null=True, blank=True)
-    input_messages = models.JSONField(default=list)
+
+    inputs = models.JSONField(default=dict, blank=True)
     outputs = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
     task_id = models.CharField(max_length=64, null=True, blank=True)
@@ -87,6 +88,10 @@ class WorkflowRun(models.Model):
 
     if TYPE_CHECKING:
         steps: Manager[WorkflowRunStep]
+        # Django adds the FK's `_id` attribute at class build time, which a static
+        # checker reading this module does not see.
+        user_id: Any
+        workflow_id: Any
 
     class Meta:
         app_label = "django_ai_sdk"
@@ -96,8 +101,7 @@ class WorkflowRun(models.Model):
         verbose_name_plural = "Workflow Runs"
 
     def __str__(self) -> str:
-        workflow_id = str(getattr(self, "workflow_id", None) or "inline")
-        return f"{workflow_id} — {self.status} — {self.created_at}"
+        return f"{self.workflow_id or 'inline'} — {self.status} — {self.created_at}"
 
 
 class WorkflowRunStep(models.Model):
@@ -109,6 +113,9 @@ class WorkflowRunStep(models.Model):
         FAILED = "failed", "Failed"
 
     run = models.ForeignKey(WorkflowRun, on_delete=models.CASCADE, related_name="steps")
+
+    if TYPE_CHECKING:
+        run_id: Any
     sequence = models.PositiveIntegerField()
     step_name = models.CharField(max_length=255, blank=True, default="")
     output_key = models.CharField(max_length=255)
@@ -127,5 +134,4 @@ class WorkflowRunStep(models.Model):
         verbose_name_plural = "Workflow Run Steps"
 
     def __str__(self) -> str:
-        run_id = getattr(self, "run_id", "unknown")
-        return f"{run_id} step {self.sequence} ({self.output_key})"
+        return f"{self.run_id} step {self.sequence} ({self.output_key})"
