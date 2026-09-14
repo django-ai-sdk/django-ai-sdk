@@ -607,6 +607,7 @@ class Agent(ABC, AgentInfoMixin):
         if not self.rag_provider or not thread_id:
             return []
 
+        from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.memories.services import MemoryService
 
         tools: list[Any] = []
@@ -614,11 +615,30 @@ class Agent(ABC, AgentInfoMixin):
             thread_id,
             user=user,
         )
+        file_memory_id = (
+            await Thread.objects.filter(id=thread_id)
+            .values_list("file_memory_id", flat=True)
+            .afirst()
+        )
 
         used_names: set[str] = set()
 
         for memory in memories:
             spec = await memory.get_tool_spec()
+
+            if (
+                file_memory_id
+                and memory.id == file_memory_id
+                and "search_uploaded_documents" not in used_names
+            ):
+                spec.name = "search_uploaded_documents"
+                spec.description = (
+                    f"Search documents uploaded to this conversation "
+                    f"{spec.doc_count or 0} available. Use this whenever the "
+                    f"user refers to 'this document', 'the file I just uploaded', "
+                    f"or asks about content from an attachment they added to the chat."
+                )
+
             if spec.name in used_names:
                 spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
                 logger.warning(
