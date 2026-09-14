@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.contrib import admin
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.urls import include, path
 from django_ai_sdk.permissions import PermissionDenied
 from ninja import NinjaAPI
@@ -56,6 +56,12 @@ def _on_permission_denied(request: HttpRequest, exc: PermissionDenied) -> HttpRe
 @api.exception_handler(ObjectDoesNotExist)
 def _on_does_not_exist(request: HttpRequest, exc: ObjectDoesNotExist) -> HttpResponse:
     return api.create_response(request, {"detail": "Not found"}, status=404)
+
+
+@api.exception_handler(ImproperlyConfigured)
+def _on_improperly_configured(request: HttpRequest, exc: ImproperlyConfigured) -> HttpResponse:
+    # A workflow definition the engine could not run is the caller's bad request.
+    return api.create_response(request, {"detail": str(exc)}, status=400)
 
 
 @api.exception_handler(ValueError)

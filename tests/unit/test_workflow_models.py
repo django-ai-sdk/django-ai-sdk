@@ -38,6 +38,7 @@ class TestWorkflowStep:
     def test_minimal(self):
         s = WorkflowStep(agent_id="abc", output_key="result")
         assert s.name == ""
+        assert s.type == "agent"
         assert s.requires == []
         assert s.system_prompt_override is None
         assert s.output_fields == {}
@@ -63,6 +64,14 @@ class TestWorkflowStep:
                 output_fields={"topic": {"type": "list"}},
             )
 
+    def test_error_key_must_differ_from_output_key(self):
+        with pytest.raises(ValidationError):
+            WorkflowStep(
+                agent_id="abc",
+                output_key="result",
+                error_key="result",
+                on_error="continue",
+            )
 
 class TestWorkflowAction:
     def test_minimal(self):
@@ -76,9 +85,7 @@ class TestWorkflowAction:
 
 class TestWorkflowDefinition:
     def test_minimal(self):
-        d = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="abc", output_key="result")]
-        )
+        d = WorkflowDefinition(steps=[WorkflowStep(agent_id="abc", output_key="result")])
         assert d.name == ""
         assert d.actions == []
 

@@ -246,6 +246,12 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
 }
 
 # Default Workflow actions
+# Step classes the `thread-digest` definition composes. The package ships none.
+AI_SDK_WORKFLOW_STEPS = {
+    "gather_thread": "apps.agents.steps.GatherStep",
+    "thread_digest": "apps.agents.steps.DigestStep",
+}
+
 AI_SDK_WORKFLOW_ACTIONS = {
     "console_log": "apps.agents.actions.ConsoleLogAction",
 }

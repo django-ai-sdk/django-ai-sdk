@@ -464,6 +464,54 @@ async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThrea
         return 400, Error(message=str(e))
 
 
+class DigestStepOut(Schema):
+    name: str
+    status: str
+    detail: str
+
+
+class DigestResponse(Schema):
+    thread_id: str
+    steps: list[DigestStepOut]
+
+
+@router.post(
+    "/threads/{thread_id}/digest/",
+    response={200: DigestResponse, 403: Error, 404: Error, 500: Error},
+    operation_id="digest_thread",
+)
+async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
+    """Run the declared thread-digest workflow (see apps.agents.workflows)."""
+    try:
+        user = await request.auser()
+        if await ThreadService.get_thread(thread_id, user=user) is None:
+            return 404, Error(message="Thread not found")
+
+        from django_ai_sdk.workflows import WorkflowExecutor, aget_workflow
+
+        definition = await aget_workflow("thread-digest")
+        if definition is None:
+            return 404, Error(message="thread-digest workflow is not registered")
+
+        # Inline, so the caller gets the outcome. WorkflowService.run() queues it.
+        _outputs, run = await WorkflowExecutor().run(
+            definition, inputs={"thread": thread_id}, user=user
+        )
+        return DigestResponse(
+            thread_id=thread_id,
+            steps=[
+                DigestStepOut(name=row.step_name, status=row.status, detail=row.detail)
+                async for row in run.steps.order_by("sequence")
+            ],
+        )
+    except PermissionDenied as e:
+        return 403, Error(message=str(e))
+    except ValueError as e:
+        return 404, Error(message=str(e))
+    except Exception as e:
+        return 500, Error(message=str(e))
+
+
 @router.post(
     "/threads/{thread_id}/messages/{message_id}/rate/",
     response={200: MessageResponse, 403: Error, 404: Error},
