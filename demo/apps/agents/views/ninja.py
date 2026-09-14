@@ -1130,15 +1130,12 @@ class WorkflowRunDetailOut(WorkflowRunOut):
 
 @router.post(
     "/workflows/run/",
-    response={202: WorkflowRunResponse, 400: Error, 500: Error},
+    response={202: WorkflowRunResponse, 400: Error, 403: Error},
     operation_id="run_workflow",
 )
 async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
-    try:
-        run = await WorkflowService.run(payload.workflow, inputs=payload.inputs, user=request.user)
-        return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
-    except Exception as e:
-        return 500, Error(message=str(e))
+    run = await WorkflowService.run(payload.workflow, inputs=payload.inputs, user=request.user)
+    return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
 
 
 @router.get(
@@ -1178,11 +1175,11 @@ class WorkflowRunByIdRequest(Schema):
 
 @router.get(
     "/workflows/",
-    response={200: list[WorkflowItem]},
+    response={200: list[WorkflowItem], 403: Error},
     operation_id="list_workflows",
 )
 async def list_workflows(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
-    records = await WorkflowService.list_workflows(limit=limit, offset=offset)
+    records = await WorkflowService.list_workflows(user=request.user, limit=limit, offset=offset)
     return [
         WorkflowItem(id=str(r.id), name=r.name, definition=r.definition, active=r.active)
         for r in records
@@ -1191,84 +1188,76 @@ async def list_workflows(request: HttpRequest, limit: int = 100, offset: int = 0
 
 @router.post(
     "/workflows/",
-    response={201: WorkflowItem, 400: Error, 500: Error},
+    response={201: WorkflowItem, 400: Error, 403: Error},
     operation_id="create_workflow",
 )
 async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) -> Any:
-    try:
-        record = await WorkflowService.create(payload.name, payload.workflow, user=request.user)
-        return 201, WorkflowItem(
-            id=str(record.id), name=record.name, definition=record.definition, active=record.active
-        )
-    except Exception as e:
-        return 500, Error(message=str(e))
+    record = await WorkflowService.create(payload.name, payload.workflow, user=request.user)
+    return 201, WorkflowItem(
+        id=str(record.id), name=record.name, definition=record.definition, active=record.active
+    )
 
 
 @router.get(
     "/workflows/{workflow_id}/runs/",
-    response={200: list[WorkflowRunOut], 500: Error},
+    response={200: list[WorkflowRunOut], 403: Error},
     operation_id="list_workflow_runs",
 )
 async def list_workflow_runs(
     request: HttpRequest, workflow_id: str, limit: int = 50, offset: int = 0
 ) -> Any:
-    try:
-        runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
-        return [
-            WorkflowRunOut(
-                id=str(r.id),
-                workflow_id=str(r.workflow_id) if r.workflow_id else None,
-                status=r.status,
-                outputs=r.outputs,
-                error=r.error,
-                created_at=r.created_at.isoformat(),
-                started_at=r.started_at.isoformat() if r.started_at else None,
-                completed_at=r.completed_at.isoformat() if r.completed_at else None,
-            )
-            for r in runs
-        ]
-    except Exception as e:
-        return 500, Error(message=str(e))
+    runs = await WorkflowService.list_runs(
+        workflow_id, user=request.user, limit=limit, offset=offset
+    )
+    return [
+        WorkflowRunOut(
+            id=str(r.id),
+            workflow_id=str(r.workflow_id) if r.workflow_id else None,
+            status=r.status,
+            outputs=r.outputs,
+            error=r.error,
+            created_at=r.created_at.isoformat(),
+            started_at=r.started_at.isoformat() if r.started_at else None,
+            completed_at=r.completed_at.isoformat() if r.completed_at else None,
+        )
+        for r in runs
+    ]
 
 
 @router.get(
     "/workflows/{workflow_id}/runs/{run_id}/",
-    response={200: WorkflowRunDetailOut, 404: Error, 500: Error},
+    response={200: WorkflowRunDetailOut, 403: Error, 404: Error},
     operation_id="get_workflow_run",
 )
 async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) -> Any:
-    from django_ai_sdk.workflows.models import WorkflowRun
-
-    try:
-        run = await WorkflowService.get_run(run_id)
-        steps = [
-            WorkflowRunStepOut(
-                id=str(s.id),
-                sequence=s.sequence,
-                step_name=s.step_name,
-                output=s.output if isinstance(s.output, dict) else None,
-                status=s.status,
-                error=s.error,
-                started_at=s.started_at.isoformat() if s.started_at else None,
-                completed_at=s.completed_at.isoformat() if s.completed_at else None,
-            )
-            async for s in run.steps.all()
-        ]
-        return WorkflowRunDetailOut(
-            id=str(run.id),
-            workflow_id=str(run.workflow_id) if run.workflow_id else None,
-            status=run.status,
-            outputs=run.outputs,
-            error=run.error,
-            created_at=run.created_at.isoformat(),
-            started_at=run.started_at.isoformat() if run.started_at else None,
-            completed_at=run.completed_at.isoformat() if run.completed_at else None,
-            steps=steps,
-        )
-    except WorkflowRun.DoesNotExist:
+    run = await WorkflowService.get_run(run_id, user=request.user)
+    if run is None:
+        # Absent covers both "no such run" and "not yours", by design.
         return 404, Error(message="Run not found")
-    except Exception as e:
-        return 500, Error(message=str(e))
+    steps = [
+        WorkflowRunStepOut(
+            id=str(s.id),
+            sequence=s.sequence,
+            step_name=s.step_name,
+            output=s.output if isinstance(s.output, dict) else None,
+            status=s.status,
+            error=s.error,
+            started_at=s.started_at.isoformat() if s.started_at else None,
+            completed_at=s.completed_at.isoformat() if s.completed_at else None,
+        )
+        async for s in run.steps.all()
+    ]
+    return WorkflowRunDetailOut(
+        id=str(run.id),
+        workflow_id=str(run.workflow_id) if run.workflow_id else None,
+        status=run.status,
+        outputs=run.outputs,
+        error=run.error,
+        created_at=run.created_at.isoformat(),
+        started_at=run.started_at.isoformat() if run.started_at else None,
+        completed_at=run.completed_at.isoformat() if run.completed_at else None,
+        steps=steps,
+    )
 
 
 @router.get(
@@ -1278,7 +1267,7 @@ async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) 
 )
 async def get_workflow(request: HttpRequest, workflow_id: str) -> Any:
     try:
-        record = await WorkflowService.get(workflow_id)
+        record = await WorkflowService.get(workflow_id, user=request.user)
         return WorkflowItem(
             id=str(record.id), name=record.name, definition=record.definition, active=record.active
         )
@@ -1297,6 +1286,7 @@ async def update_workflow(
     try:
         record = await WorkflowService.update(
             workflow_id,
+            user=request.user,
             name=payload.name,
             workflow=payload.workflow,
             active=payload.active,
@@ -1317,8 +1307,7 @@ async def update_workflow(
 )
 async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
     try:
-        await WorkflowService.get(workflow_id)
-        await WorkflowService.delete(workflow_id)
+        await WorkflowService.delete(workflow_id, user=request.user)
         return 204, None
     except WorkflowSettings.DoesNotExist:
         return 404, Error(message="Workflow not found")
