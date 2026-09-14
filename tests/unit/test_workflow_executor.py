@@ -78,7 +78,7 @@ class TestWorkflowExecutorSteps:
         assert outputs["step1"] == "first"
         assert outputs["step2"] == "second"
 
-    async def test_input_key_injects_prior_output_as_user_message(self, executor):
+    async def test_requires_injects_prior_output_as_user_message(self, executor):
         a1 = make_agent("prior result")
         a2 = make_agent("final")
         captured = []
@@ -91,7 +91,7 @@ class TestWorkflowExecutorSteps:
 
         workflow = make_workflow(
             WorkflowStep(agent_id="a1", output_key="step1"),
-            WorkflowStep(agent_id="a2", output_key="step2", input_key="step1"),
+            WorkflowStep(agent_id="a2", output_key="step2", requires=["step1"]),
         )
 
         with patch(
@@ -106,10 +106,10 @@ class TestWorkflowExecutorSteps:
             for m in injected
         )
 
-    async def test_input_key_not_found_warns_and_uses_original_messages(self, executor):
+    async def test_required_name_not_found_warns_and_uses_original_messages(self, executor):
         agent = make_agent("ok")
         workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="result", input_key="missing_key"),
+            WorkflowStep(agent_id="a1", output_key="result", requires=["missing_key"]),
         )
 
         with capture_logs() as records:
@@ -287,3 +287,83 @@ class TestWorkflowExecutorActions:
 
         assert executed == []
         assert any("does_not_exist" in r for r in records)
+
+
+# ============================================================================
+# Run state
+# ============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestRunState:
+    async def test_inputs_seed_run_state_and_are_persisted(self, executor):
+        agent = make_agent("ok")
+        workflow = make_workflow(WorkflowStep(agent_id="a1", output_key="result"))
+
+        with patch(
+            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
+        ):
+            outputs, run = await executor.run(workflow, inputs={"document": "doc-1"})
+
+        assert outputs["document"] == "doc-1"
+        await run.arefresh_from_db()
+        assert run.inputs["document"] == "doc-1"
+        # Chat-shaped and data-shaped runs share one bag.
+        assert run.inputs["messages"] == []
+
+    async def test_a_step_may_require_a_run_input(self, executor):
+        captured = []
+
+        async def capture_run(messages, **kwargs):
+            captured.append(messages)
+            return "ok"
+
+        agent = make_agent()
+        agent.run = capture_run
+
+        workflow = make_workflow(
+            WorkflowStep(agent_id="a1", output_key="result", requires=["document"])
+        )
+
+        with patch(
+            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
+        ):
+            await executor.run(workflow, inputs={"document": "doc-1"})
+
+        assert any("doc-1" in m.content for m in captured[0] if m.role == "user")
+
+    async def test_resuming_reuses_the_rows_stored_inputs(self, executor):
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        agent = make_agent("ok")
+        workflow = make_workflow(
+            WorkflowStep(agent_id="a1", output_key="result", requires=["document"])
+        )
+        run = await WorkflowRun.objects.acreate(
+            workflow_definition=workflow.model_dump(),
+            status=WorkflowRun.Status.PENDING,
+            inputs={"document": "doc-1", "messages": []},
+        )
+
+        with patch(
+            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
+        ):
+            outputs, _ = await executor.run(workflow, workflow_run=run)
+
+        # The caller passed no inputs; the row supplied them.
+        assert outputs["document"] == "doc-1"
+
+    async def test_a_completed_run_short_circuits(self, executor):
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        workflow = make_workflow(WorkflowStep(agent_id="a1", output_key="result"))
+        run = await WorkflowRun.objects.acreate(
+            workflow_definition=workflow.model_dump(),
+            status=WorkflowRun.Status.COMPLETED,
+            outputs={"result": "already done"},
+        )
+
+        outputs, _ = await executor.run(workflow, workflow_run=run)
+
+        assert outputs == {"result": "already done"}
