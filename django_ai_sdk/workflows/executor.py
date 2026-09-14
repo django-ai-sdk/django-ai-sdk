@@ -1,66 +1,36 @@
+"""Running a stored WorkflowDefinition and recording the result."""
+
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any, cast
+import logging
+from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
-from pydantic import BaseModel, Field, create_model
 
-from django_ai_sdk.agents.services import AgentService
-from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.logger import get_logger
-from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
-from django_ai_sdk.workflows.actions import get_action_registry
-from django_ai_sdk.workflows.inputs import normalize_workflow_inputs
-from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
+from django_ai_sdk.permissions import user_pk
+from django_ai_sdk.workflows.actions import ActionContext, get_action_registry
+from django_ai_sdk.workflows.definitions import compile_steps
+from django_ai_sdk.workflows.inputs import dump_messages, normalize_workflow_inputs
+from django_ai_sdk.workflows.models import WorkflowRun
+from django_ai_sdk.workflows.runner import run_steps
+from django_ai_sdk.workflows.sink import WorkflowRunStepSink
 from django_ai_sdk.workflows.tasks import execute_workflow
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
+    from django_ai_sdk.workflows.steps import Step, StepOutcome
 
-_logger = get_logger(__name__)
-
-_TYPE_MAP: dict[str, type] = {
-    "str": str,
-    "int": int,
-    "float": float,
-    "bool": bool,
-}
-
-
-def _required_context(step: Any, outputs: dict[str, Any]) -> list[ChatMessage]:
-    """Each name the step requires, rendered as a `[name]` user message.
-
-    A name the run state does not hold is skipped with a warning, so one absent
-    input does not fail the step.
-    """
-    context: list[ChatMessage] = []
-    for name in step.requires:
-        if name not in outputs:
-            _logger.warning(
-                "Workflow step '{}' requires '{}', which the run has not produced — skipping",
-                step.output_key,
-                name,
-            )
-            continue
-        rendered = json.dumps(outputs[name], default=str, indent=2)
-        context.append(ChatMessage(role="user", content=f"[{name}]\n{rendered}"))
-    return context
-
-
-# ---------------------------------------------------------------------------
-# Executor
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
 
 class WorkflowExecutor:
     @staticmethod
     async def enqueue(run: WorkflowRun) -> None:
         """Schedule a WorkflowRun as a background task."""
-
         task = await execute_workflow.aenqueue(str(run.id))
         await WorkflowRun.objects.filter(id=run.id).aupdate(task_id=task.id)
 
@@ -73,7 +43,7 @@ class WorkflowExecutor:
         user: AbstractBaseUser | AnonymousUser | None = None,
         workflow_run: WorkflowRun | None = None,
     ) -> tuple[dict[str, Any], WorkflowRun]:
-        # Guard: idempotent return for already-completed runs
+        """Compile the definition and run it, recording each step against the run."""
         if workflow_run is not None and workflow_run.status == WorkflowRun.Status.COMPLETED:
             return workflow_run.outputs or {}, workflow_run
 
@@ -81,138 +51,19 @@ class WorkflowExecutor:
         persisted = dict(workflow_run.inputs) if workflow_run and workflow_run.inputs else {}
         seeded = normalize_workflow_inputs(inputs=inputs, messages=messages)
         seeded = normalize_workflow_inputs(inputs={**persisted, **seeded}, ensure_messages=True)
-        messages = [ChatMessage(**m) for m in seeded["messages"]]
 
-        # Transition / create the run record
-        if workflow_run is None:
-            workflow_run = await WorkflowRun.objects.acreate(
-                workflow=None,
-                workflow_definition=workflow.model_dump(),
-                status=WorkflowRun.Status.RUNNING,
-                inputs=seeded,
-                user_id=user.pk if user and not getattr(user, "is_anonymous", True) else None,
-                started_at=timezone.now(),
-            )
-        else:
-            workflow_run.status = WorkflowRun.Status.RUNNING
-            if not workflow_run.started_at:
-                workflow_run.started_at = timezone.now()
-            if not workflow_run.inputs:
-                workflow_run.inputs = seeded
-            await workflow_run.asave(update_fields=["status", "started_at", "inputs", "updated_at"])
-
-        # Replay: the inputs bag seeds run state, then already-completed steps.
-        outputs: dict[str, Any] = {k: v for k, v in seeded.items() if k != "messages"}
-        completed_seqs: set[int] = set()
-        async for s in workflow_run.steps.filter(status=WorkflowRunStep.Status.COMPLETED).order_by(
-            "sequence"
-        ):
-            outputs[s.output_key] = s.output
-            completed_seqs.add(s.sequence)
+        workflow_run = await self._aopen(workflow, seeded, user, workflow_run)
 
         try:
-            for sequence, step in enumerate(workflow.steps):
-                if sequence in completed_seqs:
-                    _logger.debug("Replaying step {} ({})", sequence, step.output_key)
-                    continue
-
-                step_record, _ = await WorkflowRunStep.objects.aupdate_or_create(
-                    run=workflow_run,
-                    sequence=sequence,
-                    defaults={
-                        "step_name": step.name,
-                        "output_key": step.output_key,
-                        "status": WorkflowRunStep.Status.PENDING,
-                        "started_at": timezone.now(),
-                        "output": None,
-                        "error": "",
-                    },
-                )
-
-                try:
-                    agent = await AgentService.get(step.agent_id)
-
-                    await check_permissions(
-                        user, Operation.CHAT, get_agent_permissions(agent), agent=agent
-                    )
-
-                    step_messages = [*messages, *_required_context(step, outputs)]
-
-                    system_prompt = step.system_prompt_override or None
-
-                    if step.output_fields:
-                        field_definitions: dict[str, Any] = {}
-                        for name, f in step.output_fields.items():
-                            if f.type not in _TYPE_MAP:
-                                _logger.warning(
-                                    "Unknown output_field type '{}' for field '{}' in step '{}' — defaulting to str",
-                                    f.type,
-                                    name,
-                                    step.output_key,
-                                )
-                            field_definitions[name] = (
-                                _TYPE_MAP.get(f.type, str),
-                                Field(description=f.description) if f.description else ...,
-                            )
-                        DynamicModel = cast(
-                            "type[BaseModel]",
-                            create_model(f"Output_{step.output_key}", **field_definitions),
-                        )
-                        result = await agent.run(
-                            step_messages,
-                            system_prompt=system_prompt,
-                            response_format=DynamicModel,
-                            user=user,
-                        )
-                        result_value: Any = (
-                            result.model_dump() if isinstance(result, BaseModel) else {}
-                        )
-                    else:
-                        result = await agent.run(
-                            step_messages,
-                            system_prompt=system_prompt,
-                            user=user,
-                        )
-                        result_value = result
-
-                    outputs[step.output_key] = result_value
-                    step_record.output = result_value
-                    step_record.status = WorkflowRunStep.Status.COMPLETED
-                    step_record.completed_at = timezone.now()
-                    await step_record.asave(update_fields=["output", "status", "completed_at"])
-                    _logger.debug("Workflow step '{}' complete", step.output_key)
-
-                except Exception as step_exc:
-                    step_record.status = WorkflowRunStep.Status.FAILED
-                    step_record.error = str(step_exc)
-                    step_record.completed_at = timezone.now()
-                    await step_record.asave(update_fields=["status", "error", "completed_at"])
-                    raise
-
-            action_registry = get_action_registry()
-            for action in workflow.actions:
-                runner_cls = action_registry.get(action.type)
-                if runner_cls is None:
-                    _logger.warning("Unknown workflow action type: {}", action.type)
-                    continue
-                if action.input_key and action.input_key not in outputs:
-                    _logger.warning(
-                        "Workflow action '{}' input_key '{}' not found in outputs — skipping",
-                        action.type,
-                        action.input_key,
-                    )
-                    continue
-                payload = outputs.get(action.input_key) if action.input_key else outputs
-                await runner_cls().execute(payload)
-                _logger.debug("Workflow action '{}' complete", action.type)
-
-            workflow_run.status = WorkflowRun.Status.COMPLETED
-            workflow_run.outputs = outputs
-            workflow_run.completed_at = timezone.now()
-            await workflow_run.asave(
-                update_fields=["status", "outputs", "completed_at", "updated_at"]
+            steps = compile_steps(workflow)
+            outcomes = await run_steps(
+                steps,
+                inputs=seeded,
+                principal=user,
+                sink=WorkflowRunStepSink(workflow_run, steps),
             )
-
+            outputs = _published(steps, outcomes)
+            await self._arun_actions(workflow, outputs, user=user, workflow_run=workflow_run)
         except Exception as exc:
             workflow_run.status = WorkflowRun.Status.FAILED
             workflow_run.error = str(exc)
@@ -222,4 +73,91 @@ class WorkflowExecutor:
             )
             raise
 
+        workflow_run.status = WorkflowRun.Status.COMPLETED
+        workflow_run.outputs = outputs
+        workflow_run.completed_at = timezone.now()
+        await workflow_run.asave(update_fields=["status", "outputs", "completed_at", "updated_at"])
         return outputs, workflow_run
+
+    @staticmethod
+    async def _aopen(
+        workflow: WorkflowDefinition,
+        inputs: dict[str, Any],
+        user: AbstractBaseUser | AnonymousUser | None,
+        workflow_run: WorkflowRun | None,
+    ) -> WorkflowRun:
+        """The run row this attempt records against, opened or resumed."""
+        dumped_messages = dump_messages(inputs.get("messages"))
+        persisted = {
+            **{k: v for k, v in inputs.items() if k != "messages"},
+            "messages": dumped_messages,
+        }
+        if workflow_run is None:
+            return await WorkflowRun.objects.acreate(
+                workflow=None,
+                workflow_definition=workflow.model_dump(),
+                status=WorkflowRun.Status.RUNNING,
+                inputs=persisted,
+                user_id=user_pk(user),
+                started_at=timezone.now(),
+            )
+        workflow_run.status = WorkflowRun.Status.RUNNING
+        if not workflow_run.started_at:
+            workflow_run.started_at = timezone.now()
+        if not workflow_run.inputs:
+            workflow_run.inputs = persisted
+            await workflow_run.asave(update_fields=["status", "started_at", "inputs", "updated_at"])
+        else:
+            await workflow_run.asave(update_fields=["status", "started_at", "updated_at"])
+        return workflow_run
+
+    @staticmethod
+    async def _arun_actions(
+        workflow: WorkflowDefinition,
+        outputs: dict[str, Any],
+        *,
+        user: AbstractBaseUser | AnonymousUser | None,
+        workflow_run: WorkflowRun,
+    ) -> None:
+        """Run each declared action over the run's outputs."""
+        registry = get_action_registry()
+        producer = {step.output_key: step.agent_id for step in workflow.steps}
+        last_agent_id = workflow.steps[-1].agent_id if workflow.steps else ""
+        source = workflow.name or f"workflow:{workflow_run.id}"
+        for action in workflow.actions:
+            runner_cls = registry.get(action.type)
+            if runner_cls is None:
+                logger.warning("Unknown workflow action type: %s", action.type)
+                continue
+            if action.input_key and action.input_key not in outputs:
+                logger.warning(
+                    "Workflow action %r reads %r, which the run did not produce — skipping",
+                    action.type,
+                    action.input_key,
+                )
+                continue
+            payload = outputs.get(action.input_key) if action.input_key else outputs
+            context = ActionContext(
+                user=user,
+                agent_id=producer.get(action.input_key or "", last_agent_id),
+                source=source,
+            )
+            await runner_cls().execute(payload, context)
+            logger.debug("Workflow action %r complete", action.type)
+
+
+def _published(steps: list[Step], outcomes: dict[str, StepOutcome]) -> dict[str, Any]:
+    """What the run produced, keyed by `provides` and `error_key` names."""
+    published: dict[str, Any] = {}
+    for step in steps:
+        outcome = outcomes.get(step.name)
+        if outcome is None:
+            continue
+        if outcome.status == "completed" and step.provides:
+            published[step.provides] = outcome.output
+        elif outcome.status == "failed" and step.error_key:
+            published[step.error_key] = {
+                "step": step.name,
+                "error": outcome.detail or "failed",
+            }
+    return published

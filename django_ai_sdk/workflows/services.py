@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.executor import WorkflowExecutor
 from django_ai_sdk.workflows.inputs import normalize_workflow_inputs
+from django_ai_sdk.workflows.registry import validate as validate_definition
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -30,6 +31,8 @@ class WorkflowService:
     ) -> WorkflowRun:
         from django_ai_sdk.workflows.models import WorkflowRun
 
+        validate_definition(workflow)
+
         run = await WorkflowRun.objects.acreate(
             workflow=None,
             workflow_definition=workflow.model_dump(),
@@ -53,6 +56,7 @@ class WorkflowService:
 
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
         workflow = record.to_workflow_definition()
+        validate_definition(workflow)
 
         if run_id:
             run = await WorkflowRun.objects.aget(id=run_id, workflow_id=workflow_id)
