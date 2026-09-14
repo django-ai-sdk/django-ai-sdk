@@ -469,6 +469,15 @@ class MemoryService(PermissionsMixin):
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
+        return await cls._create_document(memory_id, file, user=user)
+
+    @classmethod
+    async def _create_document(
+        cls, memory_id: str, file: File, *, user: UserType
+    ) -> DocumentUploadResponse:
+        """Create a new document entry."""
+
+        memory = await _aget_or_not_found(Memory.objects, id=memory_id)
 
         file_name = file.name or ""
         _, ext = os.path.splitext(file_name)
