@@ -11,6 +11,7 @@ from django.utils.text import slugify
 
 from django_ai_sdk.files.common import get_entry_document_storage, get_entry_document_upload_to
 from django_ai_sdk.managers import NaturalKeyManager
+from django_ai_sdk.memories.managers import EntryManager
 from django_ai_sdk.memories.schemas import DocumentExtraction
 from django_ai_sdk.rags.schemas import RagDocument, ToolSpec
 
@@ -169,6 +170,8 @@ class Entry(models.Model):
     name = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = EntryManager()
 
     class Meta:
         db_table = "django_ai_sdk_documents"
