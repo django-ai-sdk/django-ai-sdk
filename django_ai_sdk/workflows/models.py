@@ -61,12 +61,6 @@ class WorkflowSettings(models.Model):
 
         return WorkflowDefinition.model_validate(self.definition)
 
-    @classmethod
-    def from_workflow_definition(
-        cls, name: str, workflow: WorkflowDefinition, **kwargs: Any
-    ) -> WorkflowSettings:
-        return cls(name=name, definition=workflow.model_dump(), **kwargs)
-
 
 class WorkflowRun(models.Model):
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
@@ -139,7 +133,6 @@ class WorkflowRunStep(models.Model):
         run_id: Any
     sequence = models.PositiveIntegerField()
     step_name = models.CharField(max_length=255, blank=True, default="")
-    output_key = models.CharField(max_length=255)
     output = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     error = models.TextField(blank=True, default="")
@@ -157,4 +150,4 @@ class WorkflowRunStep(models.Model):
         verbose_name_plural = "Workflow Run Steps"
 
     def __str__(self) -> str:
-        return f"{self.run_id} step {self.sequence} ({self.output_key})"
+        return f"{self.run_id} step {self.sequence} ({self.step_name})"

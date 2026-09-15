@@ -1,12 +1,12 @@
-"""Compiling a JSON WorkflowDefinition into the Steps the runner executes.
+"""Compiling a JSON WorkflowDefinition into the objects the runner executes.
 
-A definition composes two kinds of step: an agent named by id, and a `Step` class
-the deployment registered under a key in `AI_SDK_WORKFLOW_STEPS`.
+A definition composes two kinds of step — an agent named by id, and a `Step` class
+the deployment registered under a key in `AI_SDK_WORKFLOW_STEPS` — and declares
+its inputs and each step's outputs as fields, which compile to pydantic models.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -14,24 +14,37 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 from pydantic import BaseModel, Field, create_model
 
-from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.utils import resolve_setting
-from django_ai_sdk.workflows.steps import AgentStep, OnError, Step, StepContext, StepOutcome
+from django_ai_sdk.workflows.hooks import WorkflowHook, get_hook_registry
+from django_ai_sdk.workflows.steps import AgentStep, OnError, Step
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows.schemas import WorkflowDefinition, WorkflowStep
+    from django_ai_sdk.workflows.schemas import (
+        FieldDefinition,
+        HookDefinition,
+        StepDefinition,
+        WorkflowDefinition,
+    )
 
 logger = logging.getLogger(__name__)
 
-_TYPE_MAP: dict[str, type] = {"str": str, "int": int, "float": float, "bool": bool}
+_TYPE_MAP: dict[str, Any] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
+    "messages": list[ChatMessage],
+}
 
 
 def get_step_registry() -> dict[str, type[Step]]:
     """Step classes a definition may name, by key.
 
-    The registry gates what a runtime author can reach: a type that is not listed
-    cannot be composed. A path that will not import is left out with a warning.
+    The registry is the gate: a type that is not listed cannot be composed. A path
+    that will not import is left out with a warning.
     """
     registry: dict[str, type[Step]] = {}
     for key, path in resolve_setting("AI_SDK_WORKFLOW_STEPS", {}).items():
@@ -56,116 +69,113 @@ def get_step_registry() -> dict[str, type[Step]]:
     return registry
 
 
-def _output_model(spec: WorkflowStep) -> type[BaseModel]:
-    """The step's declared output fields as a pydantic model."""
-    fields: dict[str, Any] = {}
-    for name, field in spec.output_fields.items():
+def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[BaseModel]:
+    """Declared fields as a pydantic model.
+
+    One builder for both directions: a workflow's `input_fields` and a step's
+    `output_fields` mean the same thing pointed opposite ways.
+    """
+    built: dict[str, Any] = {}
+    for field_name, field in fields.items():
         if field.type not in _TYPE_MAP:
             logger.warning(
-                "Unknown output_field type %r for %r in step %r; using str.",
-                field.type,
-                name,
-                spec.output_key,
+                "Unknown field type %r for %r in %r; using str.", field.type, field_name, name
             )
-        fields[name] = (
-            _TYPE_MAP.get(field.type, str),
-            Field(description=field.description) if field.description else ...,
-        )
-    return cast("type[BaseModel]", create_model(f"Output_{spec.output_key}", **fields))
-
-
-class _DefinitionAgentStep(AgentStep):
-    """An agent named by id, run as one step of a definition."""
-
-    def __init__(self, spec: WorkflowStep) -> None:
-        self.spec = spec
-        self.name = spec.name or spec.output_key
-        self.provides = spec.output_key
-        self.requires = tuple(spec.requires)
-        self.on_error = OnError(spec.on_error)
-        self.error_key = spec.error_key or ""
-        # Compiled once, so a definition that cannot compile says so before the
-        # first model call.
-        self.schema = _output_model(spec) if spec.output_fields else None
-
-    async def system_prompt(self, ctx: StepContext) -> str:
-        """The override the definition declares, if any."""
-        return self.spec.system_prompt_override or ""
-
-    async def messages(self, ctx: StepContext) -> list[Any]:
-        """The run's transcript, plus what earlier steps produced."""
-        # Inputs are JSON-safe dicts on the run row, so coerce before .role access.
-        raw = ctx.inputs.get("messages") or []
-        history = [
-            item if isinstance(item, ChatMessage) else ChatMessage.model_validate(item)
-            for item in raw
-        ]
-        return [*history, *self._context(ctx)]
-
-    async def run(self, ctx: StepContext) -> StepOutcome:
-        """Resolve the agent by id and call it."""
-        agent = await AgentService.get(self.spec.agent_id)
-        return await self.run_agent(
-            ctx,
-            agent,
-            await self.messages(ctx),
-            await self.system_prompt(ctx) or None,
-        )
-
-    def outcome_for(self, result: Any) -> StepOutcome:
-        """Dump the model's answer to JSON, since it goes on the run's record."""
-        if self.schema and not isinstance(result, BaseModel):
-            # The step declared fields and did not get them, so `on_error` decides
-            # what that costs.
-            return StepOutcome(status="failed", detail="the agent returned no structured output")
-        if isinstance(result, BaseModel):
-            return StepOutcome(output=result.model_dump(mode="json"))
-        return StepOutcome(output=result)
-
-    def _context(self, ctx: StepContext) -> list[ChatMessage]:
-        """What earlier steps produced, as messages this one can read."""
-        return [
-            ChatMessage(
-                role="user",
-                content=f"[{name}]\n{json.dumps(ctx.get(name), default=str, indent=2)}",
+        annotation = _TYPE_MAP.get(field.type, str)
+        if field.required:
+            default = Field(description=field.description) if field.description else ...
+            built[field_name] = (annotation, default)
+        else:
+            built[field_name] = (
+                annotation | None,
+                Field(default=None, description=field.description),
             )
-            for name in self.requires
-            if ctx.get(name) is not None
-        ]
+    return cast("type[BaseModel]", create_model(name, **built))
 
 
-def _bind_registered_step(step_class: type[Step], spec: WorkflowStep) -> Step:
-    """A fresh instance wired by the definition, never a shared registry object.
-
-    The spec owns the graph fields; class attributes on the registered Step are
-    not defaults.
-    """
-    step = step_class()
-    step.name = spec.name or spec.output_key or spec.type
-    step.requires = tuple(spec.requires)
-    step.provides = spec.output_key
-    step.on_error = OnError(spec.on_error)
-    step.error_key = spec.error_key or ""
-    return step
+def compile_inputs(workflow: WorkflowDefinition) -> type[BaseModel] | None:
+    """The model a run's inputs are validated against, or None if none are declared."""
+    if not workflow.input_fields:
+        return None
+    return model_from_fields(f"Inputs_{workflow.name or 'workflow'}", workflow.input_fields)
 
 
 def compile_steps(workflow: WorkflowDefinition) -> list[Step]:
     """The definition's steps as Step objects, in the order it declares them."""
     registry = get_step_registry()
-    steps: list[Step] = []
-    for spec in workflow.steps:
-        if spec.type == "agent":
-            steps.append(_DefinitionAgentStep(spec))
-            continue
+    hooks = get_hook_registry()
+    history = tuple(
+        name for name, field in workflow.input_fields.items() if field.type == "messages"
+    )
+    return [_compile_step(declared, registry, hooks, history) for declared in workflow.steps]
 
-        step_class = registry.get(spec.type)
+
+def _compile_step(
+    declared: StepDefinition,
+    registry: dict[str, type[Step]],
+    hook_registry: dict[str, type[WorkflowHook]],
+    history: tuple[str, ...] = (),
+) -> Step:
+    """One declaration as a fresh Step instance, never a shared registry object."""
+    if declared.type == "agent":
+        step: Step = _agent_step(declared, history)
+    else:
+        step_class = registry.get(declared.type)
         if step_class is None:
             raise ImproperlyConfigured(
-                f"Workflow step type {spec.type!r} is not registered, so it cannot be "
+                f"Workflow step type {declared.type!r} is not registered, so it cannot be "
                 f"composed. Add it to AI_SDK_WORKFLOW_STEPS. Registered: {sorted(registry)}."
             )
-        steps.append(_bind_registered_step(step_class, spec))
-    return steps
+        step = step_class()
+    # The definition is the authority: class attributes on a registered Step are not
+    # defaults it falls back to.
+    step.name = declared.name
+    step.requires = tuple(declared.requires)
+    step.on_error = OnError(declared.on_error)
+    step.hooks = tuple(compile_hooks(declared.hooks, declared.name, hook_registry))
+    return step
 
 
-__all__ = ["compile_steps", "get_step_registry"]
+def _agent_step(declared: StepDefinition, history: tuple[str, ...] = ()) -> AgentStep:
+    """An agent named by id, configured."""
+    step = AgentStep()
+    step.agent_id = declared.agent_id
+    step.history = history
+    step.instructions = declared.system_prompt_override or ""
+    # Compiled once, so a definition that cannot compile says so before the first
+    # model call.
+    step.schema = (
+        model_from_fields(f"Output_{declared.name}", declared.output_fields)
+        if declared.output_fields
+        else None
+    )
+    return step
+
+
+def compile_hooks(
+    declared: list[HookDefinition],
+    where: str,
+    registry: dict[str, type[WorkflowHook]] | None = None,
+) -> list[WorkflowHook]:
+    """Hook instances for the keys a definition names."""
+    if registry is None:
+        registry = get_hook_registry()
+    hooks: list[WorkflowHook] = []
+    for hook in declared:
+        hook_class = registry.get(hook.type)
+        if hook_class is None:
+            raise ImproperlyConfigured(
+                f"Workflow hook {hook.type!r} on {where!r} is not registered. "
+                f"Add it to AI_SDK_WORKFLOW_HOOKS. Registered: {sorted(registry)}."
+            )
+        hooks.append(hook_class(hook.config))
+    return hooks
+
+
+__all__ = [
+    "compile_hooks",
+    "compile_inputs",
+    "compile_steps",
+    "get_step_registry",
+    "model_from_fields",
+]

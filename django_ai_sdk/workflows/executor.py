@@ -6,23 +6,23 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
+from pydantic import ValidationError
 
 from django_ai_sdk.permissions import user_pk
-from django_ai_sdk.workflows.actions import ActionContext, get_action_registry
-from django_ai_sdk.workflows.definitions import compile_steps
-from django_ai_sdk.workflows.inputs import dump_messages, normalize_workflow_inputs
-from django_ai_sdk.workflows.models import WorkflowRun
+from django_ai_sdk.utils import serialize
+from django_ai_sdk.workflows.definitions import compile_hooks, compile_inputs, compile_steps
+from django_ai_sdk.workflows.hooks import RunRecorder
+from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 from django_ai_sdk.workflows.runner import run_steps
-from django_ai_sdk.workflows.sink import WorkflowRunStepSink
+from django_ai_sdk.workflows.steps import StepAlreadyRunning
 from django_ai_sdk.workflows.tasks import execute_workflow
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
-    from django_ai_sdk.workflows.steps import Step, StepOutcome
+    from django_ai_sdk.workflows.steps import StepOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ class WorkflowExecutor:
     async def run(
         self,
         workflow: WorkflowDefinition,
-        messages: list[ChatMessage] | None = None,
         *,
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
@@ -49,21 +48,28 @@ class WorkflowExecutor:
 
         # Resuming: the row's persisted inputs sit underneath, the caller's overlay them.
         persisted = dict(workflow_run.inputs) if workflow_run and workflow_run.inputs else {}
-        seeded = normalize_workflow_inputs(inputs=inputs, messages=messages)
-        seeded = normalize_workflow_inputs(inputs={**persisted, **seeded}, ensure_messages=True)
+        supplied = {**persisted, **(inputs or {})}
 
-        workflow_run = await self._aopen(workflow, seeded, user, workflow_run)
+        workflow_run = await self._aopen(workflow, supplied, user, workflow_run)
 
         try:
             steps = compile_steps(workflow)
+            hooks = [
+                RunRecorder(workflow_run, steps),
+                *compile_hooks(workflow.hooks, workflow.name or str(workflow_run.id)),
+            ]
             outcomes = await run_steps(
                 steps,
-                inputs=seeded,
+                inputs=validate_inputs(workflow, supplied),
                 principal=user,
-                sink=WorkflowRunStepSink(workflow_run, steps),
+                hooks=hooks,
+                completed=await _already_completed(workflow_run),
+                workflow=workflow.name,
+                run_id=str(workflow_run.id),
             )
-            outputs = _published(steps, outcomes)
-            await self._arun_actions(workflow, outputs, user=user, workflow_run=workflow_run)
+            outputs = _published(outcomes)
+        except StepAlreadyRunning:
+            raise
         except Exception as exc:
             workflow_run.status = WorkflowRun.Status.FAILED
             workflow_run.error = str(exc)
@@ -87,77 +93,61 @@ class WorkflowExecutor:
         workflow_run: WorkflowRun | None,
     ) -> WorkflowRun:
         """The run row this attempt records against, opened or resumed."""
-        dumped_messages = dump_messages(inputs.get("messages"))
-        persisted = {
-            **{k: v for k, v in inputs.items() if k != "messages"},
-            "messages": dumped_messages,
-        }
         if workflow_run is None:
             return await WorkflowRun.objects.acreate(
                 workflow=None,
                 workflow_definition=workflow.model_dump(),
                 status=WorkflowRun.Status.RUNNING,
-                inputs=persisted,
+                inputs=serialize(inputs),
                 user_id=user_pk(user),
                 started_at=timezone.now(),
             )
         workflow_run.status = WorkflowRun.Status.RUNNING
         if not workflow_run.started_at:
             workflow_run.started_at = timezone.now()
+        fields = ["status", "started_at", "updated_at"]
         if not workflow_run.inputs:
-            workflow_run.inputs = persisted
-            await workflow_run.asave(update_fields=["status", "started_at", "inputs", "updated_at"])
-        else:
-            await workflow_run.asave(update_fields=["status", "started_at", "updated_at"])
+            workflow_run.inputs = serialize(inputs)
+            fields.append("inputs")
+        await workflow_run.asave(update_fields=fields)
         return workflow_run
 
-    @staticmethod
-    async def _arun_actions(
-        workflow: WorkflowDefinition,
-        outputs: dict[str, Any],
-        *,
-        user: AbstractBaseUser | AnonymousUser | None,
-        workflow_run: WorkflowRun,
-    ) -> None:
-        """Run each declared action over the run's outputs."""
-        registry = get_action_registry()
-        producer = {step.output_key: step.agent_id for step in workflow.steps}
-        last_agent_id = workflow.steps[-1].agent_id if workflow.steps else ""
-        source = workflow.name or f"workflow:{workflow_run.id}"
-        for action in workflow.actions:
-            runner_cls = registry.get(action.type)
-            if runner_cls is None:
-                logger.warning("Unknown workflow action type: %s", action.type)
-                continue
-            if action.input_key and action.input_key not in outputs:
-                logger.warning(
-                    "Workflow action %r reads %r, which the run did not produce — skipping",
-                    action.type,
-                    action.input_key,
-                )
-                continue
-            payload = outputs.get(action.input_key) if action.input_key else outputs
-            context = ActionContext(
-                user=user,
-                agent_id=producer.get(action.input_key or "", last_agent_id),
-                source=source,
-            )
-            await runner_cls().execute(payload, context)
-            logger.debug("Workflow action %r complete", action.type)
+
+def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> dict[str, Any]:
+    """The run's inputs, coerced to what the definition declares.
+
+    A definition that declares nothing takes what it is given: a code-authored
+    pipeline is not obliged to describe itself in JSON.
+    """
+    model = compile_inputs(workflow)
+    if model is None:
+        return dict(supplied)
+    try:
+        parsed = model.model_validate(supplied)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Workflow {workflow.name or '<unnamed>'!r} was given inputs it does not "
+            f"declare, or is missing ones it does: {exc}"
+        ) from exc
+    # Undeclared extras are dropped: the schema is the contract.
+    return {name: getattr(parsed, name) for name in model.model_fields}
 
 
-def _published(steps: list[Step], outcomes: dict[str, StepOutcome]) -> dict[str, Any]:
-    """What the run produced, keyed by `provides` and `error_key` names."""
-    published: dict[str, Any] = {}
-    for step in steps:
-        outcome = outcomes.get(step.name)
-        if outcome is None:
-            continue
-        if outcome.status == "completed" and step.provides:
-            published[step.provides] = outcome.output
-        elif outcome.status == "failed" and step.error_key:
-            published[step.error_key] = {
-                "step": step.name,
-                "error": outcome.detail or "failed",
-            }
-    return published
+async def _already_completed(run: WorkflowRun) -> dict[str, Any]:
+    """Stored output of every step of this run that already finished."""
+    return {
+        row.step_name: row.output
+        async for row in run.steps.filter(status=WorkflowRunStep.Status.COMPLETED)
+    }
+
+
+def _published(outcomes: dict[str, StepOutcome]) -> dict[str, Any]:
+    """What the run produced, keyed by step name."""
+    return {
+        name: serialize(outcome.output)
+        for name, outcome in outcomes.items()
+        if outcome.status == "completed"
+    }
+
+
+__all__ = ["WorkflowExecutor", "validate_inputs"]

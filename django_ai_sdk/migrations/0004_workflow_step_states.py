@@ -31,6 +31,10 @@ class Migration(migrations.Migration):
                 max_length=20,
             ),
         ),
+        migrations.RemoveField(
+            model_name="workflowrunstep",
+            name="output_key",
+        ),
         # No backfill: a deployment carrying WorkflowSettings rows from before this
         # migration must give them slugs itself. The field is the registry key, and
         # a derived-then-deduplicated default is a guess, not a migration.

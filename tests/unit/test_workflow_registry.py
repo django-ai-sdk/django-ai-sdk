@@ -5,12 +5,15 @@ from __future__ import annotations
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError
+from django.test import override_settings
 
 from django_ai_sdk.workflows import (
-    WorkflowAction,
+    HookDefinition,
+    WorkflowHook,
     WorkflowDefinition,
     WorkflowSettings,
-    WorkflowStep,
+    FieldDefinition,
+    StepDefinition,
 )
 from django_ai_sdk.workflows.checks import check_workflows
 from django_ai_sdk.workflows.registry import (
@@ -20,7 +23,7 @@ from django_ai_sdk.workflows.registry import (
     get_invalid_workflows,
     register,
     reset_registry,
-    validate,
+    validate_definition,
     validate_name,
 )
 
@@ -32,8 +35,15 @@ def _clean_registry():
     reset_registry()
 
 
+HOOKS = {"loud": "tests.unit.test_workflow_registry.LoudHook"}
+
+
+class LoudHook(WorkflowHook):
+    pass
+
+
 def definition(name="example", **kwargs) -> WorkflowDefinition:
-    kwargs.setdefault("steps", [WorkflowStep(agent_id="a", output_key="result")])
+    kwargs.setdefault("steps", [StepDefinition(name="result", agent_id="a")])
     return WorkflowDefinition(name=name, **kwargs)
 
 
@@ -55,7 +65,7 @@ class TestRegistration:
     def test_a_different_definition_under_one_name_warns(self, caplog):
         register(definition("digest"))
         with caplog.at_level("WARNING"):
-            register(definition("digest", steps=[WorkflowStep(agent_id="b", output_key="r")]))
+            register(definition("digest", steps=[StepDefinition(name="r", agent_id="b")]))
         assert "declared twice" in caplog.text
 
     def test_an_unknown_name_is_absent(self):
@@ -113,161 +123,134 @@ class TestTheNameIsTheRegistryKey:
 
 
 class TestValidation:
+    """What one step cannot see alone: the registries, and its neighbours' names."""
+
     def test_at_least_one_step(self):
         with pytest.raises(ImproperlyConfigured, match="no steps"):
-            validate(WorkflowDefinition(name="empty", steps=[]))
+            validate_definition(WorkflowDefinition(name="empty", steps=[]))
 
     def test_a_step_needs_an_agent_id(self):
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="agent_id"):
-            WorkflowStep(agent_id="", output_key="result")
+            StepDefinition(name="result", agent_id="")
 
-    def test_a_step_needs_an_output_key(self):
+    def test_a_registered_step_takes_no_output_fields(self):
+        """Only an agent step runs with structured output; declaring it elsewhere is dropped."""
         from pydantic import ValidationError
 
-        with pytest.raises(ValidationError, match="output_key"):
-            WorkflowStep(agent_id="a", output_key="")
-
-    def test_a_duplicate_output_key_would_overwrite(self):
-        with pytest.raises(ImproperlyConfigured, match="reuses"):
-            validate(
-                definition(
-                    steps=[
-                        WorkflowStep(agent_id="a", output_key="same"),
-                        WorkflowStep(agent_id="b", output_key="same"),
-                    ]
-                )
+        with pytest.raises(ValidationError, match="output_fields"):
+            StepDefinition(
+                name="gather", type="gather_thread", output_fields={"title": FieldDefinition()}
             )
 
-    def test_a_step_may_require_a_name_no_earlier_step_produces(self):
-        # Run inputs satisfy requires at execute time; register-time only gates types.
-        validate(
-            definition(
-                steps=[
-                    WorkflowStep(agent_id="a", output_key="summary"),
-                    WorkflowStep(agent_id="b", requires=["sumary"], output_key="verdict"),
-                ]
-            )
-        )
+    def test_a_step_needs_a_name(self):
+        from pydantic import ValidationError
 
-    def test_a_step_may_require_its_own_output_key_as_a_run_input_name(self):
-        # Colliding provides vs inputs is a runner concern when inputs are known.
-        validate(definition(steps=[WorkflowStep(agent_id="a", requires=["r"], output_key="r")]))
+        with pytest.raises(ValidationError):
+            StepDefinition(name="", agent_id="a")
 
-    def test_a_step_may_require_a_later_step_name_as_a_run_input(self):
-        validate(
-            definition(
-                steps=[
-                    WorkflowStep(agent_id="a", requires=["later"], output_key="first"),
-                    WorkflowStep(agent_id="b", output_key="later"),
-                ]
-            )
-        )
-
-    def test_reserved_messages_output_key_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="reserved"):
-            validate(
-                definition(steps=[WorkflowStep(agent_id="a", output_key="messages")])
-            )
-
-    def test_duplicate_compiled_names_are_refused(self):
+    def test_a_duplicate_step_name_is_refused(self):
+        """The one name rule left: a step's name is the key its result is filed under."""
         with pytest.raises(ImproperlyConfigured, match="duplicate step name"):
-            validate(
+            validate_definition(
                 definition(
                     steps=[
-                        WorkflowStep(name="same", agent_id="a", output_key="a"),
-                        WorkflowStep(name="same", agent_id="b", output_key="b"),
+                        StepDefinition(name="same", agent_id="a"),
+                        StepDefinition(name="same", agent_id="b"),
                     ]
                 )
             )
 
-    def test_error_key_requires_continue(self):
-        with pytest.raises(ImproperlyConfigured, match="on_error is"):
-            validate(
+    def test_a_step_may_not_require_a_name_no_earlier_step_produces(self):
+        """The typo case, caught where it is written rather than by a worker."""
+        with pytest.raises(ImproperlyConfigured, match="sumary"):
+            validate_definition(
                 definition(
                     steps=[
-                        WorkflowStep(
-                            agent_id="a",
-                            output_key="x",
-                            on_error="fail",
-                            error_key="x_err",
-                        )
+                        StepDefinition(name="summary", agent_id="a"),
+                        StepDefinition(name="verdict", agent_id="b", requires=["sumary"]),
                     ]
                 )
             )
 
-    def test_a_reserved_error_key_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="reserved"):
-            validate(
+    def test_a_step_may_not_require_a_later_one(self):
+        """Order is the author's: a list that cannot run says so up front."""
+        with pytest.raises(ImproperlyConfigured, match="later"):
+            validate_definition(
                 definition(
                     steps=[
-                        WorkflowStep(
-                            agent_id="a",
-                            output_key="x",
-                            on_error="continue",
-                            error_key="messages",
-                        )
+                        StepDefinition(name="first", agent_id="a", requires=["later"]),
+                        StepDefinition(name="later", agent_id="b"),
                     ]
                 )
             )
 
-    def test_two_steps_may_not_claim_one_error_key(self):
-        # The runner refuses this at execute time, so create-time has to as well.
-        with pytest.raises(ImproperlyConfigured, match="collides"):
-            validate(
-                definition(
-                    steps=[
-                        WorkflowStep(
-                            agent_id="a", output_key="a", on_error="continue", error_key="err"
-                        ),
-                        WorkflowStep(
-                            agent_id="b", output_key="b", on_error="continue", error_key="err"
-                        ),
-                    ]
-                )
-            )
-
-    def test_an_action_may_read_an_error_key(self):
-        # on_error=continue means the runner really does publish it.
-        validate(
+    def test_a_step_name_may_match_a_run_input_name(self):
+        """Two namespaces, so neither has to be renamed for the other's sake."""
+        validate_definition(
             definition(
-                steps=[
-                    WorkflowStep(
-                        agent_id="a", output_key="x", on_error="continue", error_key="x_err"
-                    )
-                ],
-                actions=[WorkflowAction(type="thread_message", input_key="x_err")],
+                input_fields={"summary": FieldDefinition()},
+                steps=[StepDefinition(name="summary", agent_id="a")],
             )
         )
 
-    def test_an_unregistered_action_type_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="not registered"):
-            validate(definition(actions=[WorkflowAction(type="carrier_pigeon")]))
+    def test_an_unregistered_hook_type_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_HOOKS"):
+            validate_definition(definition(hooks=[HookDefinition(type="carrier_pigeon")]))
 
-    def test_an_action_reading_an_output_nothing_produces(self):
-        with pytest.raises(ImproperlyConfigured, match="which no step produces"):
-            validate(
-                definition(actions=[WorkflowAction(type="thread_message", input_key="nope")])
+    def test_an_unregistered_hook_on_a_step_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_HOOKS"):
+            validate_definition(
+                definition(
+                    steps=[
+                        StepDefinition(name="x", agent_id="a", hooks=[HookDefinition(type="carrier_pigeon")])
+                    ]
+                )
             )
 
+    @override_settings(AI_SDK_WORKFLOW_HOOKS=HOOKS)
+    def test_a_registered_hook_is_accepted_in_both_places(self):
+        validate_definition(
+            definition(
+                steps=[StepDefinition(name="x", agent_id="a", hooks=[HookDefinition(type="loud")])],
+                hooks=[HookDefinition(type="loud")],
+            )
+        )
+
+    @override_settings(AI_SDK_WORKFLOW_HOOKS=HOOKS)
     def test_a_valid_chain_passes(self):
-        validate(
+        validate_definition(
             definition(
+                input_fields={"history": FieldDefinition(type="messages")},
                 steps=[
-                    WorkflowStep(agent_id="a", output_key="summary"),
-                    WorkflowStep(agent_id="b", requires=["summary"], output_key="verdict"),
+                    StepDefinition(name="summary", agent_id="a"),
+                    StepDefinition(name="verdict", agent_id="b", requires=["summary"]),
                 ],
-                actions=[WorkflowAction(type="thread_message", input_key="verdict")],
+                hooks=[HookDefinition(type="loud", config={"step": "verdict"})],
             )
         )
 
-    def test_an_action_with_no_input_key_takes_everything(self):
-        validate(definition(actions=[WorkflowAction(type="thread_message")]))
+    def test_input_fields_that_cannot_compile_are_refused(self):
+        """`validate_definition` promises a check where it is written, so it builds the model."""
+        with pytest.raises(ImproperlyConfigured, match="input_fields cannot compile"):
+            validate_definition(definition(input_fields={"model_dump": FieldDefinition()}))
+
+    def test_output_fields_that_cannot_compile_are_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="output_fields cannot compile"):
+            validate_definition(
+                definition(
+                    steps=[
+                        StepDefinition(
+                            name="x", agent_id="a", output_fields={"model_dump": FieldDefinition()}
+                        )
+                    ]
+                )
+            )
 
     def test_a_stored_definition_needs_no_name(self):
         # A row is keyed by its `slug` column, so the name inside the JSON is unused.
-        validate(definition(""))
+        validate_definition(definition(""))
 
 
 # transaction=True throughout: an async ORM write is not rolled back by plain django_db.
@@ -289,9 +272,7 @@ class TestDatabaseMerge:
         register(definition("shared"))
         await WorkflowSettings.objects.acreate(
             name="shared",
-            definition=definition(
-                "shared", steps=[WorkflowStep(agent_id="db", output_key="r")]
-            ).model_dump(),
+            definition=definition("shared", steps=[StepDefinition(name="r", agent_id="db")]).model_dump(),
         )
 
         # A database row adds a workflow where there is no code; it never overrides one.
@@ -330,12 +311,12 @@ class TestABrokenRowIsSkipped:
         assert set(await aget_workflows()) == {"healthy"}
 
     async def test_a_broken_definition_is_rejected(self):
-        # Rows get the same wiring checks a declaration does (duplicate provides).
+        # Rows get the same wiring checks a declaration does (a duplicate step name).
         broken = WorkflowDefinition(
             name="broken",
             steps=[
-                WorkflowStep(agent_id="a", output_key="summary"),
-                WorkflowStep(agent_id="b", output_key="summary"),
+                StepDefinition(name="summary", agent_id="a"),
+                StepDefinition(name="summary", agent_id="b"),
             ],
         )
         await WorkflowSettings.objects.acreate(name="broken", definition=broken.model_dump())

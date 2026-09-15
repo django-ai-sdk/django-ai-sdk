@@ -2,6 +2,9 @@
 
 Both are named by `AI_SDK_WORKFLOW_STEPS` and composed by the `thread-digest`
 definition in workflows.py. The package ships no step types; these are the host's.
+
+Two namespaces, so nothing collides: `ctx.input(...)` is what the caller supplied,
+`ctx.step(...)` is what an earlier step produced.
 """
 
 from __future__ import annotations
@@ -12,7 +15,7 @@ from django_ai_sdk.workflows import AgentStep, Step, StepOutcome
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows import StepContext
+    from django_ai_sdk.workflows import WorkflowContext
 
 from .extraction import PirateExtractionAgent
 
@@ -25,14 +28,14 @@ class ThreadDigest(BaseModel):
 class GatherStep(Step):
     """The non-agent step: plain Python over the thread's own rows."""
 
-    async def run(self, ctx: StepContext) -> StepOutcome:
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
         from django_ai_sdk.conversation.models import Message
 
         # A run's inputs cross the queue as JSON, so the subject arrives as an id
         # and the step resolves it.
         rows = [
             row
-            async for row in Message.objects.filter(thread_id=ctx.get("thread"), is_deleted=False)
+            async for row in Message.objects.filter(thread_id=ctx.input("thread"), is_deleted=False)
             .order_by("created_at")
             .values_list("result", flat=True)
         ]
@@ -47,17 +50,15 @@ class DigestStep(AgentStep):
 
     agent = PirateExtractionAgent
     schema = ThreadDigest
+    instructions = (
+        "You summarise conversations. Reply with a title of at most six "
+        "words and a two-sentence summary."
+    )
 
-    async def system_prompt(self, ctx: StepContext) -> str:
-        return (
-            "You summarise conversations. Reply with a title of at most six "
-            "words and a two-sentence summary."
-        )
+    async def user_message(self, ctx: WorkflowContext) -> str:
+        return ctx.step("transcript", "")
 
-    async def user_message(self, ctx: StepContext) -> str:
-        return ctx.get("transcript")
-
-    async def run(self, ctx: StepContext) -> StepOutcome:
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
         from django_ai_sdk.conversation.models import Thread
 
         outcome = await super().run(ctx)
@@ -66,5 +67,6 @@ class DigestStep(AgentStep):
 
         # Writing the title is this host's business, not the runner's: the step
         # returns the digest, and does what its own product needs.
-        await Thread.objects.filter(id=ctx.get("thread")).aupdate(title=outcome.output.title)
-        return StepOutcome(output=outcome.output.model_dump(), detail=outcome.output.title)
+        title = outcome.output["title"]
+        await Thread.objects.filter(id=ctx.input("thread")).aupdate(title=title)
+        return StepOutcome(output=outcome.output, detail=title)

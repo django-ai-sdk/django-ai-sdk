@@ -1,15 +1,17 @@
 """Workflow definitions, autodiscovered on startup.
 
 Each is a named `WorkflowDefinition` passed to `register()`, which is what makes it
-runnable by name.
+runnable by name. A step's result is filed under its own `name`, so a later step
+requires it by that name and a hook reads it with `ctx.step(...)`.
 """
 
 from __future__ import annotations
 
 from django_ai_sdk.workflows import (
-    WorkflowAction,
+    FieldDefinition,
+    HookDefinition,
+    StepDefinition,
     WorkflowDefinition,
-    WorkflowStep,
     register,
 )
 
@@ -23,10 +25,9 @@ register(
     WorkflowDefinition(
         name="harbour-report",
         steps=[
-            WorkflowStep(
+            StepDefinition(
                 name="forecast",
                 agent_id=PIRATE,
-                output_key="report",
                 system_prompt_override=(
                     "Call the weather tool for Rotterdam and report the conditions as a "
                     "ship's log entry. Three sentences. Do not invent a forecast if the "
@@ -34,31 +35,34 @@ register(
                 ),
             )
         ],
-        actions=[WorkflowAction(type="thread_message", input_key="report")],
+        # A workflow-level hook: it sees the run, and posts what `forecast` produced.
+        hooks=[
+            HookDefinition(type="thread_message", config={"agent_id": PIRATE, "step": "forecast"})
+        ],
     )
 )
 
-# Two steps, the second returning typed fields. No action: the caller reads the run.
+# Two steps, the second returning typed fields. No hook: the caller reads the run.
 register(
     WorkflowDefinition(
         name="sailing-verdict",
         steps=[
-            WorkflowStep(
+            StepDefinition(
                 name="forecast",
                 agent_id=PIRATE,
-                output_key="report",
                 system_prompt_override=(
                     "Call the weather tool for Rotterdam and describe the conditions."
                 ),
             ),
-            WorkflowStep(
-                name="judge",
+            StepDefinition(
+                name="verdict",
                 agent_id=PIRATE,
-                requires=["report"],
-                output_key="verdict",
+                requires=["forecast"],
                 output_fields={
-                    "sailing": {"type": "str", "description": "good | risky | stay ashore"},
-                    "windspeed_kmh": {"type": "float"},
+                    "sailing": FieldDefinition(
+                        type="str", description="good | risky | stay ashore"
+                    ),
+                    "windspeed_kmh": FieldDefinition(type="float"),
                 },
             ),
         ],
@@ -71,18 +75,17 @@ register(
 register(
     WorkflowDefinition(
         name="thread-digest",
+        # Declared, so a caller who forgets `thread` hears about it before the run
+        # is queued rather than three steps in.
+        input_fields={"thread": FieldDefinition(type="str", description="Thread id to digest")},
         steps=[
-            WorkflowStep(
-                type="gather_thread",
-                name="gather",
-                output_key="transcript",
-                requires=["thread"],
-            ),
-            WorkflowStep(
+            StepDefinition(type="gather_thread", name="transcript"),
+            StepDefinition(
                 type="thread_digest",
                 name="digest",
-                output_key="digest",
                 requires=["transcript"],
+                # A step-level hook: fires for this step alone.
+                hooks=[HookDefinition(type="console_log")],
             ),
         ],
     )
