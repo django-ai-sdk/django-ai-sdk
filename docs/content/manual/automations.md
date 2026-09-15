@@ -141,4 +141,4 @@ An audience resolving to `[None]` (as `Audience.APP` does) means one run with no
 
 **`AudienceResolver`** — `resolve(automation) -> list` and `describe() -> str`. The shipped ones are `Audience.APP` and `Audience.SUBSCRIBED`; implement your own for a tenant, a subscription tier, an on-call rota.
 
-**`StepHook`** — four optional callbacks (`on_run_start`, `on_step_start`, `on_step_end`, `on_run_end`), each taking the run's `WorkflowContext`. Registered by key in `AI_SDK_WORKFLOW_HOOKS`, and named either on the workflow (every step) or on one step (that step alone). See [Workflows](/manual/workflows/).
+**`WorkflowHook`** — four optional callbacks (`on_run_start`, `on_step_start`, `on_step_end`, `on_run_end`), each taking the run's `WorkflowContext`. Registered by key in `AI_SDK_WORKFLOW_HOOKS`, and named either on the workflow (every step) or on one step (that step alone). See [Workflows](/manual/workflows/).

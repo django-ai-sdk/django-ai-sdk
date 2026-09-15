@@ -67,6 +67,9 @@ INSTALLED_APPS = [
     # default integrations
     "piratespeak.integrations.linear",
     "django_ai_sdk.integrations.weather",
+    "django_ai_sdk.integrations.slack",
+    "django_ai_sdk.integrations.discord",
+    "django_ai_sdk.integrations.telegram",
     # local
     "apps.users",
     "apps.agents",
@@ -287,7 +290,43 @@ AI_SDK_VECTOR_STORE_PATH = "stores/"
 # needs none at all, so it isn't listed here and still works out of the box.
 AI_SDK_INTEGRATIONS = {
     "linear": {"TOKEN": env("LINEAR_API_KEY", default="")},
+    # Unset by default, so the demo boots without a Slack app, a Discord
+    # application or a Telegram bot: the integration reports disconnected and
+    # its webhook 404s. An empty ALLOW_FROM answers every sender the platform
+    # delivers and an empty ALLOW_WORKSPACES every installation; list platform ids
+    # to narrow either. RUN_AS names the account a run acts as: unset answers
+    # anonymously, which reaches no integration.
+    "slack": {
+        "BOT_TOKEN": env("SLACK_BOT_TOKEN", default=""),
+        "SIGNING_SECRET": env("SLACK_SIGNING_SECRET", default=""),
+        "ALLOW_FROM": env.list("SLACK_ALLOW_FROM", default=[]),
+        "ALLOW_WORKSPACES": env.list("SLACK_ALLOW_WORKSPACES", default=[]),
+        "RUN_AS": env("SLACK_RUN_AS", default=""),
+        "AGENT": "apps.agents.pirate_basic.PirateBasicAgent",
+    },
+    "discord": {
+        "PUBLIC_KEY": env("DISCORD_PUBLIC_KEY", default=""),
+        "APPLICATION_ID": env("DISCORD_APPLICATION_ID", default=""),
+        "BOT_TOKEN": env("DISCORD_BOT_TOKEN", default=""),
+        "ALLOW_FROM": env.list("DISCORD_ALLOW_FROM", default=[]),
+        "ALLOW_WORKSPACES": env.list("DISCORD_ALLOW_WORKSPACES", default=[]),
+        "RUN_AS": env("DISCORD_RUN_AS", default=""),
+        "AGENT": "apps.agents.pirate_basic.PirateBasicAgent",
+    },
+    "telegram": {
+        "BOT_TOKEN": env("TELEGRAM_BOT_TOKEN", default=""),
+        "WEBHOOK_SECRET": env("TELEGRAM_WEBHOOK_SECRET", default=""),
+        # Telegram has no admission control of its own, so the integration refuses
+        # to serve until this says who may ask. "*" answers anyone who messages it.
+        "ALLOW_FROM": env.list("TELEGRAM_ALLOW_FROM", default=["*"]),
+        "RUN_AS": env("TELEGRAM_RUN_AS", default=""),
+        "AGENT": "apps.agents.pirate_basic.PirateBasicAgent",
+    },
 }
+
+# Seconds a webhook-triggered agent run may take before the channel gets a timeout
+# reply instead.
+AI_SDK_WEBHOOK_TIMEOUT = 120
 
 
 # MCP OAuth discovery (RFC 9728)

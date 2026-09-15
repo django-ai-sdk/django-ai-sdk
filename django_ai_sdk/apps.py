@@ -32,8 +32,16 @@ class DjangoAISDKConfig(AppConfig):
         autodiscover_modules("automations")
 
         from django_ai_sdk.automations.checks import check_automations
+        from django_ai_sdk.integrations.webhooks.checks import (
+            check_agent_integrations,
+            check_dedup_cache,
+        )
         from django_ai_sdk.workflows.checks import check_workflows
 
         # A rejected declaration fails no request, so nothing else would surface it.
         register_check(check_workflows)
         register_check(check_automations)
+        # A per-process dedup cache answers a redelivered event once per process.
+        register_check(check_dedup_cache)
+        # A receive-only integration named as a tool source contributes nothing.
+        register_check(check_agent_integrations)

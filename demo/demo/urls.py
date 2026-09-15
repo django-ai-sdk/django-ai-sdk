@@ -81,4 +81,5 @@ urlpatterns = [
     path("api/v2/", include("apps.agents.views.drf")),
     path("api/v2/", include("apps.memories.views.drf")),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
+    path("api/integrations/", include("django_ai_sdk.integrations.webhooks.urls")),
 ]

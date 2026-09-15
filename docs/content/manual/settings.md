@@ -66,7 +66,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`, `workflow`. See [Permissions](/manual/permissions/). |
+| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`, `automations`, `workflow`. See [Permissions](/manual/permissions/). |
 
 ## Workflows
 
@@ -74,6 +74,25 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
 | `AI_SDK_WORKFLOW_HOOKS` | `{}` | Hooks a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.hooks.ConsoleLogHook"}`. Every hook is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
+
+## Webhooks
+
+For an integration a platform pushes events into. See [Webhooks](/manual/webhooks/).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_WEBHOOK_TIMEOUT` | `120` | Seconds a webhook-triggered agent run may take before the channel gets a timeout reply instead. |
+| `AI_SDK_WEBHOOK_MAX_TEXT` | `4000` | Characters of the inbound question kept, so the prompt is bounded by the SDK rather than by whatever the platform accepts. |
+| `AI_SDK_WEBHOOK_DEDUP_TTL` | `600` | Seconds an event id stays claimed, so a redelivered event is answered once. Needs a cache every process shares; see `ai_sdk.webhooks.W001`. |
+
+These keys live inside `AI_SDK_INTEGRATIONS[<name>]` rather than at the top level, because they configure one installation of one platform app:
+
+| Key | Purpose |
+| --- | --- |
+| `AGENT` | Dotted path to the `Agent` subclass that answers. A webhook integration is wired this way round, not by naming it in an agent's `integrations` list; doing the latter is reported as `ai_sdk.webhooks.W002`. |
+| `RUN_AS` | The account every admitted sender is answered as, matched on the user model's `USERNAME_FIELD`. Unset answers anonymously, which reaches no integration and no per-user credential. Unknown or deactivated logs an error and degrades to anonymous. |
+| `ALLOW_FROM` | Platform user ids allowed to ask, or `"*"` (bare or in a list) for anyone. Unset answers everyone the platform delivers, except where the integration demands an explicit choice (`telegram`). A malformed value refuses every event. |
+| `ALLOW_WORKSPACES` | `team_id` / `guild_id` values allowed to reach the agent. A signing secret belongs to the app, not the installation, so a second installation otherwise verifies cleanly and runs the agent on your budget. |
 
 ## Automations
 
