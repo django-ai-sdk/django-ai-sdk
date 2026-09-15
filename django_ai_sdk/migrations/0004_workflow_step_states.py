@@ -2,26 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from django.db import migrations, models
-from django.utils.text import slugify
-
-
-def backfill_slugs(apps: Any, schema_editor: Any) -> None:
-    """Give every stored definition a unique registry key derived from its name."""
-    WorkflowSettings = apps.get_model("django_ai_sdk", "WorkflowSettings")
-    used: set[str] = set()
-    for row in WorkflowSettings.objects.all().order_by("created_at"):
-        base = (slugify(row.name) or f"workflow-{str(row.pk)[:8]}")[:100]
-        slug, suffix = base, 2
-        while slug in used:
-            tail = f"-{suffix}"
-            slug = f"{base[: 100 - len(tail)]}{tail}"
-            suffix += 1
-        used.add(slug)
-        row.slug = slug
-        row.save(update_fields=["slug"])
 
 
 class Migration(migrations.Migration):
@@ -50,16 +31,13 @@ class Migration(migrations.Migration):
                 max_length=20,
             ),
         ),
+        # No backfill: a deployment carrying WorkflowSettings rows from before this
+        # migration must give them slugs itself. The field is the registry key, and
+        # a derived-then-deduplicated default is a guess, not a migration.
         migrations.AddField(
             model_name="workflowsettings",
             name="slug",
-            field=models.SlugField(blank=True, default="", max_length=100),
+            field=models.SlugField(default="", max_length=100, unique=True),
             preserve_default=False,
-        ),
-        migrations.RunPython(backfill_slugs, migrations.RunPython.noop),
-        migrations.AlterField(
-            model_name="workflowsettings",
-            name="slug",
-            field=models.SlugField(max_length=100, unique=True),
         ),
     ]
