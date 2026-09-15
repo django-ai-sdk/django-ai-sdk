@@ -3,7 +3,6 @@ from __future__ import annotations
 from asgiref.sync import async_to_sync
 from django_tasks import task
 
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.workflows.models import WorkflowRun
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
@@ -19,5 +18,4 @@ async def _execute_async(run_id: str) -> None:
 
     run = await WorkflowRun.objects.aget(id=run_id)
     workflow = WorkflowDefinition.model_validate(run.workflow_definition)
-    messages = [ChatMessage(**m) for m in run.input_messages]
-    await WorkflowExecutor().run(workflow, messages, workflow_run=run)
+    await WorkflowExecutor().run(workflow, inputs=run.inputs, workflow_run=run)
