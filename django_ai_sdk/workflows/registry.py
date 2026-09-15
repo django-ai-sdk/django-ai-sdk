@@ -14,17 +14,17 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.text import slugify
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows.actions import BaseAction
-    from django_ai_sdk.workflows.schemas import WorkflowAction, WorkflowDefinition, WorkflowStep
-    from django_ai_sdk.workflows.steps import Step
+    from django_ai_sdk.workflows.hooks import WorkflowHook
+    from django_ai_sdk.workflows.schemas import (
+        FieldDefinition,
+        HookDefinition,
+        WorkflowDefinition,
+    )
 
 logger = logging.getLogger(__name__)
 
 # Matches WorkflowSettings.slug, so a declared and a stored name are one key space.
 NAME_MAX_LENGTH = 100
-
-# Injected on every definition run by normalize_workflow_inputs(ensure_messages=True).
-RESERVED_INPUT_KEYS = frozenset({"messages"})
 
 _registry: dict[str, WorkflowDefinition] = {}
 
@@ -43,7 +43,7 @@ def register(definition: WorkflowDefinition) -> WorkflowDefinition:
     """
     try:
         validate_name(definition.name)
-        validate(definition)
+        validate_definition(definition)
     except ImproperlyConfigured as exc:
         _invalid[definition.name or "<unnamed>"] = str(exc)
         logger.warning("Workflow not registered: %s", exc)
@@ -76,104 +76,66 @@ def validate_name(name: str) -> None:
         )
 
 
-def validate(definition: WorkflowDefinition) -> None:
+def validate_definition(definition: WorkflowDefinition) -> None:
     """Raise ImproperlyConfigured unless the definition is legal to store and compile.
 
-    Covers only what one step cannot see alone: the step and action registries, the
-    reserved input names, and the names its neighbours claim. Whether a `requires`
-    name is produced needs the run's inputs, so the runner checks that at execute time.
+    The step graph is the runner's rule. What is left is the two registries: a step
+    type or a hook the deployment did not expose cannot be composed.
     """
-    from django_ai_sdk.workflows.actions import get_action_registry
     from django_ai_sdk.workflows.definitions import get_step_registry
+    from django_ai_sdk.workflows.hooks import get_hook_registry
+    from django_ai_sdk.workflows.runner import check_pipeline
 
-    if not definition.steps:
-        raise ImproperlyConfigured(f"Workflow {definition.name!r} has no steps to run.")
+    label = f"Workflow {definition.name!r}"
+    check_pipeline(definition.steps, label=label)
+    _compiles(
+        f"Inputs_{definition.name or 'workflow'}",
+        definition.input_fields,
+        f"{label} input_fields",
+    )
 
     step_types = get_step_registry()
-    produced: set[str] = set()
-    names: set[str] = set()
+    hook_types = get_hook_registry()
 
     for index, step in enumerate(definition.steps):
-        _validate_step(
-            step, f"Workflow {definition.name!r} step {index}", step_types, produced, names
-        )
+        where = f"{label} step {index} ({step.name!r})"
+        if step.type != "agent" and step.type not in step_types:
+            raise ImproperlyConfigured(
+                f"{where} has type {step.type!r}, which is not in AI_SDK_WORKFLOW_STEPS. "
+                f"Registered: {sorted(step_types) or 'none'}."
+            )
+        _compiles(f"Output_{step.name}", step.output_fields, f"{where} output_fields")
+        _validate_hooks(step.hooks, where, hook_types)
 
-    action_types = get_action_registry()
-    for action in definition.actions:
-        _validate_action(action, definition.name, action_types, produced)
+    _validate_hooks(definition.hooks, label, hook_types)
 
 
-def _validate_step(
-    step: WorkflowStep,
-    where: str,
-    step_types: dict[str, type[Step]],
-    produced: set[str],
-    names: set[str],
-) -> None:
-    """Check one step against the registry and the names its neighbours claim.
+def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:
+    """Build a declared schema now, so a field name pydantic refuses is caught here.
 
-    Adds what it produces to `produced` and its compiled name to `names`.
+    A field called `model_dump` passes every name rule above and then takes out the
+    worker, so the only honest check is to build the model.
     """
-    if step.type != "agent" and step.type not in step_types:
-        raise ImproperlyConfigured(
-            f"{where} has type {step.type!r}, which is not in AI_SDK_WORKFLOW_STEPS. "
-            f"Registered: {sorted(step_types) or 'none'}."
-        )
+    from django_ai_sdk.workflows.definitions import model_from_fields
 
-    if step.output_key:
-        if step.output_key in RESERVED_INPUT_KEYS:
-            raise ImproperlyConfigured(
-                f"{where} output_key {step.output_key!r} collides with a reserved run input name."
-            )
-        if step.output_key in produced:
-            raise ImproperlyConfigured(
-                f"{where} reuses `output_key` {step.output_key!r}, which would overwrite "
-                "an earlier step's result."
-            )
-        produced.add(step.output_key)
-
-    compiled_name = step.name or step.output_key or step.type
-    if compiled_name in names:
-        raise ImproperlyConfigured(f"{where} compiles to duplicate step name {compiled_name!r}.")
-    names.add(compiled_name)
-
-    if not step.error_key:
+    if not fields:
         return
-    if step.on_error != "continue":
-        raise ImproperlyConfigured(
-            f"{where} sets error_key but on_error is {step.on_error!r}; "
-            "error_key is only published when on_error is continue."
-        )
-    if step.error_key in RESERVED_INPUT_KEYS:
-        raise ImproperlyConfigured(
-            f"{where} error_key {step.error_key!r} collides with a reserved run input name."
-        )
-    if step.error_key in produced:
-        raise ImproperlyConfigured(
-            f"{where} error_key {step.error_key!r} collides with an earlier provides."
-        )
-    # Counted as produced: on_error is continue, so the runner publishes this name
-    # and an action may read it.
-    produced.add(step.error_key)
+    try:
+        model_from_fields(name, fields)
+    except Exception as exc:
+        raise ImproperlyConfigured(f"{where} cannot compile: {exc}") from exc
 
 
-def _validate_action(
-    action: WorkflowAction,
-    workflow_name: str,
-    action_types: dict[str, type[BaseAction]],
-    produced: set[str],
+def _validate_hooks(
+    hooks: list[HookDefinition], where: str, hook_types: dict[str, type[WorkflowHook]]
 ) -> None:
-    """Check one action against the registry and what the steps produce."""
-    if action.type not in action_types:
-        raise ImproperlyConfigured(
-            f"Workflow {workflow_name!r} action type {action.type!r} is not registered. "
-            f"Registered: {sorted(action_types)}."
-        )
-    if action.input_key and action.input_key not in produced:
-        raise ImproperlyConfigured(
-            f"Workflow {workflow_name!r} action {action.type!r} reads {action.input_key!r}, "
-            f"which no step produces. Available: {sorted(produced)}."
-        )
+    """Every hook a definition names must be one the deployment exposed."""
+    for hook in hooks:
+        if hook.type not in hook_types:
+            raise ImproperlyConfigured(
+                f"{where} names hook {hook.type!r}, which is not in AI_SDK_WORKFLOW_HOOKS. "
+                f"Registered: {sorted(hook_types) or 'none'}."
+            )
 
 
 def get_declared_workflows() -> dict[str, WorkflowDefinition]:
@@ -182,7 +144,7 @@ def get_declared_workflows() -> dict[str, WorkflowDefinition]:
 
 
 def get_invalid_workflows() -> dict[str, str]:
-    """Declarations rejected by validate(), name -> reason. Read by the system check."""
+    """Declarations the registry refused, name -> reason. Read by the system check."""
     return dict(_invalid)
 
 
@@ -232,7 +194,7 @@ def _definition_from_row(slug: str, raw: dict[str, object]) -> WorkflowDefinitio
 
     try:
         definition = WorkflowDefinition.model_validate(raw)
-        validate(definition)
+        validate_definition(definition)
     except Exception as exc:
         if slug not in _warned_invalid:
             _warned_invalid.add(slug)
@@ -265,13 +227,12 @@ def reset_registry() -> None:
 
 
 __all__ = [
-    "RESERVED_INPUT_KEYS",
     "aget_workflow",
     "aget_workflows",
     "get_declared_workflows",
     "get_invalid_workflows",
     "register",
     "reset_registry",
-    "validate",
+    "validate_definition",
     "validate_name",
 ]

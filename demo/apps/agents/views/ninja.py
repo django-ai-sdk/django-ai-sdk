@@ -9,7 +9,6 @@ from django.db.models import Q
 from django.http import HttpRequest
 from django_ai_sdk import Agent
 from django_ai_sdk.agents.services import AgentService
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import ObjectPermissions, Operation, PermissionDenied
@@ -1089,7 +1088,7 @@ async def reindex_agent(
 
 class WorkflowRunRequest(Schema):
     workflow: WorkflowDefinition
-    messages: list[ChatMessage] = []
+    inputs: dict[str, Any] = {}
 
 
 class WorkflowRunResponse(Schema):
@@ -1097,7 +1096,7 @@ class WorkflowRunResponse(Schema):
     status: str
 
 
-class WorkflowActionItem(Schema):
+class WorkflowHookItem(Schema):
     key: str
     description: str
 
@@ -1105,8 +1104,8 @@ class WorkflowActionItem(Schema):
 class WorkflowRunStepOut(Schema):
     id: str
     sequence: int
+    # The step's name is its key: its output is filed under it.
     step_name: str
-    output_key: str
     output: dict | None = None
     status: str
     error: str
@@ -1136,19 +1135,19 @@ class WorkflowRunDetailOut(WorkflowRunOut):
 )
 async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
     try:
-        run = await WorkflowService.run(payload.workflow, payload.messages, user=request.user)
+        run = await WorkflowService.run(payload.workflow, inputs=payload.inputs, user=request.user)
         return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
     except Exception as e:
         return 500, Error(message=str(e))
 
 
 @router.get(
-    "/workflows/actions/",
-    response={200: list[WorkflowActionItem]},
-    operation_id="list_workflow_actions",
+    "/workflows/hooks/",
+    response={200: list[WorkflowHookItem]},
+    operation_id="list_workflow_hooks",
 )
-def list_workflow_actions(request: HttpRequest) -> list[WorkflowActionItem]:
-    return [WorkflowActionItem(**item) for item in WorkflowService.list_actions()]
+def list_workflow_hooks(request: HttpRequest) -> list[WorkflowHookItem]:
+    return [WorkflowHookItem(**item) for item in WorkflowService.list_hooks()]
 
 
 # Workflow CRUD schemas
@@ -1173,7 +1172,7 @@ class WorkflowItem(Schema):
 
 
 class WorkflowRunByIdRequest(Schema):
-    messages: list[ChatMessage] = []
+    inputs: dict[str, Any] = {}
     run_id: str | None = None
 
 
@@ -1247,7 +1246,6 @@ async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) 
                 id=str(s.id),
                 sequence=s.sequence,
                 step_name=s.step_name,
-                output_key=s.output_key,
                 output=s.output if isinstance(s.output, dict) else None,
                 status=s.status,
                 error=s.error,
@@ -1336,7 +1334,7 @@ async def run_workflow_by_id(
 ) -> Any:
     try:
         run = await WorkflowService.run_by_id(
-            workflow_id, payload.messages, user=request.user, run_id=payload.run_id
+            workflow_id, inputs=payload.inputs, user=request.user, run_id=payload.run_id
         )
         return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
     except WorkflowSettings.DoesNotExist:

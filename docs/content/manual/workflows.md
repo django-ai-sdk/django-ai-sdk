@@ -4,53 +4,74 @@ type: docs
 weight: 121
 ---
 
-The workflow engine orchestrates multi-step agent tasks: sequential agent steps that pass results forward, then optional side-effect actions. The [Views and Routing guide](/views-and-routing/#workflows) covers the public API; this page documents the definition schema, models, and executor.
+The workflow engine orchestrates multi-step agent tasks: steps that pass results forward, and hooks that watch the run. The [Views and Routing guide](/views-and-routing/#workflows) covers the public API; this page documents the definition schema, models, and executor.
 
 ## The Definition
 
 ```python
-from django_ai_sdk.workflows import WorkflowDefinition, WorkflowStep, WorkflowAction
+from django_ai_sdk.workflows import FieldDefinition, HookDefinition, StepDefinition, WorkflowDefinition
 
 workflow = WorkflowDefinition(
-    name="Summarize and alert",
+    name="summarize-and-alert",
+    input_fields={
+        "history": FieldDefinition(type="messages"),
+        "document": FieldDefinition(type="str", description="Document id"),
+    },
     steps=[
-        WorkflowStep(
-            name="summarize",
+        StepDefinition(
+            name="summary",
             agent_id="summarizer",
-            output_key="summary",
         ),
-        WorkflowStep(
-            name="classify",
+        StepDefinition(
+            name="priority",
             agent_id="classifier",
-            requires=["summary"],                # read step 1's output
-            output_key="priority",
+            requires=["summary"],               # read the step named "summary"
             output_fields={                     # structured output
-                "priority": {"type": "str", "description": "high|low"},
-                "score": {"type": "float"},
+                "priority": FieldDefinition(type="str", description="high|low"),
+                "score": FieldDefinition(type="float"),
             },
         ),
     ],
-    actions=[WorkflowAction(type="thread_message", input_key="summary")],
+    hooks=[HookDefinition(type="thread_message", config={"step": "summary"})],
 )
 ```
 
+### Two namespaces
+
+A run's state has two halves, and nothing crosses between them. `ctx.input(name)` is what the caller supplied; `ctx.step(name)` is what an earlier step produced, keyed by **that step's own name**. A step needs no `output_key`, and an input and a step may go by the same word without either being renamed.
+
+### Declared inputs
+
+`input_fields` compiles to a pydantic model, the same way `output_fields` does — one mechanism pointed in two directions. A run's inputs are validated against it once, before the run is queued, so a caller who forgot something hears about it on the call that queued the run rather than three steps in. Undeclared extras are dropped: the schema is the contract.
+
+| `type` | Becomes |
+| --- | --- |
+| `str` / `int` / `float` / `bool` | The Python type. |
+| `list` / `dict` | A JSON container the host shapes itself. |
+| `messages` | `list[ChatMessage]`, coerced from the JSON dicts a run crosses the queue as. An agent step sends the fields declared this way as its transcript — named, never inferred from the shape of a value. |
+
+`messages` is the one SDK-owned type, because it is the one the SDK itself consumes. A file is a `str` id or a `dict` reference under whatever key the host picks — the engine has no opinion about what `pdfs` means, and the step that reads it does.
+
+A definition that declares no `input_fields` takes what it is given: a code-authored pipeline is not obliged to describe itself in JSON.
+
+There is no `file` type. A file is whatever the host already stores it as — an id or a reference the step resolves — so a type that coerced nothing would only add a name. There is no workflow-level `output_fields` either: a run's `outputs` is the map of step outputs keyed by step name, and each step already declares its own shape.
+
 ### Step semantics
 
-Each `WorkflowStep` runs its `agent_id` via `agent.run()` (non-streaming). Its result is stored under `output_key` in the run's outputs.
+An agent step runs its `agent_id` via `agent.run()` (non-streaming). Its result is filed under the step's `name`.
 
 | Field | Purpose |
 | --- | --- |
 | `type` | `"agent"`, or a key of [`AI_SDK_WORKFLOW_STEPS`](/manual/settings/) naming a registered `Step` class. |
-| `name` | Display name for the step record; defaults to `output_key`. |
+| `name` | Required, unique. The key the result is filed under, the key later steps require, and the key the record is written under. |
 | `agent_id` | Agent to run (resolved through `AgentService`). Required for `type: "agent"`, refused otherwise. |
-| `output_key` | The run-state name the result is filed under. Required for an agent step; a registered step may omit it when its result is the rows it wrote. |
-| `requires` | Run-state names this step reads: an earlier step's `output_key` / `error_key`, or a key of the run's inputs. Each is passed to an agent step as a `[name]` user message. A name with no source is refused before any step runs. Definitions stored with the older `input_key` are rewritten into `requires` by migration `0005`; the schema no longer accepts the key. |
+| `requires` | Names of **earlier** steps this one reads. Each is passed to an agent step as a `[name]` user message. A name no earlier step declares is refused before any step runs. Inputs are not listed here — they are always available. |
 | `on_error` | `"fail"` stops the run; `"continue"` records the failure and runs the rest. |
-| `error_key` | When `on_error` is `"continue"` and the step fails, publish `{step, error}` under this run-state name so a later step (or action) can require it. Must differ from `output_key`. |
 | `system_prompt_override` | Optional system prompt for this step. |
-| `output_fields` | When set, the agent runs with structured output: a dynamic Pydantic model is built from the `{name: {type, description}}` map (`type` ∈ `str` / `int` / `float` / `bool`). A result that does not come back as that model fails the step. |
+| `output_fields` | Agent steps only. The agent runs with structured output: a pydantic model is built from the `{name: FieldDefinition}` map, and a result that does not come back as that model fails the step. A registered step returns what it returns, so declaring them there is refused. |
+| `hooks` | Hooks that fire for this step alone. |
 
-Both kinds compile to `Step` objects and run through the same runner, so every run reads back from one record.
+Both kinds compile to `Step` objects and run through the same runner, so every run reads back from one record. An agent step compiles to a configured `AgentStep` — there is no second agent-step class for definitions.
 
 ### Registered step types
 
@@ -63,7 +84,7 @@ AI_SDK_WORKFLOW_STEPS = {
 }
 ```
 
-The definition names and wires it — `name`, `requires`, `output_key`, `on_error` — and the class supplies the behaviour. A key whose path will not import is left out with a warning rather than breaking the site, and a definition naming an unregistered type is refused with `ImproperlyConfigured` listing what is registered.
+The definition names and wires it — `name`, `requires`, `on_error`, `hooks` — and the class supplies the behaviour. A key whose path will not import is left out with a warning rather than breaking the site, and a definition naming an unregistered type is refused with `ImproperlyConfigured` listing what is registered.
 
 An agent step — whether a code `AgentStep` or a JSON `type: "agent"` step — is permission-checked (`Operation.CHAT`) against the run's principal. A registered Python step is never permission-checked — the registry is a deployment-level decision. Payload object ids in step inputs are **not** ACL-checked by the engine; hosts that need object auth must enforce it inside the step or refuse to expose those types at runtime.
 
@@ -73,19 +94,46 @@ An agent step — whether a code `AgentStep` or a JSON `type: "agent"` step — 
 | --- | --- | --- |
 | Step types | `AI_SDK_WORKFLOW_STEPS` | Python `Step` classes a JSON definition may compose |
 | Workflow names | `workflows.register` / `WorkflowSettings.slug` | Runnable definitions, keyed by slug |
-| Actions | `AI_SDK_WORKFLOW_ACTIONS` (+ built-in `thread_message`) | Post-run side effects |
+| Hooks | `AI_SDK_WORKFLOW_HOOKS` | Everything that watches a run rather than doing its work |
 
-### Actions
+### Hooks
 
-`WorkflowAction(type, input_key)` runs after all steps complete. The `type` is looked up in the action registry; the action receives `(payload, ActionContext)` where `ActionContext` carries `user`, `agent_id`, and `source`. Unknown types and missing inputs are skipped with a warning.
+One kind of object, attached in two places. `HookDefinition(type, config)` names a key of `AI_SDK_WORKFLOW_HOOKS`; `config` is handed to the hook as it is built, so one registered class serves every definition that names it.
+
+| Attached to | Sees |
+| --- | --- |
+| `WorkflowDefinition.hooks` | `on_run_start`, `on_step_start`, `on_step_end`, `on_run_end` — the run, and every step in it. |
+| `StepDefinition.hooks` | `on_step_start`, `on_step_end` — that step alone. |
+
+Reacting to a failure is a hook's job: a workflow-level hook sees every step that ends, whatever its status. A hook cannot fail the run — steps do the work, hooks watch it — so one that raises is logged against its name and the walk carries on. The single exception is `StepAlreadyRunning`, which is how a hook refuses a duplicate delivery. The package ships no hooks a definition can name — delivering a result somewhere is the host's business. `RunRecorder` is the one built-in, and the executor always attaches it.
+
+A key whose path will not import is left out with a warning rather than breaking the site; a definition naming a hook that is not registered is refused when it is created. `WorkflowService.list_hooks()` returns `[{key, description}]` from the registry.
+
+```python
+from django_ai_sdk.workflows import WorkflowHook
+
+
+class ConsoleLogHook(WorkflowHook):
+    description = "Log each step as it settles"
+
+    async def on_step_end(self, ctx, step, outcome):
+        print(ctx.workflow, step.name, outcome.status)
+```
+
+```python
+# settings.py
+AI_SDK_WORKFLOW_HOOKS = {
+    "console_log": "apps.agents.hooks.ConsoleLogHook",
+}
+```
 
 ## Models
 
 | Model | Purpose |
 | --- | --- |
 | `WorkflowSettings` | A persisted, named workflow: `name`, `slug` (registry key, shared with code declarations), `definition` (JSON), `active`, `created_by`. |
-| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed`, `workflow_definition` snapshot, `inputs` (run-state seed, including `messages` for chat-shaped runs), `outputs` (completed `provides` and failed `error_key` payloads), `error`, `task_id`, `user`. |
-| `WorkflowRunStep` | Per-step progress: `sequence`, `step_name`, `output_key`, `output`, status `pending` / `running` / `completed` / `failed` / `skipped`, `detail` / `error`, timestamps. |
+| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed`, `workflow_definition` snapshot, `inputs` (what the caller supplied), `outputs` (`{step name: output}` for every completed step), `error`, `task_id`, `user`. |
+| `WorkflowRunStep` | Per-step progress: `sequence`, `step_name`, `output`, status `pending` / `running` / `completed` / `failed` / `skipped`, `detail` / `error`, timestamps. |
 
 A `WorkflowSettings.to_workflow_definition()` round-trips the stored JSON.
 
@@ -95,7 +143,6 @@ A `WorkflowSettings.to_workflow_definition()` round-trips the stored JSON.
 from django_ai_sdk.workflows import WorkflowService
 
 # Ad-hoc run (inline definition, no persisted record)
-run = await WorkflowService.run(workflow, messages, user=request.user)
 run = await WorkflowService.run(workflow, inputs={"document": doc}, user=request.user)
 
 # Persisted workflows
@@ -108,7 +155,7 @@ await WorkflowService.list_workflows(active_only=True)
 # Run a persisted workflow. Pass run_id only to resume that row (reuses its
 # stored inputs; completed runs short-circuit). Omit run_id for a fresh run.
 run = await WorkflowService.run_by_id(
-    workflow_id, messages, inputs={"file": ref}, user=request.user, run_id=None
+    workflow_id, inputs={"file": ref}, user=request.user, run_id=None
 )
 
 # Run history
@@ -116,20 +163,19 @@ runs = await WorkflowService.list_runs(workflow_id)
 run = await WorkflowService.get_run(run_id)      # prefetches steps
 ```
 
-A definition is checked when it is written, not only when it runs: `create` and `update` refuse one that could not execute (unknown step or action type, a duplicate `output_key` or step name, `error_key` without `on_error="continue"`, or either key shadowing the reserved `messages` input).
+A definition is checked when it is written, not only when it runs: `create` and `update` refuse one that could not execute (an unknown step type or hook, a duplicate step name, a `requires` no earlier step produces, or an `input_fields` / `output_fields` map that pydantic will not build). Inputs are checked on the call that queues the run.
 
 ## Execution Model
 
-`WorkflowService.run()` creates a `WorkflowRun` in `pending`, then `WorkflowExecutor.enqueue()` schedules the `execute_workflow` background task (`django_tasks`), which runs `WorkflowExecutor.run()`. Whether that happens in a worker or inline in the calling request depends on the configured `TASKS` backend - see [Background Tasks](/manual/settings/#background-tasks).
+`WorkflowService.run()` creates a `WorkflowRun` in `pending`, then `WorkflowExecutor.enqueue()` schedules the `execute_workflow` background task (`django_tasks`), which runs `WorkflowExecutor.run()`. Whether that happens in a worker or inline in the calling request depends on the configured `TASKS` backend — see [Background Tasks](/manual/settings/#background-tasks).
 
 `WorkflowExecutor.run()`:
 
-1. Seeds `WorkflowRun.inputs` via `normalize_workflow_inputs` (messages always JSON-safe).
-2. Marks the run `running` (or returns early for an already-completed run; the operation is idempotent).
-3. Compiles the definition to `Step` objects and runs them through one `StepRunner` (JSON and code share this path).
-4. **Replays** completed steps from a previous attempt into outputs, so a resumed run continues where it left off.
-5. Runs registered actions with `ActionContext`.
-6. Marks the run `completed` with the full outputs; a step exception marks the run (and its step) `failed` and propagates.
+1. Marks the run `running` (or returns early for an already-completed run; the operation is idempotent).
+2. Validates the run's inputs against the definition's `input_fields`, when it declares any.
+3. Compiles the definition to `Step` objects and hooks, and runs them through `run_steps` (JSON and code share this path).
+4. **Replays** completed steps from a previous attempt, so a resumed run continues where it left off and does not re-date the rows it is trusting.
+5. Marks the run `completed` with `{step name: output}` for every completed step; a step exception marks the run (and its step) `failed` and propagates.
 
 ### Known limits
 
@@ -139,112 +185,46 @@ A definition is checked when it is written, not only when it runs: `create` and 
 - No object-level ACL on payload PKs (document ids, etc.).
 - In-turn multi-agent chat without a durable record belongs to **subagents**, not workflows.
 
-## Custom Actions
-
-```python
-from django_ai_sdk.workflows.actions import ActionContext, BaseAction
-
-class ConsoleLogAction:
-    description = "Log the payload"
-
-    async def execute(self, payload, context: ActionContext) -> None:
-        print(context.source, payload)
-```
-
-```python
-# settings.py
-AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "apps.agents.actions.ConsoleLogAction",
-}
-```
-
-A key whose path will not import is left out with a warning rather than breaking the site, and a definition naming an action that is not registered is refused when it is created.
-
-`WorkflowService.list_actions()` returns `[{key, description}]` from the registry. Built-in: `thread_message`.
-
 ## Step Workflows
 
-`WorkflowExecutor` compiles a definition into `Step` objects and calls the `run_steps` walker. The [Step Workflows guide](/workflow-steps/) covers writing step classes; this section is the reference for stored definitions, runs, and actions.
+`WorkflowExecutor` compiles a definition into `Step` objects and calls the `run_steps` walker. The [Step Workflows guide](/workflow-steps/) covers writing step classes and hooks; this section is the reference for the runtime objects.
 
 ### Step
 
 | Attribute | Default | Purpose |
 | --- | --- | --- |
-| `name` | `""` | Log key and sink key; required, unique within a pipeline. |
-| `requires` | `()` | Run-state names the step reads. Each must be a key of the run's `inputs` or provided by an **earlier** step, or the pipeline is refused before anything runs. |
-| `provides` | `""` | The one name this step's output is filed under, or `""` to publish nothing. One name, one producer, and not a name the run's `inputs` already carry. |
+| `name` | `""` | Required, unique within a pipeline. The key its outcome is recorded under and the key later steps require. |
+| `requires` | `()` | Steps declared **earlier** that this one reads. A name that is not one of them is refused before anything runs. |
 | `on_error` | `OnError.FAIL` | `FAIL` aborts the run; `CONTINUE` records the failure and runs the rest. |
-| `error_key` | `""` | When `CONTINUE` fails the step, publish `{step, error}` under this name so a handler can `requires` it (and so it lands in `WorkflowRun.outputs`). Empty means the step publishes nothing on failure. |
+| `hooks` | `()` | Hooks that fire for this step alone. |
 
-`skip_when(ctx) -> str` returns a reason to skip or `""` to run. A skipped step is recorded with its reason and publishes nothing, so whatever reads its output skips in turn. `run(ctx) -> StepOutcome` is the work.
+`skip_when(ctx) -> str` returns a reason to skip or `""` to run. A skipped step is recorded with its reason and produces nothing, so whatever reads it skips in turn. `run(ctx) -> StepOutcome` is the work.
 
-`AgentStep` adds `agent` (an `Agent` subclass) and `schema` (a real pydantic model, so nested output is expressible); it implements `run` as one structured call, with async `system_prompt(ctx)` and `user_message(ctx)` hooks, which may query. A `None` result is reported as `failed`, not stored.
+`AgentStep` adds `agent` / `agent_id`, `schema` (a real pydantic model, so nested output is expressible), `instructions` and `history` (the inputs to send as the conversation); it implements `run` as one structured call, with async `system_prompt(ctx)`, `user_message(ctx)` and `messages(ctx)` hooks, which may query. A `None` result is reported as `failed`, not stored.
 
-### StepContext and StepOutcome
+### WorkflowContext and StepOutcome
 
-| `StepContext` | Purpose |
+One context, for steps and hooks alike.
+
+| `WorkflowContext` | Purpose |
 | --- | --- |
-| `inputs` | What the caller passed to `run_steps`. |
-| `outputs` | What earlier steps produced, keyed by the names they declared in `provides`. |
+| `inputs` / `input(name)` | What the caller supplied, coerced to the declared `input_fields`. |
+| `steps` / `step(name)` | What has run so far, keyed by step name. `step()` returns the output of a **completed** step; `steps[name]` is the whole outcome, a failure's detail included. |
 | `principal` | The user the steps act as; forwarded to `AgentStep` calls. |
-
-`ctx.get(name, default)` reads either half, outputs first.
+| `workflow` / `run_id` | The definition's name and the run's id, for hooks that report on the run. |
 
 | `StepOutcome` | Purpose |
 | --- | --- |
-| `output` | The step's value, filed under the name it declares in `provides` and ignored when it declares none. |
+| `output` | The step's value, filed under the step's own name. |
 | `status` | `completed` / `failed` / `skipped`. Anything but `completed` blocks dependents. |
 | `detail` | One line for a log or a timeline. |
 
 ### Running
 
-`run_steps(steps, *, inputs=None, principal=None, sink=None)` validates the pipeline, runs the steps **in the order they were declared**, and returns `{step_name: StepOutcome}`. A step runs once every name in its `requires` is on the run's state; one that is not there yet makes the step `skipped`, naming what it waited for. A re-dispatch resumes, skipping the steps the sink reports as already completed. Without `sink=` nothing is recorded.
+`run_steps(steps, *, inputs=None, principal=None, hooks=(), completed=None, workflow="", run_id="")` validates the pipeline, runs the steps **in the order they were declared**, and returns `{step_name: StepOutcome}`. A step runs once every step in its `requires` has completed; one that has not makes the step `skipped`, naming what it waited for. `completed=` replays a previous attempt's finished steps. Without `hooks=` nothing is recorded.
 
 ### Models
 
-`WorkflowRunStep` carries `RUNNING` and `SKIPPED` statuses and a `detail` column holding the one line a step's outcome reported. `sequence` is the step's position in the declared pipeline, and `("run", "sequence")` is its identity — a skipped step never opens, so `started_at` cannot order a run.
+`WorkflowRunStep` carries `RUNNING` and `SKIPPED` statuses and a `detail` column holding the one line a step's outcome reported. `sequence` is the step's position in the declared pipeline, and `("run", "sequence")` is its identity — a skipped step never starts, so `started_at` cannot order a run.
 
 A step that never ran is a `skipped` row naming what it was waiting on, not an absence.
-
-### Sinks
-
-| `StepSink` | Called |
-| --- | --- |
-| `begin()` | Before the first step is considered; default sink marks the run `running`. |
-| `completed()` | Before running, for resume: steps already finished, name to stored output. |
-| `open(step)` | Before a step runs. |
-| `close(step, outcome)` | After a step settles, skips included. A skipped step never opened, so `close` has to create the row. |
-| `fail(step, exc)` | When a step raised. |
-| `end(outcomes, error)` | After the walk; default sink stamps `failed` when the walker aborted. |
-
-Exactly one of `close` and `fail` settles a step: a step that raised gets `fail` and no `close`; one that returned `status="failed"` gets `close` and no `fail`. A step replayed from `completed()` gets neither, so a resume does not re-date the row it is trusting.
-
-The default, `WorkflowRunStepSink(run, steps)`, writes one `WorkflowRunStep` row per step; it takes the declared pipeline because that is what fixes each row's `sequence` and `output_key`.
-
-```python
-run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING)
-await run_steps(PIPELINE, inputs={"document": document}, sink=WorkflowRunStepSink(run, PIPELINE))
-```
-
-Pass a sink of your own instead when the host already keeps a step table, so one fact is not stored twice under two retention policies. It needs the four methods above and nothing else — no base class, no registration:
-
-```python
-class DocumentSink:
-    def __init__(self, document):
-        self.document = document
-
-    async def completed(self):
-        return {
-            row.step: None
-            async for row in ExtractionStep.objects.filter(
-                document=self.document, status="completed"
-            )
-        }
-
-    async def open(self, step): ...
-    async def close(self, step, outcome): ...
-    async def fail(self, step, exc): ...
-```
-
-`open` may raise to refuse the run. It is called outside the runner's error handling, so the exception reaches the caller instead of being recorded as a step failure — which is what a sink whose rows are also a claim needs, when dispatch is at-least-once. Raise `StepAlreadyRunning` for that, and the queued entry point treats it as the ordinary case rather than a failure.
-

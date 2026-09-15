@@ -245,15 +245,16 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
     "get_memory_files": "apps.agents.tools.get_memory_files",
 }
 
-# Default Workflow actions
-# Step classes the `thread-digest` definition composes. The package ships none.
+# Workflow composables. The package ships neither step types nor hooks; both
+# registries are the gate on what a JSON definition may name.
 AI_SDK_WORKFLOW_STEPS = {
     "gather_thread": "apps.agents.steps.GatherStep",
     "thread_digest": "apps.agents.steps.DigestStep",
 }
 
-AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "apps.agents.actions.ConsoleLogAction",
+AI_SDK_WORKFLOW_HOOKS = {
+    "console_log": "apps.agents.hooks.ConsoleLogHook",
+    "thread_message": "apps.agents.hooks.ThreadMessageHook",
 }
 
 # Default asssitants

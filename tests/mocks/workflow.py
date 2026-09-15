@@ -1,4 +1,4 @@
-"""Workflow step and sink fakes.
+"""Workflow step and hook fakes.
 
 A step that appends to a list is the whole test double: the model call is
 the only boundary these tests care about, and none of them cross it.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django_ai_sdk.workflows import OnError, Step, StepContext, StepOutcome
+from django_ai_sdk.workflows import OnError, Step, StepOutcome, WorkflowContext, WorkflowHook
 
 
 class FakeStep(Step):
@@ -22,30 +22,28 @@ class FakeStep(Step):
         self,
         name: str,
         *,
-        provides: str = "",
         requires: tuple[str, ...] = (),
         outcome: StepOutcome | None = None,
         raises: Exception | None = None,
         skip_reason: str = "",
         on_error: OnError = OnError.FAIL,
-        error_key: str = "",
+        hooks: tuple[WorkflowHook, ...] = (),
         journal: list[str] | None = None,
     ) -> None:
         self.name = name
-        self.provides = provides
         self.requires = tuple(requires)
         self.outcome = outcome if outcome is not None else StepOutcome(detail=name)
         self.raises = raises
         self.skip_reason = skip_reason
         self.on_error = on_error
-        self.error_key = error_key
+        self.hooks = tuple(hooks)
         self.journal = journal
         self.calls = 0
 
-    async def skip_when(self, ctx: StepContext) -> str:
+    async def skip_when(self, ctx: WorkflowContext) -> str:
         return self.skip_reason
 
-    async def run(self, ctx: StepContext) -> StepOutcome:
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
         self.calls += 1
         if self.journal is not None:
             self.journal.append(self.name)
@@ -54,27 +52,21 @@ class FakeStep(Step):
         return self.outcome
 
 
-class RecordingSink:
-    """A StepSink that appends every call, for assertions."""
+class RecordingHook(WorkflowHook):
+    """A WorkflowHook that appends every call, for assertions."""
 
-    def __init__(self, completed_names: dict[str, Any] | None = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        super().__init__(config)
         self.events: list[tuple[str, str, Any]] = []
-        self.completed_names: dict[str, Any] = completed_names or {}
 
-    async def completed(self) -> dict[str, Any]:
-        return dict(self.completed_names)
+    async def on_run_start(self, ctx: WorkflowContext) -> None:
+        self.events.append(("run_start", "", None))
 
-    async def begin(self) -> None:
-        self.events.append(("begin", "", None))
+    async def on_run_end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
+        self.events.append(("run_end", "", None if error is None else str(error)))
 
-    async def end(self, outcomes: Any, error: BaseException | None) -> None:
-        self.events.append(("end", "", None if error is None else str(error)))
+    async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
+        self.events.append(("step_start", step.name, None))
 
-    async def open(self, step: str) -> None:
-        self.events.append(("open", step, None))
-
-    async def close(self, step: str, outcome: StepOutcome) -> None:
-        self.events.append(("close", step, outcome.status))
-
-    async def fail(self, step: str, exc: BaseException) -> None:
-        self.events.append(("fail", step, str(exc)))
+    async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
+        self.events.append(("step_end", step.name, outcome.status))
