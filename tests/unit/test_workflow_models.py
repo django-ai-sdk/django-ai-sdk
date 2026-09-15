@@ -1,107 +1,104 @@
-"""
-Unit tests for workflow Pydantic models.
-"""
+"""The pydantic shape of a definition: what an author may and may not write."""
 
 import pytest
 from pydantic import ValidationError
 
 from django_ai_sdk.workflows.schemas import (
-    FieldType,
-    StepField,
-    WorkflowAction,
+    FieldDefinition,
+    HookDefinition,
+    StepDefinition,
     WorkflowDefinition,
-    WorkflowStep,
 )
 
 
-class TestStepField:
+class TestFieldDefinition:
     def test_defaults(self):
-        f = StepField()
+        f = FieldDefinition()
         assert f.type == "str"
         assert f.description == ""
+        assert f.required is True
 
-    def test_all_valid_types(self):
-        for t in ("str", "int", "float", "bool"):
-            f = StepField(type=t)
-            assert f.type == t
+    def test_every_valid_type(self):
+        for t in ("str", "int", "float", "bool", "list", "dict", "messages"):
+            assert FieldDefinition(type=t).type == t
 
     def test_rejects_invalid_type(self):
         with pytest.raises(ValidationError):
-            StepField(type="datetime")
+            FieldDefinition(type="datetime")
 
     def test_rejects_empty_type(self):
         with pytest.raises(ValidationError):
-            StepField(type="")
+            FieldDefinition(type="")
 
 
-class TestWorkflowStep:
+class TestStepDefinition:
     def test_minimal(self):
-        s = WorkflowStep(agent_id="abc", output_key="result")
-        assert s.name == ""
+        s = StepDefinition(name="result", agent_id="abc")
+        assert s.type == "agent"
         assert s.requires == []
+        assert s.hooks == []
         assert s.system_prompt_override is None
         assert s.output_fields == {}
 
-    def test_with_name(self):
-        s = WorkflowStep(name="Extract", agent_id="abc", output_key="result")
-        assert s.name == "Extract"
+    def test_the_name_is_required(self):
+        """It is the key a result is filed under, so there is no default."""
+        with pytest.raises(ValidationError):
+            StepDefinition(name="", agent_id="abc")
 
     def test_output_fields_parsed(self):
-        s = WorkflowStep(
+        s = StepDefinition(
+            name="result",
             agent_id="abc",
-            output_key="result",
             output_fields={"topic": {"type": "str", "description": "main topic"}},
         )
-        assert isinstance(s.output_fields["topic"], StepField)
+        assert isinstance(s.output_fields["topic"], FieldDefinition)
         assert s.output_fields["topic"].type == "str"
 
     def test_output_fields_invalid_type_rejected(self):
         with pytest.raises(ValidationError):
-            WorkflowStep(
-                agent_id="abc",
-                output_key="result",
-                output_fields={"topic": {"type": "list"}},
-            )
+            StepDefinition(name="result", agent_id="abc", output_fields={"topic": {"type": "date"}})
 
 
-class TestWorkflowAction:
+class TestHookDefinition:
     def test_minimal(self):
-        a = WorkflowAction(type="log")
-        assert a.input_key is None
+        assert HookDefinition(type="log").config == {}
 
-    def test_with_input_key(self):
-        a = WorkflowAction(type="console_log", input_key="summary")
-        assert a.input_key == "summary"
+    def test_with_config(self):
+        """One registered class serves every definition that names it."""
+        hook = HookDefinition(type="thread_message", config={"step": "summary"})
+        assert hook.config == {"step": "summary"}
 
 
 class TestWorkflowDefinition:
     def test_minimal(self):
-        d = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="abc", output_key="result")]
-        )
+        d = WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="abc")])
         assert d.name == ""
-        assert d.actions == []
+        assert d.hooks == []
+        assert d.input_fields == {}
 
     def test_round_trip_json(self):
         d = WorkflowDefinition(
             name="pipeline",
+            input_fields={"history": FieldDefinition(type="messages")},
             steps=[
-                WorkflowStep(
-                    name="Step 1",
+                StepDefinition(
+                    name="summary",
                     agent_id="abc-123",
-                    output_key="summary",
-                    output_fields={"text": StepField(type="str", description="output")},
+                    output_fields={"text": FieldDefinition(type="str", description="output")},
+                    hooks=[HookDefinition(type="console_log")],
                 )
             ],
-            actions=[WorkflowAction(type="console_log", input_key="summary")],
+            hooks=[HookDefinition(type="console_log", config={"step": "summary"})],
         )
-        dumped = d.model_dump()
-        restored = WorkflowDefinition.model_validate(dumped)
+
+        restored = WorkflowDefinition.model_validate(d.model_dump())
+
         assert restored.name == d.name
-        assert restored.steps[0].name == "Step 1"
+        assert restored.input_fields["history"].type == "messages"
         assert restored.steps[0].output_fields["text"].type == "str"
-        assert restored.actions[0].type == "console_log"
+        assert restored.steps[0].hooks[0].type == "console_log"
+        assert restored.hooks[0].config == {"step": "summary"}
 
     def test_empty_steps_allowed(self):
-        d = WorkflowDefinition(steps=[])
-        assert d.steps == []
+        """The schema permits it; register, create and execute all refuse it."""
+        assert WorkflowDefinition(steps=[]).steps == []

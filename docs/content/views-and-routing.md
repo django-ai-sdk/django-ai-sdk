@@ -240,23 +240,23 @@ The SDK ships a workflow engine for orchestrating multi-step agent tasks. A `Wor
 from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 
 # Run an ad-hoc workflow
-run = await WorkflowService.run(workflow, messages, user=request.user)
+run = await WorkflowService.run(workflow, inputs={"document": doc}, user=request.user)
 
 # Persisted workflows (WorkflowSettings)
 record = await WorkflowService.create(name, workflow, user=request.user)
 await WorkflowService.update(workflow_id, name=..., workflow=..., active=...)
-await WorkflowService.run_by_id(workflow_id, messages, user=request.user)
+await WorkflowService.run_by_id(workflow_id, inputs={"document": doc}, user=request.user)
 await WorkflowService.get_run(run_id)
 
-# Available actions (declared in AI_SDK_WORKFLOW_ACTIONS)
-await WorkflowService.list_actions()
+# Available hooks (declared in AI_SDK_WORKFLOW_HOOKS)
+await WorkflowService.list_hooks()
 ```
 
-Action implementations are wired in settings:
+Hook implementations are wired in settings:
 
 ```python
-AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "apps.agents.actions.ConsoleLogAction",
+AI_SDK_WORKFLOW_HOOKS = {
+    "console_log": "apps.agents.hooks.ConsoleLogHook",
 }
 ```
 

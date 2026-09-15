@@ -18,7 +18,6 @@ from django_ai_sdk.agents.services import (
     list_agents,
     remove_agent_group,
 )
-from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
 from django_ai_sdk.permissions import Operation, PermissionDenied
@@ -918,7 +917,6 @@ class WorkflowRunStepSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     sequence = serializers.IntegerField()
     step_name = serializers.CharField()
-    output_key = serializers.CharField()
     output = serializers.DictField(allow_null=True, required=False)
     status = serializers.CharField()
     error = serializers.CharField()
@@ -949,7 +947,7 @@ class WorkflowRunAPIView(APIView):
             workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
             run = await WorkflowService.run(
                 workflow,
-                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                inputs=request.data.get("inputs", {}),
                 user=request.user,
             )
             return Response({"run_id": str(run.id), "status": run.status}, status=202)
@@ -966,7 +964,7 @@ class WorkflowRunByIdAPIView(APIView):
             run_id = request.data.get("run_id")
             run = await WorkflowService.run_by_id(
                 workflow_id,
-                [ChatMessage(**m) for m in request.data.get("messages", [])],
+                inputs=request.data.get("inputs", {}),
                 user=request.user,
                 run_id=run_id,
             )
@@ -1004,11 +1002,11 @@ class WorkflowRunDetailAPIView(APIView):
             return Response({"message": str(e)}, status=500)
 
 
-class WorkflowActionsAPIView(APIView):
+class WorkflowHooksAPIView(APIView):
     def get(self, request: Request) -> Response:
         from django_ai_sdk.workflows import WorkflowService
 
-        return Response(WorkflowService.list_actions())
+        return Response(WorkflowService.list_hooks())
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -1310,7 +1308,7 @@ urlpatterns = [
     ),
     path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
     path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
-    path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
+    path("workflows/hooks/", WorkflowHooksAPIView.as_view(), name="workflow-hooks"),
     path(
         "workflows/<str:workflow_id>/runs/",
         WorkflowRunListAPIView.as_view(),

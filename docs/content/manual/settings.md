@@ -72,7 +72,8 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Workflow action registry: `{"console_log": "path.to.ConsoleLogAction"}`. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOW_HOOKS` | `{}` | Hooks a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.hooks.ConsoleLogHook"}`. Every hook is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
 ## Streaming and Titles
 
