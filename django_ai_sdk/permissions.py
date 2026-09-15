@@ -71,6 +71,10 @@ class Operation(StrEnum):
     DELETE_AGENT = "delete_agent"
     USE_INTEGRATION = "use_integration"
     MANAGE_INTEGRATION = "manage_integration"
+    VIEW_AUTOMATION = "view_automation"
+    RUN_AUTOMATION = "run_automation"
+    MANAGE_AUTOMATION = "manage_automation"
+    SUBSCRIBE_AUTOMATION = "subscribe_automation"
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
@@ -81,6 +85,7 @@ class PermissionDomain(StrEnum):
     THREAD = "thread"
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
+    AUTOMATIONS = "automations"
     WORKFLOW = "workflow"
 
 
@@ -438,6 +443,22 @@ class IntegrationDefaultPermission(BasePermission):
         return user is not None and bool(user.is_authenticated)
 
 
+class AutomationDefaultPermission(BasePermission):
+    """Read and self-subscribe for any authenticated user; run and manage for staff.
+
+    Enabling or firing an automation acts on every other user; subscribing does not.
+    """
+
+    READ = frozenset({Operation.VIEW_AUTOMATION, Operation.SUBSCRIBE_AUTOMATION})
+
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        if user is None or not user.is_authenticated:
+            return False
+        if operation in self.READ:
+            return True
+        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
 class WorkflowDefaultPermission(BasePermission):
     """Any authenticated user may view, run, and author workflows.
 
@@ -529,6 +550,7 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
+    PermissionDomain.AUTOMATIONS: ["django_ai_sdk.permissions.AutomationDefaultPermission"],
     PermissionDomain.WORKFLOW: ["django_ai_sdk.permissions.WorkflowDefaultPermission"],
 }
 
@@ -668,6 +690,14 @@ def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
     if perms:
         return perms
     return get_domain_permissions(PermissionDomain.INTEGRATIONS)
+
+
+def get_automation_permissions(automation: Any) -> list[type[BasePermission]]:
+    """`automation.permissions` if set, else the AUTOMATIONS domain default."""
+    perms = getattr(automation, "permissions", None)
+    if perms:
+        return perms
+    return get_domain_permissions(PermissionDomain.AUTOMATIONS)
 
 
 async def has_perms(

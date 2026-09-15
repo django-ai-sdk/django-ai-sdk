@@ -24,6 +24,9 @@ PIRATE = PirateBasicAgent().agent_id
 register(
     WorkflowDefinition(
         name="harbour-report",
+        # The turn the run starts from. `daily-harbour-report` in automations.py
+        # writes it on a schedule; an API caller supplies it directly.
+        input_fields={"messages": FieldDefinition(type="messages")},
         steps=[
             StepDefinition(
                 name="forecast",
@@ -46,6 +49,7 @@ register(
 register(
     WorkflowDefinition(
         name="sailing-verdict",
+        input_fields={"messages": FieldDefinition(type="messages")},
         steps=[
             StepDefinition(
                 name="forecast",

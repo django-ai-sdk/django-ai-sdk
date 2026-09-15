@@ -75,6 +75,15 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
 | `AI_SDK_WORKFLOW_HOOKS` | `{}` | Hooks a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.hooks.ConsoleLogHook"}`. Every hook is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
+## Automations
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_AUTOMATIONS` | `{}` | Per-automation overrides, `{name: {KEY: value}}`. Recognised keys are `ENABLED`, `CRON` and `TIMEZONE`, and they win over the class attribute. A name nothing declares is reported as `W005` rather than silently doing nothing. See [Automations](/manual/automations/). |
+| `AI_SDK_AUTOMATIONS_ENABLED` | `True` | Global kill switch. `False` dispatches nothing, whatever any individual automation says. `run_automations --force <name>` bypasses it; a blanket `--force` does not. |
+| `AI_SDK_AUTOMATION_LEASE` | `3600` | Seconds a claimed automation stays locked. An expired lease is reclaimed, so a worker that died mid-run does not block the schedule forever. |
+| `AI_SDK_AUTOMATION_TIMEOUT` | `900` | Seconds one run may take before it is failed. `Automation.timeout` overrides it per automation. |
+
 ## Streaming and Titles
 
 | Setting | Default | Purpose |

@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "apps.agents",
     "apps.memories",
     "apps.integrations",
+    "apps.automations",
 ]
 
 MIDDLEWARE = [
@@ -300,6 +301,14 @@ AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
 AI_SDK_INTEGRATION_CACHE_TTL = 900  # seconds a discovered tool list stays fresh
 AI_SDK_INTEGRATION_TIMEOUT = 3  # seconds; hard bound on a cache-miss fetch
 AI_SDK_INTEGRATION_CB_COOLDOWN = 60  # seconds a failing integration is skipped
+
+
+# Declared but off, so the demo makes no model calls on a timer. Turn one on here or
+# from the admin, and run `manage.py run_automations --loop 60`.
+AI_SDK_AUTOMATIONS = {
+    "daily-harbour-report": {"ENABLED": False},
+    "weekly-sailing-verdict": {"ENABLED": False},
+}
 
 
 REST_FRAMEWORK = {

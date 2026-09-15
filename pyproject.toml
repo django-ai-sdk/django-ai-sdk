@@ -46,8 +46,10 @@ Issues = "https://github.com/django-ai-sdk/django-ai-sdk/issues"
 Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
-all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers]"]
+all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers,automations]"]
 providers = ["django-ai-sdk[anthropic,huggingface,mistral,ollama,openrouter]"]
+# Automations only schedule by cron, so croniter is only needed once you declare one.
+automations = ["croniter>=6.2"]
 rag = ["django-ai-sdk[chroma,qdrant]"]
 # Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
 # dependency now.

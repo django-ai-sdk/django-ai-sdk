@@ -27,6 +27,7 @@ from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
 from apps.agents.views.ninja import router as agents_router
+from apps.automations.views.ninja import router as automations_router
 from apps.integrations.views.ninja import router as integrations_router
 from apps.memories.views.ninja import router as memories_router
 
@@ -44,6 +45,8 @@ api.add_router("/memories", memories_router)
 # IntegrationService; the OAuth *callback* is the one leg the SDK does ship, since it
 # must sit at a fixed URL (included in urlpatterns below).
 api.add_router("/integrations", integrations_router)
+# Same stance for automations: AutomationService is the seam, the router is ours.
+api.add_router("/automations", automations_router)
 
 
 # Global safety net so service-layer errors never surface as 500s.
