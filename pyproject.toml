@@ -57,6 +57,7 @@ mcp = ["mcp-haystack>=1.4.1", "authlib>=1.7.2"]
 files = [
   "firecrawl-anydoc>=0.2.4",
   "openpyxl>=3.1.5",
+  "pdf-inspector>=1.20.0",
   "python-docx>=1.2.0",
   "python-pptx>=1.0.2",
 ]

@@ -921,6 +921,7 @@ all = [
     { name = "ollama-haystack" },
     { name = "openpyxl" },
     { name = "openrouter-haystack" },
+    { name = "pdf-inspector" },
     { name = "python-docx" },
     { name = "python-pptx" },
     { name = "qdrant-haystack" },
@@ -941,6 +942,7 @@ embeddings = [
 files = [
     { name = "firecrawl-anydoc" },
     { name = "openpyxl" },
+    { name = "pdf-inspector" },
     { name = "python-docx" },
     { name = "python-pptx" },
 ]
@@ -1039,6 +1041,7 @@ requires-dist = [
     { name = "ollama-haystack", marker = "extra == 'ollama'", specifier = ">=6.8.0" },
     { name = "openpyxl", marker = "extra == 'files'", specifier = ">=3.1.5" },
     { name = "openrouter-haystack", marker = "extra == 'openrouter'", specifier = ">=1.2.0" },
+    { name = "pdf-inspector", marker = "extra == 'files'", specifier = ">=1.20.0" },
     { name = "puremagic", specifier = ">=2.2.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "python-docx", marker = "extra == 'files'", specifier = ">=1.2.0" },
@@ -3004,6 +3007,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412, upload-time = "2026-08-04T18:15:28.737Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956, upload-time = "2026-08-04T18:15:27.159Z" },
+]
+
+[[package]]
+name = "pdf-inspector"
+version = "1.20.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/68/eec678a4f40e327c49409170d8c7886faa2aadc603c8541374f75ecb5b91/pdf_inspector-1.20.0.tar.gz", hash = "sha256:5ede2da97ca7067b03a18555b1dd116b95f854a0783685feb6089947057aad60", size = 1865932, upload-time = "2026-09-15T06:00:15.975Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/b7/f8976c0a29f644d36079fe84d9484c6206245e73b6a8dbbc4f4738267a3c/pdf_inspector-1.20.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:5ac717d1b0c0f46188f7a86ec3896dc01160a40110e42d638e0e63b010e14fcc", size = 5163657, upload-time = "2026-09-15T06:00:05.097Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/d9/4343be77b919f92c7ee9079337d107dfe8c5393ea02b56b04037e36e155a/pdf_inspector-1.20.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:93cab83b821f07e7d2a45657bd1c888d6c228942e4709f9ad34e29bc124a427f", size = 4875898, upload-time = "2026-09-15T06:00:07.767Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/1b/f46a3f6515090f6ed2e2a605ae451745d380979b043b06b4c6bded7b5fae/pdf_inspector-1.20.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e7291f60d7d8f043fd6323220670a7c8d364bf8d17979fc853c8764592ff68fe", size = 5425560, upload-time = "2026-09-15T06:00:10.135Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/55/0b520e496c3cd2ddac403853636df4063a13aff5ae2557ec5a98641522aa/pdf_inspector-1.20.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:08b840971b54923c2b952da0af2a32fa06eea73e9bb0cf72e30074fe2cb28c74", size = 5692496, upload-time = "2026-09-15T06:00:12.203Z" },
+    { url = "https://files.pythonhosted.org/packages/01/08/19e53276fc821ccacf9f113530a3eabc961e4eb7ee9665e4344f8289432c/pdf_inspector-1.20.0-cp38-abi3-win_amd64.whl", hash = "sha256:d0ac787badd6ef4b01cafef5babafd8a874d435c0337467b2a23dad8484b46ac", size = 5022575, upload-time = "2026-09-15T06:00:14.318Z" },
 ]
 
 [[package]]
