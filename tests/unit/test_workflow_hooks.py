@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from django_ai_sdk.workflows import (
     RunRecorder,
+    StepAlreadyRunning,
     WorkflowHook,
     StepOutcome,
     WorkflowContext,
@@ -119,6 +120,61 @@ class TestRunRecorder:
         await run.arefresh_from_db()
 
         assert run.status == WorkflowRun.Status.RUNNING
+
+
+@pytest.mark.django_db(transaction=True)
+class TestTheStepRowIsAClaim:
+    """A duplicate delivery of the same run reaches the same step twice."""
+
+    async def _recorder(self, *names):
+        run = await WorkflowRun.objects.acreate()
+        steps = [FakeStep(name) for name in names]
+        return run, RunRecorder(run, steps), steps
+
+    async def test_a_second_start_of_a_running_step_is_refused(self):
+        """Two workers racing a redelivery: the second loses the claim."""
+        run, recorder, (ocr,) = await self._recorder("ocr")
+
+        await recorder.on_step_start(CTX, ocr)
+
+        with pytest.raises(StepAlreadyRunning):
+            await recorder.on_step_start(CTX, ocr)
+
+        row = await run.steps.aget(step_name="ocr")
+        assert row.status == WorkflowRunStep.Status.RUNNING
+
+    async def test_two_independent_runs_do_not_contend(self):
+        """The claim is per-run: a step name repeated across runs is not a race."""
+        run_a, recorder_a, (ocr_a,) = await self._recorder("ocr")
+        run_b, recorder_b, (ocr_b,) = await self._recorder("ocr")
+
+        await recorder_a.on_step_start(CTX, ocr_a)
+        await recorder_b.on_step_start(CTX, ocr_b)  # does not raise
+
+        assert await run_a.steps.acount() == 1
+        assert await run_b.steps.acount() == 1
+
+    async def test_a_failed_step_may_be_reclaimed_on_a_legitimate_retry(self):
+        """A resume retries a FAILED step; that is not the race this guards against."""
+        run, recorder, (ocr,) = await self._recorder("ocr")
+
+        await recorder.on_step_start(CTX, ocr)
+        await recorder.on_step_end(CTX, ocr, StepOutcome(status="failed", detail="503"))
+
+        await recorder.on_step_start(CTX, ocr)  # does not raise
+
+        row = await run.steps.aget(step_name="ocr")
+        assert row.status == WorkflowRunStep.Status.RUNNING
+
+    async def test_a_second_start_of_a_completed_step_is_refused(self):
+        """Belt-and-braces: even if replay logic ever missed it, the row itself refuses."""
+        run, recorder, (ocr,) = await self._recorder("ocr")
+
+        await recorder.on_step_start(CTX, ocr)
+        await recorder.on_step_end(CTX, ocr, StepOutcome(output="the text"))
+
+        with pytest.raises(StepAlreadyRunning):
+            await recorder.on_step_start(CTX, ocr)
 
 
 class Loud(WorkflowHook):
