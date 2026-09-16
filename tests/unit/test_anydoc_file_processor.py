@@ -17,6 +17,16 @@ def _make_docx(text: str = "Hello from docx") -> bytes:
     return buf.getvalue()
 
 
+def _patch_pdf_type(monkeypatch, pdf_type: str) -> None:
+    import pdf_inspector
+
+    monkeypatch.setattr(
+        pdf_inspector,
+        "classify_pdf_bytes",
+        lambda data: MagicMock(pdf_type=pdf_type),
+    )
+
+
 class TestAnyDocFileProcessor:
     @pytest.fixture
     def processor(self):
@@ -27,10 +37,47 @@ class TestAnyDocFileProcessor:
         file.write_bytes(_make_docx())
         assert await processor.is_valid(str(file)) is True
 
-    async def test_is_valid_pdf(self, processor, tmp_path):
+    async def test_is_valid_text_based_pdf(self, processor, tmp_path, monkeypatch):
         file = tmp_path / "test.pdf"
         file.write_bytes(b"%PDF-1.4 fake pdf")
+        _patch_pdf_type(monkeypatch, "text_based")
         assert await processor.is_valid(str(file)) is True
+
+    @pytest.mark.parametrize("pdf_type", ["scanned", "image_based", "mixed"])
+    async def test_is_valid_rejects_pdf_needing_ocr(
+        self, processor, tmp_path, monkeypatch, pdf_type
+    ):
+        file = tmp_path / "test.pdf"
+        file.write_bytes(b"%PDF-1.4 fake pdf")
+        _patch_pdf_type(monkeypatch, pdf_type)
+        assert await processor.is_valid(str(file)) is False
+
+    async def test_is_valid_rejects_pdf_when_classify_raises(
+        self, processor, tmp_path, monkeypatch
+    ):
+        import pdf_inspector
+
+        file = tmp_path / "test.pdf"
+        file.write_bytes(b"not a pdf at all")
+
+        def raise_error(data: bytes):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(pdf_inspector, "classify_pdf_bytes", raise_error)
+        assert await processor.is_valid(str(file)) is False
+
+    async def test_is_valid_rejects_pdf_when_package_missing(
+        self, processor, tmp_path, monkeypatch
+    ):
+        """Missing optional dep must decline the file, not abort pipeline selection."""
+        import sys
+
+        file = tmp_path / "test.pdf"
+        file.write_bytes(b"%PDF-1.4 fake pdf")
+
+        # A None entry in sys.modules makes `import pdf_inspector` raise ImportError
+        monkeypatch.setitem(sys.modules, "pdf_inspector", None)
+        assert await processor.is_valid(str(file)) is False
 
     async def test_is_valid_odt(self, processor, tmp_path):
         file = tmp_path / "test.odt"
@@ -132,6 +179,20 @@ class TestAnyDocFileProcessor:
 
         def raise_error(data: bytes, fmt: str | None = None) -> str:
             raise anydoc.EncryptedError("encrypted")
+
+        monkeypatch.setattr(anydoc, "to_markdown_bytes", raise_error)
+        result = await processor.run(str(file))
+        assert result is None
+
+    async def test_run_returns_none_on_unexpected_error(self, processor, tmp_path, monkeypatch):
+        """Anything anydoc's runtime throws must not hard-fail the pipeline."""
+        import anydoc
+
+        file = tmp_path / "test.docx"
+        file.write_bytes(_make_docx())
+
+        def raise_error(data: bytes, fmt: str | None = None) -> str:
+            raise RuntimeError("external runtime died")
 
         monkeypatch.setattr(anydoc, "to_markdown_bytes", raise_error)
         result = await processor.run(str(file))
