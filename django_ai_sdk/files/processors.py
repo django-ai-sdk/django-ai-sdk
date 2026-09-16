@@ -286,7 +286,7 @@ class AnyDocFileProcessor(BaseFileProcessor):
     )
 
     async def is_valid(self, file: FileSource) -> bool:
-        """Validate by extension."" """
+        """Validate by extension."""
         name = get_file_name(file)
         if not name:
             return False

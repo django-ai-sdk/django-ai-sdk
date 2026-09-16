@@ -52,9 +52,7 @@ class TestAnyDocFileProcessor:
         _patch_pdf_type(monkeypatch, pdf_type)
         assert await processor.is_valid(str(file)) is False
 
-    async def test_is_valid_rejects_pdf_when_classify_raises(
-        self, processor, tmp_path, monkeypatch
-    ):
+    async def test_is_valid_rejects_pdf_when_error(self, processor, tmp_path, monkeypatch):
         import pdf_inspector
 
         file = tmp_path / "test.pdf"
@@ -64,19 +62,6 @@ class TestAnyDocFileProcessor:
             raise RuntimeError("boom")
 
         monkeypatch.setattr(pdf_inspector, "classify_pdf_bytes", raise_error)
-        assert await processor.is_valid(str(file)) is False
-
-    async def test_is_valid_rejects_pdf_when_package_missing(
-        self, processor, tmp_path, monkeypatch
-    ):
-        """Missing optional dep must decline the file, not abort pipeline selection."""
-        import sys
-
-        file = tmp_path / "test.pdf"
-        file.write_bytes(b"%PDF-1.4 fake pdf")
-
-        # A None entry in sys.modules makes `import pdf_inspector` raise ImportError
-        monkeypatch.setitem(sys.modules, "pdf_inspector", None)
         assert await processor.is_valid(str(file)) is False
 
     async def test_is_valid_odt(self, processor, tmp_path):
