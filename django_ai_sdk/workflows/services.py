@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.permissions import Operation, PermissionDomain, PermissionsMixin, user_pk
 from django_ai_sdk.workflows.actions import get_action_registry
+from django_ai_sdk.workflows.definitions import inputs_json_schema
 from django_ai_sdk.workflows.executor import WorkflowExecutor, open_run, validate_inputs
 from django_ai_sdk.workflows.registry import validate_definition
 
@@ -81,6 +82,31 @@ class WorkflowService(PermissionsMixin):
             {"key": key, "description": getattr(cls, "description", "")}
             for key, cls in get_action_registry().items()
         ]
+
+    @classmethod
+    async def get_inputs_schema(
+        cls,
+        workflow_id: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> dict[str, Any] | None:
+        """The stored workflow's inputs as a JSON Schema, for whoever composes a run.
+
+        One artifact, compiled from the same model the run validates against, so
+        a form and the executor cannot disagree. A row the caller may not run
+        reads as absent, the same as everywhere else.
+        """
+        from django_ai_sdk.workflows.models import WorkflowSettings
+
+        await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
+        record = await WorkflowSettings.objects.filter(id=workflow_id, active=True).afirst()
+        if record is None or not await cls.has_perms(
+            user, Operation.VIEW_WORKFLOW, obj=record, raise_on_deny=False
+        ):
+            return None
+        definition = record.to_workflow_definition()
+        validate_definition(definition)
+        return inputs_json_schema(definition)
 
     @classmethod
     async def create(

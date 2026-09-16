@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 
 from django_ai_sdk.workflows.executor import WorkflowExecutor
-from django_ai_sdk.workflows.schemas import StepDefinition, WorkflowDefinition
+from django_ai_sdk.workflows.schemas import FieldDefinition, StepDefinition, WorkflowDefinition
 from django_ai_sdk.workflows.services import WorkflowService
 
 
@@ -140,6 +140,43 @@ class TestWorkflowServiceRunById:
 
         with pytest.raises(WorkflowSettings.DoesNotExist):
             await WorkflowService.run_by_id(str(uuid4()), user=author)
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestWorkflowServiceInputsSchema:
+    """The JSON Schema a run is composed against, read from the same model the
+    executor validates with."""
+
+    async def test_it_returns_the_declared_shape(self, author):
+        definition = WorkflowDefinition(
+            name="test-workflow",
+            input_fields={"document": FieldDefinition(type="str")},
+            steps=[StepDefinition(name="result", agent_id="asst-1")],
+        )
+        record = await WorkflowService.create("WF", definition, user=author)
+
+        schema = await WorkflowService.get_inputs_schema(str(record.id), user=author)
+
+        assert schema["properties"]["document"] == {"title": "Document", "type": "string"}
+        assert schema["required"] == ["document"]
+
+    async def test_a_definition_declaring_nothing_is_open(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+
+        assert await WorkflowService.get_inputs_schema(str(record.id), user=author) == {
+            "type": "object",
+            "additionalProperties": True,
+        }
+
+    async def test_an_unknown_id_reads_as_absent(self, author):
+        assert await WorkflowService.get_inputs_schema(str(uuid4()), user=author) is None
+
+    async def test_an_inactive_row_reads_as_absent(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+        await WorkflowService.update(str(record.id), user=author, active=False)
+
+        assert await WorkflowService.get_inputs_schema(str(record.id), user=author) is None
 
 
 class TestWorkflowServiceListActions:
