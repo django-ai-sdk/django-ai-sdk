@@ -96,6 +96,7 @@ def validate_definition(definition: WorkflowDefinition) -> None:
 
     step_types = get_step_registry()
     hook_types = get_hook_registry()
+    declared_inputs = set(definition.input_fields)
 
     for index, step in enumerate(definition.steps):
         where = f"{label} step {index} ({step.name!r})"
@@ -103,6 +104,12 @@ def validate_definition(definition: WorkflowDefinition) -> None:
             raise ImproperlyConfigured(
                 f"{where} has type {step.type!r}, which is not in AI_SDK_WORKFLOW_STEPS. "
                 f"Registered: {sorted(step_types) or 'none'}."
+            )
+        history = sorted(name for name in step.history if name not in declared_inputs)
+        if history:
+            raise ImproperlyConfigured(
+                f"{where} sends history {history}, which input_fields does not "
+                f"declare. Declared: {sorted(declared_inputs) or 'none'}."
             )
         _compiles(f"Output_{step.name}", step.output_fields, f"{where} output_fields")
         _validate_hooks(step.hooks, where, hook_types)

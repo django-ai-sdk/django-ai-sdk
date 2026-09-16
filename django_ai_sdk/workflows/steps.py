@@ -126,8 +126,8 @@ class AgentStep(Step):
     # A system prompt replacing the agent's own; "" keeps the agent's.
     instructions: str = ""
 
-    # Inputs to send as the conversation before this step's own turn. A definition
-    # fills this from its `messages`-typed input fields; a code step names them itself.
+    # The inputs to send as the conversation before this step's own turn. A
+    # definition names its input fields per step; a code step names them itself.
     history: tuple[str, ...] = ()
 
     async def get_agent(self) -> Agent:
@@ -152,12 +152,24 @@ class AgentStep(Step):
         return "\n\n".join(parts)
 
     def transcript(self, ctx: WorkflowContext) -> list[ChatMessage]:
-        """The inputs named in `history`, as ChatMessages."""
-        return [
-            item if isinstance(item, ChatMessage) else ChatMessage.model_validate(item)
-            for name in self.history
-            for item in (ctx.input(name) or ())
-        ]
+        """The inputs named in `history`, as ChatMessages.
+
+        What a history field holds is the author's choice: a bare string is one
+        user turn, a message dict is one message, and a list is a conversation
+        whose items are messages, message dicts, or strings.
+        """
+        transcript: list[ChatMessage] = []
+        for name in self.history:
+            value = ctx.input(name)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                transcript.append(ChatMessage(role="user", content=value))
+            elif isinstance(value, dict):
+                transcript.append(ChatMessage.model_validate(value))
+            else:
+                transcript.extend(_as_message(item) for item in value)
+        return transcript
 
     async def messages(self, ctx: WorkflowContext) -> list[ChatMessage]:
         """The run's transcript, then this step's own turn."""
@@ -201,6 +213,15 @@ class AgentStep(Step):
         if self.schema is not None:
             return StepOutcome(status="failed", detail="the agent returned no structured output")
         return StepOutcome(output=result)
+
+
+def _as_message(item: Any) -> ChatMessage:
+    """One history item as a ChatMessage, whatever it crossed the queue as."""
+    if isinstance(item, ChatMessage):
+        return item
+    if isinstance(item, str):
+        return ChatMessage(role="user", content=item)
+    return ChatMessage.model_validate(item)
 
 
 def _as_text(value: Any) -> str:
