@@ -33,9 +33,7 @@ class TestWorkflowServicePermissions:
         record = await WorkflowService.create("Mine", definition(), user=owner)
         fetched = await WorkflowService.get(str(record.id), user=owner)
         assert str(fetched.id) == str(record.id)
-        updated = await WorkflowService.update(
-            str(record.id), user=owner, name="Renamed"
-        )
+        updated = await WorkflowService.update(str(record.id), user=owner, name="Renamed")
         assert updated.name == "Renamed"
 
     async def test_foreign_user_finds_it_absent_rather_than_forbidden(self):
@@ -142,9 +140,7 @@ class TestRunningIsNotManaging:
             patch.object(WorkflowExecutor, "enqueue", AsyncMock()),
             pytest.raises(WorkflowRun.DoesNotExist),
         ):
-            await WorkflowService.run_by_id(
-                str(record.id), user=other, run_id=str(run.id)
-            )
+            await WorkflowService.run_by_id(str(record.id), user=other, run_id=str(run.id))
 
 
 @pytest.mark.django_db(transaction=True)
