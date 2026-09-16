@@ -204,7 +204,9 @@ class TestValidation:
             validate_definition(
                 definition(
                     steps=[
-                        StepDefinition(name="x", agent_id="a", hooks=[HookDefinition(type="carrier_pigeon")])
+                        StepDefinition(
+                            name="x", agent_id="a", hooks=[HookDefinition(type="carrier_pigeon")]
+                        )
                     ]
                 )
             )
@@ -222,14 +224,20 @@ class TestValidation:
     def test_a_valid_chain_passes(self):
         validate_definition(
             definition(
-                input_fields={"history": FieldDefinition(type="messages")},
+                input_fields={"history": FieldDefinition(type="list")},
                 steps=[
-                    StepDefinition(name="summary", agent_id="a"),
+                    StepDefinition(name="summary", agent_id="a", history=["history"]),
                     StepDefinition(name="verdict", agent_id="b", requires=["summary"]),
                 ],
                 hooks=[HookDefinition(type="loud", config={"step": "verdict"})],
             )
         )
+
+    def test_history_a_definition_does_not_declare_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="does not declare"):
+            validate_definition(
+                definition(steps=[StepDefinition(name="x", agent_id="a", history=["history"])])
+            )
 
     def test_input_fields_that_cannot_compile_are_refused(self):
         """`validate_definition` promises a check where it is written, so it builds the model."""
@@ -272,7 +280,9 @@ class TestDatabaseMerge:
         register(definition("shared"))
         await WorkflowSettings.objects.acreate(
             name="shared",
-            definition=definition("shared", steps=[StepDefinition(name="r", agent_id="db")]).model_dump(),
+            definition=definition(
+                "shared", steps=[StepDefinition(name="r", agent_id="db")]
+            ).model_dump(),
         )
 
         # A database row adds a workflow where there is no code; it never overrides one.

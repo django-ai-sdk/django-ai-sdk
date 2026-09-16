@@ -7,19 +7,29 @@ class of its own.
 
 from __future__ import annotations
 
+from typing import Annotated, Any, Literal
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
+import django_ai_sdk.workflows.schemas
 from django_ai_sdk.workflows import AgentStep, StepOutcome, WorkflowContext, run_steps
 from django_ai_sdk.workflows.definitions import (
     compile_inputs,
     compile_steps,
     get_step_registry,
+    inputs_json_schema,
     model_from_fields,
 )
-from django_ai_sdk.workflows.schemas import FieldDefinition, HookDefinition, StepDefinition, WorkflowDefinition
+from django_ai_sdk.workflows.schemas import (
+    MAX_DEPTH,
+    FieldDefinition,
+    HookDefinition,
+    StepDefinition,
+    WorkflowDefinition,
+)
 from django_ai_sdk.workflows.steps import OnError, Step
 
 REGISTERED = {"shout": "tests.unit.test_workflow_definitions.ShoutStep"}
@@ -80,14 +90,90 @@ class TestFieldsCompileToAModel:
 
         assert model.model_validate({}).note is None
 
-    def test_a_messages_field_coerces_the_json_a_run_crosses_the_queue_as(self):
-        from django_ai_sdk.common import ChatMessage
+    def test_an_optional_field_with_a_default_keeps_its_type(self):
+        model = model_from_fields(
+            "Inputs", {"tone": FieldDefinition(required=False, default="pirate")}
+        )
 
-        model = model_from_fields("Inputs", {"history": FieldDefinition(type="messages")})
+        parsed = model.model_validate({})
 
-        parsed = model.model_validate({"history": [{"role": "user", "content": "ahoy"}]})
+        assert parsed.tone == "pirate"
 
-        assert isinstance(parsed.history[0], ChatMessage)
+    def test_an_enum_field_refuses_a_value_outside_it(self):
+        model = model_from_fields(
+            "Inputs", {"tone": FieldDefinition(type="str", enum=["pirate", "plain"])}
+        )
+
+        with pytest.raises(ValidationError):
+            model.model_validate({"tone": "robot"})
+
+    def test_a_typed_list_validates_its_items(self):
+        model = model_from_fields(
+            "Inputs",
+            {"tags": FieldDefinition(type="list", items=FieldDefinition(type="int"))},
+        )
+
+        assert model.model_validate({"tags": [1, 2]}).tags == [1, 2]
+        with pytest.raises(ValidationError):
+            model.model_validate({"tags": [1, "two"]})
+
+    def test_an_object_field_compiles_to_a_nested_model(self):
+        model = model_from_fields(
+            "Inputs",
+            {
+                "author": FieldDefinition(
+                    type="object",
+                    fields={"name": FieldDefinition(type="str"), "id": FieldDefinition(type="int")},
+                )
+            },
+        )
+
+        parsed = model.model_validate({"author": {"name": "Ann", "id": 3}})
+
+        assert (parsed.author.name, parsed.author.id) == ("Ann", 3)
+        with pytest.raises(ValidationError):
+            # The nested required field is checked with the rest, not three steps in.
+            model.model_validate({"author": {"name": "Ann"}})
+
+    def test_a_declared_schema_survives_a_dump_round_trip(self):
+        fields = {
+            "tone": FieldDefinition(
+                type="str", enum=["pirate", "plain"], required=False, default="pirate"
+            ),
+            "tags": FieldDefinition(type="list", items=FieldDefinition(type="str")),
+        }
+
+        restored = {
+            name: FieldDefinition.model_validate(f.model_dump()) for name, f in fields.items()
+        }
+
+        assert restored == fields
+
+    def test_a_default_is_refused_on_a_required_field(self):
+        with pytest.raises(ValidationError, match="not required"):
+            FieldDefinition(default="draft")
+
+    def test_a_default_outside_the_enum_is_refused(self):
+        with pytest.raises(ValidationError, match="enum"):
+            FieldDefinition(type="str", enum=["a", "b"], required=False, default="c")
+
+    def test_items_on_something_but_a_list_are_refused(self):
+        with pytest.raises(ValidationError, match="items"):
+            FieldDefinition(type="str", items=FieldDefinition())
+
+    def test_fields_on_something_but_an_object_are_refused(self):
+        with pytest.raises(ValidationError, match="fields"):
+            FieldDefinition(type="str", fields={"a": FieldDefinition()})
+
+    def test_an_object_without_fields_is_refused(self):
+        with pytest.raises(ValidationError, match="open JSON"):
+            FieldDefinition(type="object")
+
+    def test_a_schema_nested_past_the_depth_cap_is_refused(self):
+        field = FieldDefinition(type="str")
+        with pytest.raises(ValidationError, match="nests deeper"):
+            for _ in range(MAX_DEPTH + 1):
+                field = FieldDefinition(type="object", fields={"n": field})
 
     def test_an_unknown_type_is_refused_where_it_is_written(self):
         """No `file` type: a host names its own key and shapes it as str or dict."""
@@ -95,7 +181,156 @@ class TestFieldsCompileToAModel:
             FieldDefinition(type="file")  # type: ignore[arg-type]
 
     def test_a_definition_declaring_no_inputs_compiles_to_no_model(self):
-        assert compile_inputs(WorkflowDefinition(steps=[StepDefinition(type="shout", name="a")])) is None
+        assert (
+            compile_inputs(WorkflowDefinition(steps=[StepDefinition(type="shout", name="a")]))
+            is None
+        )
+
+
+class TestInputsAsJSONSchema:
+    """One artifact serves an editor, a form and a tool — compiled from the same
+    model the run itself validates against, so they cannot disagree."""
+
+    def test_declared_fields_describe_their_shape(self):
+        definition = WorkflowDefinition(
+            name="digest",
+            input_fields={
+                "thread": FieldDefinition(type="str"),
+                "tone": FieldDefinition(
+                    type="str", enum=["brief", "thorough"], required=False, default="brief"
+                ),
+                "tags": FieldDefinition(type="list", items=FieldDefinition(type="str")),
+            },
+            steps=[StepDefinition(name="d", agent_id="a1")],
+        )
+
+        schema = inputs_json_schema(definition)
+
+        assert schema["type"] == "object"
+        assert schema["required"] == ["thread", "tags"]
+        assert schema["properties"]["thread"] == {"title": "Thread", "type": "string"}
+        assert schema["properties"]["tone"]["enum"] == ["brief", "thorough"]
+        assert schema["properties"]["tone"]["default"] == "brief"
+        assert schema["properties"]["tags"]["items"] == {"type": "string"}
+
+    def test_a_definition_declaring_nothing_is_open(self):
+        """The schema says "anything" rather than saying nothing."""
+        definition = WorkflowDefinition(
+            name="open", steps=[StepDefinition(name="d", agent_id="a1")]
+        )
+
+        assert inputs_json_schema(definition) == {"type": "object", "additionalProperties": True}
+
+
+class TestAuthoringWithAPydanticModel:
+    """`inputs=SomeBaseModel` writes the same fields with type annotations.
+
+    The model is authoring, not storage: it is normalized into `input_fields`
+    and never rides on the definition, so both ways of declaring have one wire
+    format.
+    """
+
+    def test_a_model_normalizes_into_input_fields(self):
+        class DigestInputs(BaseModel):
+            thread: str
+            tone: Literal["pirate", "plain"] = "pirate"
+            note: str | None = None
+
+        definition = WorkflowDefinition(
+            name="digest",
+            inputs=DigestInputs,
+            steps=[StepDefinition(name="digest", agent_id="a1")],
+        )
+
+        assert definition.input_fields == {
+            "thread": FieldDefinition(type="str"),
+            "tone": FieldDefinition(
+                type="str", required=False, default="pirate", enum=["pirate", "plain"]
+            ),
+            "note": FieldDefinition(type="str", required=False),
+        }
+
+    def test_a_nested_model_becomes_an_object_field(self):
+        class Author(BaseModel):
+            name: str
+
+        class ReviewInputs(BaseModel):
+            author: Author
+            tags: list[str]
+
+        definition = WorkflowDefinition(
+            name="review",
+            inputs=ReviewInputs,
+            steps=[StepDefinition(name="r", agent_id="a1")],
+        )
+
+        assert definition.input_fields["author"] == FieldDefinition(
+            type="object", fields={"name": FieldDefinition(type="str")}
+        )
+        assert definition.input_fields["tags"] == FieldDefinition(
+            type="list", items=FieldDefinition(type="str")
+        )
+
+    def test_the_normalized_fields_compile_and_validate(self):
+        class Inputs(BaseModel):
+            thread: str
+            tone: Literal["pirate", "plain"] = "pirate"
+
+        definition = WorkflowDefinition(
+            name="digest", inputs=Inputs, steps=[StepDefinition(name="d", agent_id="a1")]
+        )
+
+        parsed = compile_inputs(definition).model_validate({"thread": "t1"})
+
+        assert (parsed.thread, parsed.tone) == ("t1", "pirate")
+
+    def test_a_model_with_validators_is_refused(self):
+        """A check the author wrote and the run silently skipped is the footgun."""
+
+        class Validated(BaseModel):
+            thread: str
+
+            @field_validator("thread")
+            @staticmethod
+            def not_blank(value: str) -> str:
+                return value
+
+        with pytest.raises(ValidationError, match="validators"):
+            WorkflowDefinition(
+                name="bad", inputs=Validated, steps=[StepDefinition(name="d", agent_id="a1")]
+            )
+
+    def test_an_unmappable_annotation_is_refused_naming_the_field(self):
+        class Exotic(BaseModel):
+            anything: Any
+
+        with pytest.raises(ValidationError, match="Exotic.anything"):
+            WorkflowDefinition(
+                name="bad", inputs=Exotic, steps=[StepDefinition(name="d", agent_id="a1")]
+            )
+
+    def test_giving_both_forms_is_refused(self):
+        class Inputs(BaseModel):
+            thread: str
+
+        with pytest.raises(ValidationError, match="not both"):
+            WorkflowDefinition(
+                name="bad",
+                inputs=Inputs,
+                input_fields={"thread": FieldDefinition()},
+                steps=[StepDefinition(name="d", agent_id="a1")],
+            )
+
+    def test_an_annotated_field_is_refused(self):
+        """Constraints did not cross into the declared schema yet."""
+
+        class Constrained(BaseModel):
+            count: Annotated[int, Field(ge=1)]
+
+        with pytest.raises(ValidationError, match="Constrained.count"):
+            WorkflowDefinition(
+                name="bad", inputs=Constrained, steps=[StepDefinition(name="d", agent_id="a1")]
+            )
 
 
 class TestCompiling:
@@ -128,6 +363,7 @@ class TestCompiling:
                 StepDefinition(
                     name="verdict",
                     agent_id="a1",
+                    history=["prompt"],
                     system_prompt_override="Be brief.",
                     output_fields={"sailing": FieldDefinition()},
                 )
@@ -139,8 +375,17 @@ class TestCompiling:
         assert type(step) is AgentStep
         assert step.agent_id == "a1"
         assert step.agent is None
+        assert step.history == ("prompt",)
         assert step.instructions == "Be brief."
         assert step.schema is not None
+
+    def test_an_agent_step_without_history_sends_no_transcript(self):
+        """History is the author's choice, not something a type implies."""
+        spec = WorkflowDefinition(steps=[StepDefinition(name="verdict", agent_id="a1")])
+
+        (step,) = compile_steps(spec)
+
+        assert step.history == ()
 
     @override_settings(AI_SDK_WORKFLOW_STEPS={})
     def test_an_unregistered_type_is_refused_naming_what_is_registered(self):
@@ -182,7 +427,9 @@ class TestAJsonAgentStepIsGatedToo:
         from django_ai_sdk.permissions import DenyAll, PermissionDenied
 
         agent = self._agent(DenyAll)
-        (step,) = compile_steps(WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="a1")]))
+        (step,) = compile_steps(
+            WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="a1")])
+        )
 
         with (
             patch(
@@ -201,7 +448,9 @@ class TestAJsonAgentStepIsGatedToo:
         from django_ai_sdk.permissions import AllowAll
 
         agent = self._agent(AllowAll)
-        (step,) = compile_steps(WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="a1")]))
+        (step,) = compile_steps(
+            WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="a1")])
+        )
 
         with patch(
             "django_ai_sdk.agents.services.AgentService.get",

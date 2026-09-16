@@ -162,8 +162,8 @@ class TestDeclaredInputs:
         agent = make_agent()
         agent.run = capture_run
         workflow = make_workflow(
-            StepDefinition(name="reply", agent_id="a1"),
-            input_fields={"history": FieldDefinition(type="messages")},
+            StepDefinition(name="reply", agent_id="a1", history=["history"]),
+            input_fields={"history": FieldDefinition(type="list")},
         )
 
         with patch(AGENT_GET, AsyncMock(return_value=agent)):
@@ -249,7 +249,9 @@ class TestStructuredOutput:
     async def test_a_declared_schema_that_does_not_come_back_fails_the_step(self, executor):
         agent = make_agent("plain string, not a model")
         workflow = make_workflow(
-            StepDefinition(name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")})
+            StepDefinition(
+                name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")}
+            )
         )
 
         with (
@@ -337,7 +339,8 @@ class TestHooks:
         """The registry is the gate; a name outside it is a configuration error."""
         agent = make_agent("data")
         workflow = make_workflow(
-            StepDefinition(name="result", agent_id="a1"), hooks=[HookDefinition(type="carrier_pigeon")]
+            StepDefinition(name="result", agent_id="a1"),
+            hooks=[HookDefinition(type="carrier_pigeon")],
         )
 
         with (
@@ -429,7 +432,9 @@ class TestTheQueuedEntryPoint:
         # step's on_error stops the run.
         agent = make_agent("plain string, not a model")
         run = await self._run_for(
-            StepDefinition(name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")})
+            StepDefinition(
+                name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")}
+            )
         )
 
         with patch(AGENT_GET, AsyncMock(return_value=agent)):
@@ -484,7 +489,8 @@ class TestRunState:
     async def test_inputs_are_persisted_on_the_row(self, executor):
         agent = make_agent("ok")
         workflow = make_workflow(
-            StepDefinition(name="result", agent_id="a1"), input_fields={"document": FieldDefinition()}
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"document": FieldDefinition()},
         )
 
         with patch(AGENT_GET, AsyncMock(return_value=agent)):
@@ -499,7 +505,7 @@ class TestRunState:
         agent = make_agent("ok")
         workflow = make_workflow(
             StepDefinition(name="result", agent_id="a1"),
-            input_fields={"history": FieldDefinition(type="messages")},
+            input_fields={"history": FieldDefinition(type="list")},
         )
 
         with patch(AGENT_GET, AsyncMock(return_value=agent)):
@@ -515,7 +521,8 @@ class TestRunState:
 
         agent = make_agent("ok")
         workflow = make_workflow(
-            StepDefinition(name="result", agent_id="a1"), input_fields={"document": FieldDefinition()}
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"document": FieldDefinition()},
         )
         run = await WorkflowRun.objects.acreate(
             workflow_definition=workflow.model_dump(),

@@ -146,6 +146,43 @@ class TestTheDefaultTurn:
 
         assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy"]
 
+    async def test_a_string_history_field_is_one_user_turn(self):
+        """What a history field holds is the author's choice, and a str is a prompt."""
+        step = AgentStep()
+        step.agent = StubAgent
+        step.name = "reply"
+        step.history = ("prompt",)
+        StubAgent.result = "the answer"
+
+        ctx = WorkflowContext(inputs={"prompt": "ahoy"})
+        await step.run(ctx)
+
+        assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy"]
+
+    async def test_a_single_message_dict_is_one_turn(self):
+        step = AgentStep()
+        step.agent = StubAgent
+        step.name = "reply"
+        step.history = ("prompt",)
+        StubAgent.result = "the answer"
+
+        ctx = WorkflowContext(inputs={"prompt": {"role": "user", "content": "ahoy"}})
+        await step.run(ctx)
+
+        assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy"]
+
+    async def test_a_mixed_list_of_strings_and_dicts_coerces_item_by_item(self):
+        step = AgentStep()
+        step.agent = StubAgent
+        step.name = "reply"
+        step.history = ("prompt",)
+        StubAgent.result = "the answer"
+
+        ctx = WorkflowContext(inputs={"prompt": [{"role": "user", "content": "ahoy"}, "go on"]})
+        await step.run(ctx)
+
+        assert [m.content for m in StubAgent.seen[-1]["messages"]] == ["ahoy", "go on"]
+
     async def test_an_input_nobody_named_is_not_mistaken_for_a_transcript(self):
         """Named, not guessed: a list of role-shaped rows is data until it is declared."""
         step = AgentStep()

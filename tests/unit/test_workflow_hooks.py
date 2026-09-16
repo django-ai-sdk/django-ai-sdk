@@ -162,7 +162,9 @@ class TestConfig:
         with override_settings(
             AI_SDK_WORKFLOW_HOOKS={"loud": "tests.unit.test_workflow_hooks.Loud"}
         ):
-            (hook,) = compile_hooks([HookDefinition(type="loud", config={"to": "#ops"})], "a workflow")
+            (hook,) = compile_hooks(
+                [HookDefinition(type="loud", config={"to": "#ops"})], "a workflow"
+            )
 
         assert hook.config == {"to": "#ops"}
 

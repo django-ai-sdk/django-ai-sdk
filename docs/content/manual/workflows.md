@@ -14,20 +14,30 @@ from django_ai_sdk.workflows import FieldDefinition, HookDefinition, StepDefinit
 workflow = WorkflowDefinition(
     name="summarize-and-alert",
     input_fields={
-        "history": FieldDefinition(type="messages"),
+        "history": FieldDefinition(type="list", description="The conversation so far"),
         "document": FieldDefinition(type="str", description="Document id"),
+        "options": FieldDefinition(
+            type="object",
+            fields={
+                "tone": FieldDefinition(
+                    type="str", enum=["brief", "thorough"], required=False, default="brief"
+                ),
+            },
+        ),
     },
     steps=[
         StepDefinition(
             name="summary",
             agent_id="summarizer",
+            history=["history"],
         ),
         StepDefinition(
             name="priority",
             agent_id="classifier",
             requires=["summary"],               # read the step named "summary"
+            history=["history"],
             output_fields={                     # structured output
-                "priority": FieldDefinition(type="str", description="high|low"),
+                "priority": FieldDefinition(type="str", enum=["high", "low"]),
                 "score": FieldDefinition(type="float"),
             },
         ),
@@ -44,17 +54,33 @@ A run's state has two halves, and nothing crosses between them. `ctx.input(name)
 
 `input_fields` compiles to a pydantic model, the same way `output_fields` does — one mechanism pointed in two directions. A run's inputs are validated against it once, before the run is queued, so a caller who forgot something hears about it on the call that queued the run rather than three steps in. Undeclared extras are dropped: the schema is the contract.
 
+The shape is the whole contract — structure, enums, defaults — because a declared schema has to survive a dump, cross the queue, and be read back by an editor or an agent. Behaviour does not cross: validators and value constraints (`min_length`, `ge`, …) belong in a step, not in a field.
+
 | `type` | Becomes |
 | --- | --- |
 | `str` / `int` / `float` / `bool` | The Python type. |
-| `list` / `dict` | A JSON container the host shapes itself. |
-| `messages` | `list[ChatMessage]`, coerced from the JSON dicts a run crosses the queue as. An agent step sends the fields declared this way as its transcript — named, never inferred from the shape of a value. |
+| `list` / `dict` | An open JSON container the host shapes itself. |
+| `list` + `items` | A typed list; `items` is another `FieldDefinition`, so elements are checked too. |
+| `object` + `fields` | A typed record; `fields` is a `{name: FieldDefinition}` map, recursively. |
 
-`messages` is the one SDK-owned type, because it is the one the SDK itself consumes. A file is a `str` id or a `dict` reference under whatever key the host picks — the engine has no opinion about what `pdfs` means, and the step that reads it does.
+A field may also carry `enum` (the values a scalar may take, compiled to `Literal`), `default` (implying `required: false`, with the value used when the caller omits it), and `description` (for the model, the editor, and whoever reads the JSON). Nesting is capped at 8 levels and 32 fields per object, so a stored definition cannot declare a pathology the compiler has to walk.
+
+A workflow written in code may hand the authoring to a pydantic model instead — `WorkflowDefinition(inputs=MyModel, ...)` — which is normalized into the same fields and never rides on the definition, so a stored definition and a code-declared one have one wire format. What pydantic can express as a shape crosses; validators, `default_factory` and `Annotated` constraints do not, and a model carrying any of them is refused rather than half-honored.
+
+```python
+from pydantic import BaseModel
+from typing import Literal
+
+class DigestInputs(BaseModel):
+    thread: str
+    tone: Literal["brief", "thorough"] = "brief"
+```
+
+There is no `file` type, and no `messages` type either. A file is whatever the host already stores it as — a `str` id or a `dict` reference under whatever key it picks, resolved by the first step that reads it. A conversation is an input like any other, made the transcript by the step that names it (below).
 
 A definition that declares no `input_fields` takes what it is given: a code-authored pipeline is not obliged to describe itself in JSON.
 
-There is no `file` type. A file is whatever the host already stores it as — an id or a reference the step resolves — so a type that coerced nothing would only add a name. There is no workflow-level `output_fields` either: a run's `outputs` is the map of step outputs keyed by step name, and each step already declares its own shape.
+There is no workflow-level `output_fields` either: a run's `outputs` is the map of step outputs keyed by step name, and each step already declares its own shape.
 
 ### Step semantics
 
@@ -66,6 +92,7 @@ An agent step runs its `agent_id` via `agent.run()` (non-streaming). Its result 
 | `name` | Required, unique. The key the result is filed under, the key later steps require, and the key the record is written under. |
 | `agent_id` | Agent to run (resolved through `AgentService`). Required for `type: "agent"`, refused otherwise. |
 | `requires` | Names of **earlier** steps this one reads. Each is passed to an agent step as a `[name]` user message. A name no earlier step declares is refused before any step runs. Inputs are not listed here — they are always available. |
+| `history` | Agent steps only. The inputs this step sends as its conversation, in order: a `str` field is one user turn, a `list` field a conversation of messages, message dicts, or strings. The author names them; the engine never infers a transcript from the shape of a value. A name `input_fields` does not declare is refused. |
 | `on_error` | `"fail"` stops the run; `"continue"` records the failure and runs the rest. |
 | `system_prompt_override` | Optional system prompt for this step. |
 | `output_fields` | Agent steps only. The agent runs with structured output: a pydantic model is built from the `{name: FieldDefinition}` map, and a result that does not come back as that model fails the step. A registered step returns what it returns, so declaring them there is refused. |
@@ -161,9 +188,12 @@ run = await WorkflowService.run_by_id(
 # Run history
 runs = await WorkflowService.list_runs(workflow_id)
 run = await WorkflowService.get_run(run_id)      # prefetches steps
+
+# The inputs as a JSON Schema, for a form or a tool that composes a run
+schema = await WorkflowService.get_inputs_schema(workflow_id, user=request.user)
 ```
 
-A definition is checked when it is written, not only when it runs: `create` and `update` refuse one that could not execute (an unknown step type or hook, a duplicate step name, a `requires` no earlier step produces, or an `input_fields` / `output_fields` map that pydantic will not build). Inputs are checked on the call that queues the run.
+A definition is checked when it is written, not only when it runs: `create` and `update` refuse one that could not execute (an unknown step type or hook, a duplicate step name, a `requires` no earlier step produces, or an `input_fields` / `output_fields` map that pydantic will not build). Inputs are checked on the call that queues the run. Every definition carries a `version` (currently `1`), stored with it, so a future format revision can gate on it rather than guess.
 
 ## Execution Model
 
@@ -183,6 +213,7 @@ A definition is checked when it is written, not only when it runs: `create` and 
 - No per-step timeout or automatic retry.
 - A killed worker can leave a step row `running`; the SDK does not sweep it.
 - No object-level ACL on payload PKs (document ids, etc.).
+- Declared schemas are structural: no value constraints (`min_length`, `ge`, …) and no validators. Check those in a step.
 - In-turn multi-agent chat without a durable record belongs to **subagents**, not workflows.
 
 ## Step Workflows
@@ -200,7 +231,7 @@ A definition is checked when it is written, not only when it runs: `create` and 
 
 `skip_when(ctx) -> str` returns a reason to skip or `""` to run. A skipped step is recorded with its reason and produces nothing, so whatever reads it skips in turn. `run(ctx) -> StepOutcome` is the work.
 
-`AgentStep` adds `agent` / `agent_id`, `schema` (a real pydantic model, so nested output is expressible), `instructions` and `history` (the inputs to send as the conversation); it implements `run` as one structured call, with async `system_prompt(ctx)`, `user_message(ctx)` and `messages(ctx)` hooks, which may query. A `None` result is reported as `failed`, not stored.
+`AgentStep` adds `agent` / `agent_id`, `schema` (a real pydantic model, so nested output is expressible), `instructions` and `history` (the inputs to send as the conversation — the step names them; a `str` input is one turn, a list is a conversation); it implements `run` as one structured call, with async `system_prompt(ctx)`, `user_message(ctx)` and `messages(ctx)` hooks, which may query. A `None` result is reported as `failed`, not stored.
 
 ### WorkflowContext and StepOutcome
 

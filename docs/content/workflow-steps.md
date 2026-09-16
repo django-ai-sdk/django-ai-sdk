@@ -82,11 +82,11 @@ outcomes = await run_steps(
 | `agent_id` | An id resolved through `AgentService`, for a step compiled from JSON. |
 | `schema` | A pydantic model, passed as the agent's `response_format`. Nested output is expressible. A result that does not come back as that model fails the step. |
 | `instructions` | A system prompt replacing the agent's own; empty keeps the agent's. |
-| `history` | Names of the inputs to send as the conversation. A definition fills this from its `messages`-typed input fields; a code step names them itself. |
+| `history` | Names of the inputs to send as the conversation — the author names them, per step, whether the step comes from code or JSON. A `str` input is one user turn; a `list` is a conversation of messages, message dicts, or strings. |
 
 It sends the inputs named in `history` as the transcript, then one turn. Override the async `user_message(ctx)` to write that turn, or `messages(ctx)` to write the whole conversation; both may query. By default the turn is what the steps in `requires` produced, each under a `[name]` heading. A `None` result is reported as `failed`, not stored.
 
-The transcript is **named, not guessed**. An input the workflow did not declare as `messages` crosses the queue as plain dicts, so a step that inferred its history from the shape of a value would send a conversation when run inline and none when run from a worker. Naming it also means a list of role-shaped rows that happens to be data is never mistaken for a prompt.
+The transcript is **named, not guessed**. An input is data until a step names it as `history`, so a list of role-shaped rows that happens to be data is never mistaken for a prompt, and a workflow with two agent steps can give each a different conversation. What a history field holds is the author's choice: a `str` arrives as one user turn, a message dict as one message, a list item-by-item.
 
 ## Failure
 
