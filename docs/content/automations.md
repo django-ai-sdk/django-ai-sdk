@@ -75,8 +75,9 @@ register(WorkflowDefinition(
     name="notion-digest",
     # The turn the run starts from. A schedule has nobody typing, so the
     # automation writes it — and a workflow only receives what it declares.
-    input_fields={"messages": FieldDefinition(type="messages")},
+    input_fields={"messages": FieldDefinition(type="str")},
     steps=[StepDefinition(name="digest", agent_id=OperationsAgent().agent_id,
+                          history=["messages"],
                           system_prompt_override="Summarise open work. Three sections.")],
     hooks=[HookDefinition(type="thread_message", config={"step": "digest"})],
 ))
@@ -90,10 +91,12 @@ class MorningDigest(Automation):
 ```
 
 The automation supplies its rendered turn under `input_name`, which defaults to
-`"messages"`. The workflow has to declare a `messages` field under that name to
-receive it: an input a definition does not declare is dropped before the first step,
-so a mismatch does not fail — it produces a run that succeeded having asked the model
-nothing. The `django_ai_sdk.automations` check reports that pairing as **W007** where
+`"messages"`. The workflow has to declare a field of that name to receive it — a
+`str` field receives the turn as-is, a `list` field receives it as one user
+message — and the step that should read it names it in `history`: an input a
+definition does not declare is dropped before the first step, so a mismatch does
+not fail — it produces a run that succeeded having asked the model nothing. The
+`django_ai_sdk.automations` check reports that pairing as **W007** where
 the automation is written, rather than leaving you to find it in a run's output.
 
 Keeping those apart is what lets the same workflow run from chat, from the API, by hand, and on a schedule, rather than existing only inside the thing that happens to schedule it.

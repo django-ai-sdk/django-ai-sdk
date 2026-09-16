@@ -46,10 +46,11 @@ class Automation:
     # substituted.
     input: str = "Run the {name} automation."
 
-    # The workflow input the rendered turn is supplied under. A schedule has no human
-    # asking, so the automation is the one that writes the first message, and the
-    # workflow has to declare a `messages` field under this name to receive it —
-    # an input a definition does not declare is dropped, not guessed at.
+    # The workflow input the rendered turn is supplied under. A schedule has no
+    # human asking, so the automation is the one that writes the first message:
+    # a `str` field of this name receives the turn as-is, a `list` receives it
+    # as one user message — the step that reads it wires it as `history`. An
+    # input a definition does not declare is dropped, not guessed at.
     input_name: str = "messages"
 
     audience: AudienceResolver = Audience.APP

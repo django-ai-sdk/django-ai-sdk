@@ -47,9 +47,7 @@ def agent():
     stub = MagicMock()
     stub.permissions = [AllowAll]
     stub.run = AsyncMock(return_value="aye, calm seas")
-    with patch(
-        "django_ai_sdk.agents.services.AgentService.get", AsyncMock(return_value=stub)
-    ):
+    with patch("django_ai_sdk.agents.services.AgentService.get", AsyncMock(return_value=stub)):
         yield stub
 
 
@@ -57,8 +55,12 @@ def declare_workflow(name="some-workflow", *, takes_input=True):
     return register_wf(
         WorkflowDefinition(
             name=name,
-            input_fields=({"messages": FieldDefinition(type="messages")} if takes_input else {}),
-            steps=[StepDefinition(name="result", agent_id=AGENT_ID)],
+            input_fields=({"messages": FieldDefinition(type="list")} if takes_input else {}),
+            steps=[
+                StepDefinition(
+                    name="result", agent_id=AGENT_ID, history=["messages"] if takes_input else []
+                )
+            ],
         )
     )
 
@@ -79,6 +81,24 @@ async def make_run(name="example") -> AutomationRun:
 class TestTheRenderedTurnReachesTheAgent:
     async def test_the_automations_input_is_what_the_agent_is_asked(self, agent):
         declare_workflow()
+        declare(input="Report the harbour since {last_run_at}.")
+        run = await make_run()
+
+        await run_automation(str(run.id))
+
+        (messages,) = agent.run.call_args.args
+        assert [m.content for m in messages] == ["Report the harbour since the beginning."]
+
+    async def test_a_str_input_receives_the_rendered_turn_as_is(self, agent):
+        """The workflow declares `messages` as a plain string; the turn lands there."""
+        declare_workflow(takes_input=False)
+        register_wf(
+            WorkflowDefinition(
+                name="some-workflow",
+                input_fields={"messages": FieldDefinition(type="str")},
+                steps=[StepDefinition(name="result", agent_id=AGENT_ID, history=["messages"])],
+            )
+        )
         declare(input="Report the harbour since {last_run_at}.")
         run = await make_run()
 

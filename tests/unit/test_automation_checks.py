@@ -42,10 +42,12 @@ def register_workflow(name=WORKFLOW, agent_id=AGENT_ID, *, takes_input=True):
     return register_wf(
         WorkflowDefinition(
             name=name,
-            input_fields=(
-                {"messages": FieldDefinition(type="messages")} if takes_input else {}
-            ),
-            steps=[StepDefinition(name="result", agent_id=agent_id)],
+            input_fields=({"messages": FieldDefinition(type="list")} if takes_input else {}),
+            steps=[
+                StepDefinition(
+                    name="result", agent_id=agent_id, history=["messages"] if takes_input else []
+                )
+            ],
         )
     )
 
@@ -152,16 +154,52 @@ class TestTheWorkflowCanReceiveTheTurn:
         assert "ai_sdk.automations.W007" in ids(check_automations())
 
     def test_an_input_of_the_wrong_type_is_reported(self):
-        """Declared, but as a `str`: an agent step reads the transcript, not a field."""
+        """Declared, but as an `int`: nothing the automation seeds can land there."""
         register_wf(
             WorkflowDefinition(
                 name=WORKFLOW,
-                input_fields={"messages": FieldDefinition(type="str")},
-                steps=[StepDefinition(name="result", agent_id=AGENT_ID)],
+                input_fields={"messages": FieldDefinition(type="int")},
+                steps=[StepDefinition(name="result", agent_id=AGENT_ID, history=["messages"])],
             )
         )
         declare()
         assert "ai_sdk.automations.W007" in ids(check_automations())
+
+    def test_a_str_input_receives_the_turn_as_is(self):
+        register_wf(
+            WorkflowDefinition(
+                name=WORKFLOW,
+                input_fields={"messages": FieldDefinition(type="str")},
+                steps=[StepDefinition(name="result", agent_id=AGENT_ID, history=["messages"])],
+            )
+        )
+        declare()
+        assert "ai_sdk.automations.W007" not in ids(check_automations())
+
+    def test_an_input_no_step_reads_is_reported(self):
+        """Declared and seedable, but no agent step wires it as history."""
+        register_wf(
+            WorkflowDefinition(
+                name=WORKFLOW,
+                input_fields={"messages": FieldDefinition(type="list")},
+                steps=[StepDefinition(name="result", agent_id=AGENT_ID)],
+            )
+        )
+        declare()
+        [issue] = [i for i in check_automations() if i.id == "ai_sdk.automations.W007"]
+        assert "history" in issue.hint
+
+    def test_an_input_only_a_registered_step_reads_is_not_reported(self):
+        """A python step may read the input itself, which no check can see through."""
+        register_wf(
+            WorkflowDefinition(
+                name=WORKFLOW,
+                input_fields={"messages": FieldDefinition(type="list")},
+                steps=[StepDefinition(type="shout", name="result")],
+            )
+        )
+        declare()
+        assert "ai_sdk.automations.W007" not in ids(check_automations())
 
     def test_a_workflow_nothing_declares_says_only_that(self):
         """W003 already covers it; a second warning about its inputs adds nothing."""

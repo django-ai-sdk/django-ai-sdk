@@ -17,7 +17,7 @@ The [Automations guide](/automations/) covers declaring and running them. This p
 | `timezone` | `"UTC"` | IANA zone the `cron` expression is read in. |
 | `workflow` | `""` | Name of a registered [workflow](/manual/workflows/). Required. |
 | `input` | `"Run the {name} automation."` | The user turn this occurrence starts from. Supports `{user}`, `{last_run_at}`, `{name}`. |
-| `input_name` | `"messages"` | The workflow input the rendered turn is supplied under. The workflow must declare a `messages` field of that name to receive it. |
+| `input_name` | `"messages"` | The workflow input the rendered turn is supplied under. A `str` field of that name receives the turn as-is, a `list` field as one user message, and the step that reads it names it as `history`. |
 | `audience` | `Audience.APP` | Which principal(s) it runs as. |
 | `requires` | `[]` | Integration names that must be `ACTIVE`. |
 | `enabled` | `True` | Shipped default; a database row or settings entry overrides it. |
@@ -121,7 +121,7 @@ All warnings, never errors: boot must not fail because a background job is misco
 | `W004` | `requires` names an integration no installed app registers. |
 | `W005` | `AI_SDK_AUTOMATIONS` configures a name nothing declares. |
 | `W006` | The declaration was refused at registration and is not in the registry. |
-| `W007` | The named workflow does not declare `input_name` as a `messages` input, so the rendered turn would be dropped. |
+| `W007` | The named workflow does not declare `input_name` as a `str` or `list` input (so the rendered turn would be dropped), or declares it but no step names it as `history` (so it is stored and never asked). |
 
 `W003`, `W004` and `W007` only consult code-declared workflows and integrations: the checks are synchronous and must not need a database, so a workflow living only in `WorkflowSettings` cannot be confirmed. `W003`'s message says so rather than asserting the name is wrong.
 

@@ -23,6 +23,9 @@ class DailyHarbourReport(Automation):
 
     workflow = "harbour-report"
     input = "Report the harbour conditions since {last_run_at}."
+    # The workflow declares `prompt` as a plain string, so the rendered turn is
+    # supplied as-is rather than wrapped as one message.
+    input_name = "prompt"
 
 
 @register

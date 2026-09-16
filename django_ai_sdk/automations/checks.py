@@ -103,9 +103,11 @@ def _check_workflow(name: str, automation: Any) -> list[Any]:
 def _check_workflow_input(name: str, automation: Any) -> list[Any]:
     """A workflow that will not receive the turn the automation renders.
 
-    An input a definition does not declare is dropped before the first step, so the
-    run succeeds having asked the model nothing. Code-declared only, for the same
-    reason as `_check_workflow`.
+    An input a definition does not declare is dropped before the first step, so
+    the run succeeds having asked the model nothing. And a turn nothing reads is
+    the same silence, so where the workflow has agent steps, one of them has to
+    name the input as `history`. Code-declared only, for the same reason as
+    `_check_workflow`.
     """
     from django_ai_sdk.workflows.registry import get_declared_workflows
 
@@ -115,19 +117,35 @@ def _check_workflow_input(name: str, automation: Any) -> list[Any]:
         return []
 
     declared = definition.input_fields.get(automation.input_name)
-    if declared is not None and declared.type == "messages":
+    seedable = declared is not None and declared.type in ("str", "list")
+    has_agents = any(step.type == "agent" for step in definition.steps)
+    wired = any(automation.input_name in step.history for step in definition.steps)
+    if seedable and (wired or not has_agents):
         return []
+    if not seedable:
+        detail = (
+            "does not declare that as a `str` or `list` input. The turn it renders "
+            "will be dropped and the workflow will run with nothing asked."
+        )
+        hint = (
+            f"Add input_fields={{{automation.input_name!r}: FieldDefinition(...)}} to the "
+            f"workflow — a `str` field receives the rendered turn as-is, a `list` as one "
+            f"user message — or point `input_name` at the field it does declare."
+        )
+    else:
+        detail = (
+            "declares that input but no step names it as `history`, so the turn is "
+            "stored and never asked."
+        )
+        hint = (
+            f"Add history=[{automation.input_name!r}] to the step that should read the "
+            f"turn as its conversation."
+        )
     return [
         CheckWarning(
             f"Automation {name!r} sends its input as {automation.input_name!r}, but "
-            f"workflow {automation.workflow!r} does not declare that as a `messages` "
-            "input. The turn it renders will be dropped and the workflow will run "
-            "with nothing asked.",
-            hint=(
-                f"Add input_fields={{{automation.input_name!r}: "
-                'FieldDefinition(type="messages")}} to the workflow, or point '
-                "`input_name` at the field it does declare."
-            ),
+            f"workflow {automation.workflow!r} {detail}",
+            hint=hint,
             id=f"{ID_PREFIX}.W007",
         )
     ]

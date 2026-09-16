@@ -33,9 +33,7 @@ def _clean_registries():
 @pytest.fixture(autouse=True)
 def _no_queue():
     """run_now goes through the real runner; only the queue hop is stubbed."""
-    with patch(
-        "django_ai_sdk.automations.runner._enqueue_all", new=AsyncMock(return_value=None)
-    ):
+    with patch("django_ai_sdk.automations.runner._enqueue_all", new=AsyncMock(return_value=None)):
         yield
 
 
@@ -43,7 +41,7 @@ def declare(name="example", **attrs):
     register_wf(
         WorkflowDefinition(
             name="wf",
-            input_fields={"messages": FieldDefinition(type="messages")},
+            input_fields={"messages": FieldDefinition(type="list")},
             steps=[StepDefinition(name="result", agent_id="a")],
         )
     )
@@ -190,9 +188,7 @@ class TestRunNow:
 
         declare(audience=Audience.SUBSCRIBED)
         target = await make_user("target")
-        await AutomationSubscription.objects.acreate(
-            name="example", user=target, enabled=True
-        )
+        await AutomationSubscription.objects.acreate(name="example", user=target, enabled=True)
         caller = await make_user("staffer", is_staff=True)
 
         [run] = await AutomationService.run_now("example", user=caller)
@@ -267,20 +263,20 @@ class TestRunHistory:
         user = await make_user("anyone")
         await AutomationRun.objects.acreate(name="deleted", scheduled_for=timezone.now())
 
-        with patch.object(
-            type(user), "is_authenticated", property(lambda self: False)
-        ), pytest.raises(PermissionDenied):
+        with (
+            patch.object(type(user), "is_authenticated", property(lambda self: False)),
+            pytest.raises(PermissionDenied),
+        ):
             await AutomationService.list_runs("deleted", user=user)
 
     async def test_a_run_of_an_undeclared_automation_is_still_permission_checked(self):
         user = await make_user("anyone")
-        created = await AutomationRun.objects.acreate(
-            name="deleted", scheduled_for=timezone.now()
-        )
+        created = await AutomationRun.objects.acreate(name="deleted", scheduled_for=timezone.now())
 
-        with patch.object(
-            type(user), "is_authenticated", property(lambda self: False)
-        ), pytest.raises(PermissionDenied):
+        with (
+            patch.object(type(user), "is_authenticated", property(lambda self: False)),
+            pytest.raises(PermissionDenied),
+        ):
             await AutomationService.get_run(str(created.id), user=user)
 
 
@@ -356,9 +352,7 @@ class TestTickHealth:
         await AutomationState.objects.acreate(
             name="older", next_run_at=now, last_dispatched_at=now - timedelta(hours=2)
         )
-        await AutomationState.objects.acreate(
-            name="newer", next_run_at=now, last_dispatched_at=now
-        )
+        await AutomationState.objects.acreate(name="newer", next_run_at=now, last_dispatched_at=now)
 
         assert await AutomationService.last_tick_at() == now
 
@@ -381,9 +375,7 @@ class TestAnAnonymousCallerIsNotAnOwner:
         from django.contrib.auth.models import AnonymousUser
 
         declare(permissions=[self._allow_anonymous_view()])
-        await AutomationRun.objects.acreate(
-            name="example", scheduled_for=timezone.now(), user=None
-        )
+        await AutomationRun.objects.acreate(name="example", scheduled_for=timezone.now(), user=None)
 
         assert await AutomationService.list_runs("example", user=AnonymousUser()) == []
 

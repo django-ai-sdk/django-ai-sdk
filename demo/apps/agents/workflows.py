@@ -24,13 +24,16 @@ PIRATE = PirateBasicAgent().agent_id
 register(
     WorkflowDefinition(
         name="harbour-report",
-        # The turn the run starts from. `daily-harbour-report` in automations.py
-        # writes it on a schedule; an API caller supplies it directly.
-        input_fields={"messages": FieldDefinition(type="messages")},
+        # The turn the run starts from, as a plain string: `daily-harbour-report`
+        # in automations.py writes it on a schedule; an API caller supplies it
+        # directly. The step below names it as its `history`, which is what makes
+        # it the conversation.
+        input_fields={"prompt": FieldDefinition(type="str", description="The turn to start from")},
         steps=[
             StepDefinition(
                 name="forecast",
                 agent_id=PIRATE,
+                history=["prompt"],
                 system_prompt_override=(
                     "Call the weather tool for Rotterdam and report the conditions as a "
                     "ship's log entry. Three sentences. Do not invent a forecast if the "
@@ -49,11 +52,14 @@ register(
 register(
     WorkflowDefinition(
         name="sailing-verdict",
-        input_fields={"messages": FieldDefinition(type="messages")},
+        input_fields={
+            "messages": FieldDefinition(type="list", description="The conversation so far")
+        },
         steps=[
             StepDefinition(
                 name="forecast",
                 agent_id=PIRATE,
+                history=["messages"],
                 system_prompt_override=(
                     "Call the weather tool for Rotterdam and describe the conditions."
                 ),
@@ -62,10 +68,10 @@ register(
                 name="verdict",
                 agent_id=PIRATE,
                 requires=["forecast"],
+                history=["messages"],
                 output_fields={
-                    "sailing": FieldDefinition(
-                        type="str", description="good | risky | stay ashore"
-                    ),
+                    # An enum, so the model answers with one of three words.
+                    "sailing": FieldDefinition(type="str", enum=["good", "risky", "stay ashore"]),
                     "windspeed_kmh": FieldDefinition(type="float"),
                 },
             ),

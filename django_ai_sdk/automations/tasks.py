@@ -117,17 +117,15 @@ async def _run_workflow(automation: Automation, run: AutomationRun, user: Any) -
         await WorkflowService.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
 
     # There is no human turn, so the automation supplies the one the workflow starts
-    # from, under the input name it declares. The workflow decides what to do with it:
-    # a definition that does not declare `input_name` drops it, which the
+    # from, under the input name it declares: a `str` field receives the rendered
+    # turn as-is, anything else receives it as one user message. A definition
+    # that does not declare the name drops it, which the
     # `django_ai_sdk.automations` check reports where the automation is written.
-    seeded = {
-        automation.input_name: [
-            ChatMessage(
-                role="user",
-                content=automation.render_input(user=user, last_run_at=last_run_at),
-            )
-        ]
-    }
+    rendered = automation.render_input(user=user, last_run_at=last_run_at)
+    declared = definition.input_fields.get(automation.input_name)
+    seeded: dict[str, Any] = {automation.input_name: rendered}
+    if declared is None or declared.type != "str":
+        seeded[automation.input_name] = [ChatMessage(role="user", content=rendered)]
 
     workflow_run = await open_run(definition, inputs=seeded, user=user)
     await AutomationRun.objects.filter(id=run.id).aupdate(workflow_run=workflow_run)
