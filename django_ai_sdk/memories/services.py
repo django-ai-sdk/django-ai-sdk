@@ -483,16 +483,11 @@ class MemoryService(PermissionsMixin):
         _, ext = os.path.splitext(file_name)
         file_hash = compute_file_hash(file)
 
-        dup = (
-            await EntryDocument.objects.filter(
-                memory=memory,
-                file_hash=file_hash,
-            )
-            .exclude(
-                processing_status=EntryDocument.ProcessingStatus.FAILED,
-            )
-            .afirst()
-        )
+        dup = await EntryDocument.objects.filter(
+            memory=memory,
+            file_hash=file_hash,
+        ).afirst()
+
         if dup is not None:
             raise ConflictError("File already exists in this memory")
 

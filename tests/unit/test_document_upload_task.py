@@ -464,10 +464,13 @@ class TestUploadDocumentDedup:
 
         assert result.status == "processing"
 
-    async def test_duplicate_after_failed_allows_retry(self):
+    async def test_duplicate_after_failed_still_conflicts(self):
+        """A FAILED document keeps its hash reserved — re-upload is rejected until
+        the user deletes it (or retries the existing document)."""
         from django.core.files.uploadedfile import SimpleUploadedFile
         from django_ai_sdk.memories.models import EntryDocument, Memory
         from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import ConflictError
         from tests.mocks.permissions import memory_permissions
 
         memory = await Memory.objects.acreate(name="dedup-retry")
@@ -485,8 +488,37 @@ class TestUploadDocumentDedup:
         doc.processing_status = EntryDocument.ProcessingStatus.FAILED
         await doc.asave(update_fields=["processing_status"])
 
-        # Re-upload with same content — should succeed
         uploaded2 = SimpleUploadedFile("doc.txt", b"retry content", content_type="text/plain")
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            pytest.raises(ConflictError, match="File already exists"),
+        ):
+            await MemoryService.upload_document(str(memory.id), uploaded2, user=None)
+
+    async def test_duplicate_allowed_after_delete(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django_ai_sdk.memories.models import EntryDocument, Memory
+        from django_ai_sdk.memories.services import MemoryService
+        from tests.mocks.permissions import memory_permissions
+
+        memory = await Memory.objects.acreate(name="dedup-delete")
+        uploaded = SimpleUploadedFile("doc.txt", b"delete content", content_type="text/plain")
+
+        with (
+            memory_permissions("django_ai_sdk.permissions.AllowAll"),
+            patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
+        ):
+            mock_task.aenqueue = AsyncMock(return_value=_mock_task_result("task-1"))
+            result = await MemoryService.upload_document(str(memory.id), uploaded, user=None)
+
+        doc = await EntryDocument.objects.aget(id=result.id)
+        doc.processing_status = EntryDocument.ProcessingStatus.FAILED
+        await doc.asave(update_fields=["processing_status"])
+
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
+            await MemoryService.delete_document(str(memory.id), str(result.id), user=None)
+
+        uploaded2 = SimpleUploadedFile("doc.txt", b"delete content", content_type="text/plain")
         with (
             memory_permissions("django_ai_sdk.permissions.AllowAll"),
             patch("django_ai_sdk.memories.services.process_document_upload") as mock_task,
