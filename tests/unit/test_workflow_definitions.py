@@ -157,6 +157,56 @@ class TestFieldsCompileToAModel:
         with pytest.raises(ValidationError, match="enum"):
             FieldDefinition(type="str", enum=["a", "b"], required=False, default="c")
 
+    def test_a_default_of_the_wrong_scalar_type_is_refused(self):
+        with pytest.raises(ValidationError, match="not a int"):
+            FieldDefinition(type="int", required=False, default="not-an-int")
+
+    def test_a_bool_default_is_refused_for_an_int_field(self):
+        # bool is a subclass of int in Python; the check has to be exact, not isinstance.
+        with pytest.raises(ValidationError, match="not a int"):
+            FieldDefinition(type="int", required=False, default=True)
+
+    def test_an_int_default_is_refused_for_a_bool_field(self):
+        with pytest.raises(ValidationError, match="not a bool"):
+            FieldDefinition(type="bool", required=False, default=1)
+
+    def test_a_default_of_the_wrong_type_is_refused_for_a_list(self):
+        with pytest.raises(ValidationError, match="not a list"):
+            FieldDefinition(type="list", required=False, default="not-a-list")
+
+    def test_a_mistyped_element_in_a_list_default_is_refused(self):
+        with pytest.raises(ValidationError, match=r"\[1\] is 'two', which is not a int"):
+            FieldDefinition(
+                type="list", items=FieldDefinition(type="int"), required=False, default=[1, "two"]
+            )
+
+    def test_a_default_of_the_wrong_type_is_refused_for_an_object(self):
+        with pytest.raises(ValidationError, match="not an object"):
+            FieldDefinition(
+                type="object",
+                fields={"name": FieldDefinition(type="str")},
+                required=False,
+                default="nope",
+            )
+
+    def test_an_object_default_with_an_undeclared_key_is_refused(self):
+        with pytest.raises(ValidationError, match="not a declared field"):
+            FieldDefinition(
+                type="object",
+                fields={"name": FieldDefinition(type="str")},
+                required=False,
+                default={"nickname": "Ann"},
+            )
+
+    def test_a_mistyped_member_in_an_object_default_is_refused(self):
+        with pytest.raises(ValidationError, match=r"'age' is 'old', which is not a int"):
+            FieldDefinition(
+                type="object",
+                fields={"age": FieldDefinition(type="int")},
+                required=False,
+                default={"age": "old"},
+            )
+
     def test_items_on_something_but_a_list_are_refused(self):
         with pytest.raises(ValidationError, match="items"):
             FieldDefinition(type="str", items=FieldDefinition())

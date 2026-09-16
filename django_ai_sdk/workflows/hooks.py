@@ -100,21 +100,41 @@ class RunRecorder(WorkflowHook):
         await self.run.asave(update_fields=["status", "error", "completed_at", "updated_at"])
 
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
-        """Mark a step running, clearing anything a previous attempt left."""
-        from django_ai_sdk.workflows.models import WorkflowRunStep
+        """Claim this step for this attempt, refusing a concurrent duplicate.
 
-        await WorkflowRunStep.objects.aupdate_or_create(
-            run=self.run,
-            sequence=self.sequence[step.name],
-            defaults={
-                "step_name": step.name,
-                "status": WorkflowRunStep.Status.RUNNING,
-                "started_at": timezone.now(),
-                "output": None,
-                "error": "",
-                "detail": "",
-            },
+        Two dispatches of the same run reach the same step at the same
+        time; only one may hold it.
+        """
+        from django.db import IntegrityError
+
+        from django_ai_sdk.workflows.models import WorkflowRunStep
+        from django_ai_sdk.workflows.steps import StepAlreadyRunning
+
+        sequence = self.sequence[step.name]
+        fields = {
+            "step_name": step.name,
+            "status": WorkflowRunStep.Status.RUNNING,
+            "started_at": timezone.now(),
+            "output": None,
+            "error": "",
+            "detail": "",
+        }
+        try:
+            await WorkflowRunStep.objects.acreate(run=self.run, sequence=sequence, **fields)
+            return
+        except IntegrityError:
+            pass  # the row already exists: an earlier attempt, or a concurrent claim.
+
+        claimed = (
+            await WorkflowRunStep.objects.filter(run=self.run, sequence=sequence)
+            .exclude(status__in=(WorkflowRunStep.Status.RUNNING, WorkflowRunStep.Status.COMPLETED))
+            .aupdate(**fields)
         )
+        if not claimed:
+            raise StepAlreadyRunning(
+                f"step {step.name!r} (sequence {sequence}) of run {self.run.pk} "
+                f"is already running or completed"
+            )
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
         """Write a step's outcome. Upserts, because a skipped step never started."""

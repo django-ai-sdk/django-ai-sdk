@@ -81,8 +81,48 @@ class FieldDefinition(BaseModel):
             raise ValueError(f"fields belong to an object, not type {self.type!r}.")
         if self.default is not None and self.required:
             raise ValueError("a field with a default is not required; set required=False.")
+        if self.default is not None:
+            _check_default_matches_type("this field's default", self.default, self)
         _check_bounds("this field", self)
         return self
+
+
+def _check_default_matches_type(where: str, value: Any, field: FieldDefinition) -> None:
+    """A default has to be a real value of the field's own declared type.
+
+    `create_model` does not validate a `Field(default=...)` on its own, so a
+    stored definition can otherwise carry a default of the wrong shape straight
+    into a run's inputs silently.
+    """
+    if field.type in _SCALARS:
+        expected = {"str": str, "int": int, "float": float, "bool": bool}[field.type]
+        # bool is an int in Python, so an explicit type check keeps a bool default
+        # from passing for int/float, and a 0/1 from passing for bool.
+        if field.type == "bool":
+            ok = isinstance(value, bool)
+        else:
+            ok = isinstance(value, expected) and not isinstance(value, bool)
+        if not ok:
+            raise ValueError(f"{where} is {value!r}, which is not a {field.type}.")
+    elif field.type == "list":
+        if not isinstance(value, list):
+            raise ValueError(f"{where} is {value!r}, which is not a list.")
+        if field.items is not None:
+            for index, item in enumerate(value):
+                _check_default_matches_type(f"{where}[{index}]", item, field.items)
+    elif field.type == "dict":
+        if not isinstance(value, dict):
+            raise ValueError(f"{where} is {value!r}, which is not a dict.")
+    elif field.type == "object":
+        if not isinstance(value, dict):
+            raise ValueError(f"{where} is {value!r}, which is not an object.")
+        fields = field.fields or {}
+        for key in value:
+            if key not in fields:
+                raise ValueError(f"{where} has key {key!r}, which is not a declared field.")
+        for name, member in fields.items():
+            if name in value:
+                _check_default_matches_type(f"{where}.{name!r}", value[name], member)
 
 
 def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
