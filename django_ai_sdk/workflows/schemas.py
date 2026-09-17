@@ -140,10 +140,10 @@ def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
         _check_bounds(f"{where}'s items", field.items, depth + 1)
 
 
-class HookDefinition(BaseModel):
-    """A hook named by key in `AI_SDK_WORKFLOW_HOOKS`.
+class ActionDefinition(BaseModel):
+    """An action named by key in `AI_SDK_WORKFLOW_ACTIONS`.
 
-    `config` is handed to the hook as it is built, so one registered class serves
+    `config` is handed to the action as it is built, so one registered class serves
     every definition that names it — which recipient, which step's output.
     """
 
@@ -169,8 +169,8 @@ class StepDefinition(BaseModel):
     # The inputs this step sends as its conversation, in order. The author names
     # them; the engine never infers a transcript from the shape of a value.
     history: list[str] = []
-    # Hooks that fire for this step alone.
-    hooks: list[HookDefinition] = []
+    # Actions that fire for this step alone.
+    actions: list[ActionDefinition] = []
 
     @model_validator(mode="after")
     def _check_the_type_and_its_fields_agree(self) -> StepDefinition:
@@ -195,8 +195,8 @@ class WorkflowDefinition(BaseModel):
     # What the caller must supply. Validated once, before the first step runs.
     input_fields: dict[str, FieldDefinition] = {}
     steps: list[StepDefinition]
-    # Hooks that fire for the run and for every step in it.
-    hooks: list[HookDefinition] = []
+    # Actions that fire for the run and for every step in it.
+    actions: list[ActionDefinition] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -308,9 +308,9 @@ def _type_kwargs(annotation: Any, where: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "ActionDefinition",
     "FieldDefinition",
     "FieldType",
-    "HookDefinition",
     "StepDefinition",
     "WorkflowDefinition",
     "fields_from_model",

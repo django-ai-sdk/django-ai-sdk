@@ -4,8 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from django_ai_sdk.workflows.schemas import (
+    ActionDefinition,
     FieldDefinition,
-    HookDefinition,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -38,7 +38,7 @@ class TestStepDefinition:
         s = StepDefinition(name="result", agent_id="abc")
         assert s.type == "agent"
         assert s.requires == []
-        assert s.hooks == []
+        assert s.actions == []
         assert s.system_prompt_override is None
         assert s.output_fields == {}
 
@@ -61,21 +61,21 @@ class TestStepDefinition:
             StepDefinition(name="result", agent_id="abc", output_fields={"topic": {"type": "date"}})
 
 
-class TestHookDefinition:
+class TestActionDefinition:
     def test_minimal(self):
-        assert HookDefinition(type="log").config == {}
+        assert ActionDefinition(type="log").config == {}
 
     def test_with_config(self):
         """One registered class serves every definition that names it."""
-        hook = HookDefinition(type="thread_message", config={"step": "summary"})
-        assert hook.config == {"step": "summary"}
+        action = ActionDefinition(type="thread_message", config={"step": "summary"})
+        assert action.config == {"step": "summary"}
 
 
 class TestWorkflowDefinition:
     def test_minimal(self):
         d = WorkflowDefinition(steps=[StepDefinition(name="result", agent_id="abc")])
         assert d.name == ""
-        assert d.hooks == []
+        assert d.actions == []
         assert d.input_fields == {}
         assert d.version == 1
 
@@ -102,10 +102,10 @@ class TestWorkflowDefinition:
                     agent_id="abc-123",
                     history=["history"],
                     output_fields={"text": FieldDefinition(type="str", description="output")},
-                    hooks=[HookDefinition(type="console_log")],
+                    actions=[ActionDefinition(type="console_log")],
                 )
             ],
-            hooks=[HookDefinition(type="console_log", config={"step": "summary"})],
+            actions=[ActionDefinition(type="console_log", config={"step": "summary"})],
         )
 
         restored = WorkflowDefinition.model_validate(d.model_dump())
@@ -114,8 +114,8 @@ class TestWorkflowDefinition:
         assert restored.input_fields["history"].type == "list"
         assert restored.steps[0].history == ["history"]
         assert restored.steps[0].output_fields["text"].type == "str"
-        assert restored.steps[0].hooks[0].type == "console_log"
-        assert restored.hooks[0].config == {"step": "summary"}
+        assert restored.steps[0].actions[0].type == "console_log"
+        assert restored.actions[0].config == {"step": "summary"}
 
     def test_empty_steps_allowed(self):
         """The schema permits it; register, create and execute all refuse it."""

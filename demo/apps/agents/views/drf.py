@@ -1002,11 +1002,11 @@ class WorkflowRunDetailAPIView(APIView):
             return Response({"message": str(e)}, status=500)
 
 
-class WorkflowHooksAPIView(APIView):
+class WorkflowActionsAPIView(APIView):
     def get(self, request: Request) -> Response:
         from django_ai_sdk.workflows import WorkflowService
 
-        return Response(WorkflowService.list_hooks())
+        return Response(WorkflowService.list_actions())
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -1308,7 +1308,7 @@ urlpatterns = [
     ),
     path("workflows/", WorkflowListCreateAPIView.as_view(), name="workflow-list"),
     path("workflows/run/", WorkflowRunAPIView.as_view(), name="workflow-run"),
-    path("workflows/hooks/", WorkflowHooksAPIView.as_view(), name="workflow-hooks"),
+    path("workflows/actions/", WorkflowActionsAPIView.as_view(), name="workflow-actions"),
     path(
         "workflows/<str:workflow_id>/runs/",
         WorkflowRunListAPIView.as_view(),

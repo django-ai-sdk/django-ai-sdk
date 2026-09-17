@@ -1,4 +1,4 @@
-"""WorkflowExecutor: sequencing, declared inputs, hooks, and the queued entry point."""
+"""WorkflowExecutor: sequencing, declared inputs, actions, and the queued entry point."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,8 +9,8 @@ from django.test import override_settings
 from django_ai_sdk.workflows import StepFailed
 from django_ai_sdk.workflows.executor import WorkflowExecutor
 from django_ai_sdk.workflows.schemas import (
+    ActionDefinition,
     FieldDefinition,
-    HookDefinition,
     StepDefinition,
     WorkflowDefinition,
 )
@@ -263,15 +263,15 @@ class TestStructuredOutput:
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-class TestHooks:
-    """A definition's hooks are built and attached; the recorder is always there."""
+class TestActions:
+    """A definition's actions are built and attached; the recorder is always there."""
 
-    async def test_a_workflow_hook_fires_for_every_step(self, executor):
-        from django_ai_sdk.workflows import WorkflowHook
+    async def test_a_workflow_action_fires_for_every_step(self, executor):
+        from django_ai_sdk.workflows import WorkflowAction
 
         events: list[tuple[str, str]] = []
 
-        class Capture(WorkflowHook):
+        class Capture(WorkflowAction):
             async def on_run_start(self, ctx):
                 events.append(("run_start", ""))
 
@@ -283,18 +283,18 @@ class TestHooks:
 
         import tests.unit.test_workflow_executor as mod
 
-        mod.CaptureHook = Capture
+        mod.CaptureAction = Capture
         agent = make_agent("data")
         workflow = make_workflow(
             StepDefinition(name="first", agent_id="a1"),
             StepDefinition(name="second", agent_id="a1"),
-            hooks=[HookDefinition(type="capture")],
+            actions=[ActionDefinition(type="capture")],
         )
 
         with (
             patch(AGENT_GET, AsyncMock(return_value=agent)),
             override_settings(
-                AI_SDK_WORKFLOW_HOOKS={"capture": "tests.unit.test_workflow_executor.CaptureHook"}
+                AI_SDK_WORKFLOW_ACTIONS={"capture": "tests.unit.test_workflow_executor.CaptureAction"}
             ),
         ):
             await executor.run(workflow)
@@ -306,58 +306,58 @@ class TestHooks:
             ("run_end", ""),
         ]
 
-    async def test_a_step_hook_fires_for_that_step_alone(self, executor):
+    async def test_a_step_action_fires_for_that_step_alone(self, executor):
         """The difference the two attachment points buy."""
-        from django_ai_sdk.workflows import WorkflowHook
+        from django_ai_sdk.workflows import WorkflowAction
 
         events: list[str] = []
 
-        class Capture(WorkflowHook):
+        class Capture(WorkflowAction):
             async def on_step_end(self, ctx, step, outcome):
                 events.append(step.name)
 
         import tests.unit.test_workflow_executor as mod
 
-        mod.StepOnlyHook = Capture
+        mod.StepOnlyAction = Capture
         agent = make_agent("data")
         workflow = make_workflow(
-            StepDefinition(name="first", agent_id="a1", hooks=[HookDefinition(type="capture")]),
+            StepDefinition(name="first", agent_id="a1", actions=[ActionDefinition(type="capture")]),
             StepDefinition(name="second", agent_id="a1"),
         )
 
         with (
             patch(AGENT_GET, AsyncMock(return_value=agent)),
             override_settings(
-                AI_SDK_WORKFLOW_HOOKS={"capture": "tests.unit.test_workflow_executor.StepOnlyHook"}
+                AI_SDK_WORKFLOW_ACTIONS={"capture": "tests.unit.test_workflow_executor.StepOnlyAction"}
             ),
         ):
             await executor.run(workflow)
 
         assert events == ["first"]
 
-    async def test_an_unregistered_hook_stops_the_run_rather_than_being_skipped(self, executor):
+    async def test_an_unregistered_action_stops_the_run_rather_than_being_skipped(self, executor):
         """The registry is the gate; a name outside it is a configuration error."""
         agent = make_agent("data")
         workflow = make_workflow(
             StepDefinition(name="result", agent_id="a1"),
-            hooks=[HookDefinition(type="carrier_pigeon")],
+            actions=[ActionDefinition(type="carrier_pigeon")],
         )
 
         with (
             patch(AGENT_GET, AsyncMock(return_value=agent)),
-            override_settings(AI_SDK_WORKFLOW_HOOKS={}),
+            override_settings(AI_SDK_WORKFLOW_ACTIONS={}),
             pytest.raises(ImproperlyConfigured, match="carrier_pigeon"),
         ):
             await executor.run(workflow)
 
-    async def test_a_hook_reads_the_run_and_the_step_it_was_configured_with(self, executor):
+    async def test_an_action_reads_the_run_and_the_step_it_was_configured_with(self, executor):
         from tests.factories.db import UserFactory
 
-        from django_ai_sdk.workflows import WorkflowHook
+        from django_ai_sdk.workflows import WorkflowAction
 
         seen: list[dict] = []
 
-        class Capture(WorkflowHook):
+        class Capture(WorkflowAction):
             async def on_run_end(self, ctx, error):
                 seen.append(
                     {
@@ -370,20 +370,20 @@ class TestHooks:
 
         import tests.unit.test_workflow_executor as mod
 
-        mod.CaptureConfigHook = Capture
+        mod.CaptureConfigAction = Capture
         user = await UserFactory.acreate()
         agent = make_agent("data")
         workflow = make_workflow(
             StepDefinition(name="result", agent_id="a1"),
             name="ships-log",
-            hooks=[HookDefinition(type="capture", config={"step": "result"})],
+            actions=[ActionDefinition(type="capture", config={"step": "result"})],
         )
 
         with (
             patch(AGENT_GET, AsyncMock(return_value=agent)),
             override_settings(
-                AI_SDK_WORKFLOW_HOOKS={
-                    "capture": "tests.unit.test_workflow_executor.CaptureConfigHook"
+                AI_SDK_WORKFLOW_ACTIONS={
+                    "capture": "tests.unit.test_workflow_executor.CaptureConfigAction"
                 }
             ),
         ):
@@ -455,7 +455,7 @@ class TestTheQueuedEntryPoint:
         with (
             patch(AGENT_GET, AsyncMock(return_value=agent)),
             patch(
-                "django_ai_sdk.workflows.hooks.RunRecorder.on_step_start",
+                "django_ai_sdk.workflows.actions.RunRecorder.on_step_start",
                 AsyncMock(side_effect=StepAlreadyRunning("result")),
             ),
         ):

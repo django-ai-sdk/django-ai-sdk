@@ -1,4 +1,4 @@
-"""Hooks: the run recorder's row lifecycle, and the registry that gates the rest."""
+"""Actions: the run recorder's row lifecycle, and the registry that gates the rest."""
 
 import pytest
 from django.test import override_settings
@@ -7,12 +7,12 @@ from pydantic import BaseModel
 from django_ai_sdk.workflows import (
     RunRecorder,
     StepAlreadyRunning,
-    WorkflowHook,
+    WorkflowAction,
     StepOutcome,
     WorkflowContext,
     WorkflowRun,
     WorkflowRunStep,
-    get_hook_registry,
+    get_action_registry,
     run_steps,
 )
 from tests.mocks.workflow import FakeStep
@@ -22,7 +22,7 @@ CTX = WorkflowContext()
 
 @pytest.mark.django_db(transaction=True)
 class TestRunRecorder:
-    """The one hook the package ships, and the one the executor always attaches."""
+    """The one action the package ships, and the one the executor always attaches."""
 
     async def _recorder(self, *names):
         """A recorder over a pipeline of `names`, which fixes each row's sequence."""
@@ -89,7 +89,7 @@ class TestRunRecorder:
             FakeStep("triage", requires=("ocr",)),
         ]
 
-        await run_steps(steps, hooks=[RunRecorder(run, steps)])
+        await run_steps(steps, actions=[RunRecorder(run, steps)])
 
         rows = {row.step_name: row.status async for row in run.steps.all()}
         assert rows == {
@@ -177,52 +177,52 @@ class TestTheStepRowIsAClaim:
             await recorder.on_step_start(CTX, ocr)
 
 
-class Loud(WorkflowHook):
+class Loud(WorkflowAction):
     description = "says so"
 
 
-class NotAHook:
+class NotAnAction:
     pass
 
 
-class TestTheHookRegistry:
+class TestTheActionRegistry:
     """The gate on what a JSON definition may name."""
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS={"loud": "tests.unit.test_workflow_hooks.Loud"})
-    def test_a_declared_hook_is_composable(self):
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS={"loud": "tests.unit.test_workflow_actions.Loud"})
+    def test_a_declared_action_is_composable(self):
         # By name, not identity: import_string reaches this module under its own
         # name, which is not the one pytest collected it under.
-        assert [cls.__name__ for cls in get_hook_registry().values()] == ["Loud"]
+        assert [cls.__name__ for cls in get_action_registry().values()] == ["Loud"]
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS={})
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS={})
     def test_the_package_ships_none(self):
         """Delivering a result somewhere is the host's business, not the SDK's."""
-        assert get_hook_registry() == {}
+        assert get_action_registry() == {}
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS={"gone": "nowhere.NoSuchHook"})
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS={"gone": "nowhere.NoSuchAction"})
     def test_a_path_that_will_not_import_is_left_out(self):
-        assert get_hook_registry() == {}
+        assert get_action_registry() == {}
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS={"wrong": "tests.unit.test_workflow_hooks.NotAHook"})
-    def test_a_class_that_is_not_a_hook_is_left_out(self):
-        assert get_hook_registry() == {}
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS={"wrong": "tests.unit.test_workflow_actions.NotAnAction"})
+    def test_a_class_that_is_not_a_action_is_left_out(self):
+        assert get_action_registry() == {}
 
 
 class TestConfig:
     """One registered class serves every definition that names it."""
 
-    def test_a_hook_is_built_from_the_config_its_spec_carries(self):
-        from django_ai_sdk.workflows.definitions import compile_hooks
-        from django_ai_sdk.workflows.schemas import HookDefinition
+    def test_an_action_is_built_from_the_config_its_spec_carries(self):
+        from django_ai_sdk.workflows.definitions import compile_actions
+        from django_ai_sdk.workflows.schemas import ActionDefinition
 
         with override_settings(
-            AI_SDK_WORKFLOW_HOOKS={"loud": "tests.unit.test_workflow_hooks.Loud"}
+            AI_SDK_WORKFLOW_ACTIONS={"loud": "tests.unit.test_workflow_actions.Loud"}
         ):
-            (hook,) = compile_hooks(
-                [HookDefinition(type="loud", config={"to": "#ops"})], "a workflow"
+            (action,) = compile_actions(
+                [ActionDefinition(type="loud", config={"to": "#ops"})], "a workflow"
             )
 
-        assert hook.config == {"to": "#ops"}
+        assert action.config == {"to": "#ops"}
 
-    def test_a_hook_built_in_code_takes_no_config(self):
+    def test_an_action_built_in_code_takes_no_config(self):
         assert Loud().config == {}

@@ -3,18 +3,18 @@
 A definition is data authored in code with `register()`, or at runtime in a
 `WorkflowSettings` row. It declares the inputs a run takes, names agent steps and
 `Step` classes the deployment exposed through `AI_SDK_WORKFLOW_STEPS`, and hangs
-`WorkflowHook`s off the workflow or off one step.
+`WorkflowAction`s off the workflow or off one step.
 """
 
 from __future__ import annotations
 
+from .actions import RunRecorder, WorkflowAction, get_action_registry
 from .definitions import get_step_registry
 from .executor import WorkflowExecutor
-from .hooks import RunRecorder, WorkflowHook, get_hook_registry
 from .models import WorkflowRun, WorkflowRunStep, WorkflowSettings
 from .registry import aget_workflow, aget_workflows, register
 from .runner import run_steps
-from .schemas import FieldDefinition, HookDefinition, StepDefinition, WorkflowDefinition
+from .schemas import ActionDefinition, FieldDefinition, StepDefinition, WorkflowDefinition
 from .services import WorkflowService
 from .steps import (
     AgentStep,
@@ -27,16 +27,16 @@ from .steps import (
 )
 
 __all__ = [
+    "ActionDefinition",
     "AgentStep",
     "FieldDefinition",
-    "HookDefinition",
     "OnError",
     "RunRecorder",
     "Step",
     "StepAlreadyRunning",
     "StepDefinition",
     "StepFailed",
-    "WorkflowHook",
+    "WorkflowAction",
     "StepOutcome",
     "WorkflowContext",
     "WorkflowDefinition",
@@ -47,7 +47,7 @@ __all__ = [
     "WorkflowSettings",
     "aget_workflow",
     "aget_workflows",
-    "get_hook_registry",
+    "get_action_registry",
     "get_step_registry",
     "register",
     "run_steps",

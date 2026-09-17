@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.workflows.hooks import WorkflowHook
+    from django_ai_sdk.workflows.actions import WorkflowAction
     from django_ai_sdk.workflows.steps import Step
 
 logger = logging.getLogger(__name__)
@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 class _StepRunner:
     """Walks the declared steps once, in order."""
 
-    def __init__(self, steps: Sequence[Step], *, hooks: Sequence[WorkflowHook] = ()) -> None:
+    def __init__(self, steps: Sequence[Step], *, actions: Sequence[WorkflowAction] = ()) -> None:
         self.steps = list(steps)
-        self.hooks = list(hooks)
+        self.actions = list(actions)
 
     async def run(
         self,
@@ -59,7 +59,7 @@ class _StepRunner:
             run_id=run_id,
         )
 
-        await self._notify(self.hooks, "on_run_start", lambda hook: hook.on_run_start(ctx))
+        await self._notify(self.actions, "on_run_start", lambda action: action.on_run_start(ctx))
         try:
             await self._walk(ctx, outcomes, dict(completed or {}))
         except Exception as exc:
@@ -69,27 +69,27 @@ class _StepRunner:
         return outcomes
 
     async def _end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
-        await self._notify(self.hooks, "on_run_end", lambda hook: hook.on_run_end(ctx, error))
+        await self._notify(self.actions, "on_run_end", lambda action: action.on_run_end(ctx, error))
 
     @staticmethod
     async def _notify(
-        hooks: Sequence[WorkflowHook],
+        actions: Sequence[WorkflowAction],
         what: str,
-        call: Callable[[WorkflowHook], Awaitable[None]],
+        call: Callable[[WorkflowAction], Awaitable[None]],
     ) -> None:
-        """Tell each hook, and carry on when one of them is broken.
+        """Tell each action, and carry on when one of them is broken.
 
-        A hook watches the run; it does not do the run's work, so one that raises is
-        logged and the walk carries on. `StepAlreadyRunning` is the exception: a hook
+        An action watches the run; it does not do the run's work, so one that raises is
+        logged and the walk carries on. `StepAlreadyRunning` is the exception: an action
         whose rows are also a claim refuses a duplicate delivery that way.
         """
-        for hook in hooks:
+        for action in actions:
             try:
-                await call(hook)
+                await call(action)
             except StepAlreadyRunning:
                 raise
             except Exception:
-                logger.exception("Workflow hook %s failed in %s", type(hook).__name__, what)
+                logger.exception("Workflow action %s failed in %s", type(action).__name__, what)
 
     async def _walk(
         self,
@@ -100,7 +100,7 @@ class _StepRunner:
         """Run each step in turn, recording every one that will not run."""
         for index, step in enumerate(self.steps):
             if step.name in recorded:
-                # Replayed without a hook call: the row belongs to the run that
+                # Replayed without an action call: the row belongs to the run that
                 # completed it, so closing it again would re-date it.
                 outcomes[step.name] = StepOutcome(status="completed", output=recorded[step.name])
                 continue
@@ -127,9 +127,9 @@ class _StepRunner:
                 continue
 
             await self._notify(
-                self._hooks_for(step),
+                self._actions_for(step),
                 "on_step_start",
-                lambda hook: hook.on_step_start(ctx, step),
+                lambda action: action.on_step_start(ctx, step),
             )
             try:
                 outcome = await step.run(ctx)
@@ -148,9 +148,9 @@ class _StepRunner:
                 await self._abandon(ctx, index, outcomes, recorded, f"{step.name} failed")
                 raise StepFailed(outcome.detail or f"Step {step.name!r} failed.")
 
-    def _hooks_for(self, step: Step) -> list[WorkflowHook]:
-        """Run-wide hooks fire for every step; a step's own fire for it alone."""
-        return [*self.hooks, *step.hooks]
+    def _actions_for(self, step: Step) -> list[WorkflowAction]:
+        """Run-wide actions fire for every step; a step's own fire for it alone."""
+        return [*self.actions, *step.actions]
 
     async def _settle(
         self,
@@ -159,12 +159,12 @@ class _StepRunner:
         outcomes: dict[str, StepOutcome],
         outcome: StepOutcome,
     ) -> None:
-        """Put the outcome on the run's state and tell the hooks."""
+        """Put the outcome on the run's state and tell the actions."""
         outcomes[step.name] = outcome
         await self._notify(
-            self._hooks_for(step),
+            self._actions_for(step),
             "on_step_end",
-            lambda hook: hook.on_step_end(ctx, step, outcome),
+            lambda action: action.on_step_end(ctx, step, outcome),
         )
 
     async def _abandon(
@@ -212,13 +212,13 @@ async def run_steps(
     *,
     inputs: Mapping[str, Any] | None = None,
     principal: AbstractBaseUser | AnonymousUser | None = None,
-    hooks: Sequence[WorkflowHook] = (),
+    actions: Sequence[WorkflowAction] = (),
     completed: Mapping[str, Any] | None = None,
     workflow: str = "",
     run_id: str = "",
 ) -> dict[str, StepOutcome]:
-    """Run `steps` in declared order, reporting each outcome to `hooks`."""
-    runner = _StepRunner(steps, hooks=hooks)
+    """Run `steps` in declared order, reporting each outcome to `actions`."""
+    runner = _StepRunner(steps, actions=actions)
     return await runner.run(
         inputs=inputs,
         principal=principal,

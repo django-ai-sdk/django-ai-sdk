@@ -97,7 +97,7 @@ The transcript is **named, not guessed**. An input is data until a step names it
 | `OnError.FAIL` | The run stops. Every step that will now not run is recorded as `skipped`, then the exception propagates — `StepFailed` when the step reported failure rather than raising. |
 | `OnError.CONTINUE` | The failure is recorded and the rest of the run proceeds. |
 
-A failed step produces nothing, and that is the whole cascade: a step whose required step produced nothing is recorded `skipped`, naming what it waited for. So a failure reaches exactly what read it and nothing else. To *react* to a failure — notify someone, file a ticket, write a fallback — use a [hook](#hooks); that is what they are for.
+A failed step produces nothing, and that is the whole cascade: a step whose required step produced nothing is recorded `skipped`, naming what it waited for. So a failure reaches exactly what read it and nothing else. To *react* to a failure — notify someone, file a ticket, write a fallback — use an [action](#actions); that is what they are for.
 
 Returning a failure rather than raising lets the step describe it: the detail reaches the record, and the output the step had already built is still on the outcome.
 
@@ -114,15 +114,15 @@ Returning a failure rather than raising lets the step describe it: the detail re
 
 It is async, because a precondition is usually a database read. A skipped step never starts, and its reason is recorded.
 
-## Hooks
+## Actions
 
-Everything that watches a run rather than doing its work is a hook, and there is one kind of object for all of it — recording the run's rows, telling someone a step finished, delivering the result when it ends.
+Everything that watches a run rather than doing its work is an action, and there is one kind of object for all of it — recording the run's rows, telling someone a step finished, delivering the result when it ends.
 
 ```python
-from django_ai_sdk.workflows import WorkflowHook
+from django_ai_sdk.workflows import WorkflowAction
 
 
-class NotifyHook(WorkflowHook):
+class NotifyAction(WorkflowAction):
     description = "Tell the run's user a step finished"
 
     async def on_step_end(self, ctx, step, outcome):
@@ -136,35 +136,35 @@ class NotifyHook(WorkflowHook):
 | `on_step_end(ctx, step, outcome)` | A step settled — completed, failed or skipped. |
 | `on_run_end(ctx, error)` | The run is over. `error` is what ended it, or `None`. |
 
-Every callback is a no-op by default, so a hook implements only the moments it cares about.
+Every callback is a no-op by default, so an action implements only the moments it cares about.
 
-**A hook cannot fail the run.** Steps do the work; hooks watch it. A hook that raises is that hook's own bug — it is logged against its class name and the run carries on, so a notification nobody received does not turn a workflow whose every step completed into a failed one, and one broken hook does not stop the hooks after it. The single exception is `StepAlreadyRunning`, below.
+**An action cannot fail the run.** Steps do the work; actions watch it. An action that raises is that action's own bug — it is logged against its class name and the run carries on, so a notification nobody received does not turn a workflow whose every step completed into a failed one, and one broken action does not stop the actions after it. The single exception is `StepAlreadyRunning`, below.
 
-**Where it is attached decides what it sees.** A hook on the workflow gets all four callbacks, for the run and for every step in it. A hook on one step gets the two step callbacks, for that step alone:
+**Where it is attached decides what it sees.** An action on the workflow gets all four callbacks, for the run and for every step in it. An action on one step gets the two step callbacks, for that step alone:
 
 ```python
-await run_steps(PIPELINE, hooks=[NotifyHook()])          # every step
-SummariseStep.hooks = (NotifyHook(),)                    # this step only
+await run_steps(PIPELINE, actions=[NotifyAction()])          # every step
+SummariseStep.actions = (NotifyAction(),)                    # this step only
 ```
 
-A hook whose rows are also a claim refuses a duplicate delivery by raising `StepAlreadyRunning` — the one exception the runner lets through rather than logging. The queued entry point treats it as the ordinary case, and neither the recorder nor the executor stamps the run row, because the delivery that holds the run is still working on it.
+An action whose rows are also a claim refuses a duplicate delivery by raising `StepAlreadyRunning` — the one exception the runner lets through rather than logging. The queued entry point treats it as the ordinary case, and neither the recorder nor the executor stamps the run row, because the delivery that holds the run is still working on it.
 
 ## Recording a run
 
-The runner knows things no step can: that a step was blocked by an upstream failure, that it was skipped, that it crashed before writing anything. `RunRecorder` is the hook that writes them down, and the executor always attaches it.
+The runner knows things no step can: that a step was blocked by an upstream failure, that it was skipped, that it crashed before writing anything. `RunRecorder` is the action that writes them down, and the executor always attaches it.
 
 ```python
 from django_ai_sdk.workflows import RunRecorder, WorkflowRun
 
 run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING)
-await run_steps(PIPELINE, inputs={"document": document}, hooks=[RunRecorder(run, PIPELINE)])
+await run_steps(PIPELINE, inputs={"document": document}, actions=[RunRecorder(run, PIPELINE)])
 ```
 
-`RunRecorder` writes one `WorkflowRunStep` row per step, and takes the declared pipeline because that is what fixes each row's order. A host that already keeps a step table — because a review screen queries one — adds a hook of its own instead of writing the same fact twice under two retention policies.
+`RunRecorder` writes one `WorkflowRunStep` row per step, and takes the declared pipeline because that is what fixes each row's order. A host that already keeps a step table — because a review screen queries one — adds an action of its own instead of writing the same fact twice under two retention policies.
 
 ## Resume
 
-Dispatch is at-least-once, so the same pipeline can be handed to a worker twice. A re-dispatch resumes rather than repeating: pass what already finished as `completed=`, and those steps are trusted rather than run again. They get no hook call either, so a resume does not re-date the row it is trusting.
+Dispatch is at-least-once, so the same pipeline can be handed to a worker twice. A re-dispatch resumes rather than repeating: pass what already finished as `completed=`, and those steps are trusted rather than run again. They get no action call either, so a resume does not re-date the row it is trusting.
 
 ```python
 await run_steps(PIPELINE, completed={"text": stored_text})
@@ -177,7 +177,7 @@ await run_steps(PIPELINE, completed={"text": stored_text})
 The runner never inspects `output`. What a step returns means whatever the host decides — a value the next step reads, a payload to file, a list of things a person should check. That interpretation belongs in the host's own code, in its own vocabulary:
 
 ```python
-outcomes = await run_steps(PIPELINE, inputs={"document": document}, hooks=[recorder])
+outcomes = await run_steps(PIPELINE, inputs={"document": document}, actions=[recorder])
 
 if outcomes["extract"].status == "completed":
     my_app.record_issues(document, outcomes["extract"].output)
@@ -226,7 +226,7 @@ register(
 )
 ```
 
-The definition owns the graph — `name`, `requires`, `on_error`, `hooks` — and the class
+The definition owns the graph — `name`, `requires`, `on_error`, `actions` — and the class
 supplies the behaviour. Class attributes on a registered `Step` are not defaults for
 those fields.
 
@@ -250,4 +250,4 @@ the queue as a real failure.
 - **Sequential.** Steps run one at a time, in declared order, even where two of them read nothing from each other.
 - **Order is yours to get right.** A step declared ahead of the one it reads is refused, not reordered.
 - **An `AgentStep` runs the CHAT permission check** on the principal, the same way a JSON agent step does. A code pipeline is not a permission bypass.
-- **`RunRecorder` is a hook, so it is isolated like any other.** A database error while writing a step row is logged rather than fatal, which means a run can finish with a row missing from its record. The trade is deliberate: the alternative is letting any hook fail the work.
+- **`RunRecorder` is an action, so it is isolated like any other.** A database error while writing a step row is logged rather than fatal, which means a run can finish with a row missing from its record. The trade is deliberate: the alternative is letting any action fail the work.

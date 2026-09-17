@@ -15,13 +15,13 @@ from django.utils.module_loading import import_string
 from pydantic import BaseModel, Field, create_model
 
 from django_ai_sdk.utils import resolve_setting
-from django_ai_sdk.workflows.hooks import WorkflowHook, get_hook_registry
+from django_ai_sdk.workflows.actions import WorkflowAction, get_action_registry
 from django_ai_sdk.workflows.steps import AgentStep, OnError, Step
 
 if TYPE_CHECKING:
     from django_ai_sdk.workflows.schemas import (
+        ActionDefinition,
         FieldDefinition,
-        HookDefinition,
         StepDefinition,
         WorkflowDefinition,
     )
@@ -133,14 +133,14 @@ def inputs_json_schema(workflow: WorkflowDefinition) -> dict[str, Any]:
 def compile_steps(workflow: WorkflowDefinition) -> list[Step]:
     """The definition's steps as Step objects, in the order it declares them."""
     registry = get_step_registry()
-    hooks = get_hook_registry()
-    return [_compile_step(declared, registry, hooks) for declared in workflow.steps]
+    actions = get_action_registry()
+    return [_compile_step(declared, registry, actions) for declared in workflow.steps]
 
 
 def _compile_step(
     declared: StepDefinition,
     registry: dict[str, type[Step]],
-    hook_registry: dict[str, type[WorkflowHook]],
+    action_registry: dict[str, type[WorkflowAction]],
 ) -> Step:
     """One declaration as a fresh Step instance, never a shared registry object."""
     if declared.type == "agent":
@@ -158,7 +158,7 @@ def _compile_step(
     step.name = declared.name
     step.requires = tuple(declared.requires)
     step.on_error = OnError(declared.on_error)
-    step.hooks = tuple(compile_hooks(declared.hooks, declared.name, hook_registry))
+    step.actions = tuple(compile_actions(declared.actions, declared.name, action_registry))
     return step
 
 
@@ -180,28 +180,28 @@ def _agent_step(declared: StepDefinition) -> AgentStep:
     return step
 
 
-def compile_hooks(
-    declared: list[HookDefinition],
+def compile_actions(
+    declared: list[ActionDefinition],
     where: str,
-    registry: dict[str, type[WorkflowHook]] | None = None,
-) -> list[WorkflowHook]:
-    """Hook instances for the keys a definition names."""
+    registry: dict[str, type[WorkflowAction]] | None = None,
+) -> list[WorkflowAction]:
+    """Action instances for the keys a definition names."""
     if registry is None:
-        registry = get_hook_registry()
-    hooks: list[WorkflowHook] = []
-    for hook in declared:
-        hook_class = registry.get(hook.type)
-        if hook_class is None:
+        registry = get_action_registry()
+    actions: list[WorkflowAction] = []
+    for action in declared:
+        action_class = registry.get(action.type)
+        if action_class is None:
             raise ImproperlyConfigured(
-                f"Workflow hook {hook.type!r} on {where!r} is not registered. "
-                f"Add it to AI_SDK_WORKFLOW_HOOKS. Registered: {sorted(registry)}."
+                f"Workflow action {action.type!r} on {where!r} is not registered. "
+                f"Add it to AI_SDK_WORKFLOW_ACTIONS. Registered: {sorted(registry)}."
             )
-        hooks.append(hook_class(hook.config))
-    return hooks
+        actions.append(action_class(action.config))
+    return actions
 
 
 __all__ = [
-    "compile_hooks",
+    "compile_actions",
     "compile_inputs",
     "compile_steps",
     "get_step_registry",

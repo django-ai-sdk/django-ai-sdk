@@ -1,4 +1,4 @@
-"""Workflow step and hook fakes.
+"""Workflow step and action fakes.
 
 A step that appends to a list is the whole test double: the model call is
 the only boundary these tests care about, and none of them cross it.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django_ai_sdk.workflows import OnError, Step, StepOutcome, WorkflowContext, WorkflowHook
+from django_ai_sdk.workflows import OnError, Step, StepOutcome, WorkflowAction, WorkflowContext
 
 
 class FakeStep(Step):
@@ -27,7 +27,7 @@ class FakeStep(Step):
         raises: Exception | None = None,
         skip_reason: str = "",
         on_error: OnError = OnError.FAIL,
-        hooks: tuple[WorkflowHook, ...] = (),
+        actions: tuple[WorkflowAction, ...] = (),
         journal: list[str] | None = None,
     ) -> None:
         self.name = name
@@ -36,7 +36,7 @@ class FakeStep(Step):
         self.raises = raises
         self.skip_reason = skip_reason
         self.on_error = on_error
-        self.hooks = tuple(hooks)
+        self.actions = tuple(actions)
         self.journal = journal
         self.calls = 0
 
@@ -52,8 +52,8 @@ class FakeStep(Step):
         return self.outcome
 
 
-class RecordingHook(WorkflowHook):
-    """A WorkflowHook that appends every call, for assertions."""
+class RecordingAction(WorkflowAction):
+    """A WorkflowAction that appends every call, for assertions."""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)

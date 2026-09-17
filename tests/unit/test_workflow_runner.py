@@ -10,7 +10,7 @@ from django_ai_sdk.workflows import (
     WorkflowContext,
     run_steps,
 )
-from tests.mocks.workflow import FakeStep, RecordingHook
+from tests.mocks.workflow import FakeStep, RecordingAction
 
 
 class TestOrdering:
@@ -143,9 +143,9 @@ class TestFailure:
         assert outcomes["triage"].status == "completed"
         assert journal == ["ocr", "extract", "triage"]
 
-    async def test_a_hook_sees_the_failure_a_handler_step_used_to_read(self):
-        """What `error_key` was for: reacting to a failure is a hook's job now."""
-        hook = RecordingHook()
+    async def test_a_action_sees_the_failure_a_handler_step_used_to_read(self):
+        """What `error_key` was for: reacting to a failure is an action's job now."""
+        action = RecordingAction()
         steps = [
             FakeStep(
                 "extract",
@@ -155,9 +155,9 @@ class TestFailure:
             FakeStep("match", requires=("extract",)),
         ]
 
-        outcomes = await run_steps(steps, hooks=[hook])
+        outcomes = await run_steps(steps, actions=[action])
 
-        assert ("step_end", "extract", "failed") in hook.events
+        assert ("step_end", "extract", "failed") in action.events
         assert outcomes["match"].status == "skipped"
 
     async def test_a_skipped_step_names_the_step_it_waited_for(self):
@@ -200,7 +200,7 @@ class TestFailure:
 
     async def test_every_step_that_will_not_run_is_recorded(self):
         """Nothing is merely absent, so a reader can see the whole run."""
-        hook = RecordingHook()
+        action = RecordingAction()
         steps = [
             FakeStep("ocr", raises=RuntimeError("down")),
             FakeStep("triage", requires=("ocr",)),
@@ -208,26 +208,26 @@ class TestFailure:
         ]
 
         with pytest.raises(RuntimeError):
-            await run_steps(steps, hooks=[hook])
+            await run_steps(steps, actions=[action])
 
-        settled = {name: status for event, name, status in hook.events if event == "step_end"}
+        settled = {name: status for event, name, status in action.events if event == "step_end"}
         assert settled == {"ocr": "failed", "triage": "skipped", "report": "skipped"}
 
 
 class TestSkipping:
     async def test_a_skipped_step_is_recorded_with_its_reason(self):
-        hook = RecordingHook()
+        action = RecordingAction()
         steps = [
             FakeStep("ocr"),
             FakeStep("extract", requires=("ocr",), skip_reason="not an invoice"),
             FakeStep("match", requires=("extract",)),
         ]
 
-        outcomes = await run_steps(steps, hooks=[hook])
+        outcomes = await run_steps(steps, actions=[action])
 
         assert outcomes["extract"].detail == "not an invoice"
         assert outcomes["match"].detail == "extract produced nothing"
-        assert ("step_start", "extract", None) not in hook.events
+        assert ("step_start", "extract", None) not in action.events
 
     async def test_skip_when_may_read_the_run_state(self):
         class Conditional(FakeStep):
@@ -258,15 +258,15 @@ class TestResume:
 
     async def test_a_replayed_step_is_not_recorded_again(self):
         """Recording it would date a row to a run the step took no part in."""
-        hook = RecordingHook()
+        action = RecordingAction()
 
         await run_steps(
             [FakeStep("ocr"), FakeStep("triage", requires=("ocr",))],
-            hooks=[hook],
+            actions=[action],
             completed={"ocr": "stored text"},
         )
 
-        assert [name for _event, name, _status in hook.events if name] == ["triage", "triage"]
+        assert [name for _event, name, _status in action.events if name] == ["triage", "triage"]
 
     async def test_a_replayed_step_appears_in_the_runs_outputs(self):
         """Resume must not drop replayed output from the returned map."""
@@ -284,92 +284,92 @@ class TestResume:
         assert _published(outcomes) == {"ocr": "stored text", "triage": "SUM"}
 
 
-class TestHooks:
+class TestActions:
     async def test_they_are_optional(self):
         outcomes = await run_steps([FakeStep("ocr")])
 
         assert outcomes["ocr"].status == "completed"
 
-    async def test_two_runs_can_use_different_hooks(self):
-        """No process-wide hook: the record follows the call."""
-        first, second = RecordingHook(), RecordingHook()
+    async def test_two_runs_can_use_different_actions(self):
+        """No process-wide action: the record follows the call."""
+        first, second = RecordingAction(), RecordingAction()
 
-        await run_steps([FakeStep("ocr")], hooks=[first])
-        await run_steps([FakeStep("triage")], hooks=[second])
+        await run_steps([FakeStep("ocr")], actions=[first])
+        await run_steps([FakeStep("triage")], actions=[second])
 
         assert [name for _e, name, _s in first.events if name] == ["ocr", "ocr"]
         assert [name for _e, name, _s in second.events if name] == ["triage", "triage"]
 
-    async def test_a_workflow_hook_fires_for_every_step(self):
-        hook = RecordingHook()
+    async def test_a_workflow_action_fires_for_every_step(self):
+        action = RecordingAction()
 
-        await run_steps([FakeStep("ocr"), FakeStep("triage")], hooks=[hook])
+        await run_steps([FakeStep("ocr"), FakeStep("triage")], actions=[action])
 
-        assert [name for event, name, _s in hook.events if event == "step_end"] == [
+        assert [name for event, name, _s in action.events if event == "step_end"] == [
             "ocr",
             "triage",
         ]
 
-    async def test_a_step_hook_fires_for_that_step_alone(self):
+    async def test_a_step_action_fires_for_that_step_alone(self):
         """The difference the two attachment points buy."""
-        on_the_step = RecordingHook()
+        on_the_step = RecordingAction()
 
-        await run_steps([FakeStep("ocr", hooks=(on_the_step,)), FakeStep("triage")])
+        await run_steps([FakeStep("ocr", actions=(on_the_step,)), FakeStep("triage")])
 
         assert [name for _e, name, _s in on_the_step.events] == ["ocr", "ocr"]
 
-    async def test_a_step_hook_is_told_nothing_about_the_run(self):
-        """Run-level callbacks belong to hooks attached to the workflow."""
-        on_the_step = RecordingHook()
+    async def test_a_step_action_is_told_nothing_about_the_run(self):
+        """Run-level callbacks belong to actions attached to the workflow."""
+        on_the_step = RecordingAction()
 
-        await run_steps([FakeStep("ocr", hooks=(on_the_step,))])
+        await run_steps([FakeStep("ocr", actions=(on_the_step,))])
 
         assert [event for event, _n, _s in on_the_step.events] == ["step_start", "step_end"]
 
-    async def test_a_broken_hook_does_not_fail_work_that_succeeded(self):
-        """A hook watches the run; a notification nobody received is not a failure."""
-        from django_ai_sdk.workflows import WorkflowHook
+    async def test_a_broken_action_does_not_fail_work_that_succeeded(self):
+        """An action watches the run; a notification nobody received is not a failure."""
+        from django_ai_sdk.workflows import WorkflowAction
 
-        class Broken(WorkflowHook):
+        class Broken(WorkflowAction):
             async def on_step_end(self, ctx, step, outcome):
                 raise RuntimeError("slack is down")
 
-        outcomes = await run_steps([FakeStep("ocr")], hooks=[Broken()])
+        outcomes = await run_steps([FakeStep("ocr")], actions=[Broken()])
 
         assert outcomes["ocr"].status == "completed"
 
-    async def test_a_broken_hook_does_not_stop_the_hooks_after_it(self):
-        from django_ai_sdk.workflows import WorkflowHook
+    async def test_a_broken_action_does_not_stop_the_actions_after_it(self):
+        from django_ai_sdk.workflows import WorkflowAction
 
-        class Broken(WorkflowHook):
+        class Broken(WorkflowAction):
             async def on_step_end(self, ctx, step, outcome):
                 raise RuntimeError("slack is down")
 
-        after = RecordingHook()
+        after = RecordingAction()
 
-        await run_steps([FakeStep("ocr")], hooks=[Broken(), after])
+        await run_steps([FakeStep("ocr")], actions=[Broken(), after])
 
         assert ("step_end", "ocr", "completed") in after.events
 
-    async def test_a_hook_refuses_a_duplicate_delivery_by_raising(self):
-        """The one exception: a hook whose rows are also a claim has to reach the caller."""
-        from django_ai_sdk.workflows import WorkflowHook
+    async def test_a_action_refuses_a_duplicate_delivery_by_raising(self):
+        """The one exception: an action whose rows are also a claim has to reach the caller."""
+        from django_ai_sdk.workflows import WorkflowAction
         from django_ai_sdk.workflows.steps import StepAlreadyRunning
 
-        class Claim(WorkflowHook):
+        class Claim(WorkflowAction):
             async def on_step_start(self, ctx, step):
                 raise StepAlreadyRunning(step.name)
 
         with pytest.raises(StepAlreadyRunning):
-            await run_steps([FakeStep("ocr")], hooks=[Claim()])
+            await run_steps([FakeStep("ocr")], actions=[Claim()])
 
-    async def test_a_crash_reaches_the_hooks_before_it_propagates(self):
-        hook = RecordingHook()
+    async def test_a_crash_reaches_the_actions_before_it_propagates(self):
+        action = RecordingAction()
 
         with pytest.raises(RuntimeError):
-            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], hooks=[hook])
+            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], actions=[action])
 
-        assert ("step_end", "ocr", "failed") in hook.events
+        assert ("step_end", "ocr", "failed") in action.events
 
 
 class TestNamesAreResolvable:
@@ -396,26 +396,26 @@ class TestNamesAreResolvable:
 
 
 class TestTheRunLevelBracket:
-    """A workflow hook is told the run started, and how it ended."""
+    """A workflow action is told the run started, and how it ended."""
 
     async def test_run_start_fires_before_the_first_step(self):
-        hook = RecordingHook()
+        action = RecordingAction()
 
-        await run_steps([FakeStep("ocr")], hooks=[hook])
+        await run_steps([FakeStep("ocr")], actions=[action])
 
-        assert hook.events[0] == ("run_start", "", None)
+        assert action.events[0] == ("run_start", "", None)
 
     async def test_run_end_carries_no_error_when_the_run_finished(self):
-        hook = RecordingHook()
+        action = RecordingAction()
 
-        await run_steps([FakeStep("ocr")], hooks=[hook])
+        await run_steps([FakeStep("ocr")], actions=[action])
 
-        assert hook.events[-1] == ("run_end", "", None)
+        assert action.events[-1] == ("run_end", "", None)
 
     async def test_run_end_carries_what_ended_the_run(self):
-        hook = RecordingHook()
+        action = RecordingAction()
 
         with pytest.raises(RuntimeError):
-            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], hooks=[hook])
+            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], actions=[action])
 
-        assert hook.events[-1] == ("run_end", "", "boom")
+        assert action.events[-1] == ("run_end", "", "boom")

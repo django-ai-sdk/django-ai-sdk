@@ -142,22 +142,22 @@ class TestWorkflowServiceRunById:
             await WorkflowService.run_by_id(str(uuid4()))
 
 
-class TestWorkflowServiceListHooks:
-    def test_returns_registered_hooks(self):
-        class MyHook:
+class TestWorkflowServiceListActions:
+    def test_returns_registered_actions(self):
+        class MyAction:
             description = "does something"
 
         with patch(
-            "django_ai_sdk.workflows.services.get_hook_registry",
-            return_value={"my_hook": MyHook},
+            "django_ai_sdk.workflows.services.get_action_registry",
+            return_value={"my_action": MyAction},
         ):
-            hooks = WorkflowService.list_hooks()
+            actions = WorkflowService.list_actions()
 
-        assert hooks == [{"key": "my_hook", "description": "does something"}]
+        assert actions == [{"key": "my_action", "description": "does something"}]
 
-    def test_empty_when_no_hooks_registered(self):
+    def test_empty_when_no_actions_registered(self):
         with patch(
-            "django_ai_sdk.workflows.services.get_hook_registry",
+            "django_ai_sdk.workflows.services.get_action_registry",
             return_value={},
         ):
-            assert WorkflowService.list_hooks() == []
+            assert WorkflowService.list_actions() == []

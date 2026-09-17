@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.permissions import user_pk
 from django_ai_sdk.utils import serialize
+from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.executor import WorkflowExecutor, validate_inputs
-from django_ai_sdk.workflows.hooks import get_hook_registry
 from django_ai_sdk.workflows.registry import validate_definition
 
 if TYPE_CHECKING:
@@ -70,11 +70,11 @@ class WorkflowService:
         return run
 
     @staticmethod
-    def list_hooks() -> list[dict[str, str]]:
-        """The hooks a definition may name, for a UI that composes one."""
+    def list_actions() -> list[dict[str, str]]:
+        """The actions a definition may name, for a UI that composes one."""
         return [
             {"key": key, "description": getattr(cls, "description", "")}
-            for key, cls in get_hook_registry().items()
+            for key, cls in get_action_registry().items()
         ]
 
     @staticmethod
