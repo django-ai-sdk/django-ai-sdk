@@ -245,9 +245,16 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
     "get_memory_files": "apps.agents.tools.get_memory_files",
 }
 
-# Default Workflow actions
+# Workflow composables. The package ships neither step types nor actions; both
+# registries are the gate on what a JSON definition may name.
+AI_SDK_WORKFLOW_STEPS = {
+    "gather_thread": "apps.agents.steps.GatherStep",
+    "thread_digest": "apps.agents.steps.DigestStep",
+}
+
 AI_SDK_WORKFLOW_ACTIONS = {
     "console_log": "apps.agents.actions.ConsoleLogAction",
+    "thread_message": "apps.agents.actions.ThreadMessageAction",
 }
 
 # Default asssitants

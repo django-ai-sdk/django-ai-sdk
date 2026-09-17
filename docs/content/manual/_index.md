@@ -49,7 +49,7 @@ django_ai_sdk/
 ├── conversation/         # Thread + Message models
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
-├── workflows/            # definition, executor, actions
+├── workflows/            # definitions, executor, hooks
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
