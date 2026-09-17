@@ -94,12 +94,11 @@ class WorkflowExecutor:
     ) -> WorkflowRun:
         """The run row this attempt records against, opened or resumed."""
         if workflow_run is None:
-            return await WorkflowRun.objects.acreate(
-                workflow=None,
-                workflow_definition=workflow.model_dump(),
+            return await open_run(
+                workflow,
+                inputs=inputs,
+                user=user,
                 status=WorkflowRun.Status.RUNNING,
-                inputs=serialize(inputs),
-                user_id=user_pk(user),
                 started_at=timezone.now(),
             )
         workflow_run.status = WorkflowRun.Status.RUNNING
@@ -111,6 +110,26 @@ class WorkflowExecutor:
             fields.append("inputs")
         await workflow_run.asave(update_fields=fields)
         return workflow_run
+
+
+async def open_run(
+    workflow: WorkflowDefinition,
+    *,
+    inputs: dict[str, Any] | None = None,
+    user: AbstractBaseUser | AnonymousUser | None = None,
+    record: Any = None,
+    status: str = WorkflowRun.Status.PENDING,
+    started_at: Any = None,
+) -> WorkflowRun:
+    """The row one attempt at `workflow` records against."""
+    return await WorkflowRun.objects.acreate(
+        workflow=record,
+        workflow_definition=workflow.model_dump(),
+        status=status,
+        inputs=serialize(inputs or {}),
+        user_id=user_pk(user),
+        started_at=started_at,
+    )
 
 
 def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> dict[str, Any]:
@@ -150,4 +169,4 @@ def _published(outcomes: dict[str, StepOutcome]) -> dict[str, Any]:
     }
 
 
-__all__ = ["WorkflowExecutor", "validate_inputs"]
+__all__ = ["WorkflowExecutor", "open_run", "validate_inputs"]

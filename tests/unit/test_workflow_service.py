@@ -1,15 +1,24 @@
-"""
-Unit tests for WorkflowService CRUD and run_by_id.
+"""WorkflowService CRUD and run_by_id, as its own author sees them.
+
+Every door is gated on a principal, so these carry a real user throughout. Who is
+refused which door is `test_workflow_permissions.py`.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
 from django_ai_sdk.workflows.executor import WorkflowExecutor
-from django_ai_sdk.workflows.schemas import StepDefinition, WorkflowDefinition
+from django_ai_sdk.workflows.schemas import FieldDefinition, StepDefinition, WorkflowDefinition
 from django_ai_sdk.workflows.services import WorkflowService
+
+
+@pytest.fixture
+async def author():
+    from tests.factories.db import UserFactory
+
+    return await UserFactory.acreate()
 
 
 def make_definition(agent_id="asst-1", step_name="result"):
@@ -22,15 +31,15 @@ def make_definition(agent_id="asst-1", step_name="result"):
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestWorkflowServiceCRUD:
-    async def test_create_stores_definition(self):
+    async def test_create_stores_definition(self, author):
         definition = make_definition()
-        record = await WorkflowService.create("My Workflow", definition)
+        record = await WorkflowService.create("My Workflow", definition, user=author)
 
         assert record.name == "My Workflow"
         assert record.definition == definition.model_dump()
         assert record.active is True
 
-    async def test_a_signed_in_user_is_recorded_as_the_creator(self):
+    async def test_a_signed_in_user_is_recorded_as_the_creator(self, author):
         from tests.factories.db import UserFactory
 
         user = await UserFactory.acreate()
@@ -38,75 +47,66 @@ class TestWorkflowServiceCRUD:
 
         assert record.created_by_id == user.pk
 
-    async def test_anonymous_user_sets_no_creator(self):
-        from django.contrib.auth.models import AnonymousUser
-
-        record = await WorkflowService.create(
-            "Anon Workflow", make_definition(), user=AnonymousUser()
-        )
-
-        assert record.created_by_id is None
-
-    async def test_get_returns_record(self):
+    async def test_get_returns_record(self, author):
         definition = make_definition()
-        created = await WorkflowService.create("WF", definition)
-        fetched = await WorkflowService.get(str(created.id))
+        created = await WorkflowService.create("WF", definition, user=author)
+        fetched = await WorkflowService.get(str(created.id), user=author)
         assert str(fetched.id) == str(created.id)
 
-    async def test_get_raises_for_unknown_id(self):
+    async def test_get_raises_for_unknown_id(self, author):
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         with pytest.raises(WorkflowSettings.DoesNotExist):
-            await WorkflowService.get(str(uuid4()))
+            await WorkflowService.get(str(uuid4()), user=author)
 
-    async def test_update_name(self):
+    async def test_update_name(self, author):
         definition = make_definition()
-        record = await WorkflowService.create("Old Name", definition)
-        updated = await WorkflowService.update(str(record.id), name="New Name")
+        record = await WorkflowService.create("Old Name", definition, user=author)
+        updated = await WorkflowService.update(str(record.id), user=author, name="New Name")
         assert updated.name == "New Name"
 
-    async def test_update_definition(self):
+    async def test_update_definition(self, author):
         old_def = make_definition(step_name="old")
-        record = await WorkflowService.create("WF", old_def)
+        record = await WorkflowService.create("WF", old_def, user=author)
 
         new_def = make_definition(step_name="new")
-        updated = await WorkflowService.update(str(record.id), workflow=new_def)
+        updated = await WorkflowService.update(str(record.id), user=author, workflow=new_def)
         assert updated.definition["steps"][0]["name"] == "new"
 
-    async def test_update_active_flag(self):
+    async def test_update_active_flag(self, author):
         definition = make_definition()
-        record = await WorkflowService.create("WF", definition)
-        updated = await WorkflowService.update(str(record.id), active=False)
+        record = await WorkflowService.create("WF", definition, user=author)
+        updated = await WorkflowService.update(str(record.id), user=author, active=False)
         assert updated.active is False
 
-    async def test_delete_removes_record(self):
+    async def test_delete_removes_record(self, author):
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         definition = make_definition()
-        record = await WorkflowService.create("WF", definition)
-        await WorkflowService.delete(str(record.id))
+        record = await WorkflowService.create("WF", definition, user=author)
+        await WorkflowService.delete(str(record.id), user=author)
 
         with pytest.raises(WorkflowSettings.DoesNotExist):
-            await WorkflowService.get(str(record.id))
+            await WorkflowService.get(str(record.id), user=author)
 
-    async def test_list_workflows_active_only(self):
+    async def test_list_workflows_active_only(self, author):
         definition = make_definition()
-        active = await WorkflowService.create("Active", definition)
-        inactive = await WorkflowService.create("Inactive", definition)
-        await WorkflowService.update(str(inactive.id), active=False)
+        active = await WorkflowService.create("Active", definition, user=author)
+        inactive = await WorkflowService.create("Inactive", definition, user=author)
+        await WorkflowService.update(str(inactive.id), user=author, active=False)
 
-        records = await WorkflowService.list_workflows(active_only=True)
+        records = await WorkflowService.list_workflows(user=author, active_only=True)
         ids = [str(r.id) for r in records]
         assert str(active.id) in ids
         assert str(inactive.id) not in ids
 
-    async def test_list_workflows_all(self):
+    async def test_list_workflows_all(self, author):
         definition = make_definition()
-        active = await WorkflowService.create("Active", definition)
-        inactive = await WorkflowService.create("Inactive", definition)
-        await WorkflowService.update(str(inactive.id), active=False)
+        active = await WorkflowService.create("Active", definition, user=author)
+        inactive = await WorkflowService.create("Inactive", definition, user=author)
+        await WorkflowService.update(str(inactive.id), user=author, active=False)
 
-        records = await WorkflowService.list_workflows(active_only=False)
+        records = await WorkflowService.list_workflows(user=author, active_only=False)
         ids = [str(r.id) for r in records]
         assert str(active.id) in ids
         assert str(inactive.id) in ids
@@ -115,31 +115,68 @@ class TestWorkflowServiceCRUD:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestWorkflowServiceRunById:
-    async def test_run_by_id_enqueues_task(self):
+    async def test_run_by_id_enqueues_task(self, author):
         definition = make_definition()
-        record = await WorkflowService.create("WF", definition)
+        record = await WorkflowService.create("WF", definition, user=author)
 
         with patch.object(WorkflowExecutor, "enqueue", AsyncMock()):
-            run = await WorkflowService.run_by_id(str(record.id))
+            run = await WorkflowService.run_by_id(str(record.id), user=author)
 
         assert run.status == "pending"
         assert str(run.workflow_id) == str(record.id)
 
-    async def test_run_by_id_raises_for_inactive(self):
+    async def test_run_by_id_raises_for_inactive(self, author):
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         definition = make_definition()
-        record = await WorkflowService.create("WF", definition)
-        await WorkflowService.update(str(record.id), active=False)
+        record = await WorkflowService.create("WF", definition, user=author)
+        await WorkflowService.update(str(record.id), user=author, active=False)
 
         with pytest.raises(WorkflowSettings.DoesNotExist):
-            await WorkflowService.run_by_id(str(record.id))
+            await WorkflowService.run_by_id(str(record.id), user=author)
 
-    async def test_run_by_id_raises_for_unknown_id(self):
+    async def test_run_by_id_raises_for_unknown_id(self, author):
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         with pytest.raises(WorkflowSettings.DoesNotExist):
-            await WorkflowService.run_by_id(str(uuid4()))
+            await WorkflowService.run_by_id(str(uuid4()), user=author)
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestWorkflowServiceInputsSchema:
+    """The JSON Schema a run is composed against, read from the same model the
+    executor validates with."""
+
+    async def test_it_returns_the_declared_shape(self, author):
+        definition = WorkflowDefinition(
+            name="test-workflow",
+            input_fields={"document": FieldDefinition(type="str")},
+            steps=[StepDefinition(name="result", agent_id="asst-1")],
+        )
+        record = await WorkflowService.create("WF", definition, user=author)
+
+        schema = await WorkflowService.get_inputs_schema(str(record.id), user=author)
+
+        assert schema["properties"]["document"] == {"title": "Document", "type": "string"}
+        assert schema["required"] == ["document"]
+
+    async def test_a_definition_declaring_nothing_is_open(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+
+        assert await WorkflowService.get_inputs_schema(str(record.id), user=author) == {
+            "type": "object",
+            "additionalProperties": True,
+        }
+
+    async def test_an_unknown_id_reads_as_absent(self, author):
+        assert await WorkflowService.get_inputs_schema(str(uuid4()), user=author) is None
+
+    async def test_an_inactive_row_reads_as_absent(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+        await WorkflowService.update(str(record.id), user=author, active=False)
+
+        assert await WorkflowService.get_inputs_schema(str(record.id), user=author) is None
 
 
 class TestWorkflowServiceListActions:
