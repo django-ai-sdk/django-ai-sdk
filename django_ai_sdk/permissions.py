@@ -472,7 +472,7 @@ class WorkflowDefaultPermission(BasePermission):
 
         if user is None or not bool(user.is_authenticated):
             return False
-        if self._manages_everything(user):
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
             return True
         if isinstance(obj, WorkflowSettings):
             if operation in self.MANAGE:
@@ -493,17 +493,13 @@ class WorkflowDefaultPermission(BasePermission):
 
         if user is None or not bool(user.is_authenticated):
             return queryset.none()
-        if self._manages_everything(user):
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
             return queryset
         if queryset.model is WorkflowSettings:
             return queryset.filter(created_by_id=user.pk)
         if queryset.model is WorkflowRun:
             return queryset.filter(user_id=user.pk)
         return queryset
-
-    @staticmethod
-    def _manages_everything(user: UserType) -> bool:
-        return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
 
 
 def user_pk(user: UserType) -> Any:
