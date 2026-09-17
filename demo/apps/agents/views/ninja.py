@@ -1096,7 +1096,7 @@ class WorkflowRunResponse(Schema):
     status: str
 
 
-class WorkflowHookItem(Schema):
+class WorkflowActionItem(Schema):
     key: str
     description: str
 
@@ -1142,12 +1142,12 @@ async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any
 
 
 @router.get(
-    "/workflows/hooks/",
-    response={200: list[WorkflowHookItem]},
-    operation_id="list_workflow_hooks",
+    "/workflows/actions/",
+    response={200: list[WorkflowActionItem]},
+    operation_id="list_workflow_actions",
 )
-def list_workflow_hooks(request: HttpRequest) -> list[WorkflowHookItem]:
-    return [WorkflowHookItem(**item) for item in WorkflowService.list_hooks()]
+def list_workflow_actions(request: HttpRequest) -> list[WorkflowActionItem]:
+    return [WorkflowActionItem(**item) for item in WorkflowService.list_actions()]
 
 
 # Workflow CRUD schemas

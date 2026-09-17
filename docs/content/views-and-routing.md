@@ -248,15 +248,15 @@ await WorkflowService.update(workflow_id, name=..., workflow=..., active=...)
 await WorkflowService.run_by_id(workflow_id, inputs={"document": doc}, user=request.user)
 await WorkflowService.get_run(run_id)
 
-# Available hooks (declared in AI_SDK_WORKFLOW_HOOKS)
-await WorkflowService.list_hooks()
+# Available actions (declared in AI_SDK_WORKFLOW_ACTIONS)
+await WorkflowService.list_actions()
 ```
 
-Hook implementations are wired in settings:
+Action implementations are wired in settings:
 
 ```python
-AI_SDK_WORKFLOW_HOOKS = {
-    "console_log": "apps.agents.hooks.ConsoleLogHook",
+AI_SDK_WORKFLOW_ACTIONS = {
+    "console_log": "apps.agents.actions.ConsoleLogAction",
 }
 ```
 

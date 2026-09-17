@@ -2,14 +2,14 @@
 
 Each is a named `WorkflowDefinition` passed to `register()`, which is what makes it
 runnable by name. A step's result is filed under its own `name`, so a later step
-requires it by that name and a hook reads it with `ctx.step(...)`.
+requires it by that name and an action reads it with `ctx.step(...)`.
 """
 
 from __future__ import annotations
 
 from django_ai_sdk.workflows import (
+    ActionDefinition,
     FieldDefinition,
-    HookDefinition,
     StepDefinition,
     WorkflowDefinition,
     register,
@@ -35,14 +35,14 @@ register(
                 ),
             )
         ],
-        # A workflow-level hook: it sees the run, and posts what `forecast` produced.
-        hooks=[
-            HookDefinition(type="thread_message", config={"agent_id": PIRATE, "step": "forecast"})
+        # A workflow-level action: it sees the run, and posts what `forecast` produced.
+        actions=[
+            ActionDefinition(type="thread_message", config={"agent_id": PIRATE, "step": "forecast"})
         ],
     )
 )
 
-# Two steps, the second returning typed fields. No hook: the caller reads the run.
+# Two steps, the second returning typed fields. No action: the caller reads the run.
 register(
     WorkflowDefinition(
         name="sailing-verdict",
@@ -84,8 +84,8 @@ register(
                 type="thread_digest",
                 name="digest",
                 requires=["transcript"],
-                # A step-level hook: fires for this step alone.
-                hooks=[HookDefinition(type="console_log")],
+                # A step-level action: fires for this step alone.
+                actions=[ActionDefinition(type="console_log")],
             ),
         ],
     )

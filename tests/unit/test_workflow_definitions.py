@@ -25,15 +25,15 @@ from django_ai_sdk.workflows.definitions import (
 )
 from django_ai_sdk.workflows.schemas import (
     MAX_DEPTH,
+    ActionDefinition,
     FieldDefinition,
-    HookDefinition,
     StepDefinition,
     WorkflowDefinition,
 )
 from django_ai_sdk.workflows.steps import OnError, Step
 
 REGISTERED = {"shout": "tests.unit.test_workflow_definitions.ShoutStep"}
-HOOKS = {"quiet": "tests.unit.test_workflow_definitions.QuietHook"}
+ACTIONS = {"quiet": "tests.unit.test_workflow_definitions.QuietAction"}
 
 
 class ShoutStep(Step):
@@ -44,7 +44,7 @@ class ShoutStep(Step):
         return StepOutcome(output=str(source).upper(), detail="shouted")
 
 
-class QuietHook:
+class QuietAction:
     pass
 
 
@@ -449,10 +449,10 @@ class TestCompiling:
         """One bad path in settings must not stop the site booting."""
         assert get_step_registry() == {}
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS={})
-    def test_an_unregistered_step_hook_is_refused(self):
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS={})
+    def test_an_unregistered_step_action_is_refused(self):
         spec = WorkflowDefinition(
-            steps=[StepDefinition(name="a", agent_id="a1", hooks=[HookDefinition(type="quiet")])]
+            steps=[StepDefinition(name="a", agent_id="a1", actions=[ActionDefinition(type="quiet")])]
         )
 
         with pytest.raises(ImproperlyConfigured, match="not registered"):

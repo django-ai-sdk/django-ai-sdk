@@ -8,12 +8,12 @@ from django.db import OperationalError
 from django.test import override_settings
 
 from django_ai_sdk.workflows import (
-    HookDefinition,
-    WorkflowHook,
-    WorkflowDefinition,
-    WorkflowSettings,
+    ActionDefinition,
     FieldDefinition,
     StepDefinition,
+    WorkflowAction,
+    WorkflowDefinition,
+    WorkflowSettings,
 )
 from django_ai_sdk.workflows.checks import check_workflows
 from django_ai_sdk.workflows.registry import (
@@ -35,10 +35,10 @@ def _clean_registry():
     reset_registry()
 
 
-HOOKS = {"loud": "tests.unit.test_workflow_registry.LoudHook"}
+ACTIONS = {"loud": "tests.unit.test_workflow_registry.LoudAction"}
 
 
-class LoudHook(WorkflowHook):
+class LoudAction(WorkflowAction):
     pass
 
 
@@ -195,32 +195,32 @@ class TestValidation:
             )
         )
 
-    def test_an_unregistered_hook_type_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_HOOKS"):
-            validate_definition(definition(hooks=[HookDefinition(type="carrier_pigeon")]))
+    def test_an_unregistered_action_type_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_ACTIONS"):
+            validate_definition(definition(actions=[ActionDefinition(type="carrier_pigeon")]))
 
-    def test_an_unregistered_hook_on_a_step_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_HOOKS"):
+    def test_an_unregistered_action_on_a_step_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="not in AI_SDK_WORKFLOW_ACTIONS"):
             validate_definition(
                 definition(
                     steps=[
                         StepDefinition(
-                            name="x", agent_id="a", hooks=[HookDefinition(type="carrier_pigeon")]
+                            name="x", agent_id="a", actions=[ActionDefinition(type="carrier_pigeon")]
                         )
                     ]
                 )
             )
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS=HOOKS)
-    def test_a_registered_hook_is_accepted_in_both_places(self):
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS=ACTIONS)
+    def test_a_registered_action_is_accepted_in_both_places(self):
         validate_definition(
             definition(
-                steps=[StepDefinition(name="x", agent_id="a", hooks=[HookDefinition(type="loud")])],
-                hooks=[HookDefinition(type="loud")],
+                steps=[StepDefinition(name="x", agent_id="a", actions=[ActionDefinition(type="loud")])],
+                actions=[ActionDefinition(type="loud")],
             )
         )
 
-    @override_settings(AI_SDK_WORKFLOW_HOOKS=HOOKS)
+    @override_settings(AI_SDK_WORKFLOW_ACTIONS=ACTIONS)
     def test_a_valid_chain_passes(self):
         validate_definition(
             definition(
@@ -229,7 +229,7 @@ class TestValidation:
                     StepDefinition(name="summary", agent_id="a", history=["history"]),
                     StepDefinition(name="verdict", agent_id="b", requires=["summary"]),
                 ],
-                hooks=[HookDefinition(type="loud", config={"step": "verdict"})],
+                actions=[ActionDefinition(type="loud", config={"step": "verdict"})],
             )
         )
 

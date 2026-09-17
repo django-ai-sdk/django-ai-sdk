@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from django_ai_sdk.permissions import user_pk
 from django_ai_sdk.utils import serialize
-from django_ai_sdk.workflows.definitions import compile_hooks, compile_inputs, compile_steps
-from django_ai_sdk.workflows.hooks import RunRecorder
+from django_ai_sdk.workflows.actions import RunRecorder
+from django_ai_sdk.workflows.definitions import compile_actions, compile_inputs, compile_steps
 from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.steps import StepAlreadyRunning
@@ -54,15 +54,15 @@ class WorkflowExecutor:
 
         try:
             steps = compile_steps(workflow)
-            hooks = [
+            actions = [
                 RunRecorder(workflow_run, steps),
-                *compile_hooks(workflow.hooks, workflow.name or str(workflow_run.id)),
+                *compile_actions(workflow.actions, workflow.name or str(workflow_run.id)),
             ]
             outcomes = await run_steps(
                 steps,
                 inputs=validate_inputs(workflow, supplied),
                 principal=user,
-                hooks=hooks,
+                actions=actions,
                 completed=await _already_completed(workflow_run),
                 workflow=workflow.name,
                 run_id=str(workflow_run.id),

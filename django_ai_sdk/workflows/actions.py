@@ -1,11 +1,11 @@
-"""Hooks: everything that watches a run rather than doing its work.
+"""Actions: everything that watches a run rather than doing its work.
 
-One kind of object, attached in two places. A hook on the `WorkflowDefinition`
-sees the run and every step in it; a hook on a `StepDefinition` sees that step alone.
+One kind of object, attached in two places. An action on the `WorkflowDefinition`
+sees the run and every step in it; an action on a `StepDefinition` sees that step alone.
 Recording a run's rows, notifying someone a step finished, and delivering the
 result when the run ends are all the same shape.
 
-A host declares its own by key in `AI_SDK_WORKFLOW_HOOKS`; the package ships one,
+A host declares its own by key in `AI_SDK_WORKFLOW_ACTIONS`; the package ships one,
 `RunRecorder`, which the executor always attaches.
 """
 
@@ -28,18 +28,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class WorkflowHook:
+class WorkflowAction:
     """What a run reports its progress to.
 
-    Every callback is a no-op, so a hook implements only the moments it cares about.
-    A hook attached to one step gets that step's two callbacks only; the run-level
-    pair belongs to hooks attached to the workflow.
+    Every callback is a no-op, so an action implements only the moments it cares about.
+    An action attached to one step gets that step's two callbacks only; the run-level
+    pair belongs to actions attached to the workflow.
     """
 
     description: str = ""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
-        """Built from the `config` its HookDefinition carries, or from nothing in code."""
+        """Built from the `config` its ActionDefinition carries, or from nothing in code."""
         self.config = config or {}
 
     async def on_run_start(self, ctx: WorkflowContext) -> None:
@@ -55,7 +55,7 @@ class WorkflowHook:
         """The run is over. `error` is what ended it, or None."""
 
 
-class RunRecorder(WorkflowHook):
+class RunRecorder(WorkflowAction):
     """Writes one WorkflowRunStep row per step of one run.
 
     `steps` is the pipeline as declared, which fixes each row's `sequence`.
@@ -154,25 +154,25 @@ class RunRecorder(WorkflowHook):
         )
 
 
-def get_hook_registry() -> dict[str, type[WorkflowHook]]:
-    """Hooks a definition may name, by key, from `AI_SDK_WORKFLOW_HOOKS`.
+def get_action_registry() -> dict[str, type[WorkflowAction]]:
+    """Actions a definition may name, by key, from `AI_SDK_WORKFLOW_ACTIONS`.
 
     Read at call time, so a settings change needs no restart.
     """
-    registry: dict[str, type[WorkflowHook]] = {}
-    for key, path in resolve_setting("AI_SDK_WORKFLOW_HOOKS", {}).items():
+    registry: dict[str, type[WorkflowAction]] = {}
+    for key, path in resolve_setting("AI_SDK_WORKFLOW_ACTIONS", {}).items():
         try:
             cls = import_string(path)
         except ImportError:
             logger.warning(
-                "Workflow hook %r names %r, which does not import. It is not composable.",
+                "Workflow action %r names %r, which does not import. It is not composable.",
                 key,
                 path,
             )
             continue
-        if not isinstance(cls, type) or not issubclass(cls, WorkflowHook):
+        if not isinstance(cls, type) or not issubclass(cls, WorkflowAction):
             logger.warning(
-                "Workflow hook %r names %r, which is not a WorkflowHook subclass. "
+                "Workflow action %r names %r, which is not a WorkflowAction subclass. "
                 "It is not composable.",
                 key,
                 path,
@@ -182,4 +182,4 @@ def get_hook_registry() -> dict[str, type[WorkflowHook]]:
     return registry
 
 
-__all__ = ["RunRecorder", "WorkflowHook", "get_hook_registry"]
+__all__ = ["RunRecorder", "WorkflowAction", "get_action_registry"]

@@ -1,4 +1,4 @@
-"""What a workflow step is, and the context every step and hook reads.
+"""What a workflow step is, and the context every step and action reads.
 
 A step is a named unit of work that reads the run's state and returns a value:
 `AgentStep` calls a model, a plain `Step` is arbitrary Python. A step's result is
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.agent import Agent
-    from django_ai_sdk.workflows.hooks import WorkflowHook
+    from django_ai_sdk.workflows.actions import WorkflowAction
 
 
 class StepFailed(Exception):
@@ -31,7 +31,7 @@ class StepFailed(Exception):
 
 
 class StepAlreadyRunning(Exception):
-    """Another run holds this step. Raised by a hook whose rows are also a claim."""
+    """Another run holds this step. Raised by an action whose rows are also a claim."""
 
 
 class OnError(StrEnum):
@@ -55,7 +55,7 @@ class StepOutcome:
 
 @dataclass
 class WorkflowContext:
-    """The run's state, as a step or a hook sees it.
+    """The run's state, as a step or an action sees it.
 
     Two namespaces, so nothing collides: `inputs` is what the caller supplied,
     `steps` is what has run so far, keyed by step name.
@@ -64,7 +64,7 @@ class WorkflowContext:
     inputs: Mapping[str, Any] = field(default_factory=dict)
     steps: Mapping[str, StepOutcome] = field(default_factory=dict)
     principal: AbstractBaseUser | AnonymousUser | None = None
-    # The definition's name and the run's id, for hooks that report on the run.
+    # The definition's name and the run's id, for actions that report on the run.
     workflow: str = ""
     run_id: str = ""
 
@@ -94,7 +94,7 @@ class Step:
 
     on_error: OnError = OnError.FAIL
 
-    hooks: tuple[WorkflowHook, ...] = ()
+    actions: tuple[WorkflowAction, ...] = ()
 
     async def skip_when(self, ctx: WorkflowContext) -> str:
         """A reason to skip, or "" to run.

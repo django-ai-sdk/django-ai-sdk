@@ -14,10 +14,10 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.text import slugify
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows.hooks import WorkflowHook
+    from django_ai_sdk.workflows.actions import WorkflowAction
     from django_ai_sdk.workflows.schemas import (
+        ActionDefinition,
         FieldDefinition,
-        HookDefinition,
         WorkflowDefinition,
     )
 
@@ -80,10 +80,10 @@ def validate_definition(definition: WorkflowDefinition) -> None:
     """Raise ImproperlyConfigured unless the definition is legal to store and compile.
 
     The step graph is the runner's rule. What is left is the two registries: a step
-    type or a hook the deployment did not expose cannot be composed.
+    type or an action the deployment did not expose cannot be composed.
     """
+    from django_ai_sdk.workflows.actions import get_action_registry
     from django_ai_sdk.workflows.definitions import get_step_registry
-    from django_ai_sdk.workflows.hooks import get_hook_registry
     from django_ai_sdk.workflows.runner import check_pipeline
 
     label = f"Workflow {definition.name!r}"
@@ -95,7 +95,7 @@ def validate_definition(definition: WorkflowDefinition) -> None:
     )
 
     step_types = get_step_registry()
-    hook_types = get_hook_registry()
+    action_types = get_action_registry()
     declared_inputs = set(definition.input_fields)
 
     for index, step in enumerate(definition.steps):
@@ -112,9 +112,9 @@ def validate_definition(definition: WorkflowDefinition) -> None:
                 f"declare. Declared: {sorted(declared_inputs) or 'none'}."
             )
         _compiles(f"Output_{step.name}", step.output_fields, f"{where} output_fields")
-        _validate_hooks(step.hooks, where, hook_types)
+        _validate_actions(step.actions, where, action_types)
 
-    _validate_hooks(definition.hooks, label, hook_types)
+    _validate_actions(definition.actions, label, action_types)
 
 
 def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:
@@ -133,15 +133,15 @@ def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None
         raise ImproperlyConfigured(f"{where} cannot compile: {exc}") from exc
 
 
-def _validate_hooks(
-    hooks: list[HookDefinition], where: str, hook_types: dict[str, type[WorkflowHook]]
+def _validate_actions(
+    actions: list[ActionDefinition], where: str, action_types: dict[str, type[WorkflowAction]]
 ) -> None:
-    """Every hook a definition names must be one the deployment exposed."""
-    for hook in hooks:
-        if hook.type not in hook_types:
+    """Every action a definition names must be one the deployment exposed."""
+    for action in actions:
+        if action.type not in action_types:
             raise ImproperlyConfigured(
-                f"{where} names hook {hook.type!r}, which is not in AI_SDK_WORKFLOW_HOOKS. "
-                f"Registered: {sorted(hook_types) or 'none'}."
+                f"{where} names action {action.type!r}, which is not in "
+                f"AI_SDK_WORKFLOW_ACTIONS. Registered: {sorted(action_types) or 'none'}."
             )
 
 

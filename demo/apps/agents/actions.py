@@ -1,6 +1,6 @@
-"""Workflow hooks for the demo, named by `AI_SDK_WORKFLOW_HOOKS`.
+"""Workflow actions for the demo, named by `AI_SDK_WORKFLOW_ACTIONS`.
 
-The package ships no hooks a definition can name — delivering a result somewhere
+The package ships no actions a definition can name — delivering a result somewhere
 is the host's business, not the SDK's. These two are this host's.
 """
 
@@ -10,13 +10,13 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.workflows import WorkflowHook
+from django_ai_sdk.workflows import WorkflowAction
 
 if TYPE_CHECKING:
     from django_ai_sdk.workflows import Step, StepOutcome, WorkflowContext
 
 
-class ConsoleLogHook(WorkflowHook):
+class ConsoleLogAction(WorkflowAction):
     """Print every step's outcome as it settles (dev/debug).
 
     On the workflow it prints every step; on one step it prints that one.
@@ -31,7 +31,7 @@ class ConsoleLogHook(WorkflowHook):
         )
 
 
-class ThreadMessageHook(WorkflowHook):
+class ThreadMessageAction(WorkflowAction):
     """Post a step's output into a new chat thread owned by the run's user.
 
     Config: `agent_id` — whose storage adapter opens the thread — and `step`, the
@@ -59,7 +59,7 @@ class ThreadMessageHook(WorkflowHook):
         thread_id = await ThreadService.create_thread(
             agent_id,
             title=source,
-            metadata={"created_via": "hook:thread_message"},
+            metadata={"created_via": "action:thread_message"},
             user=ctx.principal,
         )
         storage = await ThreadService.storage_for_thread(thread_id, user=ctx.principal)
