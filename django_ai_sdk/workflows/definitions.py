@@ -74,11 +74,13 @@ def field_annotation(field: FieldDefinition, label: str) -> Any:
     """
     if field.enum is not None:
         # Subscripting with a tuple is the only way to spell a dynamic Literal.
-        return Literal[tuple(field.enum)]
+        return Literal[tuple(field.enum)]  # ty: ignore[invalid-type-form]
     if field.type == "object":
         return model_from_fields(label, field.fields or {})
     if field.type == "list":
-        return list if field.items is None else list[field_annotation(field.items, label)]
+        if field.items is None:
+            return list
+        return list[field_annotation(field.items, label)]  # ty: ignore[invalid-type-form]
     return _TYPE_MAP[field.type]
 
 
