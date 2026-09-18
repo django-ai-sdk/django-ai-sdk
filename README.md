@@ -1,6 +1,10 @@
 # Django AI SDK
 
-Build AI agents in Django. Batteries included.
+<div align="center">
+  <img src="https://raw.githubusercontent.com/django-ai-sdk/django-ai-sdk/refs/heads/dev/public/logo.png" alt="Django AI SDK" width="150">
+  <br />
+  <i>Build AI agents in Django. Batteries included.</i>
+</div>
 
 ## Project Status: Read This First
 
