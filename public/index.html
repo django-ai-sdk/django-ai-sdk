@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Django AI SDK | AI Agents for Django</title>
+  <title>Django AI SDK | Agentic Framework for Django</title>
+  <meta name="description" content="Build AI agents in Django. Batteries included.">
+  <meta property="og:title" content="Django AI SDK | Agentic Framework for Django">
+  <meta property="og:description" content="Build AI agents in Django. Batteries included.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Django AI SDK | Agentic Framework for Django">
+  <meta name="twitter:description" content="Build AI agents in Django. Batteries included.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/bold/style.css" />
@@ -46,7 +53,7 @@
   <!-- Banner -->
   <div class="fixed top-0 left-0 right-0 bg-text text-surface py-2.5 px-4 text-center text-sm font-medium flex items-center justify-center gap-2 z-50">
     <i class="ph-bold ph-sparkle"></i>
-    <span>Pre-release: Expect breaking changes</span>
+    <span>Beta: API may still evolve</span>
   </div>
   
   <!-- Nav -->
@@ -70,7 +77,7 @@
         <span class="gradient-text">Django applications</span>
       </h1>
       <p class="text-lg md:text-xl text-text-secondary max-w-2xl mx-auto mb-10 leading-relaxed">
-        Build intelligent agents powered by <strong>Haystack</strong> with RAG, streaming responses, and conversation memory.
+        Build AI agents in Django. Batteries included.
         Ready in days.
       </p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -203,57 +210,71 @@ async def chat(request, payload: ChatRequest):
         <!-- Feature 0 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
           <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-cube"></i></div>
-          <h3 class="font-semibold mb-2">Powered by Haystack</h3>
-          <p class="text-sm text-text-secondary">Haystack is the core provider. All pipelines, agents, and generators run on Haystack primitives.</p>
+          <h3 class="font-semibold mb-2">Agents</h3>
+          <p class="text-sm text-text-secondary">Ship an agent anywhere in your app: a view, a background task, or a raw API call, no rewiring required.</p>
         </div>
 
         <!-- Feature 1 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
-          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-files"></i></div>
-          <h3 class="font-semibold mb-2">RAG Pipelines</h3>
-          <p class="text-sm text-text-secondary">BM25, ChromaDB, and Qdrant hybrid search via Haystack. Query expansion included.</p>
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-flow-arrow"></i></div>
+          <h3 class="font-semibold mb-2">Workflows</h3>
+          <p class="text-sm text-text-secondary">Chain agent calls into a real process, with every step tracked, so multi-step work stays auditable, not a black box.</p>
         </div>
 
         <!-- Feature 2 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
-          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-lightning"></i></div>
-          <h3 class="font-semibold mb-2">Streaming Responses</h3>
-          <p class="text-sm text-text-secondary">Built-in SSE streaming. Works with Vercel AI SDK protocol.</p>
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-share-network"></i></div>
+          <h3 class="font-semibold mb-2">Subagents</h3>
+          <p class="text-sm text-text-secondary">Split hard problems across specialists instead of one agent doing everything, and stretching to breaking point.</p>
         </div>
 
         <!-- Feature 3 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
-          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-chat-centered-text"></i></div>
-          <h3 class="font-semibold mb-2">Conversation Storage</h3>
-          <p class="text-sm text-text-secondary">Automatic message persistence. Thread-based history out of the box.</p>
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-wrench"></i></div>
+          <h3 class="font-semibold mb-2">Tool Calling</h3>
+          <p class="text-sm text-text-secondary">Give agents real capabilities: MCP servers, memory, and your own functions, all under one roof.</p>
         </div>
 
         <!-- Feature 4 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
-          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-wrench"></i></div>
-          <h3 class="font-semibold mb-2">Tool Calling</h3>
-          <p class="text-sm text-text-secondary">MCP, memory, and custom tools, all managed by your Agent.</p>
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-lightning"></i></div>
+          <h3 class="font-semibold mb-2">Streaming Responses</h3>
+          <p class="text-sm text-text-secondary">Answers appear as they're generated, not after a long wait, and drop straight into the Vercel AI SDK.</p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-chat-centered-text"></i></div>
+          <h3 class="font-semibold mb-2">Conversation Storage</h3>
+          <p class="text-sm text-text-secondary">Every thread remembers its history automatically, so you never build message persistence yourself.</p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
+          <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-files"></i></div>
+          <h3 class="font-semibold mb-2">RAG Pipelines</h3>
+          <p class="text-sm text-text-secondary">When an agent needs to ground itself in your documents, hybrid search and query expansion are already there.</p>
         </div>
 
         <!-- Feature 5 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
           <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-arrows-clockwise"></i></div>
           <h3 class="font-semibold mb-2">Reindexing</h3>
-          <p class="text-sm text-text-secondary">Hot-reload documents. Cached embeddings with simple refresh API.</p>
+          <p class="text-sm text-text-secondary">Documents change, so your embeddings should too, refreshed on demand without a rebuild.</p>
         </div>
 
         <!-- Feature 6 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
           <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-file-text"></i></div>
           <h3 class="font-semibold mb-2">File Processing</h3>
-          <p class="text-sm text-text-secondary">Document upload with pipeline-based processing. Text, CSV, JSON, DOCX, PPTX, XLSX support. Extraction transforms for metadata.</p>
+          <p class="text-sm text-text-secondary">Let agents answer questions grounded in the spreadsheets, contracts, and reports your users upload.</p>
         </div>
 
         <!-- Feature 7 -->
         <div class="bg-surface border border-border p-6 rounded-2xl hover:border-text transition duration-300">
           <div class="w-10 h-10 bg-subtle rounded-lg flex items-center justify-center mb-4 text-xl"><i class="ph-bold ph-plugs"></i></div>
           <h3 class="font-semibold mb-2">Integrations</h3>
-          <p class="text-sm text-text-secondary">MCP, OAuth, and API integrations as self-registering Django apps. Circuit breaker, caching, and namespaced tools.</p>
+          <p class="text-sm text-text-secondary">Let agents act on the tools your team already runs, like Zendesk, Linear, or GitHub.</p>
         </div>
 
       </div>
