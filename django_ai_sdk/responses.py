@@ -11,7 +11,7 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Coroutine
 
-    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.protocols.base import BaseProtocolHandler
 

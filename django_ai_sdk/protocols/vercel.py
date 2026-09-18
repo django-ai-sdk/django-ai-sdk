@@ -13,7 +13,7 @@ from django_ai_sdk.protocols.utils import format_sse
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from django_ai_sdk.adapters.protocols import Streamable
+    from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.events import (
         DataEvent,
         ErrorEvent,

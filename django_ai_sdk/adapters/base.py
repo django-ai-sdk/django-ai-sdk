@@ -40,7 +40,7 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from django_ai_sdk.adapters.protocols import T
+    from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.citations import CitationRegistry, NumberedSource
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.suggestions import SuggestionGenerator
