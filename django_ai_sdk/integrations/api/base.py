@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from haystack.tools import Tool
 
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
 
 
 def _accepted_kwargs(factory: Callable[..., Any], context: dict[str, Any]) -> dict[str, Any]:

@@ -14,7 +14,7 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.memories.models import Memory
     from django_ai_sdk.storage.schemas import ThreadInfo
     from django_ai_sdk.types import UserType

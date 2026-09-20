@@ -4,7 +4,7 @@ Django AI SDK - A plug-and-play Django AI streaming SDK.
 
 from __future__ import annotations
 
-from django_ai_sdk.agent import Agent
+from django_ai_sdk.agents.base import Agent
 from django_ai_sdk.artifacts import ArtifactSchema, ArtifactType
 from django_ai_sdk.artifacts.schemas import (
     ApprovalCardArtifact,

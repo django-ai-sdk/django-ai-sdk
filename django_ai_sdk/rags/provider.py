@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
-    from django_ai_sdk.agent import Agent
-    from django_ai_sdk.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.adapters.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
@@ -137,7 +137,7 @@ class RAGProvider:
         registry: CitationRegistry,
     ) -> None:
         """Wire a ComponentTool via the citation bridge."""
-        from django_ai_sdk.citations.utils import attach_citations  # noqa: PLC0415
+        from django_ai_sdk.adapters.citations.utils import attach_citations  # noqa: PLC0415
 
         attach_citations(tool, formatter, registry)
 

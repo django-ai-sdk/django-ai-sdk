@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
-from django_ai_sdk.agents.mixins import AgentInfoMixin
-from django_ai_sdk.agents.registry import registry
-from django_ai_sdk.citations import (
+from django_ai_sdk.adapters.citations import (
     CitationFormatter,
     CitationRegistry,
     DefaultCitationFormatter,
 )
+from django_ai_sdk.agents.mixins import AgentInfoMixin
+from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
 from django_ai_sdk.integrations.registry import get_integrations
@@ -40,12 +40,12 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
-    from django_ai_sdk.suggestions import SuggestionGenerator
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -347,7 +347,7 @@ class Agent(ABC, AgentInfoMixin):
         if thread_id is None:
             return None
 
-        from .storage.base import StorageAdapterRegistry
+        from django_ai_sdk.storage.base import StorageAdapterRegistry
 
         # Find storage of this thread
         for adapter_class in StorageAdapterRegistry.get_all_adapters():

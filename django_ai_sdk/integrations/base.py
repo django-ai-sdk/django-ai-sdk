@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.permissions import BasePermission
 
 logger = logging.getLogger(__name__)

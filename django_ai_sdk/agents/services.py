@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Any
 
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.agents.mixins import AgentInfo
     from django_ai_sdk.agents.models import (
         AgentGroup,

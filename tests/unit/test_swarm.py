@@ -255,7 +255,7 @@ class TestSubagentBuilders:
     @pytest.mark.asyncio
     async def test_build_subagent(self):
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             built = await build_subagent(SubAgent, thread_id="t1", user=None)
@@ -268,7 +268,7 @@ class TestSubagentBuilders:
     @pytest.mark.asyncio
     async def test_build_subagent_defaults_budgets(self):
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             agent, _ = await build_subagent(SubAgent, thread_id="t1", user=None)
@@ -284,7 +284,7 @@ class TestSubagentBuilders:
             max_tool_calls = 2
 
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             agent, _ = await build_subagent(BudgetSubagent, thread_id="t1", user=None)
@@ -299,7 +299,7 @@ class TestSubagentBuilders:
             max_tool_calls = None
 
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             agent, _ = await build_subagent(UncappedSubagent, thread_id="t1", user=None)
@@ -333,7 +333,7 @@ class TestSubagentBuilders:
         CycleAgentB.agents = [CycleAgentA]
 
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             built = await build_subagent(CycleAgentA, thread_id="t1", user=None)
@@ -724,7 +724,7 @@ class TestCoordinatorGetAgentTools:
         # so an anonymous caller gets every subagent filtered out.
         user = MagicMock(is_authenticated=True)
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             tools = await coordinator.get_agent_tools(thread_id="t1", user=user)
@@ -741,7 +741,7 @@ class TestCoordinatorGetAgentTools:
     async def test_permission_denied_subagent_skipped(self):
         coordinator = CoordinatorAgent()
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             with patch(
@@ -773,7 +773,7 @@ class TestCoordinatorGetAgentTools:
         coordinator = Coordinator()
         user = MagicMock(is_authenticated=True)
         with patch(
-            "django_ai_sdk.agent.Agent.get_llm",
+            "django_ai_sdk.agents.base.Agent.get_llm",
             return_value=MockChatGenerator(responses=["ok"]),
         ):
             tools = await coordinator.get_agent_tools(thread_id="t1", user=user)

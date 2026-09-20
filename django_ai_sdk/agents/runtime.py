@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, Any
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.agent import Agent
+from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
+from django_ai_sdk.agents.base import Agent
 from django_ai_sdk.common import prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
-from django_ai_sdk.suggestions import DefaultSuggestionGenerator
 
 from .tool_agent import ToolAgent, ToolAgentConfig
 

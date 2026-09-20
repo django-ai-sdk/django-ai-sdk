@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.files.processors import FileProcessor
     from django_ai_sdk.files.transforms import BaseTransform
 

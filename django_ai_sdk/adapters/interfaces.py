@@ -7,9 +7,9 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.events import StreamEvent
-    from django_ai_sdk.suggestions import SuggestionGenerator
 
 T = TypeVar("T", bound=BaseModel)
 
