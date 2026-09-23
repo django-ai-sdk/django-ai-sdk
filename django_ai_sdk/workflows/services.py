@@ -124,14 +124,14 @@ class WorkflowService:
 
     @staticmethod
     async def list_workflows(
-        *, active_only: bool = True, limit: int = 100, offset: int = 0
+        *, active_only: bool = True, limit: int | None = 100, offset: int = 0
     ) -> list[Any]:
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         qs = WorkflowSettings.objects.all()
         if active_only:
             qs = qs.filter(active=True)
-        return [r async for r in qs[offset : offset + limit]]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     # --- Run history ---
 
@@ -139,13 +139,13 @@ class WorkflowService:
     async def list_runs(
         workflow_id: str,
         *,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> list[Any]:
         from django_ai_sdk.workflows.models import WorkflowRun
 
         qs = WorkflowRun.objects.filter(workflow_id=workflow_id).order_by("-created_at")
-        return [r async for r in qs[offset : offset + limit]]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     @staticmethod
     async def get_run(run_id: str) -> Any:
