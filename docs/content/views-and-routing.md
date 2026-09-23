@@ -123,7 +123,7 @@ meta = await aget_thread_file_meta(thread_id, user=request.user)
 
 ```python
 # Threads
-await ThreadService.threads(user=request.user, limit=100, offset=0)
+await ThreadService.threads(user=request.user, limit=100, offset=0)  # limit=None returns all
 await ThreadService.get_thread(thread_id, user=request.user)
 await ThreadService.update_thread(thread_id, metadata={"agent_id": new_agent_id}, user=request.user)
 await ThreadService.delete_thread(thread_id, user=request.user)

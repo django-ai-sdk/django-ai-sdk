@@ -1,11 +1,13 @@
 """
 Pagination tests for service-layer limit/offset support.
 
-Covers four distinct pagination paths:
+Every paginated list accepts `limit=None` to return everything (offset still
+applies). Covers the distinct pagination paths:
   - MemoryStore (in-memory dict)
   - ThreadService.threads (multi-adapter merge then slice)
   - MemoryService.list_memories (DB queryset slice)
   - AgentService.list_agents (list slice on registry + DB)
+  - AgentService.list_runtime_agents (DB queryset iterated then sliced)
 """
 
 from datetime import UTC, datetime, timedelta
@@ -78,6 +80,13 @@ class TestMemoryStorePagination:
         self._make_threads(5)
         result = MemoryStore.list_threads(limit=0)
         assert result == []
+
+    def test_limit_none_returns_all(self):
+        from django_ai_sdk.storage.memory import MemoryStore
+
+        self._make_threads(10)
+        assert len(MemoryStore.list_threads(limit=3)) == 3
+        assert len(MemoryStore.list_threads(limit=None)) == 10
 
 
 # ============================================================================
@@ -175,10 +184,27 @@ class TestThreadServicePagination:
         assert len(result) == 1
         assert result[0].id == "newest"
 
+    async def test_limit_zero_returns_empty(self):
+        threads = [_make_thread_info(f"t{i}") for i in range(5)]
+        result = await self._threads_via_mock_adapter(threads, limit=0)
+        assert result == []
+
     async def test_offset_beyond_total_returns_empty(self):
         threads = [_make_thread_info(f"t{i}") for i in range(3)]
         result = await self._threads_via_mock_adapter(threads, limit=10, offset=100)
         assert result == []
+
+    async def test_limit_none_returns_all(self):
+        threads = [_make_thread_info(f"t{i}", age_seconds=i) for i in range(150)]
+        result = await self._threads_via_mock_adapter(threads, limit=None)
+        assert len(result) == 150
+
+    async def test_limit_none_with_offset_returns_tail(self):
+        threads = [_make_thread_info(f"t{i}", age_seconds=i) for i in range(150)]
+        all_results = await self._threads_via_mock_adapter(threads, limit=None)
+        result = await self._threads_via_mock_adapter(threads, limit=None, offset=50)
+        assert len(result) == 100
+        assert [t.id for t in result] == [t.id for t in all_results[50:]]
 
 
 # ============================================================================
@@ -222,6 +248,14 @@ class TestMemoryServiceListMemoriesPagination:
         # First item after skip must match position [2] in the full list
         assert page2[0].id == all_results[2].id
 
+    async def test_limit_none_returns_all(self):
+        from django_ai_sdk.memories.services import MemoryService
+
+        await self._create_memories(3)
+        everything = await MemoryService.list_memories(user=None, limit=10_000)
+        result = await MemoryService.list_memories(user=None, limit=None)
+        assert [m.id for m in result] == [m.id for m in everything]
+
     async def test_offset_beyond_count_returns_empty(self):
         from django_ai_sdk.memories.services import MemoryService
 
@@ -233,6 +267,9 @@ class TestMemoryServiceListMemoriesPagination:
 # ============================================================================
 # AgentService.list_agents — list slice (registry + DB)
 # ============================================================================
+
+# Sentinel: omit the `limit` kwarg entirely to exercise the service default.
+_UNSET = object()
 
 
 @pytest.mark.asyncio
@@ -250,11 +287,15 @@ class TestAgentServiceListAgentsPagination:
         mock_registry.visible.return_value = agents
         return mock_registry
 
-    async def _list(self, n_registry: int, limit: int = 100, offset: int = 0):
+    async def _list(self, n_registry: int, limit: object = _UNSET, offset: int = 0):
         from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.agents.models import AgentSettings
 
         registry = self._make_registry_with(n_registry)
+
+        kwargs: dict[str, object] = {"offset": offset}
+        if limit is not _UNSET:
+            kwargs["limit"] = limit
 
         with (
             patch("django_ai_sdk.agents.services.registry", registry),
@@ -269,9 +310,7 @@ class TestAgentServiceListAgentsPagination:
                 return_value=MagicMock(__aiter__=MagicMock(return_value=aiter([]))),
             ),
         ):
-            return await AgentService.list_agents(
-                user=None, limit=limit, offset=offset
-            )
+            return await AgentService.list_agents(user=None, **kwargs)
 
     async def test_limit_caps_registry_results(self):
         result = await self._list(n_registry=10, limit=3)
@@ -285,6 +324,85 @@ class TestAgentServiceListAgentsPagination:
     async def test_offset_beyond_count_returns_empty(self):
         result = await self._list(n_registry=5, limit=10, offset=100)
         assert result == []
+
+    async def test_default_limit_is_100(self):
+        result = await self._list(n_registry=150)
+        assert len(result) == 100
+
+    async def test_limit_none_returns_all(self):
+        result = await self._list(n_registry=150, limit=None)
+        assert len(result) == 150
+
+    async def test_limit_none_with_fewer_than_default(self):
+        result = await self._list(n_registry=5, limit=None)
+        assert len(result) == 5
+
+    async def test_limit_none_with_offset_returns_tail(self):
+        all_results = await self._list(n_registry=150, limit=None)
+        result = await self._list(n_registry=150, limit=None, offset=50)
+        assert len(result) == 100
+        assert [r["id"] for r in result] == [r["id"] for r in all_results[50:]]
+
+    async def test_limit_none_offset_beyond_count_returns_empty(self):
+        result = await self._list(n_registry=5, limit=None, offset=100)
+        assert result == []
+
+
+@pytest.mark.asyncio
+class TestAgentServiceListRuntimeAgentsPagination:
+    def _make_configs(self, n: int):
+        """Return n mock AgentSettings configs."""
+        configs = []
+        for i in range(n):
+            c = MagicMock()
+            c.id = f"cfg-{i}"
+            c.name = f"Runtime Agent {i}"
+            configs.append(c)
+        return configs
+
+    async def _list(self, n_configs: int, limit: object = _UNSET, offset: int = 0):
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.agents.services import AgentService
+
+        configs = self._make_configs(n_configs)
+
+        objects = MagicMock()
+        objects.all.return_value.order_by.return_value = MagicMock(
+            __aiter__=MagicMock(return_value=aiter(configs))
+        )
+
+        kwargs: dict[str, object] = {"offset": offset}
+        if limit is not _UNSET:
+            kwargs["limit"] = limit
+
+        with (
+            patch.object(AgentSettings, "objects", objects),
+            # get_runtime_agent_class(agent_ref) -> agent class -> config -> agent
+            patch(
+                "django_ai_sdk.agents.config.get_runtime_agent_class",
+                lambda agent_ref: lambda config: MagicMock(),
+            ),
+            patch.object(
+                AgentService,
+                "has_perms",
+                new_callable=AsyncMock,
+            ),
+        ):
+            return await AgentService.list_runtime_agents(user=None, **kwargs)
+
+    async def test_default_limit_is_100(self):
+        result = await self._list(n_configs=150)
+        assert len(result) == 100
+
+    async def test_limit_none_returns_all(self):
+        result = await self._list(n_configs=150, limit=None)
+        assert len(result) == 150
+
+    async def test_limit_none_with_offset_returns_tail(self):
+        all_results = await self._list(n_configs=150, limit=None)
+        result = await self._list(n_configs=150, limit=None, offset=50)
+        assert len(result) == 100
+        assert [c.id for c in result] == [c.id for c in all_results[50:]]
 
 
 def aiter(iterable):

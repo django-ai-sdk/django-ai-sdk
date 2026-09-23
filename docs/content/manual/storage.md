@@ -69,6 +69,8 @@ await DbStorageAdapter.update_thread(thread_id, title="New title")
 await DbStorageAdapter.delete_thread(thread_id)            # -> bool
 ```
 
+`list_threads` paginates with `limit`/`offset` and returns everything by default (`limit=None`).
+
 `ThreadInfo` carries `id`, `title`, `agent_id`, `model`, `user_id`, `created_at`, `updated_at`, `metadata`, `message_count`, `file_memory_id`.
 
 ### Instance methods: thread-specific operations
