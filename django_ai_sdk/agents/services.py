@@ -166,7 +166,7 @@ class AgentService(PermissionsMixin):
         cls,
         user: UserType,
         *,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[AgentSummary]:
         """Return all agents the user is allowed to view (registry + DB-backed)."""
@@ -214,7 +214,7 @@ class AgentService(PermissionsMixin):
                 )
             )
 
-        return result[offset : offset + limit]
+        return result[offset : offset + limit if limit is not None else None]
 
     @classmethod
     async def get_agent_info(cls, agent_id: str, user: UserType) -> AgentInfo:
