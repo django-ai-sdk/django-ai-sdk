@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.executor import WorkflowExecutor
+from django_ai_sdk.workflows.inputs import normalize_workflow_inputs
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -22,8 +23,9 @@ class WorkflowService:
     @staticmethod
     async def run(
         workflow: WorkflowDefinition,
-        messages: list[ChatMessage],
+        messages: list[ChatMessage] | None = None,
         *,
+        inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
         from django_ai_sdk.workflows.models import WorkflowRun
@@ -32,7 +34,7 @@ class WorkflowService:
             workflow=None,
             workflow_definition=workflow.model_dump(),
             status=WorkflowRun.Status.PENDING,
-            input_messages=[m.model_dump() for m in messages],
+            inputs=normalize_workflow_inputs(inputs=inputs, messages=messages),
             user_id=_user_id(user),
         )
         await WorkflowExecutor.enqueue(run)
@@ -41,8 +43,9 @@ class WorkflowService:
     @staticmethod
     async def run_by_id(
         workflow_id: str,
-        messages: list[ChatMessage],
+        messages: list[ChatMessage] | None = None,
         *,
+        inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         run_id: str | None = None,
     ) -> WorkflowRun:
@@ -58,7 +61,7 @@ class WorkflowService:
                 workflow=record,
                 workflow_definition=workflow.model_dump(),
                 status=WorkflowRun.Status.PENDING,
-                input_messages=[m.model_dump() for m in messages],
+                inputs=normalize_workflow_inputs(inputs=inputs, messages=messages),
                 user_id=_user_id(user),
             )
         await WorkflowExecutor.enqueue(run)

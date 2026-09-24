@@ -38,7 +38,7 @@ class TestWorkflowStep:
     def test_minimal(self):
         s = WorkflowStep(agent_id="abc", output_key="result")
         assert s.name == ""
-        assert s.input_key is None
+        assert s.requires == []
         assert s.system_prompt_override is None
         assert s.output_fields == {}
 
