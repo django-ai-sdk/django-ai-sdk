@@ -851,7 +851,9 @@ class WorkflowListCreateAPIView(APIView):
 
         limit = int(request.query_params.get("limit", 100))
         offset = int(request.query_params.get("offset", 0))
-        records = await WorkflowService.list_workflows(limit=limit, offset=offset)
+        records = await WorkflowService.list_workflows(
+            user=request.user, limit=limit, offset=offset
+        )
         return Response(WorkflowSerializer(records, many=True).data)
 
     async def post(self, request: Request) -> Response:
@@ -859,58 +861,40 @@ class WorkflowListCreateAPIView(APIView):
 
         serializer = WorkflowCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        try:
-            workflow = WorkflowDefinition.model_validate(serializer.validated_data["workflow"])
-            record = await WorkflowService.create(
-                serializer.validated_data["name"], workflow, user=request.user
-            )
-            return Response(WorkflowSerializer(record).data, status=201)
-        except Exception as e:
-            return Response({"message": str(e)}, status=400)
+        workflow = WorkflowDefinition.model_validate(serializer.validated_data["workflow"])
+        record = await WorkflowService.create(
+            serializer.validated_data["name"], workflow, user=request.user
+        )
+        return Response(WorkflowSerializer(record).data, status=201)
 
 
 class WorkflowDetailAPIView(APIView):
     async def get(self, request: Request, workflow_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowService
-        from django_ai_sdk.workflows.models import WorkflowSettings
 
-        try:
-            record = await WorkflowService.get(workflow_id)
-            return Response(WorkflowSerializer(record).data)
-        except WorkflowSettings.DoesNotExist:
-            return Response({"message": "Workflow not found"}, status=404)
+        record = await WorkflowService.get(workflow_id, user=request.user)
+        return Response(WorkflowSerializer(record).data)
 
     async def patch(self, request: Request, workflow_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
-        from django_ai_sdk.workflows.models import WorkflowSettings
 
         serializer = WorkflowUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        try:
-            workflow_data = serializer.validated_data.get("workflow")
-            workflow = WorkflowDefinition.model_validate(workflow_data) if workflow_data else None
-            record = await WorkflowService.update(
-                workflow_id,
-                name=serializer.validated_data.get("name"),
-                workflow=workflow,
-                active=serializer.validated_data.get("active"),
-            )
-            return Response(WorkflowSerializer(record).data)
-        except WorkflowSettings.DoesNotExist:
-            return Response({"message": "Workflow not found"}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=400)
+        workflow_data = serializer.validated_data.get("workflow")
+        record = await WorkflowService.update(
+            workflow_id,
+            user=request.user,
+            name=serializer.validated_data.get("name"),
+            workflow=WorkflowDefinition.model_validate(workflow_data) if workflow_data else None,
+            active=serializer.validated_data.get("active"),
+        )
+        return Response(WorkflowSerializer(record).data)
 
     async def delete(self, request: Request, workflow_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowService
-        from django_ai_sdk.workflows.models import WorkflowSettings
 
-        try:
-            await WorkflowService.get(workflow_id)
-            await WorkflowService.delete(workflow_id)
-            return Response(status=204)
-        except WorkflowSettings.DoesNotExist:
-            return Response({"message": "Workflow not found"}, status=404)
+        await WorkflowService.delete(workflow_id, user=request.user)
+        return Response(status=204)
 
 
 class WorkflowRunStepSerializer(serializers.Serializer):
@@ -941,9 +925,9 @@ class WorkflowRunDetailSerializer(WorkflowRunSerializer):
 
 class WorkflowRunAPIView(APIView):
     async def post(self, request: Request) -> Response:
-        try:
-            from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 
+        try:
             workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
             run = await WorkflowService.run(
                 workflow,
@@ -957,10 +941,10 @@ class WorkflowRunAPIView(APIView):
 
 class WorkflowRunByIdAPIView(APIView):
     async def post(self, request: Request, workflow_id: str) -> Response:
-        try:
-            from django_ai_sdk.workflows import WorkflowService
-            from django_ai_sdk.workflows.models import WorkflowSettings
+        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.models import WorkflowSettings
 
+        try:
             run_id = request.data.get("run_id")
             run = await WorkflowService.run_by_id(
                 workflow_id,
@@ -979,27 +963,24 @@ class WorkflowRunListAPIView(APIView):
     async def get(self, request: Request, workflow_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowService
 
-        limit = int(request.query_params.get("limit", 50))
-        offset = int(request.query_params.get("offset", 0))
-        try:
-            runs = await WorkflowService.list_runs(workflow_id, limit=limit, offset=offset)
-            return Response(WorkflowRunSerializer(runs, many=True).data)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        runs = await WorkflowService.list_runs(
+            workflow_id,
+            user=request.user,
+            limit=int(request.query_params.get("limit", 50)),
+            offset=int(request.query_params.get("offset", 0)),
+        )
+        return Response(WorkflowRunSerializer(runs, many=True).data)
 
 
 class WorkflowRunDetailAPIView(APIView):
     async def get(self, request: Request, workflow_id: str, run_id: str) -> Response:
         from django_ai_sdk.workflows import WorkflowService
-        from django_ai_sdk.workflows.models import WorkflowRun
 
-        try:
-            run = await WorkflowService.get_run(run_id)
-            return Response(WorkflowRunDetailSerializer(run).data)
-        except WorkflowRun.DoesNotExist:
+        run = await WorkflowService.get_run(run_id, user=request.user)
+        if run is None:
+            # Absent covers both "no such run" and "not yours", by design.
             return Response({"message": "Run not found"}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        return Response(WorkflowRunDetailSerializer(run).data)
 
 
 class WorkflowActionsAPIView(APIView):
