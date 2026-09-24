@@ -8,7 +8,7 @@ from django_ai_sdk.common import ChatMessage, prompt
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
-    from django_ai_sdk.agent import Agent
+    from django_ai_sdk.agents.base import Agent
 
 logger = get_logger(__name__)
 

@@ -30,6 +30,7 @@ DjangoAISDKConfig.ready()), so putting a class there is enough on its own.
 
 from __future__ import annotations
 
+from .base import Agent
 from .mixins import AgentInfo, AgentInfoMixin
 from .registry import (
     AgentRegistrationError,
@@ -50,6 +51,7 @@ from .tool_agent import (
 )
 
 __all__ = [
+    "Agent",
     "AgentInfo",
     "AgentInfoMixin",
     "AgentRegistry",

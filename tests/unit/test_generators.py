@@ -9,7 +9,7 @@ from django.test import override_settings
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.adapters import base
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.agent import Agent
+from django_ai_sdk.agents.base import Agent
 from django_ai_sdk.generators import (
     anthropic_chat,
     azure_openai_chat,

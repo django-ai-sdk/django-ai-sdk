@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from ..agent import Agent
+    from .base import Agent
 
 
 T = TypeVar("T", bound="Agent")

@@ -738,7 +738,7 @@ class TestExtensibility:
     async def test_agent_get_tools_threads_agent_into_factory(self):
         """A tool factory that runs its own LLM call (e.g. translation) needs the
         calling agent's model — that's why `agent` is in the contract."""
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         received: dict = {}
 
@@ -775,7 +775,7 @@ class TestIntegrationFailureIsolation:
     asyncio.gather plus a per-integration try/except."""
 
     async def test_one_failing_integration_does_not_drop_others_tools(self):
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class BrokenIntegration(APIIntegration):
             permissions = [AllowAll]
@@ -807,7 +807,7 @@ class TestIntegrationFailureIsolation:
     async def test_integrations_are_awaited_concurrently_not_serially(self):
         """If a slow integration and another were awaited one at a time, total
         wall-clock time would be additive. Assert it isn't."""
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         delay = 0.2
 
@@ -848,7 +848,7 @@ class TestIntegrationFailureIsolation:
 
     async def test_an_unpermitted_integration_contributes_no_tools(self):
         """Permissions are enforced before tools reach the model, not after."""
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class ForbiddenIntegration(APIIntegration):
             name = "forbidden"
@@ -882,7 +882,7 @@ class TestIntegrationToolNamespacing:
         name: str
 
     async def test_same_named_tools_from_two_integrations_do_not_collide(self):
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class FirstIntegration(APIIntegration):
             permissions = [AllowAll]
@@ -930,7 +930,7 @@ class TestIntegrationHint:
         description: str
 
     async def test_hint_is_prepended_to_every_tool_description(self):
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class HintedIntegration(APIIntegration):
             permissions = [AllowAll]
@@ -961,7 +961,7 @@ class TestIntegrationHint:
         )
 
     async def test_no_hint_leaves_the_description_untouched(self):
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class UnhintedIntegration(APIIntegration):
             permissions = [AllowAll]
@@ -1616,7 +1616,7 @@ class TestIntegrationPermissions:
         """The INTEGRATIONS domain default requires an authenticated user, so a system
         or anonymous context contributes no integration tools at all. Documented because
         it's easy to mistake for a registry miss when writing a test."""
-        from django_ai_sdk.agent import Agent
+        from django_ai_sdk.agents.base import Agent
 
         class DefaultPermsIntegration(APIIntegration):
             name = "default-perms"

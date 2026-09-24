@@ -437,7 +437,7 @@ See the [Files reference](/manual/files/) for the shipped processors (Text, CSV,
 Set `suggestion_generator` to stream follow-up questions after the assistant's reply:
 
 ```python
-from django_ai_sdk.suggestions import DefaultSuggestionGenerator
+from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 
 class MyAgent(Agent):
     suggestion_generator = DefaultSuggestionGenerator
