@@ -1,10 +1,3 @@
-"""What a workflow step is, and the context every step and action reads.
-
-A step is a named unit of work that reads the run's state and returns a value:
-`AgentStep` calls a model, a plain `Step` is arbitrary Python. A step's result is
-filed under its own `name`, so two steps never contend for one key.
-"""
-
 from __future__ import annotations
 
 import json

@@ -1,10 +1,3 @@
-"""
-Base protocol handling with handler selection.
-
-This module provides the main interface for selecting and using
-different protocol handlers based on the target format.
-"""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

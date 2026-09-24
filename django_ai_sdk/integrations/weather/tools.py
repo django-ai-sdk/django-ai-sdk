@@ -1,7 +1,3 @@
-"""Weather tools, built on Open-Meteo — needs no API key, so this is runnable with
-zero credentials.
-"""
-
 from __future__ import annotations
 
 import httpx

@@ -1,9 +1,3 @@
-"""CRUD and run facade for stored workflow definitions.
-
-Every method that stamps a user also gates on one. Someone else's definition or
-run reads as absent rather than forbidden, since a 403 would confirm the id exists.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

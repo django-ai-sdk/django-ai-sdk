@@ -1,10 +1,3 @@
-"""Process-wide registry of declared workflows.
-
-Every installed app's `workflows` module is imported on startup, so calling
-`register()` there is enough. A definition that cannot run is kept out of the
-registry and reported by the `django_ai_sdk.workflows` check instead of failing boot.
-"""
-
 from __future__ import annotations
 
 import logging

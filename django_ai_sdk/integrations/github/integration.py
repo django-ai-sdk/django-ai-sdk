@@ -1,5 +1,3 @@
-"""GitHub's Copilot MCP server — repos, issues, etc. via a personal access token."""
-
 from __future__ import annotations
 
 from django_ai_sdk.integrations.mcp.loader import MCPIntegration

@@ -1,5 +1,3 @@
-"""Notion's hosted MCP server."""
-
 from __future__ import annotations
 
 from django_ai_sdk.integrations.mcp.loader import MCPIntegration

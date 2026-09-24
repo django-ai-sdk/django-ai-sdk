@@ -1,5 +1,3 @@
-"""Queue entry point for workflow runs."""
-
 from __future__ import annotations
 
 import logging

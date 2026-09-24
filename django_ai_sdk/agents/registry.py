@@ -1,5 +1,3 @@
-"""Agent registry for managing Agent classes and instances."""
-
 from __future__ import annotations
 
 import threading

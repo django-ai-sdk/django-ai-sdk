@@ -1,14 +1,3 @@
-"""Actions: everything that watches a run rather than doing its work.
-
-One kind of object, attached in two places. An action on the `WorkflowDefinition`
-sees the run and every step in it; an action on a `StepDefinition` sees that step alone.
-Recording a run's rows, notifying someone a step finished, and delivering the
-result when the run ends are all the same shape.
-
-A host declares its own by key in `AI_SDK_WORKFLOW_ACTIONS`; the package ships one,
-`RunRecorder`, which the executor always attaches.
-"""
-
 from __future__ import annotations
 
 import logging

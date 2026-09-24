@@ -1,5 +1,3 @@
-"""Bridge between the citation primitives and Haystack's `ComponentTool`."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

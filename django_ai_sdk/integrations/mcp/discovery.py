@@ -1,12 +1,3 @@
-"""RFC 9728 OAuth 2.0 Protected Resource Metadata discovery for MCP servers.
-
-The RFC-compliant URL construction and response parsing are delegated to the
-official mcp SDK's stateless helpers (mcp.client.auth.utils / mcp.shared.auth).
-This module adds what that SDK does not provide: SSRF protection over every
-outbound request, an issuer-domain allowlist, an in-process discovery cache, and
-the flattened OAuthDiscovery result that the rest of the codebase consumes.
-"""
-
 from __future__ import annotations
 
 import asyncio

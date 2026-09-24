@@ -1,17 +1,3 @@
-"""The JSON shape of a workflow: what an author declares.
-
-These are declarations, not the objects that run. `definitions.compile_steps` turns a
-`StepDefinition` into a `Step`, and `definitions.compile_inputs` turns `input_fields`
-into the pydantic model a run's inputs are validated against.
-
-A field is declared structurally — type, description, enum, default, and nested
-`items`/`fields` — and the shape is the whole contract: a declared schema has to
-survive a dump, cross the queue, and be read back by an editor, so behaviour —
-validators, constraints — belongs to a step, not to a field. A workflow written in
-code may hand the authoring to a pydantic model instead (`inputs=MyModel`), which
-is normalized into the same fields and never rides on the definition.
-"""
-
 from __future__ import annotations
 
 from types import UnionType

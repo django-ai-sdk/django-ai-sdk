@@ -1,14 +1,3 @@
-"""Django admin for integrations.
-
-``MCPServerConfig`` is editable - this is the non-developer, no-deploy way to add,
-edit, and enable/disable an MCP server (see ``integrations/registry.py``). Secret
-fields render as blank password inputs; leaving one blank on edit preserves the
-existing stored secret rather than clearing it.
-
-``MCPOAuthToken``/``MCPOAuthClient`` are read-only - observability into who's
-connected to what, without ever rendering token/secret material (even encrypted).
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

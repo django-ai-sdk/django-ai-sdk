@@ -1,10 +1,3 @@
-"""MCP-backed Integration: connects to a remote MCP server over Streamable HTTP.
-
-Each DynamicMCPIntegration owns a ResilientCache (stale-while-revalidate plus circuit
-breaker; see django_ai_sdk.integrations.base) so discovery (connect + list_tools)
-never sits directly on the chat-request critical path.
-"""
-
 from __future__ import annotations
 
 import asyncio

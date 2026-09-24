@@ -1,8 +1,3 @@
-"""Startup diagnostics for declared workflows.
-
-Reported as Errors, so `manage.py check` fails on an unrunnable declaration.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

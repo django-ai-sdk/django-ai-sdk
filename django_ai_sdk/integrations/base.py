@@ -1,12 +1,3 @@
-"""Shared contract and caching for integrations.
-
-Integration wraps something an agent plugs in, such as an MCP server or a
-hand-written API wrapper. ResilientCache caches a backend's live-fetched data per key,
-with stale-while-revalidate refresh and a circuit breaker for repeated failures. The
-cache and breaker mechanics come from cashews; this module adds a small
-get/status_for/invalidate surface plus the per-key health tracking the UI reads.
-"""
-
 from __future__ import annotations
 
 import asyncio

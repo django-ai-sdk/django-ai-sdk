@@ -1,15 +1,3 @@
-"""Process-wide registry of integration services.
-
-Integrations register themselves from their app's ready() (see IntegrationAppConfig
-in apps.py). This module is just the shared dict they register into and the lookups
-the agent and the host project's integrations endpoints use.
-
-get_all_integrations() and get_integrations() are async even though the code-declared
-side needs no I/O: enabled MCPServerConfig rows (see mcp.models.MCPServerConfig) are
-merged in on every call, database-backed integrations declared by an admin/settings UI
-instead of an app.
-"""
-
 from __future__ import annotations
 
 import logging

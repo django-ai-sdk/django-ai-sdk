@@ -1,5 +1,3 @@
-"""Linear's hosted MCP server, via a shared deployment token."""
-
 from __future__ import annotations
 
 from django_ai_sdk.integrations.mcp.loader import MCPIntegration

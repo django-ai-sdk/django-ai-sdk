@@ -1,5 +1,3 @@
-"""Running a stored WorkflowDefinition and recording the result."""
-
 from __future__ import annotations
 
 import logging

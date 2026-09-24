@@ -1,5 +1,3 @@
-"""Step outcomes the runner can record, and the slug a definition is named by."""
-
 from __future__ import annotations
 
 from django.db import migrations, models

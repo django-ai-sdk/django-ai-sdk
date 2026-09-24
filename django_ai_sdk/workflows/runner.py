@@ -1,9 +1,3 @@
-"""Run a pipeline of Steps in the order they were declared.
-
-A step runs once every step it requires has completed. A step declared before its
-producer is refused rather than reordered.
-"""
-
 from __future__ import annotations
 
 import logging

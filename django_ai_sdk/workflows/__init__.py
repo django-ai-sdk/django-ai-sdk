@@ -1,11 +1,3 @@
-"""Workflows: multi-step agent work, declared as a `WorkflowDefinition`.
-
-A definition is data authored in code with `register()`, or at runtime in a
-`WorkflowSettings` row. It declares the inputs a run takes, names agent steps and
-`Step` classes the deployment exposed through `AI_SDK_WORKFLOW_STEPS`, and hangs
-`WorkflowAction`s off the workflow or off one step.
-"""
-
 from __future__ import annotations
 
 from .actions import RunRecorder, WorkflowAction, get_action_registry

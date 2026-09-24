@@ -1,5 +1,3 @@
-"""Replace WorkflowRun.input_messages with the `inputs` run-state bag."""
-
 from __future__ import annotations
 
 from django.db import migrations, models

@@ -1,5 +1,3 @@
-"""Base class for hand-written API-backed integrations."""
-
 from __future__ import annotations
 
 import inspect

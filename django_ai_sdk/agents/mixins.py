@@ -1,5 +1,3 @@
-"""Mixins for the Django AI SDK Agent classes."""
-
 from __future__ import annotations
 
 import uuid

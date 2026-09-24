@@ -1,10 +1,3 @@
-"""Compiling a JSON WorkflowDefinition into the objects the runner executes.
-
-A definition composes two kinds of step — an agent named by id, and a `Step` class
-the deployment registered under a key in `AI_SDK_WORKFLOW_STEPS` — and declares
-its inputs and each step's outputs as fields, which compile to pydantic models.
-"""
-
 from __future__ import annotations
 
 import logging

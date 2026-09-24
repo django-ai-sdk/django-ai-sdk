@@ -1,10 +1,3 @@
-"""Weather via Open-Meteo — the SDK's shipped example of an API-backed integration
-(as opposed to github/notion/linear, which are MCP-backed).
-
-Exercises the whole APIIntegration contract: get_tools(), invoking the tool, and a
-real get_status() backed by a health probe.
-"""
-
 from __future__ import annotations
 
 from django_ai_sdk.integrations.api.base import APIIntegration

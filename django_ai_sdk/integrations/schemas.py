@@ -1,10 +1,3 @@
-"""Generic, integration-kind-agnostic output schemas.
-
-These describe integrations to the /api/integrations surface and to the
-per-agent status endpoint, regardless of whether an integration is MCP-backed or
-a hand-written API wrapper.
-"""
-
 from __future__ import annotations
 
 from pydantic import BaseModel

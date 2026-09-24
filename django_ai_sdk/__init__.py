@@ -1,7 +1,3 @@
-"""
-Django AI SDK - A plug-and-play Django AI streaming SDK.
-"""
-
 from __future__ import annotations
 
 from django_ai_sdk.agents.base import Agent
