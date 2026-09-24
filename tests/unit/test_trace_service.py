@@ -92,6 +92,16 @@ class TestThreadTraces:
 
         assert [t.id for t in page] == [t.id for t in everything[2:6]]
 
+    async def test_limit_none_returns_all(self, traced_thread, mock_user):
+        thread, _, _ = traced_thread
+
+        everything = await TraceService.thread_traces(thread.id, user=mock_user)
+        page = await TraceService.thread_traces(thread.id, user=mock_user, limit=None)
+        tail = await TraceService.thread_traces(thread.id, user=mock_user, limit=None, offset=6)
+
+        assert [t.id for t in page] == [t.id for t in everything]
+        assert [t.id for t in tail] == [t.id for t in everything[6:]]
+
     async def test_message_id_narrows_to_one_run(self, traced_thread, mock_user):
         thread, _, second = traced_thread
 

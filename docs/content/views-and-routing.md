@@ -123,7 +123,7 @@ meta = await aget_thread_file_meta(thread_id, user=request.user)
 
 ```python
 # Threads
-await ThreadService.threads(user=request.user, limit=100, offset=0)
+await ThreadService.threads(user=request.user, limit=100, offset=0)  # limit=None returns all
 await ThreadService.get_thread(thread_id, user=request.user)
 await ThreadService.update_thread(thread_id, metadata={"agent_id": new_agent_id}, user=request.user)
 await ThreadService.delete_thread(thread_id, user=request.user)
@@ -240,12 +240,12 @@ The SDK ships a workflow engine for orchestrating multi-step agent tasks. A `Wor
 from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 
 # Run an ad-hoc workflow
-run = await WorkflowService.run(workflow, messages, user=request.user)
+run = await WorkflowService.run(workflow, inputs={"document": doc}, user=request.user)
 
 # Persisted workflows (WorkflowSettings)
 record = await WorkflowService.create(name, workflow, user=request.user)
 await WorkflowService.update(workflow_id, name=..., workflow=..., active=...)
-await WorkflowService.run_by_id(workflow_id, messages, user=request.user)
+await WorkflowService.run_by_id(workflow_id, inputs={"document": doc}, user=request.user)
 await WorkflowService.get_run(run_id)
 
 # Available actions (declared in AI_SDK_WORKFLOW_ACTIONS)

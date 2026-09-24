@@ -71,6 +71,9 @@ class Operation(StrEnum):
     DELETE_AGENT = "delete_agent"
     USE_INTEGRATION = "use_integration"
     MANAGE_INTEGRATION = "manage_integration"
+    VIEW_WORKFLOW = "view_workflow"
+    RUN_WORKFLOW = "run_workflow"
+    MANAGE_WORKFLOW = "manage_workflow"
 
 
 class PermissionDomain(StrEnum):
@@ -78,6 +81,7 @@ class PermissionDomain(StrEnum):
     THREAD = "thread"
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
+    WORKFLOW = "workflow"
 
 
 class BasePermission(ABC):
@@ -434,11 +438,94 @@ class IntegrationDefaultPermission(BasePermission):
         return user is not None and bool(user.is_authenticated)
 
 
+class WorkflowDefaultPermission(BasePermission):
+    """Any authenticated user may view, run, and author workflows.
+
+    A stored definition is managed by whoever created it, and running someone
+    else's active definition is not managing it. A run is read by whoever it ran
+    as: its outputs are that principal's content. Staff manage and read every one
+    of both.
+
+    Ownership lives here rather than in `WorkflowService`, so a deployment that
+    overrides the `workflow` domain replaces the whole rule and not half of it.
+    """
+
+    READ: frozenset[Operation] = frozenset({Operation.VIEW_WORKFLOW})
+    WRITE: frozenset[Operation] = frozenset({Operation.RUN_WORKFLOW})
+    MANAGE: frozenset[Operation] = frozenset({Operation.MANAGE_WORKFLOW})
+
+    WORKFLOW_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
+
+    async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
+        if user is None or not bool(user.is_authenticated):
+            return False
+        return operation in self.WORKFLOW_OPS
+
+    async def has_object_permission(
+        self,
+        user: UserType,
+        operation: Operation,
+        obj: Any,
+        **kwargs: Any,
+    ) -> bool:
+        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+
+        if user is None or not bool(user.is_authenticated):
+            return False
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return True
+        if isinstance(obj, WorkflowSettings):
+            if operation in self.MANAGE:
+                return _owned_by(obj.created_by_id, user)
+            return True
+        if isinstance(obj, WorkflowRun):
+            return _owned_by(obj.user_id, user)
+        return False
+
+    def get_queryset_perms(
+        self,
+        user: UserType,
+        operation: Operation,
+        queryset: QuerySet,
+    ) -> QuerySet:
+        """Scope a list to what `user` owns, by the same rule as the object check."""
+        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+
+        if user is None or not bool(user.is_authenticated):
+            return queryset.none()
+        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+            return queryset
+        if queryset.model is WorkflowSettings:
+            return queryset.filter(created_by_id=user.pk)
+        if queryset.model is WorkflowRun:
+            return queryset.filter(user_id=user.pk)
+        return queryset
+
+
+def user_pk(user: UserType) -> Any:
+    """The user's primary key, or None for anonymous. Safe as a query value."""
+    if user is None or not user.is_authenticated:
+        return None
+    return user.pk
+
+
+def _owned_by(owner_id: Any, user: UserType) -> bool:
+    """Whether `user` owns a row stamped with `owner_id`.
+
+    SECURITY: an unowned row is nobody's, not everybody's — an app-level run
+    has no principal, so no ordinary caller has a claim on it.
+    """
+    if owner_id is None or user is None:
+        return False
+    return str(owner_id) == str(user.pk)
+
+
 DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.AGENT: ["django_ai_sdk.permissions.AgentDefaultPermission"],
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
+    PermissionDomain.WORKFLOW: ["django_ai_sdk.permissions.WorkflowDefaultPermission"],
 }
 
 

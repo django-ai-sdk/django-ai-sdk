@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime  # noqa: TC003
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ObjectDoesNotExist
 from django_tasks import default_task_backend
 from django_tasks.base import TaskResultStatus
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+
+logger = logging.getLogger(__name__)
 
 
 class TaskError(BaseModel):
@@ -40,3 +47,27 @@ async def aget_task_status(task_id: str) -> TaskStatus:
         # SUCCESSFUL tasks have one.
         return_value=result.return_value if result.status == TaskResultStatus.SUCCESSFUL else None,
     )
+
+
+async def aget_principal(user_id: Any, *, source: str = "") -> AbstractBaseUser | None:
+    """Load the active user a queued run was created for, or None.
+
+    A worker is a fresh process with no request, so permission checks and per-user
+    credentials need this. A database failure propagates rather than downgrading.
+    """
+    if user_id is None:
+        return None
+
+    from django.contrib.auth import get_user_model
+
+    try:
+        # SECURITY: inactive is treated as absent. Answering anonymously is the
+        # lower privilege; running as a disabled account is not.
+        return await get_user_model()._default_manager.aget(pk=user_id, is_active=True)
+    except (ObjectDoesNotExist, ValueError, TypeError):
+        logger.warning(
+            "%s targets user %s, who is not an active account",
+            source or "A queued run",
+            user_id,
+        )
+        return None

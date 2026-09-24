@@ -32,6 +32,8 @@ await MemoryService.update_memory(memory_id, name="...", description="...", is_p
 await MemoryService.delete_memory(memory_id, user=request.user)
 ```
 
+All list methods paginate with `limit`/`offset`; pass `limit=None` to return everything.
+
 `create_memory` grants the creating user `can_manage=True` automatically.
 
 ## Access (Users and Groups)

@@ -4,7 +4,7 @@ type: docs
 weight: 120
 ---
 
-How the SDK gates operations: the `Operation` enum, permission domains, the built-in classes, and how to write your own. Every service (`AgentService`, `ThreadService`, `MemoryService`, `as_view()`, `history()`) checks permissions before acting and raises `PermissionDenied` on failure.
+How the SDK gates operations: the `Operation` enum, permission domains, the built-in classes, and how to write your own. Every service (`AgentService`, `ThreadService`, `MemoryService`, `WorkflowService`, `as_view()`, `history()`) checks permissions before acting and raises `PermissionDenied` on failure.
 
 ## Operations and Domains
 
@@ -23,6 +23,7 @@ PermissionDomain.MEMORY   # "memory"
 | `thread` | `ThreadDefaultPermission` |
 | `memory` | `MemoryDefaultPermission` |
 | `integrations` | `IntegrationDefaultPermission` |
+| `workflow` | `WorkflowDefaultPermission` |
 
 Override a domain globally via `AI_SDK_PERMISSIONS`:
 
@@ -51,6 +52,8 @@ VIEW_DOCUMENT, LIST_DOCUMENTS, UPLOAD_DOCUMENT, DELETE_DOCUMENT,
 LIST_THREAD_MEMORIES, LINK_MEMORY, UNLINK_MEMORY
 # Integrations
 USE_INTEGRATION, MANAGE_INTEGRATION
+# Workflows
+VIEW_WORKFLOW, RUN_WORKFLOW, MANAGE_WORKFLOW
 # Misc
 CHAT, REINDEX
 ```
@@ -68,11 +71,12 @@ CHAT, REINDEX
 
 ### Tiered default permissions
 
-Three built-ins expose `READ` / `WRITE` / `MANAGE` operation tiers:
+Four built-ins expose `READ` / `WRITE` / `MANAGE` operation tiers:
 
 - **`ThreadDefaultPermission`**: authenticated users get full access to their own threads; anonymous users get none.
 - **`MemoryDefaultPermission`**: `can_manage` members get everything; `can_manage=False` members get read + write entries; public read-only is gated by `is_public`; anonymous is always blocked.
 - **`AgentDefaultPermission`**: `can_manage` members manage the agent; other members view and use it; `is_public` grants read and use to anyone; anonymous is otherwise blocked for agent operations and passes through everything else. Chat, thread and file operations have no object to check, so they are gated on the agent passed as the `agent` keyword.
+- **`WorkflowDefaultPermission`**: any authenticated user may author a workflow and run an active one; a stored definition is managed only by its `created_by`; a run is read only by the principal it ran as, since its outputs are that person's content. Staff manage and read every one of both. It implements `get_queryset_perms`, so list endpoints are scoped in the database rather than filtered afterwards — see [Workflows](/manual/workflows/#who-may-do-what).
 
 `MemoryService.get_object_permissions_map()` and `agent_permissions()` auto-discover these `READ`/`WRITE`/`MANAGE` tiers and return an `ObjectPermissions` (`can_read` / `can_write` / `can_manage`) for the frontend.
 

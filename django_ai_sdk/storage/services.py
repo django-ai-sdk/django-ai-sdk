@@ -136,7 +136,7 @@ class ThreadService(PermissionsMixin):
         cls,
         user: UserType,
         *,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[ThreadInfo]:
         """
@@ -144,7 +144,7 @@ class ThreadService(PermissionsMixin):
 
         Args:
             user: Optional user for filtering thread ownership
-            limit: Maximum threads to return (default 100)
+            limit: Maximum threads to return; None returns all (default 100)
             offset: Number of threads to skip
 
         Returns:
@@ -165,7 +165,7 @@ class ThreadService(PermissionsMixin):
         all_threads.sort(key=lambda t: t.updated_at, reverse=True)
 
         logger.debug(f"Total threads: {len(all_threads)}")
-        return all_threads[offset : offset + limit]
+        return all_threads[offset : offset + limit if limit is not None else None]
 
     @classmethod
     async def update_thread(

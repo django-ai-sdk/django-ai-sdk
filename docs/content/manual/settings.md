@@ -66,13 +66,14 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`. See [Permissions](/manual/permissions/). |
+| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`, `workflow`. See [Permissions](/manual/permissions/). |
 
 ## Workflows
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Workflow action registry: `{"console_log": "path.to.ConsoleLogAction"}`. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Actions a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.actions.ConsoleLogAction"}`. Every action is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
 ## Streaming and Titles
 
