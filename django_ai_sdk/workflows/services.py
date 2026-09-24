@@ -135,9 +135,7 @@ class WorkflowService:
         qs = WorkflowSettings.objects.all()
         if active_only:
             qs = qs.filter(active=True)
-        return [
-            r async for r in qs[offset : offset + limit if limit is not None else None]
-        ]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     @staticmethod
     async def list_runs(
@@ -149,9 +147,7 @@ class WorkflowService:
         from django_ai_sdk.workflows.models import WorkflowRun
 
         qs = WorkflowRun.objects.filter(workflow_id=workflow_id).order_by("-created_at")
-        return [
-            r async for r in qs[offset : offset + limit if limit is not None else None]
-        ]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     @staticmethod
     async def get_run(run_id: str) -> Any:

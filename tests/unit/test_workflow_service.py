@@ -111,20 +111,25 @@ class TestWorkflowServiceCRUD:
         assert str(active.id) in ids
         assert str(inactive.id) in ids
 
-    async def test_list_workflows_limit_none_returns_all(self, mock_user):
+    async def test_list_workflows_limit_none_returns_all(self):
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
         definition = make_definition()
         baseline = len(await WorkflowService.list_workflows(limit=None))
         for i in range(150):
-            await WorkflowService.create(f"WF {i}", definition, user=mock_user)
+            await WorkflowService.create(f"WF {i}", definition, user=user)
 
         assert len(await WorkflowService.list_workflows()) == 100  # default cap
         assert len(await WorkflowService.list_workflows(limit=None)) == baseline + 150
 
-    async def test_list_runs_limit_none_returns_all(self, mock_user):
+    async def test_list_runs_limit_none_returns_all(self):
         from django_ai_sdk.workflows.models import WorkflowRun
+        from tests.factories.db import UserFactory
 
+        user = await UserFactory.acreate()
         definition = make_definition()
-        record = await WorkflowService.create("WF", definition, user=mock_user)
+        record = await WorkflowService.create("WF", definition, user=user)
         for _ in range(60):
             await WorkflowRun.objects.acreate(workflow=record)
 
