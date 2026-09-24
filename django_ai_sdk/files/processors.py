@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -13,6 +14,8 @@ from django.core.files.base import File
 from django_ai_sdk.utils import resolve_setting
 
 type FileSource = str | Path | File | IO[bytes]
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -289,7 +292,27 @@ class AnyDocFileProcessor(BaseFileProcessor):
             return False
 
         # Check if the file extension is in the allowed list
-        return any(name.lower().endswith(ext) for ext in self.EXTENSIONS)
+        if not any(name.lower().endswith(ext) for ext in self.EXTENSIONS):
+            return False
+
+        if name.lower().endswith(".pdf"):
+            data = await read_aio_bytes(file)
+            if data is None:
+                return False
+            return await asyncio.to_thread(self.is_text_pdf, data)
+
+        return True
+
+    @staticmethod
+    def is_text_pdf(data: bytes) -> bool:
+        try:
+            # Local import: pdf_inspector ships in the `files` extra
+            import pdf_inspector
+
+            return pdf_inspector.classify_pdf_bytes(data).pdf_type == "text_based"
+        except Exception:
+            logger.warning("Could not classify PDF as text-based", exc_info=True)
+            return False
 
     async def run(self, file: FileSource) -> str | None:
         data = await read_aio_bytes(file)
@@ -307,5 +330,6 @@ class AnyDocFileProcessor(BaseFileProcessor):
 
         try:
             return anydoc.to_markdown_bytes(data, fmt) if fmt else anydoc.to_markdown_bytes(data)
-        except anydoc.ConvertError:
+        except Exception:
+            # Never hard-fail the pipeline, just pass on
             return None

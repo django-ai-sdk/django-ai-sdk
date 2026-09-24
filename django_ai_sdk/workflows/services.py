@@ -193,7 +193,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
         active_only: bool = True,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[Any]:
         from django_ai_sdk.workflows.models import WorkflowSettings
@@ -203,7 +203,7 @@ class WorkflowService(PermissionsMixin):
         if active_only:
             qs = qs.filter(active=True)
         qs = cls.has_queryset_perms(user, Operation.MANAGE_WORKFLOW, queryset=qs)
-        return [r async for r in qs[offset : offset + limit]]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     @classmethod
     async def list_runs(
@@ -211,7 +211,7 @@ class WorkflowService(PermissionsMixin):
         workflow_id: str,
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
         offset: int = 0,
     ) -> list[Any]:
         from django_ai_sdk.workflows.models import WorkflowRun
@@ -221,7 +221,7 @@ class WorkflowService(PermissionsMixin):
         # whose runs are all someone else's.
         qs = WorkflowRun.objects.filter(workflow_id=workflow_id).order_by("-created_at")
         qs = cls.has_queryset_perms(user, Operation.VIEW_WORKFLOW, queryset=qs)
-        return [r async for r in qs[offset : offset + limit]]
+        return [r async for r in qs[offset : offset + limit if limit is not None else None]]
 
     @classmethod
     async def get_run(

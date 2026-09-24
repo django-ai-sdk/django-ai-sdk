@@ -174,13 +174,15 @@ class MemoryService(PermissionsMixin):
         memory_id: str,
         *,
         user: UserType,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[MemoryUserOut]:
         """List all users of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
-        qs = memory.memory_users.all().select_related("user")[offset : offset + limit]
+        qs = memory.memory_users.all().select_related("user")[
+            offset : offset + limit if limit is not None else None
+        ]
         return [
             MemoryUserOut(
                 user_id=str(o.user_id),
@@ -308,7 +310,7 @@ class MemoryService(PermissionsMixin):
 
     @classmethod
     async def list_memories(
-        cls, *, user: UserType, limit: int = 100, offset: int = 0
+        cls, *, user: UserType, limit: int | None = 100, offset: int = 0
     ) -> list[MemoryOut]:
         """List memories visible to the requesting user."""
         qs = cls.has_queryset_perms(
@@ -318,7 +320,7 @@ class MemoryService(PermissionsMixin):
         )
 
         qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")[
-            offset : offset + limit
+            offset : offset + limit if limit is not None else None
         ]
 
         return [
@@ -483,16 +485,11 @@ class MemoryService(PermissionsMixin):
         _, ext = os.path.splitext(file_name)
         file_hash = compute_file_hash(file)
 
-        dup = (
-            await EntryDocument.objects.filter(
-                memory=memory,
-                file_hash=file_hash,
-            )
-            .exclude(
-                processing_status=EntryDocument.ProcessingStatus.FAILED,
-            )
-            .afirst()
-        )
+        dup = await EntryDocument.objects.filter(
+            memory=memory,
+            file_hash=file_hash,
+        ).afirst()
+
         if dup is not None:
             raise ConflictError("File already exists in this memory")
 
@@ -527,7 +524,7 @@ class MemoryService(PermissionsMixin):
         memory_id: str,
         *,
         user: UserType,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[DocumentOut]:
         """List all file-backed documents in a memory (all processing statuses)."""
@@ -536,7 +533,7 @@ class MemoryService(PermissionsMixin):
         entry_docs = (
             EntryDocument.objects.filter(memory_id=memory_id)
             .select_related("entry")
-            .order_by("-created_at")[offset : offset + limit]
+            .order_by("-created_at")[offset : offset + limit if limit is not None else None]
         )
         return [cls._entry_doc_to_out(ed) async for ed in entry_docs]
 
@@ -604,7 +601,7 @@ class MemoryService(PermissionsMixin):
         thread_id: str,
         *,
         user: UserType,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
@@ -612,7 +609,9 @@ class MemoryService(PermissionsMixin):
             ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
             .select_related("memory")
             .prefetch_related("memory__memory_users")
-            .annotate(document_count=Count("memory__entries"))[offset : offset + limit]
+            .annotate(document_count=Count("memory__entries"))[
+                offset : offset + limit if limit is not None else None
+            ]
         )
 
         memories = []
@@ -825,7 +824,7 @@ class MemoryService(PermissionsMixin):
         thread_id: str,
         *,
         user: UserType,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[DocumentOut]:
         """List all files uploaded to a thread."""
@@ -851,7 +850,7 @@ class MemoryService(PermissionsMixin):
         entry_docs = (
             EntryDocument.objects.filter(memory_id=thread.file_memory_id)
             .select_related("entry")
-            .order_by("-created_at")[offset : offset + limit]
+            .order_by("-created_at")[offset : offset + limit if limit is not None else None]
         )
         return [cls._entry_doc_to_out(ed) async for ed in entry_docs]
 

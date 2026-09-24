@@ -136,6 +136,8 @@ await TraceService.thread_token_usage(thread_id, user=user)
 await TraceService.message_token_usage(message_id, user=user)
 ```
 
+Both trace listings paginate with `limit`/`offset` — pass `limit=None` to return every span instead of the newest 100.
+
 Message-scoped calls resolve the owning thread themselves, so a caller holding only a message id doesn't need to know its thread. All four return pydantic schemas from `django_ai_sdk.tracing.schemas` — `TraceOut` and `TokenUsage`.
 
 For sync contexts such as DRF class-based views, import the module-level aliases instead:

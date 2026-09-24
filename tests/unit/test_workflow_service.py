@@ -111,6 +111,28 @@ class TestWorkflowServiceCRUD:
         assert str(active.id) in ids
         assert str(inactive.id) in ids
 
+    async def test_list_workflows_limit_none_returns_all(self, author):
+        definition = make_definition()
+        baseline = len(await WorkflowService.list_workflows(user=author, limit=None))
+        for i in range(150):
+            await WorkflowService.create(f"WF {i}", definition, user=author)
+
+        assert len(await WorkflowService.list_workflows(user=author)) == 100  # default cap
+        assert len(await WorkflowService.list_workflows(user=author, limit=None)) == baseline + 150
+
+    async def test_list_runs_limit_none_returns_all(self, author):
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        definition = make_definition()
+        record = await WorkflowService.create("WF", definition, user=author)
+        for _ in range(60):
+            await WorkflowRun.objects.acreate(workflow=record, user_id=author.pk)
+
+        assert len(await WorkflowService.list_runs(str(record.id), user=author)) == 50
+        assert (
+            len(await WorkflowService.list_runs(str(record.id), user=author, limit=None)) == 60
+        )
+
 
 @pytest.mark.django_db
 @pytest.mark.asyncio

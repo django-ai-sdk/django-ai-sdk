@@ -21,6 +21,8 @@ await ThreadService.delete_thread(thread_id, user=request.user)
 await ThreadService.delete_all_threads(user=request.user)
 ```
 
+`threads()` merges every configured storage adapter, sorts newest first, then paginates with `limit`/`offset`. Pass `limit=None` to return every thread (`offset` still applies).
+
 `create_thread()` auto-populates `model`, `agent_name`, `agent_class`, and `created_via` in the thread metadata (caller-provided values take precedence) and auto-generates thread titles when `agent.title_generation` is enabled.
 
 ## Message Operations

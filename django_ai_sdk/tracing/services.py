@@ -30,7 +30,7 @@ class TraceService:
         user: UserType,
         message_id: str | uuid.UUID | None = None,
         operation_name: str | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[TraceOut]:
         """
@@ -41,7 +41,7 @@ class TraceService:
             user: User for permission checking
             message_id: Narrow to a single message's run
             operation_name: Narrow to one Haystack operation
-            limit: Maximum spans to return (default 100)
+            limit: Maximum spans to return; None returns all (default 100)
             offset: Number of spans to skip
 
         Returns:
@@ -64,7 +64,7 @@ class TraceService:
         *,
         user: UserType,
         operation_name: str | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[TraceOut]:
         """
@@ -77,7 +77,7 @@ class TraceService:
             message_id: Message whose spans to return
             user: User for permission checking
             operation_name: Narrow to one Haystack operation
-            limit: Maximum spans to return (default 100)
+            limit: Maximum spans to return; None returns all (default 100)
             offset: Number of spans to skip
 
         Returns:
@@ -177,7 +177,7 @@ class TraceService:
         cls,
         qs: TraceQuerySet,
         operation_name: str | None,
-        limit: int,
+        limit: int | None,
         offset: int,
     ) -> list[TraceOut]:
         """Apply the shared operation filter, ordering and slice."""
@@ -185,7 +185,9 @@ class TraceService:
             qs = qs.filter(operation_name=operation_name)
         return [
             TraceOut.model_validate(row)
-            async for row in qs.order_by("-started_at")[offset : offset + limit]
+            async for row in qs.order_by("-started_at")[
+                offset : offset + limit if limit is not None else None
+            ]
         ]
 
 
