@@ -434,6 +434,13 @@ class IntegrationDefaultPermission(BasePermission):
         return user is not None and bool(user.is_authenticated)
 
 
+def user_pk(user: UserType) -> Any:
+    """The user's primary key, or None for anonymous. Safe as a query value."""
+    if user is None or not user.is_authenticated:
+        return None
+    return user.pk
+
+
 DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.AGENT: ["django_ai_sdk.permissions.AgentDefaultPermission"],
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],

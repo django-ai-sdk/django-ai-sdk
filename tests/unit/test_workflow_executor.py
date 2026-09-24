@@ -1,32 +1,21 @@
-"""
-Unit tests for WorkflowExecutor — step sequencing, context injection, actions.
-"""
+"""WorkflowExecutor: sequencing, declared inputs, actions, and the queued entry point."""
 
-import json
-from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from loguru import logger
+from django.core.exceptions import ImproperlyConfigured
+from django.test import override_settings
 
+from django_ai_sdk.workflows import StepFailed
 from django_ai_sdk.workflows.executor import WorkflowExecutor
-
-
-@contextmanager
-def capture_logs(level="WARNING"):
-    """Capture loguru log messages at or above the given level."""
-    records: list[str] = []
-    sink_id = logger.add(lambda msg: records.append(msg), level=level, format="{message}")
-    try:
-        yield records
-    finally:
-        logger.remove(sink_id)
 from django_ai_sdk.workflows.schemas import (
-    StepField,
-    WorkflowAction,
+    ActionDefinition,
+    FieldDefinition,
+    StepDefinition,
     WorkflowDefinition,
-    WorkflowStep,
 )
+
+AGENT_GET = "django_ai_sdk.agents.services.AgentService.get"
 
 
 def make_agent(run_return="agent result"):
@@ -35,8 +24,8 @@ def make_agent(run_return="agent result"):
     return a
 
 
-def make_workflow(*steps, actions=None):
-    return WorkflowDefinition(steps=list(steps), actions=actions or [])
+def make_workflow(*steps, **kwargs):
+    return WorkflowDefinition(steps=list(steps), **kwargs)
 
 
 @pytest.fixture
@@ -44,41 +33,31 @@ def executor():
     return WorkflowExecutor()
 
 
-# ============================================================================
-# Step execution
-# ============================================================================
-
-
 @pytest.mark.asyncio
 @pytest.mark.django_db
 class TestWorkflowExecutorSteps:
-    async def test_single_step_returns_output(self, executor):
+    async def test_single_step_returns_output_keyed_by_step_name(self, executor):
         agent = make_agent("hello")
-        step = WorkflowStep(agent_id="a1", output_key="result")
-        workflow = make_workflow(step)
+        workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
 
-        with patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)):
-            outputs, _ = await executor.run(workflow, [])
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            outputs, _ = await executor.run(workflow)
 
         assert outputs == {"result": "hello"}
 
     async def test_two_steps_independent(self, executor):
         a1, a2 = make_agent("first"), make_agent("second")
         workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="step1"),
-            WorkflowStep(agent_id="a2", output_key="step2"),
+            StepDefinition(name="step1", agent_id="a1"),
+            StepDefinition(name="step2", agent_id="a2"),
         )
 
-        with patch(
-            "django_ai_sdk.workflows.executor.AgentService.get",
-            AsyncMock(side_effect=[a1, a2]),
-        ):
-            outputs, _ = await executor.run(workflow, [])
+        with patch(AGENT_GET, AsyncMock(side_effect=[a1, a2])):
+            outputs, _ = await executor.run(workflow)
 
-        assert outputs["step1"] == "first"
-        assert outputs["step2"] == "second"
+        assert outputs == {"step1": "first", "step2": "second"}
 
-    async def test_requires_injects_prior_output_as_user_message(self, executor):
+    async def test_a_required_step_reaches_the_agent_as_a_message(self, executor):
         a1 = make_agent("prior result")
         a2 = make_agent("final")
         captured = []
@@ -90,229 +69,90 @@ class TestWorkflowExecutorSteps:
         a2.run = capture_run
 
         workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="step1"),
-            WorkflowStep(agent_id="a2", output_key="step2", requires=["step1"]),
+            StepDefinition(name="step1", agent_id="a1"),
+            StepDefinition(name="step2", agent_id="a2", requires=["step1"]),
         )
 
-        with patch(
-            "django_ai_sdk.workflows.executor.AgentService.get",
-            AsyncMock(side_effect=[a1, a2]),
-        ):
-            await executor.run(workflow, [])
+        with patch(AGENT_GET, AsyncMock(side_effect=[a1, a2])):
+            await executor.run(workflow)
 
-        injected = captured[0]
-        assert any(
-            m.role == "user" and "prior result" in m.content
-            for m in injected
-        )
+        assert any(m.role == "user" and "prior result" in m.content for m in captured[0])
 
-    async def test_required_name_not_found_warns_and_uses_original_messages(self, executor):
+    async def test_a_required_name_with_no_source_is_refused_before_any_step_runs(self, executor):
+        """A typo reaches the author, rather than the agent as a silent gap."""
         agent = make_agent("ok")
-        workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="result", requires=["missing_key"]),
-        )
+        workflow = make_workflow(StepDefinition(name="result", agent_id="a1", requires=["missing"]))
 
-        with capture_logs() as records:
-            with patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)):
-                outputs, _ = await executor.run(workflow, [])
-
-        assert outputs["result"] == "ok"
-        assert any("missing_key" in r for r in records)
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            pytest.raises(ImproperlyConfigured, match="missing"),
+        ):
+            await executor.run(workflow)
 
     async def test_system_prompt_override_passed(self, executor):
         agent = make_agent()
         workflow = make_workflow(
-            WorkflowStep(
-                agent_id="a1",
-                output_key="result",
-                system_prompt_override="You are a pirate.",
-            )
+            StepDefinition(name="result", agent_id="a1", system_prompt_override="You are a pirate.")
         )
 
-        with patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)):
-            await executor.run(workflow, [])
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            await executor.run(workflow)
 
         _, kwargs = agent.run.call_args
         assert kwargs.get("system_prompt") == "You are a pirate."
 
-    async def test_empty_steps_returns_empty_outputs(self, executor):
-        workflow = make_workflow()
-        outputs, _ = await executor.run(workflow, [])
+    async def test_a_definition_with_no_steps_is_refused(self, executor):
+        """One rule for all three doors: register, create, and execute all refuse it."""
+        with pytest.raises(ImproperlyConfigured, match="no steps to run"):
+            await executor.run(make_workflow())
+
+    async def test_a_continue_failure_leaves_the_step_out_of_the_outputs(self, executor):
+        """No synthetic error key: a failed step simply produced nothing."""
+        from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
+
+        class BoomStep(Step):
+            async def run(self, ctx: WorkflowContext) -> StepOutcome:
+                return StepOutcome(status="failed", detail="provider 503")
+
+        import tests.unit.test_workflow_executor as mod
+
+        mod.BoomStepForFailure = BoomStep
+
+        workflow = make_workflow(
+            StepDefinition(type="boom", name="extract", on_error="continue"),
+            StepDefinition(type="boom", name="second", on_error="continue"),
+        )
+
+        with override_settings(
+            AI_SDK_WORKFLOW_STEPS={"boom": "tests.unit.test_workflow_executor.BoomStepForFailure"}
+        ):
+            outputs, run = await executor.run(workflow)
+
         assert outputs == {}
+        assert run.outputs == {}
 
 
-# ============================================================================
-# Structured output (output_fields)
-# ============================================================================
+def test_published_carries_only_what_completed():
+    from django_ai_sdk.workflows.executor import _published
+    from django_ai_sdk.workflows.steps import StepOutcome
 
+    outcomes = {
+        "ocr": StepOutcome(output="the text"),
+        "extract": StepOutcome(status="failed", detail="provider 503"),
+        "match": StepOutcome(status="skipped", detail="extract produced nothing"),
+    }
 
-@pytest.mark.asyncio
-@pytest.mark.django_db
-class TestWorkflowExecutorStructuredOutput:
-    async def test_output_fields_calls_with_response_format(self, executor):
-        from pydantic import BaseModel
-
-        dynamic_result = MagicMock(spec=BaseModel)
-        dynamic_result.model_dump.return_value = {"label": "sports"}
-
-        agent = MagicMock()
-        agent.run = AsyncMock(return_value=dynamic_result)
-
-        workflow = make_workflow(
-            WorkflowStep(
-                agent_id="a1",
-                output_key="classification",
-                output_fields={"label": StepField(type="str", description="category")},
-            )
-        )
-
-        with patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)):
-            outputs, _ = await executor.run(workflow, [])
-
-        assert outputs["classification"] == {"label": "sports"}
-        _, kwargs = agent.run.call_args
-        assert kwargs.get("response_format") is not None
-
-    async def test_non_basemodel_result_stored_as_empty_dict(self, executor):
-        agent = make_agent("plain string, not a model")
-        workflow = make_workflow(
-            WorkflowStep(
-                agent_id="a1",
-                output_key="result",
-                output_fields={"x": StepField(type="int")},
-            )
-        )
-
-        with patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)):
-            outputs, _ = await executor.run(workflow, [])
-
-        assert outputs["result"] == {}
-
-
-# ============================================================================
-# Actions
-# ============================================================================
+    assert _published(outcomes) == {"ocr": "the text"}
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-class TestWorkflowExecutorActions:
-    async def test_action_called_with_full_outputs_when_no_input_key(self, executor):
-        agent = make_agent("data")
-        received = []
+class TestDeclaredInputs:
+    """Input and output are the same mechanism, so a run's inputs are checked once."""
 
-        class CaptureAction:
-            async def execute(self, payload):
-                received.append(payload)
+    async def test_declared_inputs_are_coerced_before_the_first_step(self, executor):
+        from django_ai_sdk.common import ChatMessage
 
-        workflow = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="a1", output_key="result")],
-            actions=[WorkflowAction(type="capture")],
-        )
-
-        with (
-            patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)),
-            patch(
-                "django_ai_sdk.workflows.executor.get_action_registry",
-                return_value={"capture": CaptureAction},
-            ),
-        ):
-            await executor.run(workflow, [])
-
-        assert received == [{"result": "data"}]
-
-    async def test_action_called_with_specific_input_key(self, executor):
-        agent = make_agent("step_data")
-        received = []
-
-        class CaptureAction:
-            async def execute(self, payload):
-                received.append(payload)
-
-        workflow = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="a1", output_key="summary")],
-            actions=[WorkflowAction(type="capture", input_key="summary")],
-        )
-
-        with (
-            patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)),
-            patch(
-                "django_ai_sdk.workflows.executor.get_action_registry",
-                return_value={"capture": CaptureAction},
-            ),
-        ):
-            await executor.run(workflow, [])
-
-        assert received == ["step_data"]
-
-    async def test_unknown_action_type_warns_and_skips(self, executor):
-        agent = make_agent("data")
-        workflow = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="a1", output_key="result")],
-            actions=[WorkflowAction(type="nonexistent")],
-        )
-
-        with capture_logs() as records:
-            with (
-                patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)),
-                patch("django_ai_sdk.workflows.executor.get_action_registry", return_value={}),
-            ):
-                outputs, _ = await executor.run(workflow, [])
-
-        assert outputs["result"] == "data"
-        assert any("nonexistent" in r for r in records)
-
-    async def test_action_input_key_missing_warns_and_skips(self, executor):
-        agent = make_agent("data")
-        executed = []
-
-        class CaptureAction:
-            async def execute(self, payload):
-                executed.append(payload)
-
-        workflow = WorkflowDefinition(
-            steps=[WorkflowStep(agent_id="a1", output_key="result")],
-            actions=[WorkflowAction(type="capture", input_key="does_not_exist")],
-        )
-
-        with capture_logs() as records:
-            with (
-                patch("django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)),
-                patch(
-                    "django_ai_sdk.workflows.executor.get_action_registry",
-                    return_value={"capture": CaptureAction},
-                ),
-            ):
-                await executor.run(workflow, [])
-
-        assert executed == []
-        assert any("does_not_exist" in r for r in records)
-
-
-# ============================================================================
-# Run state
-# ============================================================================
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-class TestRunState:
-    async def test_inputs_seed_run_state_and_are_persisted(self, executor):
-        agent = make_agent("ok")
-        workflow = make_workflow(WorkflowStep(agent_id="a1", output_key="result"))
-
-        with patch(
-            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
-        ):
-            outputs, run = await executor.run(workflow, inputs={"document": "doc-1"})
-
-        assert outputs["document"] == "doc-1"
-        await run.arefresh_from_db()
-        assert run.inputs["document"] == "doc-1"
-        # Chat-shaped and data-shaped runs share one bag.
-        assert run.inputs["messages"] == []
-
-    async def test_a_step_may_require_a_run_input(self, executor):
         captured = []
 
         async def capture_run(messages, **kwargs):
@@ -321,43 +161,410 @@ class TestRunState:
 
         agent = make_agent()
         agent.run = capture_run
-
         workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="result", requires=["document"])
+            StepDefinition(name="reply", agent_id="a1", history=["history"]),
+            input_fields={"history": FieldDefinition(type="list")},
         )
 
-        with patch(
-            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            await executor.run(workflow, inputs={"history": [{"role": "user", "content": "ahoy"}]})
+
+        assert isinstance(captured[0][0], ChatMessage)
+        assert captured[0][0].content == "ahoy"
+
+    async def test_a_missing_declared_input_is_refused(self, executor):
+        workflow = make_workflow(
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"document": FieldDefinition()},
+        )
+
+        with pytest.raises(ValueError, match="does not declare, or is missing"):
+            await executor.run(workflow, inputs={})
+
+    async def test_an_undeclared_extra_is_dropped(self, executor):
+        """The schema is the contract, so a stray key never reaches a step."""
+        seen = {}
+        from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
+
+        class Peek(Step):
+            async def run(self, ctx: WorkflowContext) -> StepOutcome:
+                seen.update(ctx.inputs)
+                return StepOutcome(output="ok")
+
+        import tests.unit.test_workflow_executor as mod
+
+        mod.PeekStep = Peek
+
+        workflow = make_workflow(
+            StepDefinition(type="peek", name="peek"),
+            input_fields={"document": FieldDefinition()},
+        )
+
+        with override_settings(
+            AI_SDK_WORKFLOW_STEPS={"peek": "tests.unit.test_workflow_executor.PeekStep"}
         ):
-            await executor.run(workflow, inputs={"document": "doc-1"})
+            await executor.run(workflow, inputs={"document": "doc-1", "stray": "x"})
 
-        assert any("doc-1" in m.content for m in captured[0] if m.role == "user")
+        assert seen == {"document": "doc-1"}
 
-    async def test_resuming_reuses_the_rows_stored_inputs(self, executor):
-        from django_ai_sdk.workflows.models import WorkflowRun
+    async def test_a_definition_declaring_nothing_takes_what_it_is_given(self, executor):
+        """A code-authored pipeline is not obliged to describe itself in JSON."""
+        agent = make_agent("ok")
+        workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            _outputs, run = await executor.run(workflow, inputs={"anything": 1})
+
+        await run.arefresh_from_db()
+        assert run.inputs == {"anything": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestStructuredOutput:
+    async def test_output_fields_calls_with_response_format(self, executor):
+        from pydantic import BaseModel
+
+        class Classification(BaseModel):
+            label: str
+
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=Classification(label="sports"))
+
+        workflow = make_workflow(
+            StepDefinition(
+                name="classification",
+                agent_id="a1",
+                output_fields={"label": FieldDefinition(type="str", description="category")},
+            )
+        )
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            outputs, _ = await executor.run(workflow)
+
+        assert outputs["classification"] == {"label": "sports"}
+        _, kwargs = agent.run.call_args
+        assert kwargs.get("response_format") is not None
+
+    async def test_a_declared_schema_that_does_not_come_back_fails_the_step(self, executor):
+        agent = make_agent("plain string, not a model")
+        workflow = make_workflow(
+            StepDefinition(
+                name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")}
+            )
+        )
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            pytest.raises(StepFailed),
+        ):
+            await executor.run(workflow)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestActions:
+    """A definition's actions are built and attached; the recorder is always there."""
+
+    async def test_a_workflow_action_fires_for_every_step(self, executor):
+        from django_ai_sdk.workflows import WorkflowAction
+
+        events: list[tuple[str, str]] = []
+
+        class Capture(WorkflowAction):
+            async def on_run_start(self, ctx):
+                events.append(("run_start", ""))
+
+            async def on_step_end(self, ctx, step, outcome):
+                events.append(("step_end", step.name))
+
+            async def on_run_end(self, ctx, error):
+                events.append(("run_end", ""))
+
+        import tests.unit.test_workflow_executor as mod
+
+        mod.CaptureAction = Capture
+        agent = make_agent("data")
+        workflow = make_workflow(
+            StepDefinition(name="first", agent_id="a1"),
+            StepDefinition(name="second", agent_id="a1"),
+            actions=[ActionDefinition(type="capture")],
+        )
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            override_settings(
+                AI_SDK_WORKFLOW_ACTIONS={"capture": "tests.unit.test_workflow_executor.CaptureAction"}
+            ),
+        ):
+            await executor.run(workflow)
+
+        assert events == [
+            ("run_start", ""),
+            ("step_end", "first"),
+            ("step_end", "second"),
+            ("run_end", ""),
+        ]
+
+    async def test_a_step_action_fires_for_that_step_alone(self, executor):
+        """The difference the two attachment points buy."""
+        from django_ai_sdk.workflows import WorkflowAction
+
+        events: list[str] = []
+
+        class Capture(WorkflowAction):
+            async def on_step_end(self, ctx, step, outcome):
+                events.append(step.name)
+
+        import tests.unit.test_workflow_executor as mod
+
+        mod.StepOnlyAction = Capture
+        agent = make_agent("data")
+        workflow = make_workflow(
+            StepDefinition(name="first", agent_id="a1", actions=[ActionDefinition(type="capture")]),
+            StepDefinition(name="second", agent_id="a1"),
+        )
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            override_settings(
+                AI_SDK_WORKFLOW_ACTIONS={"capture": "tests.unit.test_workflow_executor.StepOnlyAction"}
+            ),
+        ):
+            await executor.run(workflow)
+
+        assert events == ["first"]
+
+    async def test_an_unregistered_action_stops_the_run_rather_than_being_skipped(self, executor):
+        """The registry is the gate; a name outside it is a configuration error."""
+        agent = make_agent("data")
+        workflow = make_workflow(
+            StepDefinition(name="result", agent_id="a1"),
+            actions=[ActionDefinition(type="carrier_pigeon")],
+        )
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            override_settings(AI_SDK_WORKFLOW_ACTIONS={}),
+            pytest.raises(ImproperlyConfigured, match="carrier_pigeon"),
+        ):
+            await executor.run(workflow)
+
+    async def test_an_action_reads_the_run_and_the_step_it_was_configured_with(self, executor):
+        from tests.factories.db import UserFactory
+
+        from django_ai_sdk.workflows import WorkflowAction
+
+        seen: list[dict] = []
+
+        class Capture(WorkflowAction):
+            async def on_run_end(self, ctx, error):
+                seen.append(
+                    {
+                        "payload": ctx.step(self.config["step"]),
+                        "user": ctx.principal,
+                        "workflow": ctx.workflow,
+                        "run_id": ctx.run_id,
+                    }
+                )
+
+        import tests.unit.test_workflow_executor as mod
+
+        mod.CaptureConfigAction = Capture
+        user = await UserFactory.acreate()
+        agent = make_agent("data")
+        workflow = make_workflow(
+            StepDefinition(name="result", agent_id="a1"),
+            name="ships-log",
+            actions=[ActionDefinition(type="capture", config={"step": "result"})],
+        )
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            override_settings(
+                AI_SDK_WORKFLOW_ACTIONS={
+                    "capture": "tests.unit.test_workflow_executor.CaptureConfigAction"
+                }
+            ),
+        ):
+            _outputs, run = await executor.run(workflow, user=user)
+
+        assert seen[0]["payload"] == "data"
+        assert seen[0]["user"] == user
+        assert seen[0]["workflow"] == "ships-log"
+        assert seen[0]["run_id"] == str(run.id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestTheQueuedEntryPoint:
+    """A recorded ending stays off the queue; an unrecorded crash reaches it.
+
+    A stopped step and a refused claim are already on the run's own rows, so the
+    task result reports only what nothing else did.
+    """
+
+    async def _run_for(self, *steps):
+        from django_ai_sdk.workflows import WorkflowRun
+
+        workflow = make_workflow(*steps)
+        return await WorkflowRun.objects.acreate(
+            workflow_definition=workflow.model_dump(), inputs={}
+        )
+
+    async def test_a_queued_run_reaches_the_workflow(self):
+        from django_ai_sdk.workflows.tasks import _execute_async
+
+        agent = make_agent("done")
+        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            await _execute_async(str(run.id))
+
+        await run.arefresh_from_db()
+        assert run.outputs == {"result": "done"}
+
+    async def test_a_step_failure_does_not_escape_the_task(self):
+        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.tasks import _execute_async
+
+        # A declared schema the agent does not return fails the step, and the
+        # step's on_error stops the run.
+        agent = make_agent("plain string, not a model")
+        run = await self._run_for(
+            StepDefinition(
+                name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")}
+            )
+        )
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            await _execute_async(str(run.id))
+
+        await run.arefresh_from_db()
+        assert run.status == WorkflowRun.Status.FAILED
+        assert run.error
+
+    async def test_a_claim_refusal_does_not_escape_the_task(self):
+        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.steps import StepAlreadyRunning
+        from django_ai_sdk.workflows.tasks import _execute_async
+
+        agent = make_agent("done")
+        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            patch(
+                "django_ai_sdk.workflows.actions.RunRecorder.on_step_start",
+                AsyncMock(side_effect=StepAlreadyRunning("result")),
+            ),
+        ):
+            await _execute_async(str(run.id))
+
+        # The delivery that holds the run is still working on it: this one must not
+        # stamp failure over its progress.
+        await run.arefresh_from_db()
+        assert run.status == WorkflowRun.Status.RUNNING
+        assert run.error == ""
+
+    async def test_a_crash_still_reaches_the_queue(self):
+        from django_ai_sdk.workflows.tasks import _execute_async
+
+        agent = MagicMock()
+        agent.run = AsyncMock(side_effect=RuntimeError("boom"))
+        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
+
+        with (
+            patch(AGENT_GET, AsyncMock(return_value=agent)),
+            pytest.raises(RuntimeError),
+        ):
+            await _execute_async(str(run.id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+class TestRunState:
+    """A run's inputs seed its state, persist on the row, and survive a resume."""
+
+    async def test_inputs_are_persisted_on_the_row(self, executor):
+        agent = make_agent("ok")
+        workflow = make_workflow(
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"document": FieldDefinition()},
+        )
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            _outputs, run = await executor.run(workflow, inputs={"document": "doc-1"})
+
+        await run.arefresh_from_db()
+        assert run.inputs == {"document": "doc-1"}
+
+    async def test_messages_are_persisted_json_safe(self, executor):
+        from django_ai_sdk.common import ChatMessage
 
         agent = make_agent("ok")
         workflow = make_workflow(
-            WorkflowStep(agent_id="a1", output_key="result", requires=["document"])
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"history": FieldDefinition(type="list")},
+        )
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
+            _outputs, run = await executor.run(
+                workflow, inputs={"history": [ChatMessage(role="user", content="ahoy")]}
+            )
+
+        await run.arefresh_from_db()
+        assert run.inputs["history"][0]["content"] == "ahoy"
+
+    async def test_resuming_reuses_the_rows_stored_inputs(self, executor):
+        from django_ai_sdk.workflows import WorkflowRun
+
+        agent = make_agent("ok")
+        workflow = make_workflow(
+            StepDefinition(name="result", agent_id="a1"),
+            input_fields={"document": FieldDefinition()},
         )
         run = await WorkflowRun.objects.acreate(
             workflow_definition=workflow.model_dump(),
             status=WorkflowRun.Status.PENDING,
-            inputs={"document": "doc-1", "messages": []},
+            inputs={"document": "doc-1"},
         )
 
-        with patch(
-            "django_ai_sdk.workflows.executor.AgentService.get", AsyncMock(return_value=agent)
-        ):
+        # The caller passes no inputs; the row supplies them.
+        with patch(AGENT_GET, AsyncMock(return_value=agent)):
             outputs, _ = await executor.run(workflow, workflow_run=run)
 
-        # The caller passed no inputs; the row supplied them.
-        assert outputs["document"] == "doc-1"
+        assert outputs["result"] == "ok"
+
+    async def test_a_completed_step_is_not_re_run_on_resume(self, executor):
+        from django_ai_sdk.workflows import WorkflowRun, WorkflowRunStep
+
+        agent = make_agent("ok")
+        workflow = make_workflow(
+            StepDefinition(name="first", agent_id="a1"),
+            StepDefinition(name="second", agent_id="a1", requires=["first"]),
+        )
+        run = await WorkflowRun.objects.acreate(
+            workflow_definition=workflow.model_dump(), status=WorkflowRun.Status.FAILED
+        )
+        await WorkflowRunStep.objects.acreate(
+            run=run,
+            sequence=0,
+            step_name="first",
+            status=WorkflowRunStep.Status.COMPLETED,
+            output="stored",
+        )
+
+        with patch(AGENT_GET, AsyncMock(return_value=agent)) as get:
+            outputs, _ = await executor.run(workflow, workflow_run=run)
+
+        assert outputs == {"first": "stored", "second": "ok"}
+        assert get.await_count == 1
 
     async def test_a_completed_run_short_circuits(self, executor):
-        from django_ai_sdk.workflows.models import WorkflowRun
+        from django_ai_sdk.workflows import WorkflowRun
 
-        workflow = make_workflow(WorkflowStep(agent_id="a1", output_key="result"))
+        workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
         run = await WorkflowRun.objects.acreate(
             workflow_definition=workflow.model_dump(),
             status=WorkflowRun.Status.COMPLETED,

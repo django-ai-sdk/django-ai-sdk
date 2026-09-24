@@ -2,40 +2,41 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.permissions import user_pk
+from django_ai_sdk.utils import serialize
 from django_ai_sdk.workflows.actions import get_action_registry
-from django_ai_sdk.workflows.executor import WorkflowExecutor
-from django_ai_sdk.workflows.inputs import normalize_workflow_inputs
+from django_ai_sdk.workflows.executor import WorkflowExecutor, validate_inputs
+from django_ai_sdk.workflows.registry import validate_definition
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
-
-
-def _user_id(user: AbstractBaseUser | AnonymousUser | None) -> Any:
-    return user.pk if user and not getattr(user, "is_anonymous", True) else None
 
 
 class WorkflowService:
     @staticmethod
     async def run(
         workflow: WorkflowDefinition,
-        messages: list[ChatMessage] | None = None,
         *,
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
         from django_ai_sdk.workflows.models import WorkflowRun
 
+        validate_definition(workflow)
+        # Checked here rather than in the worker: a caller who supplied the wrong
+        # inputs should hear about it on the call that queued the run.
+        validate_inputs(workflow, inputs or {})
+
         run = await WorkflowRun.objects.acreate(
             workflow=None,
             workflow_definition=workflow.model_dump(),
             status=WorkflowRun.Status.PENDING,
-            inputs=normalize_workflow_inputs(inputs=inputs, messages=messages),
-            user_id=_user_id(user),
+            inputs=serialize(inputs or {}),
+            user_id=user_pk(user),
         )
         await WorkflowExecutor.enqueue(run)
         return run
@@ -43,7 +44,6 @@ class WorkflowService:
     @staticmethod
     async def run_by_id(
         workflow_id: str,
-        messages: list[ChatMessage] | None = None,
         *,
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
@@ -53,28 +53,29 @@ class WorkflowService:
 
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
         workflow = record.to_workflow_definition()
+        validate_definition(workflow)
 
         if run_id:
             run = await WorkflowRun.objects.aget(id=run_id, workflow_id=workflow_id)
         else:
+            validate_inputs(workflow, inputs or {})
             run = await WorkflowRun.objects.acreate(
                 workflow=record,
                 workflow_definition=workflow.model_dump(),
                 status=WorkflowRun.Status.PENDING,
-                inputs=normalize_workflow_inputs(inputs=inputs, messages=messages),
-                user_id=_user_id(user),
+                inputs=serialize(inputs or {}),
+                user_id=user_pk(user),
             )
         await WorkflowExecutor.enqueue(run)
         return run
 
     @staticmethod
     def list_actions() -> list[dict[str, str]]:
+        """The actions a definition may name, for a UI that composes one."""
         return [
             {"key": key, "description": getattr(cls, "description", "")}
             for key, cls in get_action_registry().items()
         ]
-
-    # --- CRUD ---
 
     @staticmethod
     async def create(
@@ -88,7 +89,7 @@ class WorkflowService:
         record = WorkflowSettings(
             name=name,
             definition=workflow.model_dump(),
-            created_by_id=_user_id(user),
+            created_by_id=user_pk(user),
         )
         await record.asave()
         return record
@@ -135,8 +136,6 @@ class WorkflowService:
         if active_only:
             qs = qs.filter(active=True)
         return [r async for r in qs[offset : offset + limit if limit is not None else None]]
-
-    # --- Run history ---
 
     @staticmethod
     async def list_runs(
