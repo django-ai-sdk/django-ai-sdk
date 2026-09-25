@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import uuid
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -377,16 +378,16 @@ class VercelProtocolHandler(BaseProtocolHandler):
     ) -> AsyncGenerator[bytes, None]:
         """Generate SSE-formatted streaming response from normalized events."""
 
-        # Reset state for new stream
-        self.text_started = False
-        self.text_id = None
-        self.message_id = None
-        # Reset reasoning state
-        self.reasoning_started = False
-        self.reasoning_id = None
+        # The agent shares one handler across requests: each stream gets its own state.
+        state = copy.copy(self)
+        state.text_started = False
+        state.text_id = None
+        state.message_id = None
+        state.reasoning_started = False
+        state.reasoning_id = None
 
         events = adapter.stream(messages)
-        protocol_stream = self.handle_stream(events)
+        protocol_stream = state.handle_stream(events)
 
         try:
             async for chunk in protocol_stream:
@@ -399,14 +400,14 @@ class VercelProtocolHandler(BaseProtocolHandler):
             await protocol_stream.aclose()
             # Ensure any open blocks are closed if stream was interrupted
             cleanup_chunks = []
-            reasoning_id = self.reasoning_id
-            text_id = self.text_id
-            if self.reasoning_started and reasoning_id:
+            reasoning_id = state.reasoning_id
+            text_id = state.text_id
+            if state.reasoning_started and reasoning_id:
                 cleanup_chunks.append(ReasoningEndPart(id=reasoning_id))
-                self.reasoning_started = False
-            if self.text_started and text_id:
+                state.reasoning_started = False
+            if state.text_started and text_id:
                 cleanup_chunks.append(TextEndPart(id=text_id))
-                self.text_started = False
+                state.text_started = False
 
             # Yield cleanup chunks
             for chunk in cleanup_chunks:
