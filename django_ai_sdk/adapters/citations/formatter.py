@@ -59,11 +59,17 @@ class DefaultCitationFormatter:
         '- Multiple sources: use separate tags, e.g. <source id="1" /> <source id="2" />. '
         "Never combine ids in one tag.\n"
         "- Do not add a 'Sources:' or 'References:' section - citations are inline only.\n"
-        "- Do not explain or reason about citations, only add them."
+        "- Do not explain or reason about citations, only add them.\n"
+        "- Only state what the sources below say. If none of them are about what the user "
+        "asked (e.g. a different file than the one named), say you could not find it; never "
+        "fill in from general knowledge."
     )
 
     # Repeated after the sources
-    CITATION_REMINDER = 'Reminder: cite inline with <source id="N" />, one tag per source id.'
+    CITATION_REMINDER = (
+        'Reminder: cite inline with <source id="N" />, one tag per source id. '
+        "If no source is about what the user asked, say you could not find it."
+    )
 
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
         if not documents:

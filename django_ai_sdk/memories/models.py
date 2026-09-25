@@ -171,6 +171,9 @@ class Entry(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Annotated
+    file_size: int
+
     objects = EntryManager()
 
     class Meta:
