@@ -11,7 +11,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("django_ai_sdk", "0002_memory_metadata_storage"),
-        ("django_ai_sdk_workflows", "0001_initial"),
     ]
 
     operations = [
