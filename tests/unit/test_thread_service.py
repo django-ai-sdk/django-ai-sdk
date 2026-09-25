@@ -365,3 +365,43 @@ class TestGetThreadFileMeta:
                 result = await aget_thread_file_meta("thread-1", user=None)
         assert result["file_count"] == 5
         assert result["file_memory_id"] == file_memory_id
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestAgentHistoryChecksTheThreadOwner:
+    """An agent anyone may use still only shows a thread to its owner."""
+
+    async def _history(self, thread_id, user):
+        from django_ai_sdk.agents.base import Agent
+        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+        from django_ai_sdk.storage.db import DbStorageAdapter
+        from tests.mocks.agent import create_agent_mock
+
+        agent = create_agent_mock()  # AllowAll: the agent chain alone lets anyone in.
+        agent.get_storage_adapter = AsyncMock(return_value=DbStorageAdapter(thread_id))
+        agent.protocol_handler = VercelProtocolHandler()
+        return await Agent.history(agent, thread_id, user=user)
+
+    async def test_a_stranger_is_refused(self):
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.permissions import PermissionDenied
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        stranger = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=owner)
+
+        with pytest.raises(PermissionDenied):
+            await self._history(str(thread.id), stranger)
+
+    async def test_the_owner_reads_it(self):
+        from django_ai_sdk.conversation.models import Thread
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=owner)
+
+        detail = await self._history(str(thread.id), owner)
+
+        assert str(detail.thread.id) == str(thread.id)

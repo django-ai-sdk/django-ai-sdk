@@ -918,6 +918,8 @@ class Agent(ABC, AgentInfoMixin):
         if not thread_info:
             raise ValueError(f"Thread not found: {thread_id}")
 
+        # The agent chain gates the agent, not whose thread this is.
+        await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread_info)
         await check_object_permissions(
             user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
         )
