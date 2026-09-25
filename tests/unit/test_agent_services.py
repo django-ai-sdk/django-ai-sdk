@@ -41,3 +41,27 @@ class TestUpdateRuntimeAgentFields:
 
         await config.arefresh_from_db()
         assert (config.name, config.is_public) == ("Support", False)
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_a_db_agent_runs_under_the_same_limits_as_a_code_agent(settings):
+    from unittest.mock import AsyncMock, patch
+
+    from django_ai_sdk.agents import runtime
+    from django_ai_sdk.agents.models import AgentSettings
+    from django_ai_sdk.agents.tool_agent import ToolCallBudgetHook
+
+    settings.OPENAI_API_KEY = "sk-test"
+    config = await AgentSettings.objects.acreate(name="DB", slug=str(uuid4()), agent="test")
+    agent = runtime.RuntimeAgent(config)
+
+    with (
+        patch.object(runtime.RuntimeAgent, "get_tools", AsyncMock(return_value=[])),
+        patch.object(runtime, "ToolAgent", wraps=runtime.ToolAgent) as built,
+    ):
+        await agent.get_pipeline_adapter(thread_id=None)
+
+    tool_config = built.call_args.kwargs["config"]
+    assert tool_config.max_agent_steps == agent.max_agent_steps
+    assert any(isinstance(h, ToolCallBudgetHook) for h in tool_config.hooks["before_tool"])
