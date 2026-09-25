@@ -380,3 +380,28 @@ class TestGetThreadFileMeta:
                 result = await aget_thread_file_meta("thread-1", user=None)
         assert result["file_count"] == 5
         assert result["file_memory_id"] == file_memory_id
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestRatingTwiceDoesNotRaise:
+    """A double-click rates twice at once: both requests may miss the existing row."""
+
+    async def test_a_rating_that_raced_the_first_one_updates_it(self):
+        from django_ai_sdk.conversation.models import Message, MessageFeedback
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=user)
+        message = await Message.objects.acreate(thread=thread, result={"role": "assistant"})
+        adapter = DbStorageAdapter(str(thread.id))
+        await adapter.rate_message(str(message.id), rating=1, user=user)
+
+        # The second request read before the first one's row existed.
+        with patch.object(
+            MessageFeedback.objects, "aget", AsyncMock(side_effect=MessageFeedback.DoesNotExist)
+        ):
+            assert await adapter.rate_message(str(message.id), rating=-1, user=user) is True
+
+        [feedback] = [f async for f in MessageFeedback.objects.filter(message=message)]
+        assert feedback.rating == -1
