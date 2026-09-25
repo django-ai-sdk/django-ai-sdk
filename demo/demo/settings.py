@@ -62,6 +62,8 @@ INSTALLED_APPS = [
     "django_ai_sdk",
     # tracing
     "django_ai_sdk.tracing",
+    # workflows
+    "django_ai_sdk.workflows",
     # mcp integration
     "django_ai_sdk.integrations.mcp",
     # default integrations
