@@ -245,6 +245,7 @@ AI_SDK_RUNTIME_AGENT_BASES = [
 AI_SDK_RUNTIME_AGENT_TOOLS = {
     "get_today": "apps.agents.tools.get_today",
     "get_memory_files": "apps.agents.tools.get_memory_files",
+    "get_memory_file": "apps.agents.tools.get_memory_file",
 }
 
 # Workflow composables. The package ships neither step types nor actions; both

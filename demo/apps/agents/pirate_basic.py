@@ -24,7 +24,7 @@ from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.storage.db import DbStorageAdapter
 
 from .extraction import PirateExtractionAgent
-from .tools import get_memory_files, get_today
+from .tools import get_memory_file, get_memory_files, get_today
 from .transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
@@ -80,7 +80,7 @@ class PirateBasicAgent(Agent):
     # Use the new RAG provider pattern for Haystack
     rag_provider = RAGProvider()
 
-    tools: list = [get_today, get_memory_files]
+    tools: list = [get_today, get_memory_files, get_memory_file]
 
     # Registry keys of installed integration apps.
     integrations: list[str] = ["linear", "weather"]
