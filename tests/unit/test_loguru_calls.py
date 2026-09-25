@@ -40,3 +40,28 @@ async def test_a_failed_agent_lookup_names_the_agent(logged):
         await AgentService.get("no-such-agent")
 
     assert any("RuntimeAgent lookup failed for no-such-agent:" in r for r in logged)
+
+
+def test_tool_call_arguments_stay_out_of_the_info_log():
+    """Arguments can carry PII or tokens: INFO names the tool, DEBUG adds the arguments."""
+    from unittest.mock import MagicMock
+
+    from haystack.dataclasses import ChatMessage, ToolCall
+
+    from django_ai_sdk.agents.tool_agent import LogToolCallsHook
+
+    records: list[tuple[str, str]] = []
+    sink = logger.add(
+        lambda m: records.append((m.record["level"].name, m.record["message"])), level="DEBUG"
+    )
+    call = ToolCall(tool_name="send_email", arguments={"to": "a@b.c", "token": "s3cret"})
+    state = MagicMock(data={"messages": [ChatMessage.from_assistant(tool_calls=[call])]})
+    try:
+        LogToolCallsHook().run(state)
+    finally:
+        logger.remove(sink)
+
+    info = [msg for level, msg in records if level == "INFO"]
+    debug = [msg for level, msg in records if level == "DEBUG"]
+    assert info == ["Tool call: send_email"]
+    assert any("s3cret" in msg for msg in debug)
