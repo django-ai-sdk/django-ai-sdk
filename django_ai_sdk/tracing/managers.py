@@ -92,6 +92,8 @@ class TraceQuerySet(models.QuerySet):
             return {}
 
         totals: dict[str, dict[str, Any]] = {}
+        owned: list[tuple[tuple[str, str], dict[str, Any]]] = []
+        parents: set[Any] = set()
         # a nested subagent is both a start point and a child.
         seen: set[Any] = set(owners)
         frontier = owners
@@ -108,6 +110,7 @@ class TraceQuerySet(models.QuerySet):
             )
             next_frontier: dict[Any, tuple[str, str]] = {}
             for child in children:
+                parents.add(child["parent_id"])
                 # a nested subagent owns its own subtree from here down.
                 owner = (
                     (str(child["agent_id"]), child["agent_name"])
@@ -118,10 +121,14 @@ class TraceQuerySet(models.QuerySet):
                     continue
                 seen.add(child["id"])
                 next_frontier[child["id"]] = owner
-                agent_id, agent_name = owner
-                entry = totals.setdefault(agent_id, {"agent_name": agent_name, **_zeroed({})})
-                _add_tokens(entry, child)
+                owned.append((owner, child))
             frontier = next_frontier
+
+        for (agent_id, agent_name), span in owned:
+            entry = totals.setdefault(agent_id, {"agent_name": agent_name, **_zeroed({})})
+            # Only LLM calls count, as in token_usage(): an agent span repeats their total.
+            if span["id"] not in parents:
+                _add_tokens(entry, span)
 
         return totals
 

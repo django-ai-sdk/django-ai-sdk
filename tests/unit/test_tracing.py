@@ -726,6 +726,31 @@ class TestSubagentQueries:
         }
 
     @pytest.mark.django_db
+    def test_the_inner_agent_running_total_is_not_counted_again(self):
+        """Haystack puts the run's token_usage total on the agent span too; only the
+        LLM calls (leaf spans) count, the same as token_usage()."""
+        root = _span("haystack.agent.run")
+        planner = _span(
+            "django_ai_sdk.subagent.run",
+            parent=root,
+            agent_id=PLANNER_ID,
+            agent_name="Research Planner",
+        )
+        inner = _span("haystack.agent.run", parent=planner, tokens=(30, 12, 42))
+        _span("haystack.agent.step.llm", parent=inner, tokens=(10, 5, 15))
+        _span("haystack.agent.step.llm", parent=inner, tokens=(20, 7, 27))
+
+        usage = Trace.objects.subagent_usage()[PLANNER_ID]
+        assert (usage["prompt_tokens"], usage["completion_tokens"], usage["total_tokens"]) == (
+            30,
+            12,
+            42,
+        )
+        assert usage["total_tokens"] == Trace.objects.filter(parent=inner).token_usage()[
+            "total_tokens"
+        ]
+
+    @pytest.mark.django_db
     def test_nested_subagent_is_not_double_counted(self):
         root = _span("haystack.agent.run")
         planner = _span(
