@@ -159,7 +159,8 @@ class DbStorageAdapter(BaseStorageAdapter):
                 # Merge metadata
                 thread.metadata.update(metadata)
 
-            await thread.asave()
+            # Only these fields: a full save would write back a stale file_memory.
+            await thread.asave(update_fields=["title", "metadata", "updated_at"])
             return True
         except (Thread.DoesNotExist, ValidationError):
             return False

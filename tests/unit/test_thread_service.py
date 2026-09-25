@@ -296,6 +296,21 @@ class TestDbStorageAdapterUpdateThreadTitle:
         await thread.arefresh_from_db()
         assert thread.title == "Short title"
 
+    async def test_a_title_update_keeps_a_file_memory_set_meanwhile(self):
+        from django_ai_sdk.memories.models import Memory
+
+        thread = await Thread.objects.acreate()
+        stale = await Thread.objects.aget(id=thread.id)  # read before the upload lands
+        memory = await Memory.objects.acreate(name="files", is_hidden=True)
+        await Thread.objects.filter(id=thread.id).aupdate(file_memory=memory)
+
+        with patch.object(Thread.objects, "aget", AsyncMock(return_value=stale)):
+            await DbStorageAdapter.update_thread(str(thread.id), title="Renamed")
+
+        await thread.arefresh_from_db()
+        assert thread.title == "Renamed"
+        assert thread.file_memory_id == memory.id
+
 
 # ============================================================================
 # Thread history & file meta
