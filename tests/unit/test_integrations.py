@@ -1140,6 +1140,24 @@ class TestOAuthTokenRefresh:
         assert result is not None
         assert result.get_access_token() == "winner-access"
 
+    async def test_a_failed_refresh_of_a_disconnected_token_reports_failure(self, monkeypatch):
+        """The row can be deleted (disconnect) while our refresh is in flight."""
+        from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        token_obj = await self._make_token(user)
+        await MCPOAuthToken.objects.filter(pk=token_obj.pk).adelete()
+
+        _patch_discovery(monkeypatch)
+        _patch_oauth_transport(
+            monkeypatch, _mock_transport({"error": "invalid_grant"}, status_code=400)
+        )
+
+        config = OAuthMCPIntegrationConfig(url="https://mcp.example.com", client_id="c")
+        assert await refresh_oauth_token(token_obj, config) is None
+
 
 @pytest.mark.django_db
 class TestExchangeToken:

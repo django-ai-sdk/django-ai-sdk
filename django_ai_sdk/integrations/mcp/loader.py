@@ -646,8 +646,13 @@ async def refresh_oauth_token(
         # rotated this refresh_token (e.g. the IDP rejected our now-stale one with
         # invalid_grant). Check whether another writer already landed a good token
         # before reporting failure upstream.
-        current = await MCPOAuthToken.objects.aget(pk=token_obj.pk)
-        if current.refresh_token != stale_refresh_token and not current.is_expired():
+        # The row is gone if the user disconnected meanwhile.
+        current = await MCPOAuthToken.objects.filter(pk=token_obj.pk).afirst()
+        if (
+            current is not None
+            and current.refresh_token != stale_refresh_token
+            and not current.is_expired()
+        ):
             logger.info(
                 "Refresh for %r failed (%s) but another refresh already landed",
                 token_obj.server_name,
