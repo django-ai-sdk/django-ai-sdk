@@ -42,6 +42,17 @@ class TestAgentRegistry:
         assert agent.description is None
         assert agent.info().name == "Unnamed Agent"
 
+    def test_the_storage_attribute_picks_the_storage_adapter(self):
+        from django_ai_sdk.storage.db import DbStorageAdapter
+
+        class Persistent(Agent):
+            storage = DbStorageAdapter
+
+            async def get_pipeline_adapter(self, thread_id=None):
+                pass
+
+        assert Persistent().storage_adapter is DbStorageAdapter
+
     def test_auto_registration(self):
         """Test that Agent subclasses are auto-registered with UUID v5 IDs."""
 
