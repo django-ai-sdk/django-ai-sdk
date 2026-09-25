@@ -11,6 +11,7 @@ from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import StreamingChunk, ToolCall
 
+from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
 from django_ai_sdk.common import (
@@ -239,6 +240,8 @@ class Stream:
         self.citation_registry = citation_registry
         self.suggestion_generator = suggestion_generator
         self._sources_emitted = 0
+        self.cited_ids: set[int] = set()
+        self.citations_missing = False
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
         self.message_result: ChatMessage | None = None
@@ -447,17 +450,32 @@ class Stream:
         stream_writer: StreamWriter | None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Consume queue and yield stream events."""
+        citations = (
+            StreamingCitationBuffer(self.citation_registry)
+            if self.citation_registry is not None
+            else None
+        )
         while True:
             item = await queue.get()
             if item is _SENTINEL:
+                if citations is not None and (tail := citations.flush()):
+                    if stream_writer:
+                        stream_writer.add_chunk(self.get_text_chunk(tail))
+                    yield TextChunkEvent(content=tail)
                 break
 
             chunk = cast("StreamingChunk", item)
 
-            if chunk.content:
+            text = chunk.content or ""
+            if citations is not None:
+                text = citations.feed(text)
+                # Release held text before tool events
+                if chunk.tool_calls or chunk.tool_call_result:
+                    text += citations.flush()
+            if text:
                 if stream_writer:
-                    stream_writer.add_chunk(self.get_text_chunk(chunk.content))
-                yield TextChunkEvent(content=chunk.content)
+                    stream_writer.add_chunk(self.get_text_chunk(text))
+                yield TextChunkEvent(content=text)
 
             # Reasoning models stream their summary separately from the answer.
             if chunk.reasoning and chunk.reasoning.reasoning_text:
@@ -518,6 +536,12 @@ class Stream:
                     self._sources_emitted = len(all_sources)
 
             self._persist_streamed_tool_chunks(chunk, stream_writer)
+
+        if citations is not None:
+            self.cited_ids = citations.cited
+            if citations.registry.all_sources and not self.cited_ids:
+                self.citations_missing = True
+                logger.warning("Sources were retrieved but the response cites none of them")
 
     async def get_pipeline_result(
         self,

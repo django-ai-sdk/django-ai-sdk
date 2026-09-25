@@ -35,5 +35,9 @@ class CitationRegistry:
     def all_sources(self) -> list[NumberedSource]:
         return list(self._sources)
 
+    @property
+    def valid_ids(self) -> set[int]:
+        return {s.index for s in self._sources}
+
     def __len__(self) -> int:
         return self._counter
