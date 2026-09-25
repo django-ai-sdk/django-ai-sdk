@@ -296,3 +296,73 @@ class TestTitleGenerationPrompt:
         )
 
         assert agent.run.call_args.kwargs["system_prompt"] == custom_prompt
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestAThreadIsCheckedBeforeAnythingIsStored:
+    """A refused chat leaves no trace in someone else's thread."""
+
+    @pytest_asyncio.fixture
+    async def agent(self):
+        class OpenAgent(Agent):
+            name = "open_agent"
+            model = "gpt-4o-mini"
+            storage_adapter = MemoryStorageAdapter
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                return MagicMock()
+
+        return OpenAgent()
+
+    async def test_a_stranger_stores_nothing(self, agent):
+        from django_ai_sdk.permissions import PermissionDenied
+        from django_ai_sdk.views.schemas import Message
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        stranger = await UserFactory.acreate()
+        thread_id = await MemoryStorageAdapter.create_thread(
+            title="Owner's", metadata={"agent_id": agent.agent_id}, user=owner
+        )
+
+        with pytest.raises(PermissionDenied):
+            await agent.as_view(
+                [Message(role="user", parts=[{"type": "text", "text": "hi"}])],
+                thread_id=thread_id,
+                user=stranger,
+            )
+
+        assert MemoryStore.get_messages(thread_id) == []
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestMemoryStoreStaysInItsThread:
+    """A message id from another thread is not this thread's to change."""
+
+    async def _two_threads(self):
+        mine = await MemoryStorageAdapter.create_thread(title="mine")
+        theirs = await MemoryStorageAdapter.create_thread(title="theirs")
+        message_id = await MemoryStorageAdapter(theirs).store_chat_message(
+            ChatMessageFactory.build()
+        )
+        return MemoryStorageAdapter(mine), theirs, message_id
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda adapter, mid: adapter.rate_message(mid, rating=1),
+            lambda adapter, mid: adapter.delete_message(mid),
+            lambda adapter, mid: adapter.restore_message(mid),
+        ],
+        ids=["rate", "delete", "restore"],
+    )
+    async def test_another_threads_message_is_untouched(self, call):
+        adapter, theirs, message_id = await self._two_threads()
+
+        assert await call(adapter, message_id) is False
+
+        [message] = MemoryStore.get_messages(theirs, include_deleted=True)
+        assert message.feedbacks == []
+        assert message.is_deleted is False

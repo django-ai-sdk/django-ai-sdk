@@ -970,6 +970,13 @@ class Agent(ABC, AgentInfoMixin):
 
         await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
+        # Before anything is stored: a refused chat must leave no trace in the thread.
+        thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
+        if thread:
+            await check_object_permissions(
+                user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
+            )
+
         # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
         logger.debug(
@@ -1017,19 +1024,12 @@ class Agent(ABC, AgentInfoMixin):
         if suggestion_generator:
             adapter.suggestion_generator = suggestion_generator
 
-        # TODO: fix type error for argument, can never be None, now nested
-        if thread_id:
-            thread = await ThreadService.get_thread(thread_id, user=user)
-            if thread:
-                await check_object_permissions(
-                    user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
-                )
-            if self.title_generation and thread and not thread.title:
-                title = await generate_thread_title(
-                    agent=self, messages=messages, thread_id=thread_id, user=user
-                )
-                if title:
-                    await ThreadService.update_thread(thread_id, title=title, user=user)
+        if self.title_generation and thread and not thread.title:
+            title = await generate_thread_title(
+                agent=self, messages=messages, thread_id=thread.id, user=user
+            )
+            if title:
+                await ThreadService.update_thread(thread.id, title=title, user=user)
 
         logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
 
