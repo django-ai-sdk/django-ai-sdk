@@ -109,7 +109,8 @@ class MCPOAuthToken(models.Model):
             return ""
 
     def is_expired(self) -> bool:
-        return bool(self.expires_at and self.expires_at <= tz.now())
+        # A minute early: a token expiring mid-request would fail that request.
+        return bool(self.expires_at and self.expires_at <= tz.now() + timedelta(seconds=60))
 
 
 class MCPOAuthClient(models.Model):
