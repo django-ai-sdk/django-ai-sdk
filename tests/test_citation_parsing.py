@@ -111,7 +111,13 @@ class TestStreamCitations:
 
 def test_formatter_reminder_follows_sources():
     text, _ = DefaultCitationFormatter().format([{"content": "x", "meta": {}}], start_index=1)
-    assert text.rstrip().endswith(
-        'Reminder: cite inline with <source id="N" />, one tag per source id.'
-    )
+    assert text.rstrip().endswith(DefaultCitationFormatter.CITATION_REMINDER)
     assert text.index("</source>") < text.index("Reminder:")
+
+
+def test_formatter_tells_model_to_say_not_found():
+    # A search that returns other files must not be answered from general knowledge.
+    text, _ = DefaultCitationFormatter().format([{"content": "x", "meta": {}}], start_index=1)
+    preamble, reminder = text.split('\n<source id="1">')[0], text.rsplit("</source>", 1)[1]
+    assert "say you could not find it" in preamble
+    assert "say you could not find it" in reminder
