@@ -3,13 +3,8 @@
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from django_ai_sdk.workflows import (
-    OnError,
-    StepFailed,
-    StepOutcome,
-    WorkflowContext,
-    run_steps,
-)
+from django_ai_sdk.workflows.runner import run_steps
+from django_ai_sdk.workflows.steps import OnError, StepFailed, StepOutcome, WorkflowContext
 from tests.mocks.workflow import FakeStep, RecordingAction
 
 
@@ -328,7 +323,7 @@ class TestActions:
 
     async def test_a_broken_action_does_not_fail_work_that_succeeded(self):
         """An action watches the run; a notification nobody received is not a failure."""
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
 
         class Broken(WorkflowAction):
             async def on_step_end(self, ctx, step, outcome):
@@ -339,7 +334,7 @@ class TestActions:
         assert outcomes["ocr"].status == "completed"
 
     async def test_a_broken_action_does_not_stop_the_actions_after_it(self):
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
 
         class Broken(WorkflowAction):
             async def on_step_end(self, ctx, step, outcome):
@@ -353,7 +348,7 @@ class TestActions:
 
     async def test_a_action_refuses_a_duplicate_delivery_by_raising(self):
         """The one exception: an action whose rows are also a claim has to reach the caller."""
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
         from django_ai_sdk.workflows.steps import StepAlreadyRunning
 
         class Claim(WorkflowAction):

@@ -7,12 +7,12 @@ requires it by that name and an action reads it with `ctx.step(...)`.
 
 from __future__ import annotations
 
-from django_ai_sdk.workflows import (
+from django_ai_sdk.workflows.registry import register
+from django_ai_sdk.workflows.schemas import (
     ActionDefinition,
     FieldDefinition,
     StepDefinition,
     WorkflowDefinition,
-    register,
 )
 
 from .pirate_basic import PirateBasicAgent

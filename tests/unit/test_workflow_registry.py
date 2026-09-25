@@ -7,15 +7,15 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError
 from django.test import override_settings
 
-from django_ai_sdk.workflows import (
+from django_ai_sdk.workflows.actions import WorkflowAction
+from django_ai_sdk.workflows.checks import check_workflows
+from django_ai_sdk.workflows.models import WorkflowSettings
+from django_ai_sdk.workflows.schemas import (
     ActionDefinition,
     FieldDefinition,
     StepDefinition,
-    WorkflowAction,
     WorkflowDefinition,
-    WorkflowSettings,
 )
-from django_ai_sdk.workflows.checks import check_workflows
 from django_ai_sdk.workflows.registry import (
     aget_workflow,
     aget_workflows,

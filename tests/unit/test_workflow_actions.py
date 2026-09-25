@@ -4,17 +4,10 @@ import pytest
 from django.test import override_settings
 from pydantic import BaseModel
 
-from django_ai_sdk.workflows import (
-    RunRecorder,
-    StepAlreadyRunning,
-    WorkflowAction,
-    StepOutcome,
-    WorkflowContext,
-    WorkflowRun,
-    WorkflowRunStep,
-    get_action_registry,
-    run_steps,
-)
+from django_ai_sdk.workflows.actions import RunRecorder, WorkflowAction, get_action_registry
+from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
+from django_ai_sdk.workflows.runner import run_steps
+from django_ai_sdk.workflows.steps import StepAlreadyRunning, StepOutcome, WorkflowContext
 from tests.mocks.workflow import FakeStep
 
 CTX = WorkflowContext()

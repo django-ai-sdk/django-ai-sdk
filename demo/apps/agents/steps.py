@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from django_ai_sdk.workflows import AgentStep, Step, StepOutcome
+from django_ai_sdk.workflows.steps import AgentStep, Step, StepOutcome
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows import WorkflowContext
+    from django_ai_sdk.workflows.steps import WorkflowContext
 
 from .extraction import PirateExtractionAgent
 

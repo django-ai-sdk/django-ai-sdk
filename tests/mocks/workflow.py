@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from django_ai_sdk.workflows import OnError, Step, StepOutcome, WorkflowAction, WorkflowContext
+from django_ai_sdk.workflows.actions import WorkflowAction
+from django_ai_sdk.workflows.steps import OnError, Step, StepOutcome, WorkflowContext
 
 
 class FakeStep(Step):

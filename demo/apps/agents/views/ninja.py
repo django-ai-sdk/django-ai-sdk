@@ -23,8 +23,9 @@ from django_ai_sdk.storage.services import (
 from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
 from django_ai_sdk.tracing.services import TraceService
 from django_ai_sdk.views.schemas import ChatRequest, RateMessagePayload
-from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
 from django_ai_sdk.workflows.models import WorkflowSettings
+from django_ai_sdk.workflows.schemas import WorkflowDefinition
+from django_ai_sdk.workflows.services import WorkflowService
 from ninja import Router, Schema
 
 from .permissions import agent_permissions, thread_permissions
@@ -486,7 +487,8 @@ async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
         if await ThreadService.get_thread(thread_id, user=user) is None:
             return 404, Error(message="Thread not found")
 
-        from django_ai_sdk.workflows import WorkflowExecutor, aget_workflow
+        from django_ai_sdk.workflows.executor import WorkflowExecutor
+        from django_ai_sdk.workflows.registry import aget_workflow
 
         definition = await aget_workflow("thread-digest")
         if definition is None:
