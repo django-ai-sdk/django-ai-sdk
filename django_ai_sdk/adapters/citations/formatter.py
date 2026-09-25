@@ -46,18 +46,24 @@ class DefaultCitationFormatter:
     brackets, bundled citations, trailing 'Sources:' sections).
     """
 
+    # Documents are wrapped in <source id="N">, so models reach for that same tag
+    # when citing; the self-closing <source id="N" /> is the one citation format.
     RAG_TEMPLATE = (
-        'Retrieved documents below are wrapped in <source id="N"> tags. '
-        'When you reference one, cite it inline using <citation id="N" />, '
-        "using the exact id from the source tag. Do not renumber.\n\n"
+        'Retrieved documents below are each wrapped in a <source id="N">...</source> tag. '
+        'To reference one, cite it inline with a self-closing <source id="N" /> tag, '
+        "using the exact id from the source wrapper. Do not renumber.\n\n"
         "Citation rules:\n"
-        '- Use exactly this format: <citation id="N" /> - one self-closing tag per source.\n'
+        '- Use exactly this self-closing format: <source id="N" />, one tag per source.\n'
         "- Place the citation tag immediately after the clause it supports, not bundled at "
         "the end of a paragraph.\n"
-        '- Multiple sources: use separate tags, e.g. <citation id="1" /> <citation id="2" />. '
+        '- Multiple sources: use separate tags, e.g. <source id="1" /> <source id="2" />. '
         "Never combine ids in one tag.\n"
-        "- Do not add a 'Sources:' or 'References:' section - citations are inline only."
+        "- Do not add a 'Sources:' or 'References:' section - citations are inline only.\n"
+        "- Do not explain or reason about citations, only add them."
     )
+
+    # Repeated after the sources
+    CITATION_REMINDER = 'Reminder: cite inline with <source id="N" />, one tag per source id.'
 
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
         if not documents:
@@ -96,4 +102,5 @@ class DefaultCitationFormatter:
                 )
             )
             lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
+        lines.append(self.CITATION_REMINDER)
         return "\n".join(lines), sources
