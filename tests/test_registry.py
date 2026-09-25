@@ -31,6 +31,17 @@ class TestAgentRegistry:
         yield
         registry._reset()
 
+    def test_an_agent_without_name_or_description_still_describes_itself(self):
+        class Bare(Agent):
+            async def get_pipeline_adapter(self, thread_id=None):
+                pass
+
+        agent = Bare()
+
+        assert agent.get_name() == "Unnamed Agent"
+        assert agent.description is None
+        assert agent.info().name == "Unnamed Agent"
+
     def test_auto_registration(self):
         """Test that Agent subclasses are auto-registered with UUID v5 IDs."""
 

@@ -140,10 +140,10 @@ class Agent(ABC, AgentInfoMixin):
     """
 
     # Name of agent.
-    name: str
+    name: str | None = None
 
     # Short description of agent.
-    description: str
+    description: str | None = None
 
     # Model identifier for LLM backend.
     model: str
