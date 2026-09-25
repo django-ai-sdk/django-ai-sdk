@@ -197,13 +197,13 @@ class Run:
             user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
 
         if response_format:
-            response = self.generator.run(
+            response = await self.generator.run_async(
                 messages=user_messages,
                 generation_kwargs=schema_kwargs(self.generator, response_format),
             )
             return response_format.model_validate_json(response["replies"][0].text)
 
-        response = self.generator.run(messages=user_messages)
+        response = await self.generator.run_async(messages=user_messages)
         return response["replies"][0].text
 
 
@@ -378,57 +378,45 @@ class Stream:
 
         return chunks
 
-    def get_streaming_tool_chunks(self, chunk: StreamingChunk) -> list[MessageChunk]:
-        """Convert a streamed tool chunk into the MessageChunks for history."""
-        chunks = []
-        subagent = chunk.meta.get(SUBAGENT_META_KEY)
-
-        for tc in chunk.tool_calls or []:
-            tc_id = tc.id or str(uuid.uuid4())
-            chunks.append(
-                MessageChunk(
-                    type="tool_call_start",
-                    content={"tool_call_id": tc_id, "tool_name": tc.tool_name},
-                    metadata=self.get_attribution(tc.tool_name or "", subagent),
-                )
-            )
-            if tc.arguments:
-                chunks.append(
-                    MessageChunk(
-                        type="tool_input",
-                        content={
-                            "tool_call_id": tc_id,
-                            "tool_name": tc.tool_name,
-                            "tool_input": parse_tool_input(tc.arguments),
-                        },
-                    )
-                )
-
-        if chunk.tool_call_result:
-            result = chunk.tool_call_result
-            tool_output = parse_tool_output(result.to_dict())
-            chunks.append(
-                MessageChunk(
-                    type="tool_output",
-                    content={"tool_call_id": result.origin.id, "tool_output": tool_output},
-                )
-            )
-
-        return chunks
-
-    def _persist_streamed_tool_chunks(
-        self, chunk: StreamingChunk, stream_writer: StreamWriter | None
-    ) -> None:
-        """Persist streamed tool chunks live, recording their ids for dedupe."""
+    def _persist_tool(self, stream_writer: StreamWriter | None, chunk: MessageChunk) -> None:
+        """Store a tool chunk live, recording its id so get_pipeline_result skips it."""
         if not stream_writer:
             return
-        for c in self.get_streaming_tool_chunks(chunk):
-            cid = c.content["tool_call_id"]
-            if c.type == "tool_output":
-                self._persisted_tool_output_ids.add(cid)
-            else:
-                self._persisted_tool_ids.add(cid)
-            stream_writer.add_chunk(c)
+        ids = (
+            self._persisted_tool_output_ids
+            if chunk.type == "tool_output"
+            else self._persisted_tool_ids
+        )
+        ids.add(chunk.content["tool_call_id"])
+        stream_writer.add_chunk(chunk)
+
+    def _tool_input(
+        self,
+        stream_writer: StreamWriter | None,
+        tool_call_id: str,
+        tool_name: str,
+        attribution: dict[str, str],
+        tool_input: Any,
+    ) -> ToolInputCompleteEvent:
+        """Store a tool call's complete input and return the event announcing it."""
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_input",
+                content={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                },
+            ),
+        )
+        return ToolInputCompleteEvent(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            agent=attribution.get("agent"),
+            handoff=attribution.get("handoff"),
+        )
 
     def get_task(
         self,
@@ -455,6 +443,8 @@ class Stream:
             if self.citation_registry is not None
             else None
         )
+        pending: dict[str, tuple[str, dict[str, str], str]] = {}  # id -> name, attribution, args
+        at_index: dict[int, str] = {}  # delta index -> tool call id
         while True:
             item = await queue.get()
             if item is _SENTINEL:
@@ -488,37 +478,64 @@ class Stream:
             if chunk.tool_calls:
                 subagent = chunk.meta.get(SUBAGENT_META_KEY)
                 for tc in chunk.tool_calls:
-                    if not tc.tool_name:
-                        continue
-                    tc_id = tc.id or str(uuid.uuid4())
-                    # marks the stored history
-                    attribution = self.get_attribution(tc.tool_name, subagent)
-                    yield ToolCallStartEvent(
-                        tool_call_id=tc_id,
-                        tool_name=tc.tool_name,
-                        agent=attribution.get("agent"),
-                        handoff=attribution.get("handoff"),
-                    )
-                    if tc.arguments:
-                        yield ToolInputCompleteEvent(
+                    if tc.tool_name:
+                        tc_id = tc.id or str(uuid.uuid4())
+                        at_index[tc.index] = tc_id
+                        # marks the stored history
+                        attribution = self.get_attribution(tc.tool_name, subagent)
+                        pending[tc_id] = (tc.tool_name, attribution, "")
+                        self._persist_tool(
+                            stream_writer,
+                            MessageChunk(
+                                type="tool_call_start",
+                                content={"tool_call_id": tc_id, "tool_name": tc.tool_name},
+                                metadata=attribution,
+                            ),
+                        )
+                        yield ToolCallStartEvent(
                             tool_call_id=tc_id,
                             tool_name=tc.tool_name,
-                            tool_input=parse_tool_input(tc.arguments),
                             agent=attribution.get("agent"),
                             handoff=attribution.get("handoff"),
                         )
+                    else:
+                        # A later fragment has no name, and Chat Completions drops its id too.
+                        tc_id = tc.id or at_index.get(tc.index, "")
+                    if tc_id not in pending:
+                        continue
+                    # Arguments arrive in fragments: the input is complete once it parses.
+                    name, attribution, streamed = pending[tc_id]
+                    streamed += tc.arguments or ""
+                    try:
+                        tool_input = json.loads(streamed)
+                    except json.JSONDecodeError:
+                        pending[tc_id] = (name, attribution, streamed)
+                        continue
+                    del pending[tc_id]
+                    yield self._tool_input(stream_writer, tc_id, name, attribution, tool_input)
 
             if chunk.tool_call_result:
                 result = chunk.tool_call_result
                 tool_call_id = result.origin.id or str(uuid.uuid4())
+                # Never parsed as JSON: the call that actually ran carries the input.
+                if tool_call_id in pending:
+                    name, attribution, _ = pending.pop(tool_call_id)
+                    yield self._tool_input(
+                        stream_writer, tool_call_id, name, attribution, result.origin.arguments
+                    )
                 if result.error:
                     logger.error(
                         f"Tool call failed: tool={result.origin.tool_name}, result={result.result}"
                     )
-                yield ToolOutputEvent(
-                    tool_call_id=tool_call_id,
-                    tool_output=parse_tool_output(result.to_dict()),
+                tool_output = parse_tool_output(result.to_dict())
+                self._persist_tool(
+                    stream_writer,
+                    MessageChunk(
+                        type="tool_output",
+                        content={"tool_call_id": tool_call_id, "tool_output": tool_output},
+                    ),
                 )
+                yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
 
                 if self.citation_registry is not None:
                     all_sources = self.citation_registry.all_sources
@@ -534,8 +551,6 @@ class Stream:
                                 media_type="file",
                             )
                     self._sources_emitted = len(all_sources)
-
-            self._persist_streamed_tool_chunks(chunk, stream_writer)
 
         if citations is not None:
             self.cited_ids = citations.cited

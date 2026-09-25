@@ -170,14 +170,14 @@ class TestStructuredOutput:
 
     @staticmethod
     def _capture(generator):
-        """Replace .run() with a recorder returning a valid `Answer` payload."""
+        """Replace .run_async() with a recorder returning a valid `Answer` payload."""
         captured = {}
 
-        def fake_run(messages, generation_kwargs=None, **kwargs):
+        async def fake_run(messages, generation_kwargs=None, **kwargs):
             captured.update(generation_kwargs or {})
             return {"replies": [HaystackChatMessage.from_assistant('{"text": "ok"}')]}
 
-        generator.run = fake_run
+        generator.run_async = fake_run
         return captured
 
     @override_settings(OPENAI_API_KEY="sk-test")
