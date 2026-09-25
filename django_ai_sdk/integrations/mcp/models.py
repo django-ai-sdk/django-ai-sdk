@@ -86,6 +86,9 @@ class MCPOAuthToken(models.Model):
         elif ts := token_response.get("expires_at"):
             if isinstance(ts, (int, float)):
                 self.expires_at = datetime.fromtimestamp(ts, tz=UTC)
+        else:
+            # A token without an expiry must not inherit the old one's past date.
+            self.expires_at = None
 
     def get_access_token(self) -> str:
         if not self.access_token:

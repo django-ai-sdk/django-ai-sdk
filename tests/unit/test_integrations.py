@@ -1634,3 +1634,19 @@ class TestIntegrationPermissions:
         register(DefaultPermsIntegration())
 
         assert await FakeAgent()._get_integration_tools(user=None) == []
+
+
+def test_a_refresh_without_expiry_clears_the_old_expiry():
+    """A stale past expiry would make every fetch refresh again."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+
+    token = MCPOAuthToken(server_name="github", expires_at=timezone.now() - timedelta(hours=1))
+
+    token.set_tokens({"access_token": "new"})
+
+    assert token.expires_at is None
+    assert not token.is_expired()
