@@ -15,7 +15,6 @@ from django.test import override_settings
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 import django_ai_sdk.workflows.schemas
-from django_ai_sdk.workflows import AgentStep, StepOutcome, WorkflowContext, run_steps
 from django_ai_sdk.workflows.definitions import (
     compile_inputs,
     compile_steps,
@@ -23,6 +22,7 @@ from django_ai_sdk.workflows.definitions import (
     inputs_json_schema,
     model_from_fields,
 )
+from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.schemas import (
     MAX_DEPTH,
     ActionDefinition,
@@ -30,7 +30,7 @@ from django_ai_sdk.workflows.schemas import (
     StepDefinition,
     WorkflowDefinition,
 )
-from django_ai_sdk.workflows.steps import OnError, Step
+from django_ai_sdk.workflows.steps import AgentStep, OnError, Step, StepOutcome, WorkflowContext
 
 REGISTERED = {"shout": "tests.unit.test_workflow_definitions.ShoutStep"}
 ACTIONS = {"quiet": "tests.unit.test_workflow_definitions.QuietAction"}

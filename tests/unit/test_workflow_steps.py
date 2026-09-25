@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from django_ai_sdk import Agent
-from django_ai_sdk.workflows import AgentStep, StepOutcome, WorkflowContext
+from django_ai_sdk.workflows.steps import AgentStep, StepOutcome, WorkflowContext
 
 # Distinguishes "not passed" from an explicit None, which Agent.run reads as
 # "no structured output".

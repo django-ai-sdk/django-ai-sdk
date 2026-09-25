@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("django_ai_sdk", "0003_workflow_run_inputs"),
+        ("django_ai_sdk_workflows", "0002_workflow_run_inputs"),
     ]
 
     operations = [
@@ -33,9 +33,6 @@ class Migration(migrations.Migration):
             model_name="workflowrunstep",
             name="output_key",
         ),
-        # No backfill: a deployment carrying WorkflowSettings rows from before this
-        # migration must give them slugs itself. The field is the registry key, and
-        # a derived-then-deduplicated default is a guess, not a migration.
         migrations.AddField(
             model_name="workflowsettings",
             name="slug",

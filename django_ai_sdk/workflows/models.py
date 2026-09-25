@@ -31,7 +31,7 @@ class WorkflowSettings(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        app_label = "django_ai_sdk"
+        app_label = "django_ai_sdk_workflows"
         db_table = "django_ai_sdk_workflows"
         ordering = ["name"]
         verbose_name = "Workflow"
@@ -107,7 +107,7 @@ class WorkflowRun(models.Model):
         workflow_id: Any
 
     class Meta:
-        app_label = "django_ai_sdk"
+        app_label = "django_ai_sdk_workflows"
         db_table = "django_ai_sdk_workflow_runs"
         ordering = ["-created_at"]
         verbose_name = "Workflow Run"
@@ -142,7 +142,7 @@ class WorkflowRunStep(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        app_label = "django_ai_sdk"
+        app_label = "django_ai_sdk_workflows"
         db_table = "django_ai_sdk_workflow_run_steps"
         unique_together = [("run", "sequence")]
         ordering = ["sequence"]

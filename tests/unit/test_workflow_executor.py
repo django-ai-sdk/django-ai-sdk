@@ -6,8 +6,8 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from django_ai_sdk.workflows import StepFailed
 from django_ai_sdk.workflows.executor import WorkflowExecutor
+from django_ai_sdk.workflows.steps import StepFailed
 from django_ai_sdk.workflows.schemas import (
     ActionDefinition,
     FieldDefinition,
@@ -267,7 +267,7 @@ class TestActions:
     """A definition's actions are built and attached; the recorder is always there."""
 
     async def test_a_workflow_action_fires_for_every_step(self, executor):
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
 
         events: list[tuple[str, str]] = []
 
@@ -308,7 +308,7 @@ class TestActions:
 
     async def test_a_step_action_fires_for_that_step_alone(self, executor):
         """The difference the two attachment points buy."""
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
 
         events: list[str] = []
 
@@ -353,7 +353,7 @@ class TestActions:
     async def test_an_action_reads_the_run_and_the_step_it_was_configured_with(self, executor):
         from tests.factories.db import UserFactory
 
-        from django_ai_sdk.workflows import WorkflowAction
+        from django_ai_sdk.workflows.actions import WorkflowAction
 
         seen: list[dict] = []
 
@@ -405,7 +405,7 @@ class TestTheQueuedEntryPoint:
     """
 
     async def _run_for(self, *steps):
-        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.models import WorkflowRun
 
         workflow = make_workflow(*steps)
         return await WorkflowRun.objects.acreate(
@@ -425,7 +425,7 @@ class TestTheQueuedEntryPoint:
         assert run.outputs == {"result": "done"}
 
     async def test_a_step_failure_does_not_escape_the_task(self):
-        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.models import WorkflowRun
         from django_ai_sdk.workflows.tasks import _execute_async
 
         # A declared schema the agent does not return fails the step, and the
@@ -445,7 +445,7 @@ class TestTheQueuedEntryPoint:
         assert run.error
 
     async def test_a_claim_refusal_does_not_escape_the_task(self):
-        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.models import WorkflowRun
         from django_ai_sdk.workflows.steps import StepAlreadyRunning
         from django_ai_sdk.workflows.tasks import _execute_async
 
@@ -517,7 +517,7 @@ class TestRunState:
         assert run.inputs["history"][0]["content"] == "ahoy"
 
     async def test_resuming_reuses_the_rows_stored_inputs(self, executor):
-        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.models import WorkflowRun
 
         agent = make_agent("ok")
         workflow = make_workflow(
@@ -537,7 +537,7 @@ class TestRunState:
         assert outputs["result"] == "ok"
 
     async def test_a_completed_step_is_not_re_run_on_resume(self, executor):
-        from django_ai_sdk.workflows import WorkflowRun, WorkflowRunStep
+        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep
 
         agent = make_agent("ok")
         workflow = make_workflow(
@@ -562,7 +562,7 @@ class TestRunState:
         assert get.await_count == 1
 
     async def test_a_completed_run_short_circuits(self, executor):
-        from django_ai_sdk.workflows import WorkflowRun
+        from django_ai_sdk.workflows.models import WorkflowRun
 
         workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
         run = await WorkflowRun.objects.acreate(

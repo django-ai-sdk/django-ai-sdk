@@ -847,7 +847,7 @@ class WorkflowUpdateSerializer(serializers.Serializer):
 
 class WorkflowListCreateAPIView(APIView):
     async def get(self, request: Request) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         limit = int(request.query_params.get("limit", 100))
         offset = int(request.query_params.get("offset", 0))
@@ -857,7 +857,8 @@ class WorkflowListCreateAPIView(APIView):
         return Response(WorkflowSerializer(records, many=True).data)
 
     async def post(self, request: Request) -> Response:
-        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows.schemas import WorkflowDefinition
+        from django_ai_sdk.workflows.services import WorkflowService
 
         serializer = WorkflowCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -870,13 +871,14 @@ class WorkflowListCreateAPIView(APIView):
 
 class WorkflowDetailAPIView(APIView):
     async def get(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         record = await WorkflowService.get(workflow_id, user=request.user)
         return Response(WorkflowSerializer(record).data)
 
     async def patch(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows.schemas import WorkflowDefinition
+        from django_ai_sdk.workflows.services import WorkflowService
 
         serializer = WorkflowUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -891,7 +893,7 @@ class WorkflowDetailAPIView(APIView):
         return Response(WorkflowSerializer(record).data)
 
     async def delete(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         await WorkflowService.delete(workflow_id, user=request.user)
         return Response(status=204)
@@ -925,7 +927,8 @@ class WorkflowRunDetailSerializer(WorkflowRunSerializer):
 
 class WorkflowRunAPIView(APIView):
     async def post(self, request: Request) -> Response:
-        from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+        from django_ai_sdk.workflows.schemas import WorkflowDefinition
+        from django_ai_sdk.workflows.services import WorkflowService
 
         try:
             workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
@@ -941,8 +944,8 @@ class WorkflowRunAPIView(APIView):
 
 class WorkflowRunByIdAPIView(APIView):
     async def post(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
         from django_ai_sdk.workflows.models import WorkflowSettings
+        from django_ai_sdk.workflows.services import WorkflowService
 
         try:
             run_id = request.data.get("run_id")
@@ -961,7 +964,7 @@ class WorkflowRunByIdAPIView(APIView):
 
 class WorkflowRunListAPIView(APIView):
     async def get(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         runs = await WorkflowService.list_runs(
             workflow_id,
@@ -974,7 +977,7 @@ class WorkflowRunListAPIView(APIView):
 
 class WorkflowRunDetailAPIView(APIView):
     async def get(self, request: Request, workflow_id: str, run_id: str) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         run = await WorkflowService.get_run(run_id, user=request.user)
         if run is None:
@@ -985,7 +988,7 @@ class WorkflowRunDetailAPIView(APIView):
 
 class WorkflowActionsAPIView(APIView):
     def get(self, request: Request) -> Response:
-        from django_ai_sdk.workflows import WorkflowService
+        from django_ai_sdk.workflows.services import WorkflowService
 
         return Response(WorkflowService.list_actions())
 

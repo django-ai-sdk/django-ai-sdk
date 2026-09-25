@@ -10,10 +10,10 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.workflows import WorkflowAction
+from django_ai_sdk.workflows.actions import WorkflowAction
 
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows import Step, StepOutcome, WorkflowContext
+    from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 
 
 class ConsoleLogAction(WorkflowAction):
