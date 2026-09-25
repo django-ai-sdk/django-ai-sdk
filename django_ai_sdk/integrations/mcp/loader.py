@@ -40,10 +40,9 @@ AUTH_KINDS = frozenset({"static", "token", "oauth"})
 #: The toolkit app carrying the OAuth token models every MCP integration reuses.
 _MCP_APP = "django_ai_sdk.integrations.mcp"
 
-# Session-key templates for PKCE state during the OAuth redirect dance.
-_K_STATE = "mcp_oauth_state_{}"
-_K_VERIFIER = "mcp_oauth_verifier_{}"
-_K_TOKEN_ENDPOINT = "mcp_oauth_token_endpoint_{}"  # noqa: S105
+# Session key holding one OAuth attempt's PKCE verifier and token endpoint, by server
+# and state: two tabs connecting the same server each keep their own.
+_K_FLOW = "mcp_oauth_{}_{}"
 
 
 class DynamicMCPIntegration(Integration):
@@ -273,9 +272,10 @@ class DynamicMCPIntegration(Integration):
         )
         verifier, challenge, state = mcp_service.build_pkce_params()
 
-        request.session[_K_STATE.format(self.name)] = state
-        request.session[_K_VERIFIER.format(self.name)] = verifier
-        request.session[_K_TOKEN_ENDPOINT.format(self.name)] = discovery.token_endpoint
+        request.session[_K_FLOW.format(self.name, state)] = {
+            "verifier": verifier,
+            "token_endpoint": discovery.token_endpoint,
+        }
         await sync_to_async(request.session.save)()
 
         auth_url = mcp_service.build_auth_url(

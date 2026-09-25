@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import logging
 from http import HTTPStatus
 
@@ -12,9 +11,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django_ai_sdk.integrations.mcp import services as mcp_service
 from django_ai_sdk.integrations.mcp.discovery import discover
 from django_ai_sdk.integrations.mcp.loader import (
-    _K_STATE,
-    _K_TOKEN_ENDPOINT,
-    _K_VERIFIER,
+    _K_FLOW,
     DynamicMCPIntegration,
     resolve_client_credentials,
 )
@@ -58,15 +55,16 @@ async def _validate_callback_params(
     if not code or not state:
         raise OAuthCallbackError("Missing code or state")
 
-    stored_state = request.session.get(_K_STATE.format(server_name)) or ""
-    if not hmac.compare_digest(state, stored_state):
+    # Only a state this session started has a flow: anything else is a mismatch.
+    flow = request.session.get(_K_FLOW.format(server_name, state))
+    if not flow:
         raise OAuthCallbackError("State mismatch")
 
-    verifier = request.session.get(_K_VERIFIER.format(server_name))
+    verifier = flow.get("verifier")
     if not verifier:
         raise OAuthCallbackError("Missing code verifier")
 
-    token_endpoint = request.session.get(_K_TOKEN_ENDPOINT.format(server_name))
+    token_endpoint = flow.get("token_endpoint")
 
     integration = await _get_oauth_integration(server_name)
     if integration is None:
@@ -111,8 +109,7 @@ async def oauth_callback(
             )
         client_id, client_secret = await resolve_client_credentials(server_name, config)
 
-        for key_template in (_K_STATE, _K_VERIFIER, _K_TOKEN_ENDPOINT):
-            request.session.pop(key_template.format(server_name), None)
+        request.session.pop(_K_FLOW.format(server_name, request.GET["state"]), None)
         await sync_to_async(request.session.save)()
 
         token_endpoint = await _resolve_token_endpoint(config, raw_endpoint)
