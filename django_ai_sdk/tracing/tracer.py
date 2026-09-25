@@ -29,7 +29,7 @@ def _write(rows: list[Trace]) -> None:
         else:
             Trace.objects.bulk_create(rows)
     except Exception as exc:
-        logger.error("Trace write failed: {}", exc, exc_info=exc)
+        logger.opt(exception=exc).error("Trace write failed: {}", exc)
 
 
 def _reply_meta(value: dict[str, Any]) -> dict[str, Any]:

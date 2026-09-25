@@ -30,7 +30,7 @@ async def _ensure_adapter(
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
     except Exception:
-        logger.error("Adapter initialization failed", exc_info=True)
+        logger.opt(exception=True).error("Adapter initialization failed")
         yield format_sse({"type": "data-warmup", "data": {"status": "failed"}, "transient": True})
         yield format_sse("[DONE]")
         return
