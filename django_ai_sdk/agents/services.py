@@ -119,7 +119,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id, active=True)
         except (AgentSettings.DoesNotExist, ValidationError) as exc:
-            _logger.warning("RuntimeAgent lookup failed for %s: %r", agent_id, exc)
+            _logger.warning("RuntimeAgent lookup failed for {}: {!r}", agent_id, exc)
             raise ValueError(f"Agent '{agent_id}' not found")
         return get_runtime_agent_class(config.agent)(config)
 
@@ -157,7 +157,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id, active=True)
         except (AgentSettings.DoesNotExist, ValidationError) as exc:
-            _logger.warning("RuntimeAgent lookup failed for %s: %r", agent_id, exc)
+            _logger.warning("RuntimeAgent lookup failed for {}: {!r}", agent_id, exc)
             raise ValueError(f"Agent '{agent_id}' not found")
         return get_runtime_agent_class(config.agent)(config)
 
@@ -195,7 +195,7 @@ class AgentService(PermissionsMixin):
                 agent = get_runtime_agent_class(config.agent)(config)
             except Exception:
                 _logger.exception(
-                    "Skipping agent %r (id=%s): failed to instantiate",
+                    "Skipping agent {!r} (id={}): failed to instantiate",
                     config.name,
                     config.id,
                 )
@@ -461,7 +461,7 @@ class AgentService(PermissionsMixin):
                 agent = get_runtime_agent_class(config.agent)(config)
             except Exception:
                 _logger.exception(
-                    "Skipping runtime agent %r (id=%s): failed to instantiate",
+                    "Skipping runtime agent {!r} (id={}): failed to instantiate",
                     config.name,
                     config.id,
                 )

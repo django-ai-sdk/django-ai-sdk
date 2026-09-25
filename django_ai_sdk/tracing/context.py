@@ -87,7 +87,7 @@ def schedule(write: Coroutine[Any, Any, Any]) -> None:
 
 def _log_write_failure(task: asyncio.Task[Any]) -> None:
     if not task.cancelled() and (exc := task.exception()):
-        logger.error("Trace write failed: {}", exc, exc_info=exc)
+        logger.opt(exception=exc).error("Trace write failed: {}", exc)
 
 
 async def aflush() -> None:

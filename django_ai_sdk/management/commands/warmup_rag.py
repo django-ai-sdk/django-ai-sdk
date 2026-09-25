@@ -100,6 +100,6 @@ class Command(BaseCommand):
                     self.stdout.write(f"  [{name}] Warmed memory {mid[:8]}")
                 except Exception as e:
                     self.stdout.write(self.style.ERROR(f"  [{name}] memory {mid[:8]} FAILED: {e}"))
-                    logger.exception("Warmup failed for %s memory %s", name, mid)
+                    logger.exception("Warmup failed for {} memory {}", name, mid)
 
         self.stdout.write(self.style.SUCCESS("Warmup complete."))

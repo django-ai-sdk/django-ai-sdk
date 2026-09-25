@@ -69,7 +69,7 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
         return dataclasses.replace(tool, **updates)
     except (TypeError, AttributeError):
         logger.warning(
-            "Could not namespace tool %r from integration %r — left as-is, may "
+            "Could not namespace tool {!r} from integration {!r} — left as-is, may "
             "collide with another integration's tool.",
             getattr(tool, "name", tool),
             integration_name,
@@ -860,7 +860,7 @@ class Agent(ABC, AgentInfoMixin):
             try:
                 tools = await integration.get_tools(user, agent=self, thread_id=thread_id)
             except Exception:
-                logger.exception("Failed to load tools for integration %r", integration.name)
+                logger.exception("Failed to load tools for integration {!r}", integration.name)
                 return []
             return [_namespaced(integration.name, tool, integration.hint) for tool in tools]
 
