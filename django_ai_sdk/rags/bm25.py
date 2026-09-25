@@ -7,6 +7,7 @@ from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.document_stores.types import DuplicatePolicy
 from haystack.tools import ComponentTool
 
 from django_ai_sdk.generators import openai_chat
@@ -84,7 +85,8 @@ class BM25QueryExpanderRAG(RAGBase):
         self, documents: list[HaystackDocument], document_store: InMemoryDocumentStore
     ) -> None:
         """Write documents to the store (no chunking for BM25)."""
-        writer = DocumentWriter(document_store)
+        # An Entry save re-adds its id on every edit: replace, don't fail.
+        writer = DocumentWriter(document_store, policy=DuplicatePolicy.OVERWRITE)
         writer.run(documents=documents)
 
     async def warmup(self, force_rebuild: bool = False) -> None:

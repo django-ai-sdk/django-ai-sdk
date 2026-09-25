@@ -106,6 +106,17 @@ class TestHaystackBM25AddDocuments:
         assert rag._cached_document_store.count_documents() == 3
 
     @pytest.mark.asyncio
+    async def test_re_adding_an_edited_document_replaces_it(self):
+        """An Entry save re-adds the same id; an edit must not raise."""
+        rag = BM25QueryExpanderRAG(documents=[RagDocument(id="1", content="Original")])
+        await rag.warmup()
+
+        await rag.add_documents([RagDocument(id="1", content="Edited")])
+
+        [doc] = rag._cached_document_store.filter_documents()
+        assert doc.content == "Edited"
+
+    @pytest.mark.asyncio
     async def test_add_to_unwarmed_rag(self):
         """Test adding documents when not warmed up."""
         docs = [RagDocument(id="1", content="Original")]
