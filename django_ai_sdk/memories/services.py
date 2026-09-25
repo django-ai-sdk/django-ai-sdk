@@ -4,8 +4,9 @@ import os
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Count, QuerySet
 from django.utils import timezone
 
@@ -740,16 +741,27 @@ class MemoryService(PermissionsMixin):
         thread = await _aget_or_not_found(
             Thread.objects.select_related("file_memory"), id=thread_id
         )
-        if not thread.file_memory:
-            memory, created = await Memory.objects.aget_or_create(
+        if thread.file_memory:
+            return thread.file_memory
+
+        return await sync_to_async(cls._create_thread_file_memory)(thread_id)
+
+    @staticmethod
+    def _create_thread_file_memory(thread_id: str) -> Memory:
+        # Parallel uploads wait on the thread row lock.
+        with transaction.atomic():
+            thread = Thread.objects.select_for_update().get(id=thread_id)
+            if thread.file_memory_id:
+                return thread.file_memory
+            memory = Memory.objects.create(
                 name=f"thread_files_{thread_id}",
-                defaults={"description": "Thread file uploads", "is_hidden": True},
+                description="Thread file uploads",
+                is_hidden=True,
             )
             thread.file_memory = memory
-            await thread.asave(update_fields=["file_memory", "updated_at"])
-            if created:
-                await ThreadMemory.objects.acreate(thread=thread, memory=memory, active=True)
-        return thread.file_memory
+            thread.save(update_fields=["file_memory", "updated_at"])
+            ThreadMemory.objects.create(thread=thread, memory=memory, active=True)
+            return memory
 
     @classmethod
     async def upload_thread_file(

@@ -683,3 +683,52 @@ class TestUploadThreadFileRespectsAgentFileUpload:
                 await MemoryService.upload_thread_file(
                     str(thread.id), ContentFile(b"hello", name="a.txt"), user=user
                 )
+
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestThreadFileMemory:
+    async def test_upload_that_loses_the_race_uses_the_winning_memory(self):
+        # Parallel uploads each read the thread before any of them claims it.
+        # Replay that: a second call sees a stale thread without file_memory.
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.memories import services
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+
+        user = await get_user_model().objects.acreate_user(
+            email=f"{uuid4()}@example.com", password="x"
+        )
+        thread = await Thread.objects.acreate(user=user)
+        stale = await Thread.objects.select_related("file_memory").aget(id=thread.id)
+
+        winner = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+        with patch.object(services, "_aget_or_not_found", AsyncMock(return_value=stale)):
+            loser = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+
+        assert loser.id == winner.id
+        assert await Memory.objects.filter(name=f"thread_files_{thread.id}").acount() == 1
+        assert await ThreadMemory.objects.filter(thread=thread).acount() == 1
+
+    async def test_existing_file_memory_is_reused(self):
+        from uuid import uuid4
+
+        from django.contrib.auth import get_user_model
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+
+        user = await get_user_model().objects.acreate_user(
+            email=f"{uuid4()}@example.com", password="x"
+        )
+        thread = await Thread.objects.acreate(user=user)
+
+        first = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+        second = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+
+        assert first.id == second.id
+        assert await Memory.objects.filter(name=f"thread_files_{thread.id}").acount() == 1
