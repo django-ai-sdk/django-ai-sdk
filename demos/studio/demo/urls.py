@@ -19,26 +19,24 @@ from __future__ import annotations
 
 from django.contrib import admin
 from django.urls import include, path
-from django_ai_sdk.contrib.ninja import register_error_handlers
+from django_ai_sdk.contrib import ninja as ai
 from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
-from apps.agents.views.ninja import router as agents_router
-from apps.integrations.views.ninja import router as integrations_router
-from apps.memories.views.ninja import router as memories_router
+from apps.agents.views.ninja import router as studio_router
 
-# Create the main API instance
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0", auth=SessionAuth())
+# Every error answers with a stable code, never the exception text.
+ai.register_error_handlers(api)
 
-api.add_router("/", agents_router)
-api.add_router("/memories", memories_router)
-# The SDK ships no integrations router — HTTP surfaces are the host project's, so it
-# doesn't pick your web framework. views_integrations_ninja builds one over
-# IntegrationService; the OAuth *callback* is the one leg the SDK does ship, since it
-# must sit at a fixed URL (included in urlpatterns below).
-api.add_router("/integrations", integrations_router)
-
-register_error_handlers(api)
+# The SDK's ready-made endpoints...
+api.add_router("/", ai.get_threads_router())
+api.add_router("/", ai.get_agents_router())
+api.add_router("/", ai.get_workflows_router())
+api.add_router("/memories", ai.get_memories_router())
+api.add_router("/integrations", ai.get_integrations_router())
+# ...and the studio's own (health, digest, accounts).
+api.add_router("/", studio_router)
 
 
 urlpatterns = [
@@ -46,7 +44,7 @@ urlpatterns = [
     path("accounts/", include("allauth.urls")),
     path("_allauth/", include("allauth.headless.urls")),
     path("api/", api.urls),
-    path("api/v2/", include("apps.agents.views.drf")),
-    path("api/v2/", include("apps.memories.views.drf")),
+    # The same services as DRF viewsets, for projects built on DRF.
+    path("api/v2/", include("django_ai_sdk.contrib.drf.urls")),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
 ]
