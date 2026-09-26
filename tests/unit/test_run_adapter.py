@@ -17,20 +17,20 @@ def user_message(text="Hello"):
 class TestWithoutTools:
     async def test_a_bare_completion_is_unchanged(self):
         generator = MagicMock()
-        generator.run.return_value = {"replies": [MagicMock(text="hi there")]}
+        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="hi there")]})
 
         run = Run(generator=generator)
         result = await run.run([user_message()])
 
         assert result == "hi there"
-        generator.run.assert_called_once()
+        generator.run_async.assert_awaited_once()
 
     async def test_structured_output_is_unchanged(self):
         class Out(BaseModel):
             value: str
 
         generator = MagicMock()
-        generator.run.return_value = {"replies": [MagicMock(text='{"value": "x"}')]}
+        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
 
         run = Run(generator=generator)
         result = await run.run([user_message()], response_format=Out)
@@ -54,7 +54,7 @@ class TestAgentRunToolsDefault:
         agent = RuntimeAgent(config)
 
         generator = MagicMock()
-        generator.run.return_value = {"replies": [MagicMock(text="A Title")]}
+        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="A Title")]})
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,
@@ -166,7 +166,7 @@ class TestStructuredCallsDoNotResolveTools:
         agent = RuntimeAgent(config)
 
         generator = MagicMock()
-        generator.run.return_value = {"replies": [MagicMock(text='{"value": "x"}')]}
+        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,

@@ -994,7 +994,10 @@ class TestHandoffAttribution:
             "agent": "Research Planner"
         }
 
-    def test_streamed_chunk_carries_subagent_tag(self):
+    @pytest.mark.asyncio
+    async def test_streamed_chunk_carries_subagent_tag(self):
+        from django_ai_sdk.adapters.base import _SENTINEL
+        from django_ai_sdk.common import StreamWriter
         from haystack.dataclasses import StreamingChunk, ToolCallDelta
 
         stream = _stream_with_handoffs("research_planner")
@@ -1004,8 +1007,14 @@ class TestHandoffAttribution:
             meta={SUBAGENT_META_KEY: "Research Planner"},
             tool_calls=[ToolCallDelta(index=0, tool_name="search_web", id="call_9")],
         )
-        start = stream.get_streaming_tool_chunks(chunk)[0]
-        assert start.metadata == {"agent": "Research Planner"}
+        queue: asyncio.Queue = asyncio.Queue()
+        queue.put_nowait(chunk)
+        queue.put_nowait(_SENTINEL)
+        writer = StreamWriter(message_id="m1", storage_callback=None)
+
+        [_ async for _ in stream.get_events(queue, writer)]
+
+        assert writer.message.tool_calls[0]["agent"] == "Research Planner"
 
     def test_tool_chunks_only_tags_forwarded_chunks(self):
         from haystack.dataclasses import StreamingChunk, ToolCallDelta
