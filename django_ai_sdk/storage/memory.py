@@ -184,20 +184,24 @@ class MemoryStore:
         return messages
 
     @classmethod
-    def get_message(cls, message_id: str) -> MemoryMessage | None:
-        """Find message by ID across all threads."""
-        for messages in cls.messages.values():
-            for msg in messages:
-                if msg.id == message_id:
-                    return msg
+    def get_message(cls, thread_id: str, message_id: str) -> MemoryMessage | None:
+        """Find a message by ID within one thread."""
+        for msg in cls.messages.get(thread_id, []):
+            if msg.id == message_id:
+                return msg
         return None
 
     @classmethod
     def rate_message(
-        cls, message_id: str, rating: int | None, feedback: str = "", user_id: str | None = None
+        cls,
+        thread_id: str,
+        message_id: str,
+        rating: int | None,
+        feedback: str = "",
+        user_id: str | None = None,
     ) -> bool:
         """Rate a message."""
-        message = cls.get_message(message_id)
+        message = cls.get_message(thread_id, message_id)
         if message:
             if rating is not None:
                 # Update or create feedback for this user
@@ -223,9 +227,9 @@ class MemoryStore:
         return False
 
     @classmethod
-    def delete_message(cls, message_id: str) -> bool:
+    def delete_message(cls, thread_id: str, message_id: str) -> bool:
         """Soft delete a message."""
-        message = cls.get_message(message_id)
+        message = cls.get_message(thread_id, message_id)
         if message:
             message.is_deleted = True
             message.deleted_at = datetime.now(UTC)
@@ -233,9 +237,9 @@ class MemoryStore:
         return False
 
     @classmethod
-    def restore_message(cls, message_id: str) -> bool:
+    def restore_message(cls, thread_id: str, message_id: str) -> bool:
         """Restore a soft-deleted message."""
-        message = cls.get_message(message_id)
+        message = cls.get_message(thread_id, message_id)
         if message:
             message.is_deleted = False
             message.deleted_at = None
@@ -426,21 +430,21 @@ class MemoryStorageAdapter(BaseStorageAdapter):
     ) -> bool:
         """Rate a message in this thread."""
         user_id = str(user.pk) if user and user.is_authenticated else None
-        success = MemoryStore.rate_message(message_id, rating, feedback, user_id)
+        success = MemoryStore.rate_message(self.thread_id, message_id, rating, feedback, user_id)
         if success:
             logger.debug(f"Rated message {message_id}: {rating}")
         return success
 
     async def delete_message(self, message_id: str) -> bool:
         """Soft delete a message in this thread."""
-        success = MemoryStore.delete_message(message_id)
+        success = MemoryStore.delete_message(self.thread_id, message_id)
         if success:
             logger.debug(f"Soft deleted message {message_id}")
         return success
 
     async def restore_message(self, message_id: str) -> bool:
         """Restore a soft-deleted message."""
-        success = MemoryStore.restore_message(message_id)
+        success = MemoryStore.restore_message(self.thread_id, message_id)
         if success:
             logger.debug(f"Restored message {message_id}")
         return success
