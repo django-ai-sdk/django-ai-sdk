@@ -17,6 +17,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+        # The tables this app's later migrations alter are created there.
+        ("django_ai_sdk", "0001_initial"),
     ]
 
     operations = [
