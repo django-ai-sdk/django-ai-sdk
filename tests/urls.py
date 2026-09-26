@@ -15,6 +15,7 @@ api.add_router("/integrations", ai.get_integrations_router())
 
 urlpatterns = [
     path("api/", api.urls),
+    path("drf/", include("django_ai_sdk.contrib.drf.urls")),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),
     path("chat/<str:thread_id>/", ChatView.as_view()),
 ]
