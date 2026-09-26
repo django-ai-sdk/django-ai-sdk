@@ -86,7 +86,7 @@ await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=req
 
 ## Demo Endpoints
 
-The demo (`demo/apps/memories/views/`) implements a complete Ninja router (mounted at `/memories`) and a matching [experimental DRF router](/views-and-routing/#ninja-or-drf). Responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed via `agent_permissions()`.
+The demo (`demos/studio/apps/memories/views/`) implements a complete Ninja router (mounted at `/memories`) and a matching [experimental DRF router](/views-and-routing/#ninja-or-drf). Responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed via `agent_permissions()`.
 
 | Endpoint | Operation |
 | --- | --- |

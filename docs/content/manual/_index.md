@@ -15,7 +15,7 @@ If you're building an application with the SDK, start with the [Quick Start](/qu
 ```bash
 git clone https://github.com/django-ai-sdk/django-ai-sdk.git
 cd django-ai-sdk
-make setup      # demo/runtime extras only
+make setup      # runtime + demo extras only
 make setup-all  # every extra, including the torch-based transformers stack
 ```
 

@@ -53,7 +53,7 @@ Binary Office formats use `BaseBinaryFileProcessor`, which also requires a match
 | `JSONTransform` | JSON string → `dict` / `list` |
 | `TextTransform` | Any input → `{"data": ...}` dict |
 
-`BaseTransform` has a single `async run(data, **kwargs)` hook; transforms receive `agent=` when a pipeline runs with one. Write your own by subclassing it. For LLM extraction, the demo's `DocumentExtractionTransform` (`demo/apps/agents/transforms.py`) shows the pattern: run the extracted text through an agent with a `response_format`, e.g. the SDK's `DocumentExtraction` schema (summary, keywords, entities, facts, sections, events).
+`BaseTransform` has a single `async run(data, **kwargs)` hook; transforms receive `agent=` when a pipeline runs with one. Write your own by subclassing it. For LLM extraction, the demo's `DocumentExtractionTransform` (`demos/studio/apps/agents/transforms.py`) shows the pattern: run the extracted text through an agent with a `response_format`, e.g. the SDK's `DocumentExtraction` schema (summary, keywords, entities, facts, sections, events).
 
 ## Default Pipeline and FileService
 

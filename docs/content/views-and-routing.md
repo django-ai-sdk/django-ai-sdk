@@ -4,7 +4,7 @@ type: docs
 weight: 5
 ---
 
-This page covers wiring agents into Django views: the chat endpoint, thread management, runtime-configured agents, permissions, and workflows. The demo (`demo/apps/agents/views/`) contains complete Ninja and experimental DRF routers. This guide walks through the same API.
+This page covers wiring agents into Django views: the chat endpoint, thread management, runtime-configured agents, permissions, and workflows. The demo (`demos/studio/apps/agents/views/`) contains complete Ninja and experimental DRF routers. This guide walks through the same API.
 
 ## The Chat Endpoint
 
