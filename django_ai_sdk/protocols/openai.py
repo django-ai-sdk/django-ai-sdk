@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import time
 import uuid
@@ -104,11 +105,14 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         """
         Generate SSE-formatted streaming response in OpenAI format.
         """
-        # Generate ID
-        self.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        # The agent shares one handler across requests: each stream gets its own state.
+        state = copy.copy(self)
+        state.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        state.tool_calls_buffer = []
+        state.current_tool_call = None
 
         # Emit start chunk with role
-        start_chunk = self._create_chunk(OpenAIDelta(role="assistant"))
+        start_chunk = state._create_chunk(OpenAIDelta(role="assistant"))
         yield format_sse(start_chunk.model_dump())
 
         # Get events from adapter
@@ -124,7 +128,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                     case "text_chunk":
                         text_event = cast("TextChunkEvent", event)
                         # Emit content chunk immediately
-                        chunk = self._create_chunk(OpenAIDelta(content=text_event.content))
+                        chunk = state._create_chunk(OpenAIDelta(content=text_event.content))
                         yield format_sse(chunk.model_dump())
 
                     case "reasoning_chunk":
@@ -134,7 +138,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                     case "tool_call_start":
                         tool_start = cast("ToolCallStartEvent", event)
                         # Start buffering tool call
-                        self.current_tool_call = {
+                        state.current_tool_call = {
                             "id": tool_start.tool_call_id,
                             "type": "function",
                             "function": {
@@ -146,7 +150,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                     case "tool_input_complete":
                         tool_input = cast("ToolInputCompleteEvent", event)
                         # Add arguments to current tool call
-                        if self.current_tool_call:
+                        if state.current_tool_call:
                             # TODO: move into a utils, there should be a single way for
                             # formatting tool input arguments
                             args = (
@@ -154,9 +158,9 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                                 if isinstance(tool_input.tool_input, dict)
                                 else str(tool_input.tool_input)
                             )
-                            self.current_tool_call["function"]["arguments"] = args
-                            self.tool_calls_buffer.append(self.current_tool_call)
-                            self.current_tool_call = None
+                            state.current_tool_call["function"]["arguments"] = args
+                            state.tool_calls_buffer.append(state.current_tool_call)
+                            state.current_tool_call = None
 
                     case "tool_output":
                         # Tool output happens after the assistant message
@@ -171,10 +175,10 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                         # Emit final chunk with finish_reason and any buffered tool calls
                         delta = OpenAIDelta()
 
-                        if self.tool_calls_buffer:
-                            delta.tool_calls = self.tool_calls_buffer
+                        if state.tool_calls_buffer:
+                            delta.tool_calls = state.tool_calls_buffer
 
-                        final_chunk = self._create_chunk(
+                        final_chunk = state._create_chunk(
                             delta=delta,
                             finish_reason=end_event.finish_reason or "stop",
                         )
