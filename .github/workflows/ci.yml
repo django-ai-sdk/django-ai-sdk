@@ -30,6 +30,9 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Run demo tests
+        run: make test-demos
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
@@ -48,7 +51,7 @@ jobs:
           python-version: "3.12"
 
       - name: Ruff lint
-        run: uv run ruff check django_ai_sdk/ demo/
+        run: uv run ruff check django_ai_sdk/ demos/
 
       - name: Typecheck
         run: make typecheck

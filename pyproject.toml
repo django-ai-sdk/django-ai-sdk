@@ -76,8 +76,8 @@ openrouter = ["openrouter-haystack>=1.2.0"]
 transformers = ["transformers-haystack>=0.3.0"]
 
 [dependency-groups]
-# The demo project stack.
-demo = [
+# Stack for the demo projects in demos/.
+studio = [
   "daphne>=4.2.3",
   "ddgs-haystack>=1.1.0",
   "django-allauth[headless]>=65.18.0",
@@ -128,7 +128,7 @@ exclude = [
   "**/tests/**",
   "**/conftest.py",
 ]
-src = ["django_ai_sdk", "demo"]
+src = ["django_ai_sdk", "demos/studio"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -161,13 +161,13 @@ runtime-evaluated-decorators = [
 ]
 
 [tool.ty.src]
-include = ["django_ai_sdk", "demo"]
+include = ["django_ai_sdk", "demos"]
 exclude = [
   "docs/**",
   "**/tests/**",
   "**/conftest.py",
   "**/migrations/**",
-  "demo/**/settings.py",
+  "demos/**/settings.py",
   "**/node_modules/**",
   "**/__pycache__/**",
   "**/.*",

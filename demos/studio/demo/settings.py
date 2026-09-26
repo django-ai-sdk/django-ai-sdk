@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import environ
@@ -17,9 +16,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Take environment variables from .env file
 environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
-
-# Add the parent directory to Python path to import django_ai_sdk
-sys.path.insert(0, str(BASE_DIR.parent))
 
 
 # Quick-start development settings - unsuitable for production

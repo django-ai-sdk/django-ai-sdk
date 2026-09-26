@@ -1,6 +1,6 @@
-PHONY: setup setup-all format test typecheck tag build publish release docs-graphs docs-build docs-serve
+PHONY: setup setup-all format test test-demos typecheck tag build publish release docs-graphs docs-build docs-serve
 
-DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group demo
+DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
 TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers
 
 setup:
@@ -22,6 +22,9 @@ format:
 
 test:
 	uv run $(TEST_EXTRAS) pytest tests -v
+
+test-demos:
+	for d in demos/*/; do (cd $$d && make test) || exit 1; done
 
 typecheck:
 	uv run $(TEST_EXTRAS) ty check

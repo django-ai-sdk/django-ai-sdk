@@ -988,18 +988,6 @@ transformers = [
 ]
 
 [package.dev-dependencies]
-demo = [
-    { name = "daphne" },
-    { name = "ddgs-haystack" },
-    { name = "django-allauth", extra = ["headless"] },
-    { name = "django-cors-headers" },
-    { name = "django-environ" },
-    { name = "django-ninja" },
-    { name = "django-tasks-db" },
-    { name = "django-watchfiles" },
-    { name = "djangorestframework" },
-    { name = "trafilatura" },
-]
 dev = [
     { name = "django-stubs" },
     { name = "factory-boy" },
@@ -1013,6 +1001,18 @@ dev = [
     { name = "pytest-mock" },
     { name = "ruff" },
     { name = "ty" },
+]
+studio = [
+    { name = "daphne" },
+    { name = "ddgs-haystack" },
+    { name = "django-allauth", extra = ["headless"] },
+    { name = "django-cors-headers" },
+    { name = "django-environ" },
+    { name = "django-ninja" },
+    { name = "django-tasks-db" },
+    { name = "django-watchfiles" },
+    { name = "djangorestframework" },
+    { name = "trafilatura" },
 ]
 
 [package.metadata]
@@ -1053,18 +1053,6 @@ requires-dist = [
 provides-extras = ["all", "providers", "rag", "haystack", "mcp", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
 
 [package.metadata.requires-dev]
-demo = [
-    { name = "daphne", specifier = ">=4.2.3" },
-    { name = "ddgs-haystack", specifier = ">=1.1.0" },
-    { name = "django-allauth", extras = ["headless"], specifier = ">=65.18.0" },
-    { name = "django-cors-headers", specifier = ">=4.9.0" },
-    { name = "django-environ", specifier = ">=0.14.0" },
-    { name = "django-ninja", specifier = ">=1.6.2" },
-    { name = "django-tasks-db", specifier = ">=0.12.0" },
-    { name = "django-watchfiles", specifier = ">=1.4.0" },
-    { name = "djangorestframework", specifier = ">=3.17.1" },
-    { name = "trafilatura", specifier = ">=2.2.0" },
-]
 dev = [
     { name = "django-stubs", specifier = ">=6.0.7" },
     { name = "factory-boy", specifier = ">=3.3.3" },
@@ -1078,6 +1066,18 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.15.1" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "ty", specifier = ">=0.0.65" },
+]
+studio = [
+    { name = "daphne", specifier = ">=4.2.3" },
+    { name = "ddgs-haystack", specifier = ">=1.1.0" },
+    { name = "django-allauth", extras = ["headless"], specifier = ">=65.18.0" },
+    { name = "django-cors-headers", specifier = ">=4.9.0" },
+    { name = "django-environ", specifier = ">=0.14.0" },
+    { name = "django-ninja", specifier = ">=1.6.2" },
+    { name = "django-tasks-db", specifier = ">=0.12.0" },
+    { name = "django-watchfiles", specifier = ">=1.4.0" },
+    { name = "djangorestframework", specifier = ">=3.17.1" },
+    { name = "trafilatura", specifier = ">=2.2.0" },
 ]
 
 [[package]]
