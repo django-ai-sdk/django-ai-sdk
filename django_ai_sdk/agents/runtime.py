@@ -11,7 +11,7 @@ from django_ai_sdk.common import prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
 
-from .tool_agent import ToolAgent, ToolAgentConfig
+from .tool_agent import ToolAgent, ToolAgentConfig, default_hooks
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -80,6 +80,9 @@ class RuntimeAgent(Agent):
                 model=self.get_model(),
                 system_prompt=self.get_system_prompt(),
                 tools=tools,
+                # Same limits and hooks as a code-defined agent's own tool loop.
+                max_agent_steps=self.max_agent_steps,
+                hooks=default_hooks(self),
             ),
             generator=generator,
         )

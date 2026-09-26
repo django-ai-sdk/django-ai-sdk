@@ -140,10 +140,10 @@ class Agent(ABC, AgentInfoMixin):
     """
 
     # Name of agent.
-    name: str
+    name: str | None = None
 
     # Short description of agent.
-    description: str
+    description: str | None = None
 
     # Model identifier for LLM backend.
     model: str
@@ -306,11 +306,9 @@ class Agent(ABC, AgentInfoMixin):
             else VercelProtocolHandler()
         )
 
-        # Storage adapter setup
+        # Storage adapter setup: `storage_adapter` wins, the documented `storage` is honoured too
         self.storage_adapter = (
-            self.storage_adapter
-            if hasattr(self, "storage_adapter") and self.storage_adapter is not None
-            else MemoryStorageAdapter
+            getattr(self, "storage_adapter", None) or self.storage or MemoryStorageAdapter
         )
 
         if self.warmup_on_init and self.rag_provider is not None:

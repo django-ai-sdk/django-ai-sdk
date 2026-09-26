@@ -536,6 +536,10 @@ class AgentService(PermissionsMixin):
         agent = get_runtime_agent_class(config.agent)(config)
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
+        # A TypedDict is not checked at runtime: never let a raw dict set slug, is_public, ...
+        if unknown := set(data) - set(AgentUpdateData.__annotations__):
+            raise TypeError(f"Cannot update agent fields: {sorted(unknown)}")
+
         update_fields: list[str] = []
         for field, value in data.items():
             setattr(config, field, value)
