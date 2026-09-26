@@ -1,7 +1,7 @@
 PHONY: setup setup-all format test test-demos typecheck tag build publish release docs-graphs docs-build docs-serve
 
 DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
-TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers
+TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf
 
 setup:
 	uv sync $(DEMO_EXTRAS)

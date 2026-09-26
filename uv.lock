@@ -935,6 +935,9 @@ chroma = [
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
 ]
+drf = [
+    { name = "djangorestframework" },
+]
 embeddings = [
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
@@ -958,6 +961,9 @@ mcp = [
 ]
 mistral = [
     { name = "mistral-haystack" },
+]
+ninja = [
+    { name = "django-ninja" },
 ]
 ollama = [
     { name = "ollama-haystack" },
@@ -1029,7 +1035,9 @@ requires-dist = [
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'qdrant'" },
     { name = "django-ai-sdk", extras = ["files", "haystack", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
+    { name = "django-ninja", marker = "extra == 'ninja'", specifier = ">=1.6.2" },
     { name = "django-tasks", specifier = ">=0.12.0" },
+    { name = "djangorestframework", marker = "extra == 'drf'", specifier = ">=3.17.1" },
     { name = "fastembed-haystack", marker = "extra == 'embeddings'", specifier = ">=2.4.0" },
     { name = "firecrawl-anydoc", marker = "extra == 'files'", specifier = ">=0.2.4" },
     { name = "haystack-ai", specifier = ">=3.0.0" },
@@ -1050,7 +1058,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "transformers-haystack", marker = "extra == 'transformers'", specifier = ">=0.3.0" },
 ]
-provides-extras = ["all", "providers", "rag", "haystack", "mcp", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
+provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
 
 [package.metadata.requires-dev]
 dev = [

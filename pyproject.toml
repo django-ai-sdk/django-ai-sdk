@@ -53,6 +53,9 @@ rag = ["django-ai-sdk[chroma,qdrant]"]
 # dependency now.
 haystack = ["haystack-ai>=3.0.0"]
 mcp = ["mcp-haystack>=1.4.1", "authlib>=1.7.2"]
+# Ready-made HTTP layers (django_ai_sdk.contrib.*); bring the framework you use.
+ninja = ["django-ninja>=1.6.2"]
+drf = ["djangorestframework>=3.17.1"]
 # Files support
 files = [
   "firecrawl-anydoc>=0.2.4",
@@ -141,6 +144,10 @@ select = [
   "TCH",
 ]
 ignore = ["ANN401", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ninja reads endpoint annotations at runtime; they cannot move under TYPE_CHECKING.
+"django_ai_sdk/contrib/ninja/*" = ["TCH"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]
