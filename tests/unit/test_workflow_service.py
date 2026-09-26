@@ -163,6 +163,38 @@ class TestWorkflowServiceRunById:
         with pytest.raises(WorkflowSettings.DoesNotExist):
             await WorkflowService.run_by_id(str(uuid4()), user=author)
 
+    async def test_a_resume_refuses_new_inputs(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+
+        with pytest.raises(ValueError, match="reuses its own inputs"):
+            await WorkflowService.run_by_id(
+                str(record.id), user=author, run_id=str(uuid4()), inputs={"topic": "x"}
+            )
+
+    async def test_force_needs_a_run_to_resume(self, author):
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+
+        with pytest.raises(ValueError, match="only applies when resuming"):
+            await WorkflowService.run_by_id(str(record.id), user=author, force=True)
+
+    @pytest.mark.parametrize(("force", "expected"), [(False, "running"), (True, "failed")])
+    async def test_only_a_forced_resume_releases_a_stuck_step(self, author, force, expected):
+        from django_ai_sdk.workflows.models import WorkflowRunStep
+
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+        with patch.object(WorkflowExecutor, "enqueue", AsyncMock()):
+            run = await WorkflowService.run_by_id(str(record.id), user=author)
+            # The worker died holding the step.
+            await WorkflowRunStep.objects.acreate(
+                run=run, sequence=0, step_name="result", status=WorkflowRunStep.Status.RUNNING
+            )
+            await WorkflowService.run_by_id(
+                str(record.id), user=author, run_id=str(run.id), inputs={}, force=force
+            )
+
+        step = await WorkflowRunStep.objects.aget(run=run, sequence=0)
+        assert step.status == expected
+
 
 @pytest.mark.django_db
 @pytest.mark.asyncio

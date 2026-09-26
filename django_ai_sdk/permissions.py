@@ -374,8 +374,6 @@ class AgentDefaultPermission(BasePermission):
         }
     )
 
-    AGENT_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
-
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if operation in _USE_OPERATIONS:
             if "agent" not in kwargs:
@@ -392,7 +390,7 @@ class AgentDefaultPermission(BasePermission):
                 return False
 
             return await self._membership_allows(user, operation, config)
-        if operation not in self.AGENT_OPS:
+        if operation not in self.READ | self.WRITE | self.MANAGE:
             return True
         return user is not None and bool(user.is_authenticated)
 
@@ -454,12 +452,10 @@ class WorkflowDefaultPermission(BasePermission):
     WRITE: frozenset[Operation] = frozenset({Operation.RUN_WORKFLOW})
     MANAGE: frozenset[Operation] = frozenset({Operation.MANAGE_WORKFLOW})
 
-    WORKFLOW_OPS: frozenset[Operation] = frozenset(READ | WRITE | MANAGE)
-
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
-        return operation in self.WORKFLOW_OPS
+        return operation in self.READ | self.WRITE | self.MANAGE
 
     async def has_object_permission(
         self,

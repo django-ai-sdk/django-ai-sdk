@@ -46,8 +46,22 @@ class WorkflowService(PermissionsMixin):
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         run_id: str | None = None,
+        force: bool = False,
     ) -> WorkflowRun:
-        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+        """Start a run of a stored workflow, or resume `run_id` from where it stopped.
+
+        A resume reuses the run's own inputs. A step left running by a worker that
+        died refuses the resume until `force=True` releases it; only pass it when
+        that worker is known to be gone, or the step may run twice.
+        """
+        from django.utils import timezone
+
+        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
+
+        if run_id and inputs:
+            raise ValueError("A resumed run reuses its own inputs; do not pass new ones.")
+        if force and not run_id:
+            raise ValueError("`force` only applies when resuming a run.")
 
         await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
@@ -63,6 +77,14 @@ class WorkflowService(PermissionsMixin):
                 user, Operation.VIEW_WORKFLOW, run, raise_on_deny=False
             ):
                 raise WorkflowRun.DoesNotExist
+            if force:
+                await WorkflowRunStep.objects.filter(
+                    run=run, status=WorkflowRunStep.Status.RUNNING
+                ).aupdate(
+                    status=WorkflowRunStep.Status.FAILED,
+                    error="Interrupted: released by a forced resume.",
+                    completed_at=timezone.now(),
+                )
         else:
             validate_inputs(workflow, inputs or {})
             run = await open_run(workflow, inputs=inputs, user=user, record=record)
