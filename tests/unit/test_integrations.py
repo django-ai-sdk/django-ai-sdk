@@ -19,6 +19,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -1140,6 +1141,24 @@ class TestOAuthTokenRefresh:
         assert result is not None
         assert result.get_access_token() == "winner-access"
 
+    async def test_a_failed_refresh_of_a_disconnected_token_reports_failure(self, monkeypatch):
+        """The row can be deleted (disconnect) while our refresh is in flight."""
+        from django_ai_sdk.integrations.mcp.loader import refresh_oauth_token
+        from django_ai_sdk.integrations.mcp.models import MCPOAuthToken
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        token_obj = await self._make_token(user)
+        await MCPOAuthToken.objects.filter(pk=token_obj.pk).adelete()
+
+        _patch_discovery(monkeypatch)
+        _patch_oauth_transport(
+            monkeypatch, _mock_transport({"error": "invalid_grant"}, status_code=400)
+        )
+
+        config = OAuthMCPIntegrationConfig(url="https://mcp.example.com", client_id="c")
+        assert await refresh_oauth_token(token_obj, config) is None
+
 
 @pytest.mark.django_db
 class TestExchangeToken:
@@ -1268,9 +1287,9 @@ class TestOAuthRedirectFlow:
         )
 
         assert result["redirect_url"].startswith("https://auth.example.com/authorize?")
-        # PKCE state must be held server-side; the callback compares against it.
-        assert request.session[loader_module._K_STATE.format("notion")]
-        assert request.session[loader_module._K_VERIFIER.format("notion")]
+        # PKCE material must be held server-side, under the state the callback returns.
+        state = parse_qs(urlparse(result["redirect_url"]).query)["state"][0]
+        assert request.session[loader_module._K_FLOW.format("notion", state)]["verifier"]
 
     async def test_connect_rejects_an_unknown_server(self):
         from django_ai_sdk.integrations.services import IntegrationService
@@ -1315,11 +1334,10 @@ class TestOAuthRedirectFlow:
             code="auth-code",
             state="the-state",
         )
-        request.session[loader_module._K_STATE.format("notion")] = "the-state"
-        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
-        request.session[loader_module._K_TOKEN_ENDPOINT.format("notion")] = (
-            "https://auth.example.com/token"
-        )
+        request.session[loader_module._K_FLOW.format("notion", "the-state")] = {
+            "verifier": "the-verifier",
+            "token_endpoint": "https://auth.example.com/token",
+        }
 
         response = await oauth_views.oauth_callback(request, "notion")
 
@@ -1330,7 +1348,7 @@ class TestOAuthRedirectFlow:
         assert stored.get_access_token() == "fresh-access"
         assert stored.get_refresh_token() == "fresh-refresh"
         # One-shot PKCE material must not survive the exchange.
-        assert loader_module._K_VERIFIER.format("notion") not in request.session
+        assert loader_module._K_FLOW.format("notion", "the-state") not in request.session
 
     async def test_callback_clears_a_status_cached_before_the_token_existed(
         self, settings, monkeypatch
@@ -1377,11 +1395,10 @@ class TestOAuthRedirectFlow:
             code="auth-code",
             state="the-state",
         )
-        request.session[loader_module._K_STATE.format("notion")] = "the-state"
-        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
-        request.session[loader_module._K_TOKEN_ENDPOINT.format("notion")] = (
-            "https://auth.example.com/token"
-        )
+        request.session[loader_module._K_FLOW.format("notion", "the-state")] = {
+            "verifier": "the-verifier",
+            "token_endpoint": "https://auth.example.com/token",
+        }
 
         response = await oauth_views.oauth_callback(request, "notion")
         assert response.status_code == 302
@@ -1389,6 +1406,30 @@ class TestOAuthRedirectFlow:
         # The stale entry is gone, so the next read goes back to the server.
         await integration._cache.get(key, fetch)
         assert fetches == 2
+
+    async def test_two_tabs_connecting_the_same_server_each_keep_their_flow(self):
+        """A second tab must not overwrite the first tab's PKCE verifier."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from django_ai_sdk.integrations.mcp import loader as loader_module
+        from django_ai_sdk.integrations.mcp import oauth_views
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        request = self._request(
+            user, path="/api/integrations/oauth/notion/callback/", code="c", state="first"
+        )
+        request.session[loader_module._K_FLOW.format("notion", "first")] = {"verifier": "v1"}
+        request.session[loader_module._K_FLOW.format("notion", "second")] = {"verifier": "v2"}
+
+        with patch.object(
+            oauth_views, "_get_oauth_integration", AsyncMock(return_value=MagicMock())
+        ):
+            _code, verifier, _endpoint, _ = await oauth_views._validate_callback_params(
+                request, "notion"
+            )
+
+        assert verifier == "v1"
 
     async def test_callback_rejects_a_mismatched_state(self, monkeypatch):
         """CSRF protection for the OAuth handshake: a code arriving with someone else's
@@ -1414,8 +1455,9 @@ class TestOAuthRedirectFlow:
             code="auth-code",
             state="attacker-state",
         )
-        request.session[loader_module._K_STATE.format("notion")] = "the-real-state"
-        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
+        request.session[loader_module._K_FLOW.format("notion", "the-real-state")] = {
+            "verifier": "the-verifier"
+        }
 
         response = await oauth_views.oauth_callback(request, "notion")
 
@@ -1472,11 +1514,10 @@ class TestOAuthRedirectFlow:
             code="auth-code",
             state="the-state",
         )
-        request.session[loader_module._K_STATE.format("notion")] = "the-state"
-        request.session[loader_module._K_VERIFIER.format("notion")] = "the-verifier"
-        request.session[loader_module._K_TOKEN_ENDPOINT.format("notion")] = (
-            "https://auth.example.com/token"
-        )
+        request.session[loader_module._K_FLOW.format("notion", "the-state")] = {
+            "verifier": "the-verifier",
+            "token_endpoint": "https://auth.example.com/token",
+        }
 
         response = await oauth_views.oauth_callback(request, "notion")
 
