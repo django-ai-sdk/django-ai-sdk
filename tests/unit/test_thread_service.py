@@ -296,6 +296,46 @@ class TestDbStorageAdapterUpdateThreadTitle:
         await thread.arefresh_from_db()
         assert thread.title == "Short title"
 
+    async def test_a_title_update_keeps_a_file_memory_set_meanwhile(self):
+        from django_ai_sdk.memories.models import Memory
+
+        thread = await Thread.objects.acreate()
+        stale = await Thread.objects.aget(id=thread.id)  # read before the upload lands
+        memory = await Memory.objects.acreate(name="files", is_hidden=True)
+        await Thread.objects.filter(id=thread.id).aupdate(file_memory=memory)
+
+        with patch.object(Thread.objects, "aget", AsyncMock(return_value=stale)):
+            await DbStorageAdapter.update_thread(str(thread.id), title="Renamed")
+
+        await thread.arefresh_from_db()
+        assert thread.title == "Renamed"
+        assert thread.file_memory_id == memory.id
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestRatingTwiceDoesNotRaise:
+    """A double-click rates twice at once: both requests may miss the existing row."""
+
+    async def test_a_rating_that_raced_the_first_one_updates_it(self):
+        from django_ai_sdk.conversation.models import Message, MessageFeedback
+        from tests.factories.db import UserFactory
+
+        user = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=user)
+        message = await Message.objects.acreate(thread=thread, result={"role": "assistant"})
+        adapter = DbStorageAdapter(str(thread.id))
+        await adapter.rate_message(str(message.id), rating=1, user=user)
+
+        # The second request read before the first one's row existed.
+        with patch.object(
+            MessageFeedback.objects, "aget", AsyncMock(side_effect=MessageFeedback.DoesNotExist)
+        ):
+            assert await adapter.rate_message(str(message.id), rating=-1, user=user) is True
+
+        [feedback] = [f async for f in MessageFeedback.objects.filter(message=message)]
+        assert feedback.rating == -1
+
 
 # ============================================================================
 # Thread history & file meta

@@ -159,7 +159,8 @@ class DbStorageAdapter(BaseStorageAdapter):
                 # Merge metadata
                 thread.metadata.update(metadata)
 
-            await thread.asave()
+            # Only these fields: a full save would write back a stale file_memory.
+            await thread.asave(update_fields=["title", "metadata", "updated_at"])
             return True
         except (Thread.DoesNotExist, ValidationError):
             return False
@@ -294,23 +295,13 @@ class DbStorageAdapter(BaseStorageAdapter):
             # Verify message exists and belongs to this thread
             await Message.objects.aget(id=message_id, thread_id=self.thread_id)
             if rating is not None:
-                # Try to get existing feedback
-                try:
-                    fb = await MessageFeedback.objects.aget(message_id=message_id, user=user)
-                    # Update existing
-                    fb.rating = rating
-                    fb.feedback = feedback
-                    await fb.asave(update_fields=["rating", "feedback"])
-                    logger.debug(f"Updated feedback for message {message_id}: rating={rating}")
-                except MessageFeedback.DoesNotExist:
-                    # Create new
-                    await MessageFeedback.objects.acreate(
-                        message_id=message_id,
-                        user=user,
-                        rating=rating,
-                        feedback=feedback,
-                    )
-                    logger.debug(f"Created feedback for message {message_id}: rating={rating}")
+                # One call, not get-then-create: a double-click would hit the unique constraint.
+                await MessageFeedback.objects.aupdate_or_create(
+                    message_id=message_id,
+                    user=user,
+                    defaults={"rating": rating, "feedback": feedback},
+                )
+                logger.debug(f"Saved feedback for message {message_id}: rating={rating}")
             else:
                 # Delete feedback when rating is None
                 await MessageFeedback.objects.filter(message_id=message_id, user=user).adelete()
