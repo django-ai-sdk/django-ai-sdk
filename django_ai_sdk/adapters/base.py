@@ -651,7 +651,7 @@ class Stream:
         if self.store and self.storage_adapter:
             stream_writer = StreamWriter(
                 message_id=message_id,
-                model="haystack-pipeline",
+                model=self.model_name or "haystack-pipeline",
                 role="assistant",
                 storage_callback=self.storage_adapter.storage_callback,
             )
@@ -727,7 +727,6 @@ class Stream:
             yield ErrorEvent(
                 error_message=f"{type(critical_error).__name__}: {str(critical_error)}"
             )
-            return
 
         finally:
             if pipeline_task is not None and not pipeline_task.done():
