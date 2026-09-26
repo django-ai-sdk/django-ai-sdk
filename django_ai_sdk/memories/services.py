@@ -41,6 +41,7 @@ from django_ai_sdk.permissions import (
     get_agent_permissions,
     has_perms,
 )
+from django_ai_sdk.storage.services import ThreadService
 from django_ai_sdk.tasks import TaskStatus, aget_task_status
 
 # Catches the worker dying outright (nothing left to hit PIPELINE_TIMEOUT_SECONDS'
@@ -576,9 +577,10 @@ class MemoryService(PermissionsMixin):
     @classmethod
     async def link_memory_to_thread(cls, memory_id: str, thread_id: str, *, user: UserType) -> None:
         """Link a memory to a thread."""
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.LINK_MEMORY, memory)
-        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
         await ThreadMemory.objects.aget_or_create(
             thread=thread,
             memory=memory,
@@ -589,6 +591,8 @@ class MemoryService(PermissionsMixin):
         cls, memory_id: str, thread_id: str, *, user: UserType
     ) -> None:
         """Unlink a memory from a thread."""
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UNLINK_MEMORY, memory)
         link = await _aget_or_not_found(
@@ -606,8 +610,16 @@ class MemoryService(PermissionsMixin):
         offset: int = 0,
     ) -> list[ThreadMemoryOut]:
         """List all memories connected to a thread with their active status."""
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
+        # Filtered before slicing, so a page is not short by the rows it drops.
+        readable = cls.has_queryset_perms(
+            user, Operation.LIST_THREAD_MEMORIES, queryset=Memory.objects.all()
+        )
         thread_memories = (
-            ThreadMemory.objects.filter(thread_id=thread_id, memory__is_hidden=False)
+            ThreadMemory.objects.filter(
+                thread_id=thread_id, memory__is_hidden=False, memory__in=readable
+            )
             .select_related("memory")
             .prefetch_related("memory__memory_users")
             .annotate(document_count=Count("memory__entries"))[
@@ -674,6 +686,7 @@ class MemoryService(PermissionsMixin):
             PermissionDenied: If the user lacks LINK_MEMORY on any memory.
         """
         thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
 
         memories = {str(m.id): m async for m in Memory.objects.filter(id__in=memory_ids)}
         missing = [mid for mid in memory_ids if mid not in memories]
@@ -700,6 +713,8 @@ class MemoryService(PermissionsMixin):
         user: UserType,
     ) -> ThreadMemoryOut:
         """Toggle the active status of a memory for a thread."""
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         thread_memory = await _aget_or_not_found(
             ThreadMemory.objects, thread_id=thread_id, memory_id=memory_id
         )
@@ -724,6 +739,8 @@ class MemoryService(PermissionsMixin):
         cls, thread_id: str, memory_id: str, *, user: UserType
     ) -> None:
         """Disconnect a memory from a thread."""
+        thread = await _aget_or_not_found(Thread.objects, id=thread_id)
+        await ThreadService.has_perms(user, Operation.UPDATE_THREAD, thread)
         link = await _aget_or_not_found(
             ThreadMemory.objects, thread_id=thread_id, memory_id=memory_id
         )
@@ -753,11 +770,15 @@ class MemoryService(PermissionsMixin):
             thread = Thread.objects.select_for_update().get(id=thread_id)
             if thread.file_memory_id:
                 return thread.file_memory
+            # Private: uploads are the thread owner's content, not a shared memory.
             memory = Memory.objects.create(
                 name=f"thread_files_{thread_id}",
                 description="Thread file uploads",
                 is_hidden=True,
+                is_public=False,
             )
+            if thread.user_id:
+                MemoryUser.objects.create(memory=memory, user_id=thread.user_id)
             thread.file_memory = memory
             thread.save(update_fields=["file_memory", "updated_at"])
             ThreadMemory.objects.create(thread=thread, memory=memory, active=True)
@@ -775,6 +796,7 @@ class MemoryService(PermissionsMixin):
         if agent_id is None:
             raise ValueError("Thread has no agent")
         agent = await AgentService.get(agent_id)
+        await ThreadService.has_perms(user, Operation.UPLOAD_FILE, thread)
         await has_perms(
             user,
             Operation.UPLOAD_FILE,
@@ -848,6 +870,7 @@ class MemoryService(PermissionsMixin):
         if agent_id is None:
             raise ValueError("Thread has no agent")
         agent = await AgentService.get(agent_id)
+        await ThreadService.has_perms(user, Operation.VIEW_FILE, thread)
         await has_perms(
             user,
             Operation.VIEW_FILE,
@@ -880,6 +903,7 @@ class MemoryService(PermissionsMixin):
         if agent_id is None:
             raise ValueError("Thread has no agent")
         agent = await AgentService.get(agent_id)
+        await ThreadService.has_perms(user, Operation.DELETE_FILE, thread)
         await has_perms(
             user,
             Operation.DELETE_FILE,
@@ -989,6 +1013,7 @@ class MemoryService(PermissionsMixin):
             if agent_id is None:
                 raise ValueError("Thread has no agent")
             agent = await AgentService.get(agent_id)
+            await ThreadService.has_perms(user, Operation.UPLOAD_FILE, thread)
             await has_perms(
                 user,
                 Operation.UPLOAD_FILE,
@@ -1057,6 +1082,7 @@ class MemoryService(PermissionsMixin):
             if agent_id is None:
                 raise ValueError("Thread has no agent")
             agent = await AgentService.get(agent_id)
+            await ThreadService.has_perms(user, Operation.UPLOAD_FILE, thread)
             await has_perms(
                 user,
                 Operation.UPLOAD_FILE,

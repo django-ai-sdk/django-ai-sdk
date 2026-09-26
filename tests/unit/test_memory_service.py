@@ -3,6 +3,9 @@ Unit tests for MemoryService permission enforcement.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+
+from django.core.files.base import ContentFile
 
 import pytest
 
@@ -568,7 +571,7 @@ class TestMemoryServiceListThreadMemories:
         from tests.mocks.permissions import memory_permissions
 
         owner = await self._get_user()
-        thread = await Thread.objects.acreate()
+        thread = await Thread.objects.acreate(user=owner)
         mem = await Memory.objects.acreate(name="owned", is_public=False)
         await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
@@ -587,7 +590,7 @@ class TestMemoryServiceListThreadMemories:
 
         owner = await self._get_user()
         stranger = await self._get_user()
-        thread = await Thread.objects.acreate()
+        thread = await Thread.objects.acreate(user=stranger)
         mem = await Memory.objects.acreate(name="private", is_public=False)
         await MemoryUser.objects.acreate(memory=mem, user=owner, can_manage=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
@@ -604,7 +607,7 @@ class TestMemoryServiceListThreadMemories:
         from tests.mocks.permissions import memory_permissions
 
         stranger = await self._get_user()
-        thread = await Thread.objects.acreate()
+        thread = await Thread.objects.acreate(user=stranger)
         mem = await Memory.objects.acreate(name="public", is_public=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
 
@@ -614,20 +617,22 @@ class TestMemoryServiceListThreadMemories:
         assert len(result) == 1
         assert str(result[0].id) == str(mem.id)
 
-    async def test_anonymous_gets_empty_list(self):
+    async def test_anonymous_is_refused(self):
         from django_ai_sdk.memories.models import Memory, ThreadMemory
         from django_ai_sdk.memories.services import MemoryService
         from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.permissions import PermissionDenied
         from tests.mocks.permissions import memory_permissions
 
         thread = await Thread.objects.acreate()
         mem = await Memory.objects.acreate(name="public", is_public=True)
         await ThreadMemory.objects.acreate(thread=thread, memory=mem, active=True)
 
-        with memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"):
-            result = await MemoryService.list_thread_memories(str(thread.id), user=None)
-
-        assert len(result) == 0
+        with (
+            memory_permissions("django_ai_sdk.permissions.MemoryDefaultPermission"),
+            pytest.raises(PermissionDenied),
+        ):
+            await MemoryService.list_thread_memories(str(thread.id), user=None)
 
 
 # ============================================================================
@@ -732,3 +737,132 @@ class TestThreadFileMemory:
 
         assert first.id == second.id
         assert await Memory.objects.filter(name=f"thread_files_{thread.id}").acount() == 1
+
+
+# ============================================================================
+# MemoryService — a thread's memories belong to the thread's owner
+# ============================================================================
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+class TestThreadMemoryOwnership:
+    """A public memory is readable by anyone; someone else's thread is not."""
+
+    async def _setup(self):
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.memories.models import Memory, ThreadMemory
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        stranger = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=owner)
+        linked = await Memory.objects.acreate(name="linked", is_public=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=linked, active=True)
+        public = await Memory.objects.acreate(name="public", is_public=True)
+        return owner, stranger, thread, linked, public
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda s, t, linked, public, u: s.link_memory_to_thread(public, t, user=u),
+            lambda s, t, linked, public, u: s.unlink_memory_from_thread(linked, t, user=u),
+            lambda s, t, linked, public, u: s.bulk_connect_memories(t, [public], user=u),
+            lambda s, t, linked, public, u: s.toggle_memory_active(t, linked, False, user=u),
+            lambda s, t, linked, public, u: s.disconnect_memory_from_thread(t, linked, user=u),
+            lambda s, t, linked, public, u: s.list_thread_memories(t, user=u),
+        ],
+        ids=["link", "unlink", "bulk", "toggle", "disconnect", "list"],
+    )
+    async def test_a_stranger_cannot_touch_someone_elses_thread(self, call):
+        from django_ai_sdk.memories.models import ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        owner, stranger, thread, linked, public = await self._setup()
+
+        with pytest.raises(PermissionDenied):
+            await call(MemoryService, str(thread.id), str(linked.id), str(public.id), stranger)
+
+        active = [
+            str(m)
+            async for m in ThreadMemory.objects.filter(thread=thread, active=True).values_list(
+                "memory_id", flat=True
+            )
+        ]
+        assert active == [str(linked.id)]
+
+    async def test_the_owner_can_link_a_public_memory(self):
+        from django_ai_sdk.memories.models import ThreadMemory
+        from django_ai_sdk.memories.services import MemoryService
+
+        owner, stranger, thread, linked, public = await self._setup()
+
+        await MemoryService.link_memory_to_thread(str(public.id), str(thread.id), user=owner)
+
+        assert await ThreadMemory.objects.filter(thread=thread, memory=public).aexists()
+
+    async def test_the_thread_file_memory_is_private_to_the_owner(self):
+        from django_ai_sdk.conversation.models import Thread
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import Operation
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        stranger = await UserFactory.acreate()
+        thread = await Thread.objects.acreate(user=owner)
+
+        memory = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+
+        for operation in (Operation.VIEW_MEMORY, Operation.VIEW_DOCUMENT, Operation.LIST_DOCUMENTS):
+            assert await MemoryService.has_perms(owner, operation, memory, raise_on_deny=False)
+            assert not await MemoryService.has_perms(
+                stranger, operation, memory, raise_on_deny=False
+            )
+
+
+# Same flush reason as TestUploadThreadFileRespectsAgentFileUpload.
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+class TestThreadFilesBelongToTheThreadOwner:
+    """A public agent lets anyone chat with it, not into someone else's thread."""
+
+    async def _setup(self):
+        from uuid import uuid4
+
+        from django_ai_sdk.agents.models import AgentSettings
+        from django_ai_sdk.conversation.models import Thread
+        from tests.factories.db import UserFactory
+
+        owner = await UserFactory.acreate()
+        stranger = await UserFactory.acreate()
+        config = await AgentSettings.objects.acreate(
+            name="Public", slug=str(uuid4()), agent="test", file_upload=True, is_public=True
+        )
+        thread = await Thread.objects.acreate(user=owner, metadata={"agent_id": str(config.id)})
+        return owner, stranger, thread
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda s, t, u: s.upload_thread_file(t, ContentFile(b"x", name="a.txt"), user=u),
+            lambda s, t, u: s.list_thread_files(t, user=u),
+            lambda s, t, u: s.delete_thread_file(t, str(uuid4()), user=u),
+        ],
+        ids=["upload", "list", "delete"],
+    )
+    async def test_a_stranger_is_refused(self, call):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        owner, stranger, thread = await self._setup()
+
+        with pytest.raises(PermissionDenied):
+            await call(MemoryService, str(thread.id), stranger)
+
+    async def test_the_owner_lists_their_files(self):
+        from django_ai_sdk.memories.services import MemoryService
+
+        owner, stranger, thread = await self._setup()
+
+        assert await MemoryService.list_thread_files(str(thread.id), user=owner) == []
