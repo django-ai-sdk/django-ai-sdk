@@ -21,7 +21,7 @@ format:
 	uv run ruff format .
 
 test:
-	PYTHONPATH=demo uv run $(TEST_EXTRAS) pytest tests -v
+	uv run $(TEST_EXTRAS) pytest tests -v
 
 typecheck:
 	uv run $(TEST_EXTRAS) ty check
