@@ -1,7 +1,7 @@
 ---
 title: Error Handling
 type: docs
-weight: 6
+weight: 7
 ---
 
 When something fails, a client gets a stable **error code**, a message and a short **ref**. It never gets the exception text: provider URLs, file paths and class names stay in your logs, tagged with the same ref, so a user can quote it to an admin.

@@ -1,7 +1,7 @@
 ---
 title: Command Line Interface
 type: docs
-weight: 7
+weight: 9
 ---
 
 The SDK ships two management commands. **`warmup_rag`** pre-builds RAG pipelines so the first chat request doesn't pay the indexing cost, and **`refresh_integrations`** refreshes MCP integration tool lists.

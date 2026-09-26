@@ -4,11 +4,114 @@ type: docs
 weight: 5
 ---
 
-This page covers wiring agents into Django views: the chat endpoint, thread management, runtime-configured agents, permissions, and workflows. The demo (`demos/studio/apps/agents/views/`) contains complete Ninja and experimental DRF routers. This guide walks through the same API.
+This page covers exposing agents over HTTP: ready-made endpoints for django-ninja and Django REST framework, a framework-free chat view, and the services underneath if you'd rather write your own.
+
+## Pick a starting point
+
+| You use | Install | Mount |
+| --- | --- | --- |
+| django-ninja | `pip install django-ai-sdk[ninja]` | `get_*_router()` from `django_ai_sdk.contrib.ninja` |
+| Django REST framework | `pip install django-ai-sdk[drf]` | `include("django_ai_sdk.contrib.drf.urls")` |
+| Neither / your own style | nothing extra | `ChatView` plus the services below |
+
+The SDK never imports Ninja or DRF itself; the `contrib` layers are optional. Both are thin: every endpoint calls a service (`ThreadService`, `AgentService`, `MemoryService`, `WorkflowService`, `IntegrationService`, `TraceService`), and the services do the permission checks. So whichever you choose, behaviour is the same.
+
+{{< callout type="warning" >}}
+The contrib layers are **beta**: URLs and response shapes may still change between minor releases. Pin your version if a frontend client is generated from them.
+{{< /callout >}}
+
+### django-ninja
+
+```python
+# urls.py
+from django.urls import include, path
+from ninja import NinjaAPI
+from ninja.security import SessionAuth
+
+from django_ai_sdk.contrib import ninja as ai
+
+api = NinjaAPI(auth=SessionAuth())
+ai.register_error_handlers(api)  # every error answers with a code, see Error Handling
+
+api.add_router("/", ai.get_threads_router())
+api.add_router("/", ai.get_agents_router())
+api.add_router("/", ai.get_workflows_router())
+api.add_router("/memories", ai.get_memories_router())
+api.add_router("/integrations", ai.get_integrations_router())
+
+urlpatterns = [
+    path("api/", api.urls),
+    path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),  # OAuth callback
+]
+```
+
+Each `get_*_router()` returns a **new** Router (Ninja can't mount one Router twice), so you can trim it and add your own endpoints next to the SDK's:
+
+```python
+router = ai.get_threads_router(exclude={"delete_all_threads"})
+
+@router.get("/threads/{thread_id}/export/")
+async def export_thread(request, thread_id: str):
+    ...
+
+api.add_router("/", router)
+```
+
+`exclude` takes endpoint function names, which are also the OpenAPI `operationId`s; a misspelt name raises at startup. Your own routers can live on the same `NinjaAPI`, which is how the studio demo adds its health, digest and account endpoints (`demos/studio/apps/agents/views/ninja.py`).
+
+`register_error_handlers()` covers the whole API, so your own endpoints on it answer errors the same way: raise `NotFound` or `UserError` from `django_ai_sdk.errors` and the client gets the matching code. See [Error Handling](/errors/).
+
+### Django REST framework
+
+```python
+# urls.py
+urlpatterns = [
+    path("api/", include("django_ai_sdk.contrib.drf.urls")),
+    path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),  # OAuth callback
+]
+```
+
+That registers `ThreadViewSet`, `MessageViewSet`, `AgentViewSet`, `RuntimeAgentViewSet`, `MemoryViewSet`, `WorkflowViewSet` and `IntegrationViewSet`, plus the streaming `ChatView` at `threads/<id>/chat/`. Authentication, permission and throttle classes come from your `REST_FRAMEWORK` settings. The viewsets answer errors with [error codes](/errors/) whatever your `EXCEPTION_HANDLER` is; set it to `django_ai_sdk.contrib.drf.exception_handler` to give your own views the same.
+
+To change one resource, subclass its viewset and register it on your own router:
+
+```python
+from rest_framework.decorators import action
+from rest_framework.routers import DefaultRouter
+from rest_framework.throttling import UserRateThrottle
+
+from django_ai_sdk.contrib.drf import ThreadViewSet
+
+class MyThreadViewSet(ThreadViewSet):
+    throttle_classes = [UserRateThrottle]
+
+    @action(detail=True, methods=["get"])
+    def export(self, request, thread_id=None):
+        ...
+
+router = DefaultRouter()
+router.register("threads", MyThreadViewSet, basename="thread")
+```
+
+Request bodies are validated with the pydantic models in `django_ai_sdk.views.schemas`, and responses are the services' own models, dumped to JSON. There are no duplicate DRF serializers to keep in sync, but the browsable API shows no forms for these endpoints.
+
+Need to change what these endpoints do? See [Overriding Views](/overriding-views/) for replacing, removing and extending endpoints in both frameworks.
+
+### Your own views
+
+Chat is the one endpoint that is awkward to write in any framework, so the SDK ships it as a plain async Django view:
+
+```python
+from django_ai_sdk.views.chat import ChatView
+
+urlpatterns = [path("api/threads/<str:thread_id>/chat/", ChatView.as_view())]
+```
+
+Subclass it and override `get_agent()` or `error_response(exc)` to change how the agent is picked or how failures look. For everything else, call the services as shown in the rest of this page. They raise typed errors (`NotFound`, `PermissionDenied`, ...), and `django_ai_sdk.errors.error_response(exc)` turns any exception into the status and body both contrib layers send. See [Error Handling](/errors/) for the codes.
 
 ## The Chat Endpoint
 
-Agents expose `as_view()`, which returns a ready-to-return `StreamingHttpResponse`. The minimal endpoint:
+Agents expose `as_view()`, which returns a ready-to-return `StreamingHttpResponse`. The minimal hand-written endpoint:
 
 ```python
 from ninja import Router
@@ -214,12 +317,12 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
 Agents declare `permissions` classes; `as_view()`, `history()`, and `AgentService` check them before acting, raising `PermissionDenied` when access is denied.
 
 ```python
-from django_ai_sdk.permissions import ObjectPermissions
+from django_ai_sdk.views.permissions import agent_permissions, memory_permissions, thread_permissions
 
-perms: ObjectPermissions = await agent_permissions(request.user, agent_id)
+perms = await agent_permissions(request.user, agent_id)  # ObjectPermissions(can_read=..., ...)
 ```
 
-Return `ObjectPermissions` in your agent-info response so the frontend can show/hide controls. Domain-wide overrides live in settings:
+Return `ObjectPermissions` in your responses so the frontend can show or hide controls; both contrib layers already do. Domain-wide overrides live in settings:
 
 ```python
 AI_SDK_PERMISSIONS = {
@@ -259,14 +362,6 @@ AI_SDK_WORKFLOW_ACTIONS = {
     "console_log": "apps.agents.actions.ConsoleLogAction",
 }
 ```
-
-## Ninja or DRF?
-
-{{< callout type="warning" >}}
-**DRF support is experimental.** We're actively building it out: the DRF router and serializers are not yet production-ready. **Ninja is the supported path.**
-{{< /callout >}}
-
-The demo includes a complete **Ninja router** (`views/ninja.py`) with typed schemas, plus an **experimental DRF router** (`views/drf.py`) with serializers, including a plain Django `View` chat handler that returns the SSE stream directly. Start with Ninja, and reach for DRF only if your project is already committed to it. Either way, `AgentService`, `ThreadService`, and the schemas in `django_ai_sdk.views.schemas` are framework-neutral.
 
 ## CORS and Streaming
 
