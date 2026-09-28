@@ -10,7 +10,6 @@ from django.db import transaction
 from django.db.models import Count, QuerySet
 from django.utils import timezone
 
-from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.files.common import compute_file_hash
@@ -1139,9 +1138,7 @@ class MemoryService(PermissionsMixin):
 
         memory_id = str(entry.memory_id)
 
-        for agent in registry.all().values():
-            if agent.rag_provider is None:
-                continue
+        for agent in await AgentService.get_rag_agents():
             rag = agent.rag_provider.get_cached_rag_instance(agent, memory_id)
             if rag is None:
                 continue

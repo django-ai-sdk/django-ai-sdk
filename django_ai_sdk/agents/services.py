@@ -162,6 +162,26 @@ class AgentService(PermissionsMixin):
         return get_runtime_agent_class(config.agent)(config)
 
     @classmethod
+    async def get_rag_agents(cls) -> list[Agent]:
+        """Registry and active runtime agents that have a RAG provider."""
+        from django_ai_sdk.agents.config import get_runtime_agent_class
+        from django_ai_sdk.agents.models import AgentSettings
+
+        agents = list(registry.all().values())
+        seen: set[type] = set()
+        async for config in AgentSettings.objects.filter(active=True):
+            agent_cls = get_runtime_agent_class(config.agent)
+            if agent_cls in seen:
+                continue
+            try:
+                agents.append(agent_cls(config))
+            except Exception:
+                _logger.exception("Skipping runtime agent %r for RAG", config.name)
+                continue
+            seen.add(agent_cls)
+        return [agent for agent in agents if agent.rag_provider is not None]
+
+    @classmethod
     async def list_agents(
         cls,
         user: UserType,

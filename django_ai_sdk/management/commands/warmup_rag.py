@@ -61,37 +61,29 @@ class Command(BaseCommand):
         force_rebuild: bool,
     ) -> None:
         from django_ai_sdk.agents.registry import registry
+        from django_ai_sdk.agents.services import AgentService
 
         try:
-            agents = registry.all()
+            registry.all()
         except RuntimeError:
             registry.setup(instantiate=True)
-            agents = registry.all()
+        agents = await AgentService.get_rag_agents()
 
         if agent_filter:
-            filtered = {
-                aid: inst for aid, inst in agents.items() if inst.__class__.__name__ == agent_filter
-            }
-            if not filtered:
-                raise CommandError(f"Agent '{agent_filter}' not found in registry")
-            agents = filtered
+            agents = [inst for inst in agents if inst.__class__.__name__ == agent_filter]
+            if not agents:
+                raise CommandError(f"Agent '{agent_filter}' not found or has no RAG provider")
 
         if not agents:
-            self.stdout.write(self.style.WARNING("No agents registered."))
+            self.stdout.write(self.style.WARNING("No agents with a RAG provider."))
             return
 
         if not memory_ids:
             self.stdout.write(self.style.WARNING("No memories found."))
             return
 
-        for aid, inst in agents.items():
+        for inst in agents:
             name = inst.__class__.__name__
-            if inst.rag_provider is None:
-                self.stdout.write(
-                    self.style.WARNING(f"[{name}] No RAG provider configured, skipping")
-                )
-                continue
-
             self.stdout.write(f"[{name}] Warming up {len(memory_ids)} memory/memories...")
 
             for mid in memory_ids:
