@@ -326,10 +326,11 @@ class AnyDocFileProcessor(BaseFileProcessor):
         # Local import: anydoc ships in the `files` extra
         import anydoc
 
-        fmt: str | None = anydoc.format_from_path(name) if name else None
-
         try:
-            return anydoc.to_markdown_bytes(data, fmt) if fmt else anydoc.to_markdown_bytes(data)
+            fmt: str | None = anydoc.format_from_path(name) if name else None
+            text = anydoc.to_markdown_bytes(data, fmt) if fmt else anydoc.to_markdown_bytes(data)
         except Exception:
-            # Never hard-fail the pipeline, just pass on
+            # Never hard-fail the pipeline, just pass on.
+            logger.info("anydoc could not convert %s, passing on", name, exc_info=True)
             return None
+        return text if text.strip() else None

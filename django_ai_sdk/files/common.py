@@ -101,11 +101,23 @@ async def get_default_file_pipeline(file: object | None = None) -> FilePipeline:
     """
     from django_ai_sdk.files.pipeline import FilePipeline
 
+    pipelines = await get_default_file_pipelines(file)
+    return pipelines[0] if pipelines else FilePipeline(TextFileProcessor())
+
+
+async def get_default_file_pipelines(file: object | None = None) -> list[FilePipeline]:
+    """All AI_SDK_MEMORY_FILE_PIPELINE pipelines accepting file, in setting order.
+
+    Lets callers fall through to the next pipeline when one accepts the file but
+    its processor passes on it (returns None). No TextFileProcessor fallback.
+    """
     setting = resolve_setting("AI_SDK_MEMORY_FILE_PIPELINE")
-    if setting:
-        paths = [setting] if isinstance(setting, str) else setting
-        for path in paths:
-            pipeline = import_string(path)()
-            if file is None or await pipeline.accepts(file):
-                return pipeline
-    return FilePipeline(TextFileProcessor())
+    if not setting:
+        return []
+    paths = [setting] if isinstance(setting, str) else setting
+    pipelines: list[FilePipeline] = []
+    for path in paths:
+        pipeline = import_string(path)()
+        if file is None or await pipeline.accepts(file):
+            pipelines.append(pipeline)
+    return pipelines

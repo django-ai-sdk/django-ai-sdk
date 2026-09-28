@@ -359,10 +359,12 @@ class Agent(ABC, AgentInfoMixin):
 
     async def get_file_pipeline(self, file: object) -> FilePipeline | None:
         """Return the first FilePipeline whose processor accepts file, or None."""
-        for pipeline in self.file_pipelines:
-            if await pipeline.accepts(file):
-                return pipeline
-        return None
+        pipelines = await self.get_file_pipelines(file)
+        return pipelines[0] if pipelines else None
+
+    async def get_file_pipelines(self, file: object) -> list[FilePipeline]:
+        """Return all FilePipelines whose processor accepts file, in order."""
+        return [pipeline for pipeline in self.file_pipelines if await pipeline.accepts(file)]
 
     def get_name(self) -> str:
         """Return the agent's display name."""

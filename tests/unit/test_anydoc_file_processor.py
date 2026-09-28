@@ -183,5 +183,15 @@ class TestAnyDocFileProcessor:
         result = await processor.run(str(file))
         assert result is None
 
+    async def test_run_returns_none_on_blank_output(self, processor, tmp_path, monkeypatch):
+        import anydoc
+
+        file = tmp_path / "images.pdf"
+        file.write_bytes(b"fake pdf")
+
+        monkeypatch.setattr(anydoc, "to_markdown_bytes", lambda data, fmt=None: " \n\n ")
+        result = await processor.run(str(file))
+        assert result is None
+
     async def test_step_is_set(self, processor):
         assert processor.step == "anydoc"

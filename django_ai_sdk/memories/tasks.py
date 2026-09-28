@@ -40,7 +40,9 @@ async def run_file_pipeline(
     from django.utils import timezone
 
     from django_ai_sdk.agents.services import AgentService
-    from django_ai_sdk.files.common import get_default_file_pipeline
+    from django_ai_sdk.files.common import get_default_file_pipelines
+    from django_ai_sdk.files.pipeline import FilePipeline, PipelineResult
+    from django_ai_sdk.files.processors import TextFileProcessor
     from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
 
     # The document may have been deleted (user cancelled an in-flight upload) or
@@ -84,18 +86,24 @@ async def run_file_pipeline(
             raise _Cancelled
 
     try:
+        pipelines: list[FilePipeline] = []
         if agent_id:
             agent = await AgentService.get(agent_id)
-            pipeline = await agent.get_file_pipeline(
-                entry_doc.file
-            ) or await get_default_file_pipeline(entry_doc.file)
-        else:
-            pipeline = await get_default_file_pipeline(entry_doc.file)
+            pipelines += await agent.get_file_pipelines(entry_doc.file)
+        pipelines += await get_default_file_pipelines(entry_doc.file)
+        if not pipelines:
+            pipelines = [FilePipeline(TextFileProcessor())]
 
-        result = await asyncio.wait_for(
-            pipeline.run(entry_doc.file, on_step=_on_step),
-            timeout=PIPELINE_TIMEOUT_SECONDS,
-        )
+        # A processor returning None passes on the file.
+        # One timeout budget covers all attempts.
+        async def _run_pipelines() -> PipelineResult | None:
+            for pipeline in pipelines:
+                result = await pipeline.run(entry_doc.file, on_step=_on_step)
+                if result is not None:
+                    return result
+            return None
+
+        result = await asyncio.wait_for(_run_pipelines(), timeout=PIPELINE_TIMEOUT_SECONDS)
 
         if result is None:
             await _transition(
