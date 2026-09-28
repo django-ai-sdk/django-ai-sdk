@@ -85,8 +85,8 @@ class TestProcessAsync:
         mock_pipeline.run = AsyncMock(return_value=mock_result)
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             result = await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
@@ -111,8 +111,8 @@ class TestProcessAsync:
         mock_pipeline.run = AsyncMock(return_value=None)
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
@@ -120,6 +120,41 @@ class TestProcessAsync:
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED
         assert "Unsupported or empty file" in entry_doc.processing_error
         assert entry_doc.entry_id is None
+
+    async def test_pipeline_returning_none_falls_through_to_next(self):
+        from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
+        from django_ai_sdk.memories.tasks import run_file_pipeline
+
+        memory = await Memory.objects.acreate(name="task-fallthrough")
+        entry_doc = await _make_entry_doc(memory)
+
+        mock_result = MagicMock()
+        mock_result.content = "from ocr"
+        mock_result.data = {}
+
+        passing = MagicMock()
+        passing.run = AsyncMock(return_value=None)
+        ocr = MagicMock()
+        ocr.run = AsyncMock(return_value=mock_result)
+
+        mock_agent = MagicMock()
+        mock_agent.get_file_pipelines = AsyncMock(return_value=[passing])
+
+        with (
+            patch(
+                "django_ai_sdk.agents.services.AgentService.get",
+                new=AsyncMock(return_value=mock_agent),
+            ),
+            patch("django_ai_sdk.files.common.get_default_file_pipelines", return_value=[ocr]),
+        ):
+            await run_file_pipeline(str(entry_doc.id), str(memory.id), "asst-123")
+
+        passing.run.assert_called_once()
+        ocr.run.assert_called_once()
+        await entry_doc.arefresh_from_db()
+        assert entry_doc.processing_status == EntryDocument.ProcessingStatus.COMPLETED
+        entry = await Entry.objects.aget(id=entry_doc.entry_id)
+        assert entry.content == "from ocr"
 
     async def test_pipeline_raises_marks_failed_and_reraises(self):
         from django_ai_sdk.memories.models import EntryDocument, Memory
@@ -132,8 +167,8 @@ class TestProcessAsync:
         mock_pipeline.run = AsyncMock(side_effect=RuntimeError("OCR failed"))
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             with pytest.raises(RuntimeError, match="OCR failed"):
                 await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
@@ -166,8 +201,8 @@ class TestProcessAsync:
         mock_pipeline.run = _pipeline_run
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             result = await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
@@ -203,8 +238,8 @@ class TestProcessAsync:
         mock_pipeline.run = _pipeline_run
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             result = await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
@@ -240,8 +275,8 @@ class TestProcessAsync:
         mock_pipeline.run = capture_step
 
         with patch(
-            "django_ai_sdk.files.common.get_default_file_pipeline",
-            return_value=mock_pipeline,
+            "django_ai_sdk.files.common.get_default_file_pipelines",
+            return_value=[mock_pipeline],
         ):
             await run_file_pipeline(str(entry_doc.id), str(memory.id), None)
 
@@ -268,8 +303,8 @@ class TestProcessAsync:
         with (
             patch.object(tasks_module, "PIPELINE_TIMEOUT_SECONDS", 0.05),
             patch(
-                "django_ai_sdk.files.common.get_default_file_pipeline",
-                return_value=mock_pipeline,
+                "django_ai_sdk.files.common.get_default_file_pipelines",
+                return_value=[mock_pipeline],
             ),
         ):
             with pytest.raises(TimeoutError):
@@ -295,15 +330,18 @@ class TestProcessAsync:
         mock_custom_pipeline.run = AsyncMock(return_value=mock_result)
 
         mock_agent = MagicMock()
-        mock_agent.get_file_pipeline = AsyncMock(return_value=mock_custom_pipeline)
+        mock_agent.get_file_pipelines = AsyncMock(return_value=[mock_custom_pipeline])
 
-        with patch(
-            "django_ai_sdk.agents.services.AgentService.get",
-            new=AsyncMock(return_value=mock_agent),
+        with (
+            patch(
+                "django_ai_sdk.agents.services.AgentService.get",
+                new=AsyncMock(return_value=mock_agent),
+            ),
+            patch("django_ai_sdk.files.common.get_default_file_pipelines", return_value=[]),
         ):
             await run_file_pipeline(str(entry_doc.id), str(memory.id), "asst-123")
 
-        mock_agent.get_file_pipeline.assert_called_once()
+        mock_agent.get_file_pipelines.assert_called_once()
         mock_custom_pipeline.run.assert_called_once()
 
         await entry_doc.arefresh_from_db()
