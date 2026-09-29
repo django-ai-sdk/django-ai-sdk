@@ -3,23 +3,25 @@ from __future__ import annotations
 from django.http import HttpRequest
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.memories.schemas import (
-    AddMemoryGroupIn,
-    AddMemoryUserIn,
-    BulkConnectMemoriesIn,
     DocumentOut,
     DocumentStatusOut,
     DocumentUploadResponse,
     MemoryGroupOut,
-    MemoryIn,
     MemoryOut,
     MemoryUserOut,
     ThreadMemoryOut,
-    ToggleMemoryActiveIn,
-    UpdateMemoryUserIn,
 )
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import ObjectPermissions
-from django_ai_sdk.views.schemas import ErrorResponse
+from django_ai_sdk.views.schemas import (
+    AddMemoryGroupIn,
+    AddMemoryUserIn,
+    BulkConnectMemoriesIn,
+    ErrorResponse,
+    MemoryIn,
+    ToggleMemoryActiveIn,
+    UpdateMemoryUserIn,
+)
 from ninja import File, Router, Schema
 from ninja.files import UploadedFile
 

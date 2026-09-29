@@ -30,6 +30,11 @@ DATABASES = {
     }
 }
 
+MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+]
+
 ROOT_URLCONF = "tests.urls"
 
 TASKS = {"default": {"BACKEND": "django_tasks.backends.immediate.ImmediateBackend"}}

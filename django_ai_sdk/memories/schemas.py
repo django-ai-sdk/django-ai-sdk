@@ -66,16 +66,7 @@ class DocumentExtraction(BaseModel):
     events: list[Event] = Field(..., description="Events extracted from text")
 
 
-# View Schemas
-
-
-class MemoryIn(BaseModel):
-    """Schema for creating a memory."""
-
-    name: str
-    slug: str = ""
-    description: str = ""
-    is_public: bool = True
+# Service output schemas
 
 
 class MemoryOut(BaseModel):
@@ -89,12 +80,6 @@ class MemoryOut(BaseModel):
     document_count: int
     created_at: str
     updated_at: str
-
-
-class DocumentIn(BaseModel):
-    """Schema for creating a document."""
-
-    content: str = ""
 
 
 class DocumentOut(BaseModel):
@@ -134,12 +119,6 @@ class ThreadMemoryOut(BaseModel):
     created_at: str
 
 
-class BulkConnectMemoriesIn(BaseModel):
-    """Schema for bulk connecting memories to a thread."""
-
-    memory_ids: list[str]
-
-
 class DocumentUploadResponse(BaseModel):
     """Schema to return after upload"""
 
@@ -160,12 +139,6 @@ class DocumentStatusOut(BaseModel):
     task: TaskStatus | None = None
 
 
-class ToggleMemoryActiveIn(BaseModel):
-    """Schema for toggling memory active status."""
-
-    active: bool
-
-
 class MemoryUserOut(BaseModel):
     """Schema for memory user output."""
 
@@ -183,21 +156,30 @@ class MemoryGroupOut(BaseModel):
     created_at: str
 
 
-class AddMemoryUserIn(BaseModel):
-    """Schema for adding a user to a memory."""
+# HTTP payloads moved to django_ai_sdk.views.schemas; old import path kept working.
+_MOVED_TO_VIEWS = frozenset(
+    {
+        "AddMemoryUserIn",
+        "DocumentIn",
+        "AddMemoryGroupIn",
+        "UpdateMemoryUserIn",
+        "ToggleMemoryActiveIn",
+        "MemoryIn",
+        "BulkConnectMemoriesIn",
+    }
+)
 
-    user_id: str
-    can_manage: bool = False
 
+def __getattr__(name: str) -> object:
+    if name in _MOVED_TO_VIEWS:
+        import warnings
 
-class UpdateMemoryUserIn(BaseModel):
-    """Schema for updating a memory user."""
+        from django_ai_sdk.views import schemas
 
-    can_manage: bool
-
-
-class AddMemoryGroupIn(BaseModel):
-    """Schema for adding a group to a memory."""
-
-    group_id: int
-    can_manage: bool = False
+        warnings.warn(
+            f"django_ai_sdk.memories.schemas.{name} moved to django_ai_sdk.views.schemas.{name}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(schemas, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
