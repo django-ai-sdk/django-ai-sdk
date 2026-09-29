@@ -14,6 +14,7 @@ from mcp.client.auth.utils import handle_registration_response
 from mcp.shared.auth import OAuthClientMetadata
 from pydantic import AnyUrl
 
+from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.integrations.mcp.discovery import OAuthDiscovery, discover
 from django_ai_sdk.integrations.mcp.models import MCPOAuthClient, MCPOAuthToken
 from django_ai_sdk.utils import resolve_setting
@@ -92,7 +93,7 @@ async def get_or_register_client(
     """
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
-        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+        raise NotFound(f"Server {server_name!r} not found or not OAuth type")
 
     # Static credentials win when configured.
     if server.client_id:
@@ -118,9 +119,10 @@ async def get_or_register_client(
         )
 
     if not discovery.registration_endpoint:
-        raise ValueError(
+        raise AiSdkError(
             f"Server {server_name!r} has no registration_endpoint; "
-            "provide static client_id/client_secret instead."
+            "provide static client_id/client_secret instead.",
+            ErrorCode.CONFIGURATION_ERROR,
         )
 
     client_metadata = OAuthClientMetadata(
@@ -218,7 +220,7 @@ async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthT
 
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
-        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+        raise NotFound(f"Server {server_name!r} not found or not OAuth type")
 
     refreshed = await refresh_oauth_token(token_obj, server)
     if refreshed is None:
@@ -236,7 +238,7 @@ async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
     """Get OAuth discovery for a server (static endpoints if configured, else RFC 9728)."""
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
-        raise ValueError(f"Server {server_name!r} not found or not OAuth type")
+        raise NotFound(f"Server {server_name!r} not found or not OAuth type")
 
     if server.authorization_endpoint and server.token_endpoint:
         return OAuthDiscovery(

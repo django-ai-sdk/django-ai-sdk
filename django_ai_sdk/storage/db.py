@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH
 from django_ai_sdk.conversation.models import Message, MessageFeedback, Thread
+from django_ai_sdk.errors import NotFound
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
@@ -191,7 +192,7 @@ class DbStorageAdapter(BaseStorageAdapter):
                 logger.debug(f"Thread loaded successfully: {self._thread.title or 'Untitled'}")
             except Thread.DoesNotExist:
                 logger.error(f"Thread not found in database: {self.thread_id}")
-                raise ValueError(f"Thread with id {self.thread_id} not found")
+                raise NotFound(f"Thread with id {self.thread_id} not found")
         return self._thread
 
     async def get_messages(self) -> list[ChatMessage]:

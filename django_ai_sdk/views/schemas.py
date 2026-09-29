@@ -26,3 +26,13 @@ class RateMessagePayload(BaseModel):
         None, description="Rating value: 1 for good, -1 for bad, or None to unrate (optional)"
     )
     feedback: str = Field(default="", description="Optional explanation for the rating")
+
+
+class ErrorResponse(BaseModel):
+    """The body of an error response (see `django_ai_sdk.errors.error_response`)."""
+
+    code: str
+    message: str
+    retryable: bool
+    ref: str
+    errors: list[dict] | None = None

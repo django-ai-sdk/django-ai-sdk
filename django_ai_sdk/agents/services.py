@@ -7,6 +7,7 @@ from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 
 from django_ai_sdk.agents.registry import registry
+from django_ai_sdk.errors import NotFound
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     Operation,
@@ -104,7 +105,7 @@ class AgentService(PermissionsMixin):
         """Resolve agent from registry only (sync). Raises ValueError if not found."""
         agent = registry.get(agent_id)
         if agent is None:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         return agent
 
     @classmethod
@@ -120,7 +121,7 @@ class AgentService(PermissionsMixin):
             config = await AgentSettings.objects.aget(id=agent_id, active=True)
         except (AgentSettings.DoesNotExist, ValidationError) as exc:
             _logger.warning("RuntimeAgent lookup failed for {}: {!r}", agent_id, exc)
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         return get_runtime_agent_class(config.agent)(config)
 
     @classmethod
@@ -144,7 +145,7 @@ class AgentService(PermissionsMixin):
 
         thread = await ThreadService.get_thread(thread_id, user=user)
         if thread is None:
-            raise ValueError("Thread not found")
+            raise NotFound("Thread not found")
 
         agent_id = thread.agent_id
         agent = registry.get(agent_id)
@@ -158,7 +159,7 @@ class AgentService(PermissionsMixin):
             config = await AgentSettings.objects.aget(id=agent_id, active=True)
         except (AgentSettings.DoesNotExist, ValidationError) as exc:
             _logger.warning("RuntimeAgent lookup failed for {}: {!r}", agent_id, exc)
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         return get_runtime_agent_class(config.agent)(config)
 
     @classmethod
@@ -298,7 +299,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         return [u async for u in AgentUser.objects.filter(agent_id=agent_id).select_related("user")]
@@ -320,14 +321,14 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         User = get_user_model()
         try:
             target_user = await User.objects.aget(id=target_user_id)
         except User.DoesNotExist:
-            raise ValueError(f"User '{target_user_id}' not found")
+            raise NotFound(f"User '{target_user_id}' not found")
 
         entry, _ = await AgentUser.objects.aupdate_or_create(
             agent_id=agent_id,
@@ -351,7 +352,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         try:
@@ -359,7 +360,7 @@ class AgentService(PermissionsMixin):
                 agent_id=agent_id, user_id=target_user_id
             )
         except AgentUser.DoesNotExist:
-            raise ValueError(f"User '{target_user_id}' not found on agent '{agent_id}'")
+            raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 
         entry.can_manage = can_manage
         await entry.asave(update_fields=["can_manage"])
@@ -379,14 +380,14 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         deleted, _ = await AgentUser.objects.filter(
             agent_id=agent_id, user_id=target_user_id
         ).adelete()
         if not deleted:
-            raise ValueError(f"User '{target_user_id}' not found on agent '{agent_id}'")
+            raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 
     # ============================================================================
     # Agent group management
@@ -400,7 +401,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         return [
@@ -424,13 +425,13 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         try:
             target_group = await Group.objects.aget(id=group_id)
         except Group.DoesNotExist:
-            raise ValueError(f"Group '{group_id}' not found")
+            raise NotFound(f"Group '{group_id}' not found")
 
         entry, _ = await AgentGroup.objects.aupdate_or_create(
             agent_id=agent_id,
@@ -453,12 +454,12 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
         deleted, _ = await AgentGroup.objects.filter(agent_id=agent_id, group_id=group_id).adelete()
         if not deleted:
-            raise ValueError(f"Group '{group_id}' not found on agent '{agent_id}'")
+            raise NotFound(f"Group '{group_id}' not found on agent '{agent_id}'")
 
     # ============================================================================
     # Runtime agent CRUD
@@ -501,7 +502,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         agent = get_runtime_agent_class(config.agent)(config)
         await cls.has_perms(user, Operation.VIEW_AGENT, obj=config, agent=agent)
         return config
@@ -552,7 +553,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         agent = get_runtime_agent_class(config.agent)(config)
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
@@ -579,7 +580,7 @@ class AgentService(PermissionsMixin):
         try:
             config = await AgentSettings.objects.aget(id=agent_id)
         except AgentSettings.DoesNotExist:
-            raise ValueError(f"Agent '{agent_id}' not found")
+            raise NotFound(f"Agent '{agent_id}' not found")
         agent = get_runtime_agent_class(config.agent)(config)
         await cls.has_perms(user, Operation.DELETE_AGENT, obj=config, agent=agent)
 

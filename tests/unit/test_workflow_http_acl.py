@@ -88,7 +88,7 @@ class TestNinjaRouter:
         response = post_json(client, NINJA, {"name": "empty", "workflow": NO_STEPS})
 
         assert response.status_code == 400
-        assert "no steps to run" in response.content.decode()
+        assert response.json()["code"] == "invalid_request"
 
     def test_a_run_of_an_unknown_workflow_is_absent(self, client, users):
         owner, _, _ = users

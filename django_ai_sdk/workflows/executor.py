@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils import timezone
 from pydantic import ValidationError
 
+from django_ai_sdk.errors import UserError
 from django_ai_sdk.permissions import user_pk
 from django_ai_sdk.utils import serialize
 from django_ai_sdk.workflows.actions import RunRecorder
@@ -142,7 +143,7 @@ def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> d
     try:
         parsed = model.model_validate(supplied)
     except ValidationError as exc:
-        raise ValueError(
+        raise UserError(
             f"Workflow {workflow.name or '<unnamed>'!r} was given inputs it does not "
             f"declare, or is missing ones it does: {exc}"
         ) from exc

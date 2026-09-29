@@ -13,6 +13,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone as tz
 
+from django_ai_sdk.errors import UserError
+
 logger = logging.getLogger(__name__)
 
 _BLOCKED_HOSTNAMES = {"localhost", "metadata.google.internal"}
@@ -31,13 +33,13 @@ def _validate_public_url(url: str) -> None:
     """
     host = (urlparse(url).hostname or "").lower()
     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOSTNAME_SUFFIXES):
-        raise ValueError(f"{url!r} points at a local/internal hostname ({host!r})")
+        raise UserError(f"{url!r} points at a local/internal hostname ({host!r})")
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-        raise ValueError(f"{url!r} resolves to a non-public address ({ip})")
+        raise UserError(f"{url!r} resolves to a non-public address ({ip})")
 
 
 def _get_fernet() -> Fernet:

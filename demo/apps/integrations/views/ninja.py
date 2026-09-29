@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from django.http import HttpRequest
 from django.urls import reverse
-from django_ai_sdk.integrations.base import IntegrationNotConnectable, IntegrationStatus
+from django_ai_sdk.errors import NotFound
+from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.schemas import IntegrationOut
 from django_ai_sdk.integrations.services import IntegrationService
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.views.schemas import ErrorResponse
 from ninja import Router, Schema
-
-from apps.agents.views.ninja import Error
 
 
 class DetailOut(Schema):
@@ -39,54 +38,43 @@ async def list_integrations(request: HttpRequest) -> list[IntegrationOut]:
 
 @router.post(
     "/{name}/connect",
-    response={200: ConnectOut, 400: Error, 403: Error, 404: Error},
+    response={200: ConnectOut, 400: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse},
 )
-async def connect(request: HttpRequest, name: str) -> ConnectOut | tuple[int, Error]:
+async def connect(request: HttpRequest, name: str) -> ConnectOut:
     """Begin connecting an integration (OAuth); returns a redirect URL for the client
     to navigate to itself."""
     redirect_uri = request.build_absolute_uri(
         reverse("integrations_mcp:oauth-callback", kwargs={"server_name": name})
     )
-    try:
-        result = await IntegrationService.connect(
-            name, request.user, request=request, redirect_uri=redirect_uri
-        )
-    except PermissionDenied:
-        return 403, Error(message="Not permitted")
-    except IntegrationNotConnectable as e:
-        return 400, Error(message=str(e) or "Integration does not support connect")
+    result = await IntegrationService.connect(
+        name, request.user, request=request, redirect_uri=redirect_uri
+    )
     if result is None:
-        return 404, Error(message="Unknown integration")
+        raise NotFound("Unknown integration")
     return ConnectOut(redirect_url=result["redirect_url"])
 
 
 @router.post(
     "/{name}/disconnect",
-    response={200: DetailOut, 403: Error, 404: Error},
+    response={200: DetailOut, 403: ErrorResponse, 404: ErrorResponse},
 )
-async def disconnect(request: HttpRequest, name: str) -> DetailOut | tuple[int, Error]:
+async def disconnect(request: HttpRequest, name: str) -> DetailOut:
     """Drop the user's stored connection/credential for an integration."""
-    try:
-        deleted = await IntegrationService.disconnect(name, request.user)
-    except PermissionDenied:
-        return 403, Error(message="Not permitted")
+    deleted = await IntegrationService.disconnect(name, request.user)
     if deleted is None:
-        return 404, Error(message="Unknown integration")
+        raise NotFound("Unknown integration")
     if not deleted:
-        return 404, Error(message="Not connected")
+        raise NotFound("Not connected")
     return DetailOut(detail=f"Disconnected {name}")
 
 
 @router.post(
     "/{name}/reconnect",
-    response={200: StatusOut, 403: Error, 404: Error},
+    response={200: StatusOut, 403: ErrorResponse, 404: ErrorResponse},
 )
-async def reconnect(request: HttpRequest, name: str) -> StatusOut | tuple[int, Error]:
+async def reconnect(request: HttpRequest, name: str) -> StatusOut:
     """Force a fresh connection attempt and return the real status."""
-    try:
-        status = await IntegrationService.reconnect(name, request.user)
-    except PermissionDenied:
-        return 403, Error(message="Not permitted")
+    status = await IntegrationService.reconnect(name, request.user)
     if status is None:
-        return 404, Error(message="Unknown integration")
+        raise NotFound("Unknown integration")
     return StatusOut(status=status)

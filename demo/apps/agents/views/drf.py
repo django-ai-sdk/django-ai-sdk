@@ -18,9 +18,10 @@ from django_ai_sdk.agents.services import (
     list_agents,
     remove_agent_group,
 )
+from django_ai_sdk.errors import NotFound, error_response
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.services import link_memories, unlink_memories
-from django_ai_sdk.permissions import Operation, PermissionDenied
+from django_ai_sdk.permissions import Operation
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.storage.services import (
     create_thread,
@@ -193,169 +194,111 @@ class ThreadListAPIView(APIView):
 
 class ThreadCreateAPIView(APIView):
     def post(self, request: Request) -> Response:
-        try:
-            serializer = ChatRequestSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            agent_id = request.data.get("agent_id", "")  # type: ignore[union-attr]
-            thread_id = create_thread(
-                agent_id=agent_id,
-                user=request.user,
-                # Initial messages are not persisted here; the chat/stream endpoint
-                # receives and stores the full message list.
-            )
-            return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=400)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agent_id = request.data.get("agent_id", "")  # type: ignore[union-attr]
+        thread_id = create_thread(
+            agent_id=agent_id,
+            user=request.user,
+            # Initial messages are not persisted here; the chat/stream endpoint
+            # receives and stores the full message list.
+        )
+        return Response(CreateThreadResponseSerializer({"thread_id": thread_id}).data)
 
 
 class ThreadDetailAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
-        try:
-            data = get_thread_history(thread_id, user=request.user)
+        data = get_thread_history(thread_id, user=request.user)
 
-            # Filter feedbacks to current user only
-            user_pk = str(request.user.pk) if request.user.is_authenticated else None
-            for message in data.get("messages", []):
-                feedbacks = message.get("feedbacks", [])
-                user_feedback = None
-                if feedbacks:
-                    user_feedback = next(
-                        (fb for fb in feedbacks if fb.get("user_id") == user_pk),
-                        None,
-                    )
-                message["feedback"] = user_feedback
-                del message["feedbacks"]
+        # Filter feedbacks to current user only
+        user_pk = str(request.user.pk) if request.user.is_authenticated else None
+        for message in data.get("messages", []):
+            feedbacks = message.get("feedbacks", [])
+            user_feedback = None
+            if feedbacks:
+                user_feedback = next(
+                    (fb for fb in feedbacks if fb.get("user_id") == user_pk),
+                    None,
+                )
+            message["feedback"] = user_feedback
+            del message["feedbacks"]
 
-            return Response(ThreadDetailSerializer(data).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        return Response(ThreadDetailSerializer(data).data)
 
     def patch(self, request: Request, thread_id: str) -> Response:
         agent_id = request.data.get("agent_id")  # type: ignore[union-attr]
         if not agent_id:
             return Response({"message": "agent_id required"}, status=400)
-        try:
-            AgentService.from_registry(agent_id)
-            thread = get_thread(thread_id, user=request.user)
-            if thread is None:
-                return Response({"message": "Thread not found"}, status=404)
-            if thread.agent_id:
-                unlink_memories(thread.agent_id, thread_id, user=request.user)
-            update_thread(thread_id, metadata={"agent_id": agent_id}, user=request.user)
-            link_memories(agent_id, thread_id, user=request.user)
-            return Response({"success": True})
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=400)
+        AgentService.from_registry(agent_id)
+        thread = get_thread(thread_id, user=request.user)
+        if thread is None:
+            raise NotFound("Thread not found")
+        if thread.agent_id:
+            unlink_memories(thread.agent_id, thread_id, user=request.user)
+        update_thread(thread_id, metadata={"agent_id": agent_id}, user=request.user)
+        link_memories(agent_id, thread_id, user=request.user)
+        return Response({"success": True})
 
 
 class ThreadFileMetaAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
-        try:
-            data = get_thread_file_meta(thread_id, user=request.user)
-            return Response(ThreadFileMetaSerializer(data).data)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        data = get_thread_file_meta(thread_id, user=request.user)
+        return Response(ThreadFileMetaSerializer(data).data)
 
 
 class ThreadTracesAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
-        try:
-            traces = thread_traces(
-                thread_id,
-                user=request.user,
-                message_id=request.query_params.get("message_id"),
-                operation_name=request.query_params.get("operation_name"),
-                limit=int(request.query_params.get("limit", 100)),
-                offset=int(request.query_params.get("offset", 0)),
-            )
-            return Response({"traces": [t.model_dump(mode="json") for t in traces]})
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        traces = thread_traces(
+            thread_id,
+            user=request.user,
+            message_id=request.query_params.get("message_id"),
+            operation_name=request.query_params.get("operation_name"),
+            limit=int(request.query_params.get("limit", 100)),
+            offset=int(request.query_params.get("offset", 0)),
+        )
+        return Response({"traces": [t.model_dump(mode="json") for t in traces]})
 
 
 class MessageTracesAPIView(APIView):
     def get(self, request: Request, message_id: str) -> Response:
-        try:
-            traces = message_traces(
-                message_id,
-                user=request.user,
-                operation_name=request.query_params.get("operation_name"),
-                limit=int(request.query_params.get("limit", 100)),
-                offset=int(request.query_params.get("offset", 0)),
-            )
-            return Response({"traces": [t.model_dump(mode="json") for t in traces]})
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        traces = message_traces(
+            message_id,
+            user=request.user,
+            operation_name=request.query_params.get("operation_name"),
+            limit=int(request.query_params.get("limit", 100)),
+            offset=int(request.query_params.get("offset", 0)),
+        )
+        return Response({"traces": [t.model_dump(mode="json") for t in traces]})
 
 
 class ThreadTokenUsageAPIView(APIView):
     def get(self, request: Request, thread_id: str) -> Response:
-        try:
-            usage = thread_token_usage(thread_id, user=request.user)
-            return Response(usage.model_dump())
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        usage = thread_token_usage(thread_id, user=request.user)
+        return Response(usage.model_dump())
 
 
 class MessageTokenUsageAPIView(APIView):
     def get(self, request: Request, message_id: str) -> Response:
-        try:
-            usage = message_token_usage(message_id, user=request.user)
-            return Response(usage.model_dump())
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        usage = message_token_usage(message_id, user=request.user)
+        return Response(usage.model_dump())
 
 
 class ThreadDeleteAPIView(APIView):
     def delete(self, request: Request, thread_id: str) -> Response:
-        try:
-            success = delete_thread(thread_id, user=request.user)
-            if success:
-                return Response({"success": True, "message": "Thread deleted successfully"})
-            return Response({"message": "Thread not found"}, status=404)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        success = delete_thread(thread_id, user=request.user)
+        if success:
+            return Response({"success": True, "message": "Thread deleted successfully"})
+        raise NotFound("Thread not found")
 
 
 class ThreadDeleteAllAPIView(APIView):
     def delete(self, request: Request) -> Response:
-        try:
-            deleted_count = delete_all_threads(user=request.user)
-            return Response(
-                DeleteAllThreadsResponseSerializer(
-                    {"success": True, "deleted_count": deleted_count}
-                ).data
-            )
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        deleted_count = delete_all_threads(user=request.user)
+        return Response(
+            DeleteAllThreadsResponseSerializer(
+                {"success": True, "deleted_count": deleted_count}
+            ).data
+        )
 
 
 class RateMessageAPIView(APIView):
@@ -364,87 +307,59 @@ class RateMessageAPIView(APIView):
             return Response({"message": "rating is required"}, status=400)
         rating = request.data.get("rating")  # type: ignore[union-attr]
         feedback_text = request.data.get("feedback", "")  # type: ignore[union-attr]
-        try:
-            rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)  # type: ignore[arg-type]
-            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        rate_message(thread_id, message_id, rating, feedback=feedback_text, user=request.user)  # type: ignore[arg-type]
+        return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
 
 
 class DeleteMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
-        try:
-            delete_message(thread_id, message_id, user=request.user)
-            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": True}).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        delete_message(thread_id, message_id, user=request.user)
+        return Response(MessageResponseSerializer({"id": message_id, "is_deleted": True}).data)
 
 
 class RestoreMessageAPIView(APIView):
     def post(self, request: Request, thread_id: str, message_id: str) -> Response:
-        try:
-            restore_message(thread_id, message_id, user=request.user)
-            return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        restore_message(thread_id, message_id, user=request.user)
+        return Response(MessageResponseSerializer({"id": message_id, "is_deleted": False}).data)
 
 
 class ListAgentsAPIView(APIView):
     def get(self, request: Request) -> Response:
         limit = int(request.query_params.get("limit", 100))
         offset = int(request.query_params.get("offset", 0))
-        try:
-            items = list_agents(user=request.user, limit=limit, offset=offset)
-            return Response(ListAgentsSerializer({"agents": items}).data)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
+        items = list_agents(user=request.user, limit=limit, offset=offset)
+        return Response(ListAgentsSerializer({"agents": items}).data)
 
 
 class AgentInfoAPIView(APIView):
     def get(self, request: Request, agent_id: str) -> Response:
-        try:
-            agent = AgentService.from_registry(agent_id)
-            info = get_agent_info(agent_id, user=request.user)
-            return Response(
-                AgentInfoSerializer(
-                    {
-                        "id": info.id,
-                        "name": info.name,
-                        "model": info.model,
-                        "class_name": info.class_name,
-                        "description": info.description,
-                        "instructions": agent.get_system_prompt(),
-                        "file_upload": info.file_upload,
-                        "rag": info.rag,
-                    }
-                ).data
-            )
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        agent = AgentService.from_registry(agent_id)
+        info = get_agent_info(agent_id, user=request.user)
+        return Response(
+            AgentInfoSerializer(
+                {
+                    "id": info.id,
+                    "name": info.name,
+                    "model": info.model,
+                    "class_name": info.class_name,
+                    "description": info.description,
+                    "instructions": agent.get_system_prompt(),
+                    "file_upload": info.file_upload,
+                    "rag": info.rag,
+                }
+            ).data
+        )
 
 
 class AgentToolsAPIView(APIView):
     async def get(self, request: Request, agent_id: str) -> Response:
-        try:
-            agent = await AgentService.get(agent_id)
-            await AgentService.has_perms(
-                request.user,
-                Operation.VIEW_AGENT,
-                obj=agent.config if agent.is_runtime else None,
-                agent=agent,
-            )
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
+        agent = await AgentService.get(agent_id)
+        await AgentService.has_perms(
+            request.user,
+            Operation.VIEW_AGENT,
+            obj=agent.config if agent.is_runtime else None,
+            agent=agent,
+        )
 
         tools_data = []
         try:
@@ -484,74 +399,51 @@ class ReindexAgentAPIView(APIView):
     def post(self, request: Request, agent_id: str) -> Response:
         memory_id = request.data.get("memory_id")  # type: ignore[union-attr]
         force_rebuild = request.data.get("force_rebuild", False)  # type: ignore[union-attr]
-        try:
-            agent = AgentService.from_registry(agent_id)
-            result = Agent.reindex(agent, memory_id, force_rebuild)  # type: ignore[arg-type]
+        agent = AgentService.from_registry(agent_id)
+        result = Agent.reindex(agent, memory_id, force_rebuild)  # type: ignore[arg-type]
 
-            if not result:
-                return Response(
-                    ReindexResponseSerializer(
-                        {
-                            "success": False,
-                            "message": "No RAG provider configured for this agent",
-                        }
-                    ).data
-                )
+        if not result:
+            return Response(
+                ReindexResponseSerializer(
+                    {
+                        "success": False,
+                        "message": "No RAG provider configured for this agent",
+                    }
+                ).data
+            )
 
-            rebuild_msg = " (force rebuild)" if force_rebuild else ""
-            message = "RAG pipeline reindexed successfully" + rebuild_msg
-            if memory_id:
-                message += f" for memory {memory_id}"
+        rebuild_msg = " (force rebuild)" if force_rebuild else ""
+        message = "RAG pipeline reindexed successfully" + rebuild_msg
+        if memory_id:
+            message += f" for memory {memory_id}"
 
-            return Response(ReindexResponseSerializer({"success": True, "message": message}).data)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        return Response(ReindexResponseSerializer({"success": True, "message": message}).data)
 
 
 class AgentStatelessRunAPIView(APIView):
     """Stateless run"""
 
     async def post(self, request: Request, agent_id: str) -> Response:
-        try:
-            serializer = ChatRequestSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
-            agent = await AgentService.get(agent_id)
-            chat_messages = agent.protocol_handler.to_chat_messages(messages)
-            result = await agent.run(chat_messages, user=request.user)
-            return Response({"result": result, "thread_id": None})
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValidationError as e:
-            return Response({"message": str(e)}, status=400)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except NotImplementedError as e:
-            return Response({"message": str(e)}, status=501)
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+        agent = await AgentService.get(agent_id)
+        chat_messages = agent.protocol_handler.to_chat_messages(messages)
+        result = await agent.run(chat_messages, user=request.user)
+        return Response({"result": result, "thread_id": None})
 
 
 class AgentRunAPIView(APIView):
     """Synchronous JSON endpoint wrapping Agent.run()"""
 
     async def post(self, request: Request, thread_id: str) -> Response:
-        try:
-            serializer = ChatRequestSerializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
-            agent = await AgentService.get_agent(thread_id, user=request.user)
-            chat_messages = agent.protocol_handler.to_chat_messages(messages)
-            result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
-            return Response({"result": result, "thread_id": thread_id})
-        except PermissionDenied as e:
-            return Response({"message": str(e)}, status=403)
-        except ValidationError as e:
-            return Response({"message": str(e)}, status=400)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except NotImplementedError as e:
-            return Response({"message": str(e)}, status=501)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
+        agent = await AgentService.get_agent(thread_id, user=request.user)
+        chat_messages = agent.protocol_handler.to_chat_messages(messages)
+        result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
+        return Response({"result": result, "thread_id": thread_id})
 
 
 class AgentAPIView(View):
@@ -562,14 +454,11 @@ class AgentAPIView(View):
             messages = [Message(**m) for m in serializer.validated_data["messages"]]  # type: ignore[index, optional-subscript]
             agent = await AgentService.get_agent(thread_id, user=request.user)
             return await agent.as_view(messages, thread_id=thread_id, user=request.user)
-        except PermissionDenied as e:
-            return self._error_response({"message": str(e)}, 403)
         except ValidationError as e:
-            return self._error_response({"message": str(e)}, 400)
-        except ValueError as e:
-            return self._error_response({"message": str(e)}, 404)
+            return self._error_response({"detail": e.detail}, 400)
         except Exception as e:
-            return self._error_response({"message": str(e)}, 500)
+            status, body = error_response(e)
+            return self._error_response(body, status)
 
     @staticmethod
     def _error_response(data: dict[str, Any], status: int) -> StreamingHttpResponse:
@@ -676,13 +565,10 @@ class RuntimeAgentListCreateAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
-        try:
-            config = await AgentService.create_runtime_agent(
-                cast("AgentCreateData", data),
-                user=request.user,
-            )
-        except Exception as e:
-            return Response({"message": str(e)}, status=400)
+        config = await AgentService.create_runtime_agent(
+            cast("AgentCreateData", data),
+            user=request.user,
+        )
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
                 await AgentService.add_agent_user(
@@ -708,27 +594,19 @@ class RuntimeAgentListCreateAPIView(APIView):
 
 class RuntimeAgentDetailAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
-        try:
-            config = await AgentService.get_runtime_agent(runtime_id, user=request.user)
-            return Response(AgentSettingsSerializer(config).data)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        config = await AgentService.get_runtime_agent(runtime_id, user=request.user)
+        return Response(AgentSettingsSerializer(config).data)
 
     async def patch(self, request: Request, runtime_id: str) -> Response:
         serializer = AgentSettingsUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         skip_keys = {"users", "groups"}
         data = {k: v for k, v in serializer.validated_data.items() if k not in skip_keys}  # type: ignore[union-attr]
-        try:
-            config = await AgentService.update_runtime_agent(
-                runtime_id,
-                cast("AgentUpdateData", data),
-                user=request.user,
-            )
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=400)
+        config = await AgentService.update_runtime_agent(
+            runtime_id,
+            cast("AgentUpdateData", data),
+            user=request.user,
+        )
         for entry in serializer.validated_data.get("users") or []:  # type: ignore[union-attr]
             try:
                 await AgentService.add_agent_user(
@@ -746,11 +624,8 @@ class RuntimeAgentDetailAPIView(APIView):
         return Response(AgentSettingsSerializer(config).data)
 
     async def delete(self, request: Request, runtime_id: str) -> Response:
-        try:
-            config = await AgentService.delete_runtime_agent(runtime_id, user=request.user)
-            return Response(AgentSettingsSerializer(config).data)
-        except ValueError as e:
-            return Response({"message": str(e)}, status=404)
+        config = await AgentService.delete_runtime_agent(runtime_id, user=request.user)
+        return Response(AgentSettingsSerializer(config).data)
 
 
 # ── Agent Users ───────────────────────────────────────────────────────────
@@ -784,39 +659,24 @@ class AddAgentGroupInSerializer(serializers.Serializer):
 
 class AgentGroupListCreateAPIView(APIView):
     def get(self, request: Request, runtime_id: str) -> Response:
-        try:
-            groups = list_agent_groups(runtime_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
+        groups = list_agent_groups(runtime_id, user=request.user)
         return Response(AgentGroupOutSerializer(groups, many=True).data)
 
     def post(self, request: Request, runtime_id: str) -> Response:
         serializer = AddAgentGroupInSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        try:
-            entry = add_agent_group(
-                runtime_id,
-                serializer.validated_data["group_id"],  # type: ignore[index]
-                serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
-                user=request.user,
-            )
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
+        entry = add_agent_group(
+            runtime_id,
+            serializer.validated_data["group_id"],  # type: ignore[index]
+            serializer.validated_data.get("can_manage", False),  # type: ignore[union-attr]
+            user=request.user,
+        )
         return Response(AgentGroupOutSerializer(entry).data)
 
 
 class AgentGroupDetailAPIView(APIView):
     def delete(self, request: Request, runtime_id: str, group_id: int) -> Response:
-        try:
-            remove_agent_group(runtime_id, group_id, user=request.user)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=404)
+        remove_agent_group(runtime_id, group_id, user=request.user)
         return Response(status=204)
 
 
@@ -930,36 +790,27 @@ class WorkflowRunAPIView(APIView):
         from django_ai_sdk.workflows.schemas import WorkflowDefinition
         from django_ai_sdk.workflows.services import WorkflowService
 
-        try:
-            workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
-            run = await WorkflowService.run(
-                workflow,
-                inputs=request.data.get("inputs", {}),
-                user=request.user,
-            )
-            return Response({"run_id": str(run.id), "status": run.status}, status=202)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        workflow = WorkflowDefinition.model_validate(request.data.get("workflow", {}))
+        run = await WorkflowService.run(
+            workflow,
+            inputs=request.data.get("inputs", {}),
+            user=request.user,
+        )
+        return Response({"run_id": str(run.id), "status": run.status}, status=202)
 
 
 class WorkflowRunByIdAPIView(APIView):
     async def post(self, request: Request, workflow_id: str) -> Response:
-        from django_ai_sdk.workflows.models import WorkflowSettings
         from django_ai_sdk.workflows.services import WorkflowService
 
-        try:
-            run_id = request.data.get("run_id")
-            run = await WorkflowService.run_by_id(
-                workflow_id,
-                inputs=request.data.get("inputs", {}),
-                user=request.user,
-                run_id=run_id,
-            )
-            return Response({"run_id": str(run.id), "status": run.status}, status=202)
-        except WorkflowSettings.DoesNotExist:
-            return Response({"message": "Workflow not found"}, status=404)
-        except Exception as e:
-            return Response({"message": str(e)}, status=500)
+        run_id = request.data.get("run_id")
+        run = await WorkflowService.run_by_id(
+            workflow_id,
+            inputs=request.data.get("inputs", {}),
+            user=request.user,
+            run_id=run_id,
+        )
+        return Response({"run_id": str(run.id), "status": run.status}, status=202)
 
 
 class WorkflowRunListAPIView(APIView):
@@ -982,7 +833,7 @@ class WorkflowRunDetailAPIView(APIView):
         run = await WorkflowService.get_run(run_id, user=request.user)
         if run is None:
             # Absent covers both "no such run" and "not yours", by design.
-            return Response({"message": "Run not found"}, status=404)
+            raise NotFound("Run not found")
         return Response(WorkflowRunDetailSerializer(run).data)
 
 
@@ -1062,18 +913,12 @@ class UserSessionSerializer(serializers.Serializer):
 class UserDetailAPIView(APIView):
     def get(self, request: Request, user_id: str) -> Response:
         User = get_user_model()
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
+        user = User.objects.get(id=user_id)
         return Response(UserDetailSerializer(user).data)
 
     def patch(self, request: Request, user_id: str) -> Response:
         User = get_user_model()
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({"error": "User not found"}, status=404)
+        user = User.objects.get(id=user_id)
         serializer = UserUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
@@ -1117,28 +962,20 @@ class AgentUserUpdateSerializer(serializers.Serializer):
 
 class AgentUserListCreateAPIView(APIView):
     async def get(self, request: Request, runtime_id: str) -> Response:
-        try:
-            users = await AgentService.list_agent_users(runtime_id, user=request.user)
-            return Response(AgentUserSerializer(users, many=True).data)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=404)
+        users = await AgentService.list_agent_users(runtime_id, user=request.user)
+        return Response(AgentUserSerializer(users, many=True).data)
 
     async def post(self, request: Request, runtime_id: str) -> Response:
         serializer = AgentUserAddSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
-        try:
-            entry = await AgentService.add_agent_user(
-                runtime_id,
-                serializer.validated_data["user_id"],
-                serializer.validated_data["can_manage"],
-                user=request.user,
-            )
-            return Response(AgentUserSerializer(entry).data, status=201)
-        except PermissionDenied as e:
-            return Response({"error": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=404)
+        entry = await AgentService.add_agent_user(
+            runtime_id,
+            serializer.validated_data["user_id"],
+            serializer.validated_data["can_manage"],
+            user=request.user,
+        )
+        return Response(AgentUserSerializer(entry).data, status=201)
 
 
 class AgentUserDetailAPIView(APIView):
@@ -1146,27 +983,17 @@ class AgentUserDetailAPIView(APIView):
         serializer = AgentUserUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
-        try:
-            entry = await AgentService.update_agent_user(
-                runtime_id,
-                user_id,
-                serializer.validated_data["can_manage"],
-                user=request.user,
-            )
-            return Response(AgentUserSerializer(entry).data)
-        except PermissionDenied as e:
-            return Response({"error": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=404)
+        entry = await AgentService.update_agent_user(
+            runtime_id,
+            user_id,
+            serializer.validated_data["can_manage"],
+            user=request.user,
+        )
+        return Response(AgentUserSerializer(entry).data)
 
     async def delete(self, request: Request, runtime_id: str, user_id: str) -> Response:
-        try:
-            await AgentService.remove_agent_user(runtime_id, user_id, user=request.user)
-            return Response(status=204)
-        except PermissionDenied as e:
-            return Response({"error": str(e)}, status=403)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=404)
+        await AgentService.remove_agent_user(runtime_id, user_id, user=request.user)
+        return Response(status=204)
 
 
 urlpatterns = [
