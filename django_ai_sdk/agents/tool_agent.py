@@ -10,11 +10,14 @@ from haystack.dataclasses import ChatMessage
 from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
 # message meta flag on a tool result the budget hook
 SKIPPED_META_KEY = "django_ai_sdk.skipped"
+# message meta on a cut tool result: {"original_chars", "kept_chars"}
+TRUNCATED_META_KEY = "django_ai_sdk.truncated"
 
 
 class ToolCallBudgetHook:
@@ -68,11 +71,73 @@ class LogToolCallsHook:
             logger.debug("Tool call {} args={}", tool_call.tool_name, tool_call.arguments)
 
 
+class ToolOutputLimitHook:
+    """Cut tool results longer than `max_chars`, with a note to the model.
+
+    Each result is cut once, when it arrives; later steps see it as it was left.
+    """
+
+    allowed_hook_points = ["after_tool"]
+
+    # Ahead of the result: a note at the end of a long result is easily missed.
+    _NOTE = (
+        "[This tool result is {original:,} characters; only the first {kept:,} are shown. "
+        "Answer from this part and say briefly that it is partial; a narrower request "
+        "can get the rest.]\n\n"
+    )
+
+    def __init__(self, max_chars: int) -> None:
+        self.max_chars = max_chars
+
+    def run(self, state: State) -> None:
+        messages = list(state.data.get("messages") or [])
+        changed = False
+        for index, message in enumerate(messages):
+            result = message.tool_call_result
+            if (
+                result is None
+                or not isinstance(result.result, str)
+                or len(result.result) <= self.max_chars
+                or TRUNCATED_META_KEY in message.meta
+            ):
+                continue
+            original = len(result.result)
+            logger.warning(
+                "Cutting tool result {} to {} of {} characters",
+                result.origin.tool_name,
+                self.max_chars,
+                original,
+            )
+            messages[index] = ChatMessage.from_tool(
+                self._NOTE.format(kept=self.max_chars, original=original)
+                + result.result[: self.max_chars],
+                origin=result.origin,
+                error=result.error,
+                meta={
+                    **message.meta,
+                    TRUNCATED_META_KEY: {"original_chars": original, "kept_chars": self.max_chars},
+                },
+            )
+            changed = True
+        if changed:
+            state.set("messages", messages, handler_override=replace_values)
+
+
+def tool_output_limit(max_chars: int | None = None) -> int | None:
+    """`max_chars`, else ``AI_SDK_TOOL_OUTPUT_LIMIT``; None when 0 or below."""
+    limit = (
+        max_chars if max_chars is not None else resolve_setting("AI_SDK_TOOL_OUTPUT_LIMIT", 100_000)
+    )
+    return limit if limit > 0 else None
+
+
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
-    """Standard `before_tool` hooks for a tool-capable agent."""
+    """Standard hooks for a tool-capable agent."""
     hooks: dict[str, list[Any]] = {"before_tool": [LogToolCallsHook()]}
     if agent.max_tool_calls is not None:
         hooks["before_tool"].append(ToolCallBudgetHook(agent.max_tool_calls))
+    if (limit := tool_output_limit()) is not None:
+        hooks["after_tool"] = [ToolOutputLimitHook(limit)]
     return hooks
 
 
@@ -93,6 +158,9 @@ class ToolAgentConfig(BaseModel):
 
     # Optional hard cap on tool calls per run. None disables the budget hook.
     max_tool_calls: int | None = None
+
+    # Characters kept of each tool result. None uses AI_SDK_TOOL_OUTPUT_LIMIT; 0 disables.
+    max_tool_output_chars: int | None = None
 
     # Maximum number of tools invoked in parallel per step.
     tool_concurrency_limit: int = 4
@@ -175,6 +243,8 @@ class ToolAgent:
             hooks.setdefault("before_tool", []).append(
                 ToolCallBudgetHook(self.config.max_tool_calls)
             )
+        if (limit := tool_output_limit(self.config.max_tool_output_chars)) is not None:
+            hooks.setdefault("after_tool", []).append(ToolOutputLimitHook(limit))
         return hooks or None
 
     def pipeline(self) -> Pipeline:

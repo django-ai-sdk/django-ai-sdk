@@ -83,6 +83,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_SUGGESTION_TIMEOUT` | `5.0` | Seconds before suggestion generation is abandoned. |
 | `AI_SDK_TITLE_SANITY_LIMIT` | `80` | Character ceiling for auto-generated thread titles. |
 | `AI_SDK_SUBAGENT_DIGEST_LIMIT` | `6000` | Character budget for the digest of a subagent's tool results, used when its run ended without a written report. Shared across all results; `0` or below disables truncation. See [Handoff output](/manual/agent/#handoff-output). |
+| `AI_SDK_TOOL_OUTPUT_LIMIT` | `100000` | Character cap per tool result the model gets within a run; the model is told it was cut. `ToolAgentConfig.max_tool_output_chars` overrides it per agent. `0` or below disables it. See [Error Handling](/errors/#what-the-model-sees). |
 | `AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT` | `4000` | Character cap per subagent handoff result replayed into a later turn. `0` or below disables truncation. See [Subagent Delegation](/manual/agent/#handoff-history). |
 
 ## Tracing
