@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel
 
 from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.errors import get_error_spec
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
 
@@ -186,12 +187,15 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "error":
                         error_event = cast("ErrorEvent", event)
-                        # Note: error chunk are emitted differently from regular chunks
+                        spec = get_error_spec(error_event.error_code)
                         yield format_sse(
                             {
                                 "error": {
-                                    "message": error_event.error_message,
+                                    "message": str(spec.message),
                                     "type": "server_error",
+                                    "code": spec.code,
+                                    "retryable": spec.retryable,
+                                    "ref": error_event.ref,
                                 }
                             }
                         )

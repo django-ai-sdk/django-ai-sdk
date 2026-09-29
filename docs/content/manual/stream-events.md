@@ -23,7 +23,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `SourceEvent` | RAG citation | `index`, `title`, `content`, `source_id` |
 | `SuggestionEvent` | Follow-up questions | `suggestions` |
 | `MessageEndEvent` | Message complete | `finish_reason` |
-| `ErrorEvent` | Error occurred | `error_message`, `error_code` |
+| `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](/errors/)) |
 | `StreamEndEvent` | Stream terminated | (none) |
 
 ## Handling Events
@@ -44,7 +44,7 @@ async for event in stream.stream(messages):
         case MessageEndEvent():
             print(f"Finish reason: {event.finish_reason}")
         case ErrorEvent():
-            print(f"Error: {event.error_message}")
+            print(f"Error {event.error_code} (ref {event.ref})")
         case StreamEndEvent():
             print("Done")
 ```
@@ -63,7 +63,7 @@ Helpers: `parse_tool_input()` JSON-decodes tool arguments (falling back to the r
 `Stream.stream()` is defensive:
 
 - Pipeline failures produce an `ErrorEvent` (with the message persisted with `finish_reason="error"`) followed by `StreamEndEvent`.
-- Unexpected exceptions yield an `ErrorEvent` with the exception type and message.
+- Unexpected exceptions yield an `ErrorEvent` too. It carries only the error code and a `ref`; the exception text is logged with that ref and stored for admins.
 - Cancellation (`pipeline_task.cancel()` in `finally`) persists the partial message with `finish_reason="cancelled"`.
 - `MessageEndEvent` and `StreamEndEvent` always terminate the stream cleanly.
 

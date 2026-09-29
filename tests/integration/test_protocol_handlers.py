@@ -242,9 +242,9 @@ class TestVercelProtocolHandler:
         assert tool_inputs[0].input == {"query": "test"}
 
     @pytest.mark.asyncio
-    async def test_handle_stream_tool_output_preserves_error_flag(self, handler):
-        """Test that tool output preserves the error flag from Haystack."""
-        from django_ai_sdk.protocols.vercel import ToolOutputAvailablePart
+    async def test_handle_stream_tool_output_error_sends_a_code(self, handler):
+        """A failed tool call is a tool-output-error with a code, not the tool's error text."""
+        from django_ai_sdk.protocols.vercel import ToolOutputAvailablePart, ToolOutputErrorPart
 
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
@@ -262,10 +262,10 @@ class TestVercelProtocolHandler:
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        tool_outputs = [c for c in chunks if isinstance(c, ToolOutputAvailablePart)]
-        assert len(tool_outputs) == 1
-        assert tool_outputs[0].output["result"] == "Rate limit exceeded"
-        assert tool_outputs[0].output["error"] is True
+        assert not [c for c in chunks if isinstance(c, ToolOutputAvailablePart)]
+        [error] = [c for c in chunks if isinstance(c, ToolOutputErrorPart)]
+        assert error.tool_call_id == "call_1"
+        assert error.error_text == "tool_failed"
 
     @pytest.mark.asyncio
     async def test_handle_stream_data_event(self, handler):
@@ -289,20 +289,26 @@ class TestVercelProtocolHandler:
     @pytest.mark.asyncio
     async def test_handle_stream_error_event(self, handler):
         """Test handling error events."""
-        from django_ai_sdk.protocols.vercel import ErrorPart
+        from django_ai_sdk.protocols.vercel import DataPart, ErrorPart
 
         async def event_generator():
             yield MessageStartEvent(message_id="msg_123")
-            yield ErrorEvent(error_message="Something went wrong")
+            yield ErrorEvent(error_code="rate_limited", ref="abcd1234")
             yield MessageEndEvent(finish_reason="error")
 
         chunks = []
         async for chunk in handler.handle_stream(event_generator()):
             chunks.append(chunk)
 
-        error_parts = [c for c in chunks if isinstance(c, ErrorPart)]
-        assert len(error_parts) == 1
-        assert error_parts[0].error_text == "Something went wrong"  # snake_case
+        [data] = [c for c in chunks if isinstance(c, DataPart) and c.type == "data-error"]
+        assert data.data == {
+            "code": "rate_limited",
+            "message": "Too many requests right now. Please try again in a moment.",
+            "retryable": True,
+            "ref": "abcd1234",
+        }
+        [error] = [c for c in chunks if isinstance(c, ErrorPart)]
+        assert error.error_text == "rate_limited"
 
     @pytest.mark.asyncio
     async def test_handle_stream_finishes_with_done(self, handler):

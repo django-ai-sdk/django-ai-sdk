@@ -10,6 +10,10 @@ class DjangoAISDKConfig(AppConfig):
     name = "django_ai_sdk"
 
     def ready(self) -> None:
+        # Storage adapters register on import; a fresh process needs them at once.
+        import django_ai_sdk.storage.db  # noqa: F401
+        import django_ai_sdk.storage.memory  # noqa: F401
+
         # Autodiscovers every installed app's `agents` module, so defining an
         # Agent subclass there is enough on its own — no per-app ready() hook,
         # no settings entry.

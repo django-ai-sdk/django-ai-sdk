@@ -36,7 +36,11 @@ class ChatMessage(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     model: str = ""
     finish_reason: str = ""
+    # Raw text, for admins and logs only.
     errors: list[str] = Field(default_factory=list)
+    # What a client sees (see django_ai_sdk.errors).
+    error_code: str = ""
+    error_ref: str = ""
     metadata: dict = Field(default_factory=dict)
 
     # Timestamps & timing
@@ -161,6 +165,8 @@ class StreamWriter:
         elif chunk.type == "error":
             error_message = chunk.content["error_message"]
             self.message.errors.append(error_message)
+            self.message.error_code = chunk.content.get("error_code", "")
+            self.message.error_ref = chunk.content.get("error_ref", "")
             logger.debug(f"Added error to message: {error_message}")
         else:
             logger.debug(f"Unknown chunk type: {chunk.type}")

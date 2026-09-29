@@ -108,7 +108,7 @@ SourceEvent(index=1, title="Quarterly report", source_id="doc:chunk", ...)
 SuggestionEvent(suggestions=["Tell me about the revenue", "Summarize it"])
 
 # Errors
-ErrorEvent(error_message="Pipeline failed: ...")
+ErrorEvent(error_code="rate_limited", ref="3f9a1c02")
 ```
 
 The full set: `MessageStartEvent`, `TextChunkEvent`, `ReasoningChunkEvent`, `DataEvent`, `ToolCallStartEvent`, `ToolInputChunkEvent`, `ToolInputCompleteEvent`, `ToolOutputEvent`, `SourceEvent`, `SuggestionEvent`, `MessageEndEvent`, `ErrorEvent`, `StreamEndEvent`.

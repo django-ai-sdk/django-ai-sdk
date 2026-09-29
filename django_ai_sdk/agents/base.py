@@ -17,6 +17,7 @@ from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
+from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.common import Prompt
@@ -911,12 +913,14 @@ class Agent(ABC, AgentInfoMixin):
         storage = await self.get_storage_adapter(thread_id)
 
         if not storage:
-            raise ValueError(f"No storage adapter found for thread: {thread_id}")
+            raise AiSdkError(
+                f"No storage adapter found for thread: {thread_id}", ErrorCode.CONFIGURATION_ERROR
+            )
 
         # Get thread metadata
         thread_info = await storage.__class__.get_thread(thread_id)
         if not thread_info:
-            raise ValueError(f"Thread not found: {thread_id}")
+            raise NotFound(f"Thread not found: {thread_id}")
 
         # The agent chain gates the agent, not whose thread this is.
         await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread_info)
@@ -1016,24 +1020,27 @@ class Agent(ABC, AgentInfoMixin):
             else:
                 logger.debug("No user messages found to store")
 
-        # Create fresh adapter each time
-        # RAG is cached separately via get_rag(), so adapter is not tied to it
-        logger.debug("Creating pipeline adapter")
-        adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
-
-        # Wire suggestion generator onto the adapter
-        suggestion_generator = self.get_suggestion_generator()
-        if suggestion_generator:
-            adapter.suggestion_generator = suggestion_generator
-
         if self.title_generation and thread and not thread.title:
-            title = await generate_thread_title(
-                agent=self, messages=messages, thread_id=thread.id, user=user
-            )
-            if title:
-                await ThreadService.update_thread(thread.id, title=title, user=user)
+            # A failed title must not fail the reply.
+            try:
+                title = await generate_thread_title(
+                    agent=self, messages=messages, thread_id=thread.id, user=user
+                )
+                if title:
+                    await ThreadService.update_thread(thread.id, title=title, user=user)
+            except Exception:
+                logger.exception("Thread title generation failed")
 
-        logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
+        async def build_adapter() -> Streamable:
+            # Built inside the stream, so a failure (e.g. RAG warmup) reaches the client.
+            adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
+            suggestion_generator = self.get_suggestion_generator()
+            if suggestion_generator:
+                adapter.suggestion_generator = suggestion_generator
+            logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
+            return adapter
 
         logger.debug("Initiating stream response")
-        return await stream_response(adapter, messages, self.protocol_handler)
+        return await stream_response(
+            build_adapter, messages, self.protocol_handler, storage_adapter=storage_adapter
+        )
