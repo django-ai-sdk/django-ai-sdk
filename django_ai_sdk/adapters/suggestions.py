@@ -104,6 +104,6 @@ class DefaultSuggestionGenerator:
             # Don't f-string `e` in: its text can contain braces (e.g. malformed
             # JSON from the model), which loguru's internal str.format() then
             # chokes on, turning this already-handled failure into a crash.
-            logger.error("Error generating suggestions: {}", e, exc_info=True)
+            logger.opt(exception=e).error("Error generating suggestions: {}", e)
 
         return []

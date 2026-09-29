@@ -51,7 +51,7 @@ class ToolCallBudgetHook:
 
 
 class LogToolCallsHook:
-    """Log every tool call an agent makes, at INFO level."""
+    """Log every tool call an agent makes: its name at INFO, its arguments at DEBUG."""
 
     allowed_hook_points = ["before_tool"]
 
@@ -63,7 +63,9 @@ class LogToolCallsHook:
         if not messages or not messages[-1].tool_calls:
             return
         for tool_call in messages[-1].tool_calls:
-            self._log(f"Tool call: {tool_call.tool_name} args={tool_call.arguments}")
+            self._log("Tool call: {}", tool_call.tool_name)
+            # Arguments can carry PII or tokens: keep them out of the default log.
+            logger.debug("Tool call {} args={}", tool_call.tool_name, tool_call.arguments)
 
 
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
