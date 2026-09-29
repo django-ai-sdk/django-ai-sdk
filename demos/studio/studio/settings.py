@@ -83,6 +83,27 @@ AI_SDK_PERMISSIONS = {
     "thread": ["apps.agents.permissions.DemoThreadPermission"],
 }
 
+# Files and images
+
+# Answers image questions (ask_image) and captions uploaded images. Agents on this model
+# get image attachments as pixels; others get the caption.
+AI_SDK_VISION_MODEL = env("AI_SDK_VISION_MODEL", default=None)
+
+# The thread-file download view (storage isn't publicly served); file parts in the chat
+# link to it. Ninja names routes "<namespace>:<view function>".
+AI_SDK_THREAD_FILE_URL_NAME = "api-1.0.0:download_thread_file"
+
+# The shared text types, plus what the studio's PDF and image pipelines read.
+AI_SDK_ALLOWED_FILES = {
+    **AI_SDK_ALLOWED_FILES,
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 # Integrations are Django apps (see INSTALLED_APPS) that register themselves on ready().
 # This dict configures them by name. A missing credential doesn't crash boot: the
 # integration reports that it needs setup instead. `weather` needs none at all.

@@ -9,7 +9,12 @@ from django_ai_sdk.adapters.citations import DefaultCitationFormatter
 from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 from django_ai_sdk.agents import ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.common import prompt
-from django_ai_sdk.files import FilePipeline, TextFileProcessor
+from django_ai_sdk.files import (
+    AnyDocFileProcessor,
+    FilePipeline,
+    ImageCaptionProcessor,
+    TextFileProcessor,
+)
 from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -68,9 +73,26 @@ class PirateBasicAgent(Agent):
     # Enable file upload UI for this agent
     file_upload = True
 
+    # A turn with an attached file must search it before answering.
+    attachment_tools = ["search_uploaded_documents"]
+
     file_pipelines = [
         FilePipeline(
             TextFileProcessor(),
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAgent()),
+            ],
+        ),
+        FilePipeline(
+            AnyDocFileProcessor(),
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAgent()),
+            ],
+        ),
+        # Images become a searchable caption, which is also what agents
+        # without vision get to see.
+        FilePipeline(
+            ImageCaptionProcessor(),
             transforms=[
                 DocumentExtractionTransform(PirateExtractionAgent()),
             ],
