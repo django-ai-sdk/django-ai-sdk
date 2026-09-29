@@ -5,7 +5,9 @@ These tests use in-memory Qdrant (no LLM needed).
 Document indexing uses local FastEmbed models.
 """
 
-from unittest.mock import MagicMock, patch
+import asyncio
+import threading
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from django_ai_sdk.rags.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
@@ -325,3 +327,47 @@ class TestQdrantFileLockRetry:
 
         assert not rag._is_warmed_up
         assert rag._cached_document_store is None
+
+
+class TestQdrantRealFileLock:
+    """Against a real lock held by another client, not a mocked constructor.
+
+    The store opens its client lazily, so a retry around the constructor alone
+    never sees the lock.
+    """
+
+    @staticmethod
+    def rag(path, lock_timeout):
+        storage = QdrantStorageConfig(
+            backend="persistent", persist_path=str(path), lock_timeout=lock_timeout
+        )
+        return QdrantBM25HybridRAG(documents=[], config=QdrantBM25HybridRAGConfig(storage=storage))
+
+    @pytest.mark.asyncio
+    async def test_waits_for_the_lock_to_be_released(self, tmp_path):
+        from qdrant_client import QdrantClient
+
+        holder = QdrantClient(path=str(tmp_path))
+        threading.Timer(0.5, holder.close).start()
+
+        store = await asyncio.to_thread(self.rag(tmp_path, 10)._create_document_store)
+
+        assert store.count_documents() == 0
+
+    @pytest.mark.asyncio
+    async def test_gives_up_as_knowledge_unavailable(self, tmp_path):
+        from qdrant_client import QdrantClient
+
+        from django_ai_sdk.errors import AiSdkError, ErrorCode
+        from django_ai_sdk.rags.provider import RAGProvider
+
+        holder = QdrantClient(path=str(tmp_path))
+        agent = MagicMock()
+        agent.get_rag_pipeline = AsyncMock(return_value=self.rag(tmp_path, 0.3))
+        try:
+            with pytest.raises(AiSdkError) as raised:
+                await RAGProvider().get_rag_instance(agent, "memory-1")
+        finally:
+            holder.close()
+
+        assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE

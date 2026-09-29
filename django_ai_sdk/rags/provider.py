@@ -4,6 +4,7 @@ import asyncio
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.errors import AiSdkError, ErrorCode
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
@@ -12,6 +13,12 @@ if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
+
+
+def _knowledge_unavailable(cache_key: str, exc: Exception) -> AiSdkError:
+    if isinstance(exc, AiSdkError):
+        return exc
+    return AiSdkError(f"RAG {cache_key} failed: {exc}", ErrorCode.KNOWLEDGE_UNAVAILABLE)
 
 
 class RAGProvider:
@@ -154,7 +161,10 @@ class RAGProvider:
         rag = self._cache.get(cache_key)
 
         if rag is not None and hasattr(rag, "add_documents"):
-            await rag.add_documents(documents)
+            try:
+                await rag.add_documents(documents)
+            except Exception as exc:
+                raise _knowledge_unavailable(cache_key, exc) from exc
             logger.info(f"Added {len(documents)} documents to {cache_key}")
 
     async def remove_documents(
@@ -165,7 +175,10 @@ class RAGProvider:
         rag = self._cache.get(cache_key)
 
         if rag is not None and hasattr(rag, "remove_documents"):
-            await rag.remove_documents(document_ids)
+            try:
+                await rag.remove_documents(document_ids)
+            except Exception as exc:
+                raise _knowledge_unavailable(cache_key, exc) from exc
             logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
 
     async def reindex(
@@ -246,18 +259,17 @@ class RAGProvider:
                 return self._cache[cache_key]
 
             logger.debug(f"Creating RAG for {cache_key} (force_rebuild={force_rebuild})")
-            rag = await agent.get_rag_pipeline(memory_id)
-
-            if rag is not None:
-                if hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
+            try:
+                rag = await agent.get_rag_pipeline(memory_id)
+                if rag is not None and hasattr(rag, "warmup") and hasattr(rag, "needs_warmup"):
                     if rag.needs_warmup or force_rebuild:
                         logger.debug(
                             f"Warming up RAG for {cache_key} (force_rebuild={force_rebuild})"
                         )
                         await rag.warmup(force_rebuild)
-                self._cache[cache_key] = rag
-            else:
-                self._cache[cache_key] = None
+            except Exception as exc:
+                raise _knowledge_unavailable(cache_key, exc) from exc
+            self._cache[cache_key] = rag
 
             # Evict LRU entries when over the cap; clean up their locks too
             while len(self._cache) > self._MAX_CACHE_SIZE:
