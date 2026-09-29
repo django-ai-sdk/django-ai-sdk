@@ -6,6 +6,7 @@ from typing import Any
 from asgiref.sync import async_to_sync
 from django_tasks import task
 
+from django_ai_sdk.errors import ErrorCode, classify_error
 from django_ai_sdk.utils import resolve_setting
 
 # No pipeline step reports progress within this ceiling; a hung/leaked
@@ -55,12 +56,13 @@ async def run_file_pipeline(
 
     # Only writes if still PROCESSING, so a concurrent cancel/finish wins
     # instead of being clobbered. Returns whether the write applied.
-    async def _transition(*, status: str, error: str) -> bool:
+    async def _transition(*, status: str, error: str, code: str = "") -> bool:
         updated = await EntryDocument.objects.filter(
             id=entry_doc.id, processing_status=EntryDocument.ProcessingStatus.PROCESSING
         ).aupdate(
             processing_status=status,
             processing_error=error,
+            processing_error_code=code,
             processing_step=None,
             updated_at=timezone.now(),
         )
@@ -109,6 +111,7 @@ async def run_file_pipeline(
             await _transition(
                 status=EntryDocument.ProcessingStatus.FAILED,
                 error=f"Unsupported or empty file: {entry_doc.file_name}",
+                code=ErrorCode.FILE_UNSUPPORTED,
             )
             return
 
@@ -142,10 +145,16 @@ async def run_file_pipeline(
         if not await _transition(
             status=EntryDocument.ProcessingStatus.FAILED,
             error=str(exc) or f"Processing timed out after {PIPELINE_TIMEOUT_SECONDS} seconds",
+            code=ErrorCode.FILE_PROCESSING_FAILED,
         ):
             await _mark_cancelled()
         raise
     except Exception as exc:
-        if not await _transition(status=EntryDocument.ProcessingStatus.FAILED, error=str(exc)):
+        code = classify_error(exc)
+        if not await _transition(
+            status=EntryDocument.ProcessingStatus.FAILED,
+            error=str(exc),
+            code=ErrorCode.FILE_PROCESSING_FAILED if code == ErrorCode.UNKNOWN else code,
+        ):
             await _mark_cancelled()
         raise

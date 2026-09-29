@@ -274,7 +274,9 @@ class EntryDocument(models.Model):
     # while processing_status=PROCESSING. Not a TextChoices enum: any
     # agent's custom processor/transform can supply its own step string.
     processing_step = models.CharField(max_length=32, null=True, blank=True, default=None)
+    # Raw text, for admins only; clients get processing_error_code.
     processing_error = models.TextField(blank=True, default="")
+    processing_error_code = models.CharField(max_length=64, blank=True, default="")
     # Checked cooperatively at each pipeline step boundary (see
     # memories/tasks.py); cancellation only takes effect between steps, not
     # mid-call. Null means not cancelled.

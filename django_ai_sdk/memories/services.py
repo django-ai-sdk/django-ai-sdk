@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
+from django_ai_sdk.errors import ErrorCode, NotFound, UserError, get_error_spec
 from django_ai_sdk.files.common import compute_file_hash
 from django_ai_sdk.memories.models import (
     Entry,
@@ -56,13 +57,13 @@ if TYPE_CHECKING:
 
 
 async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
-    """Fetch a single object or raise ValueError (mapped to 404 at the view layer)."""
+    """Fetch a single object or raise NotFound."""
     from django.core.exceptions import ObjectDoesNotExist
 
     try:
         return await qs.aget(**lookup)
     except ObjectDoesNotExist:
-        raise ValueError(f"{qs.model.__name__} not found") from None
+        raise NotFound(f"{qs.model.__name__} not found") from None
 
 
 async def _fail_orphaned_processing_document(
@@ -94,22 +95,37 @@ async def _fail_orphaned_processing_document(
     ).aupdate(
         processing_status=EntryDocument.ProcessingStatus.FAILED,
         processing_error=error,
+        processing_error_code=ErrorCode.FILE_PROCESSING_FAILED,
         processing_step=None,
         updated_at=timezone.now(),
     )
     if updated:
         entry_doc.processing_status = EntryDocument.ProcessingStatus.FAILED
         entry_doc.processing_error = error
+        entry_doc.processing_error_code = ErrorCode.FILE_PROCESSING_FAILED
         entry_doc.processing_step = None
+
+
+def _public_error(entry_doc: EntryDocument) -> tuple[str, str]:
+    """The (code, message) a client sees. Older failed rows have no code."""
+    code = entry_doc.processing_error_code
+    if not code and entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED:
+        code = ErrorCode.FILE_PROCESSING_FAILED
+    if not code:
+        return "", ""
+    spec = get_error_spec(code)
+    return spec.code, str(spec.message)
 
 
 def _document_status_out(
     entry_doc: EntryDocument, task_status: TaskStatus | None
 ) -> DocumentStatusOut:
+    error_code, error = _public_error(entry_doc)
     return DocumentStatusOut(
         id=str(entry_doc.id),
         status=entry_doc.processing_status,
-        error=entry_doc.processing_error,
+        error=error,
+        error_code=error_code,
         processing_step=entry_doc.processing_step,
         task=task_status,
     )
@@ -690,7 +706,7 @@ class MemoryService(PermissionsMixin):
         memories = {str(m.id): m async for m in Memory.objects.filter(id__in=memory_ids)}
         missing = [mid for mid in memory_ids if mid not in memories]
         if missing:
-            raise ValueError(f"Memories not found: {', '.join(missing)}")
+            raise NotFound(f"Memories not found: {', '.join(missing)}")
 
         links = []
         for memory_id in memory_ids:
@@ -1000,7 +1016,7 @@ class MemoryService(PermissionsMixin):
             raise ValueError("Document has no associated memory")
 
         if entry_doc.processing_status not in _RETRYABLE:
-            raise ValueError(
+            raise UserError(
                 f"Document cannot be retried in status {entry_doc.processing_status!r}. "
                 f"Only {sorted(s.value for s in _RETRYABLE)} are retryable."
             )
@@ -1025,12 +1041,14 @@ class MemoryService(PermissionsMixin):
 
         entry_doc.processing_status = EntryDocument.ProcessingStatus.PENDING
         entry_doc.processing_error = ""
+        entry_doc.processing_error_code = ""
         entry_doc.processing_step = None
         entry_doc.cancelled_at = None
         await entry_doc.asave(
             update_fields=[
                 "processing_status",
                 "processing_error",
+                "processing_error_code",
                 "processing_step",
                 "cancelled_at",
                 "updated_at",
@@ -1050,7 +1068,13 @@ class MemoryService(PermissionsMixin):
         # Re-read to return the actual persisted state — the conditional aupdate above
         # may have been skipped if the worker already advanced past PENDING.
         await entry_doc.arefresh_from_db(
-            fields=["processing_status", "processing_error", "processing_step", "task_id"]
+            fields=[
+                "processing_status",
+                "processing_error",
+                "processing_error_code",
+                "processing_step",
+                "task_id",
+            ]
         )
         return _document_status_out(entry_doc, None)
 
@@ -1104,7 +1128,7 @@ class MemoryService(PermissionsMixin):
         )
         if not updated:
             await entry_doc.arefresh_from_db(fields=["processing_status"])
-            raise ValueError(
+            raise UserError(
                 f"Document cannot be cancelled in status {entry_doc.processing_status!r}."
             )
         entry_doc.cancelled_at = now
@@ -1158,6 +1182,7 @@ class MemoryService(PermissionsMixin):
         # The document id is always the EntryDocument id so it's stable across the
         # whole lifecycle.
         entry = entry_doc.entry
+        error_code, error = _public_error(entry_doc)
         return DocumentOut(
             id=str(entry_doc.id),
             file=entry_doc.file.url if entry_doc.file else "",
@@ -1169,7 +1194,8 @@ class MemoryService(PermissionsMixin):
             content_type=entry_doc.content_type,
             file_extension=entry_doc.file_extension,
             status=entry_doc.processing_status,
-            error=entry_doc.processing_error,
+            error=error,
+            error_code=error_code,
             processing_step=entry_doc.processing_step,
             created_at=entry_doc.created_at.isoformat(),
             updated_at=entry_doc.updated_at.isoformat(),

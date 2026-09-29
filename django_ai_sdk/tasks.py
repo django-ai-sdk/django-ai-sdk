@@ -26,7 +26,8 @@ class TaskStatus(BaseModel):
     enqueued_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
-    errors: list[TaskError] = Field(default_factory=list)
+    # Server-side only.
+    errors: list[TaskError] = Field(default_factory=list, exclude=True)
     return_value: Any | None = None
 
 
