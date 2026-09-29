@@ -31,6 +31,8 @@ class AgentSettings(models.Model):
     title_generation = models.BooleanField(default=True)
     max_history = models.PositiveIntegerField(null=True, blank=True)
     file_upload = models.BooleanField(default=False)
+    vision = models.BooleanField(default=False)
+    required_tools = models.JSONField(default=list, blank=True)
     active = models.BooleanField(default=True, db_index=True)
     is_public = models.BooleanField(default=False)
 

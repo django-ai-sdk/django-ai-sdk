@@ -200,6 +200,7 @@ async def get_agent_info(request: HttpRequest, agent_id: str) -> Any:
         instructions=agent.get_system_prompt(),
         file_upload=info.file_upload,
         rag=info.rag,
+        vision=info.vision,
         permissions=await aagent_permissions(request.user, agent_id),
     )
 

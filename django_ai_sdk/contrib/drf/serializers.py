@@ -39,8 +39,15 @@ class PydanticField(serializers.Field):
 
 
 class MessagePartSerializer(serializers.Serializer):
+    """A Vercel UI message part. Keys keep the client's camelCase spelling."""
+
     type = serializers.CharField()
     text = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    # file parts
+    url = serializers.CharField(required=False, allow_null=True)
+    mediaType = serializers.CharField(required=False, allow_null=True)  # noqa: N815
+    filename = serializers.CharField(required=False, allow_null=True)
+    providerMetadata = serializers.DictField(required=False, allow_null=True)  # noqa: N815
 
 
 class MessageSerializer(serializers.Serializer):
@@ -115,6 +122,10 @@ class RuntimeAgentCreateSerializer(serializers.Serializer):
     title_generation = serializers.BooleanField(required=False, default=True)
     max_history = serializers.IntegerField(required=False, allow_null=True, default=None)
     file_upload = serializers.BooleanField(required=False, default=False)
+    vision = serializers.BooleanField(required=False, default=False)
+    required_tools = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
 
 
 class RuntimeAgentUpdateSerializer(serializers.Serializer):
@@ -131,6 +142,8 @@ class RuntimeAgentUpdateSerializer(serializers.Serializer):
     title_generation = serializers.BooleanField(required=False)
     max_history = serializers.IntegerField(required=False, allow_null=True)
     file_upload = serializers.BooleanField(required=False)
+    vision = serializers.BooleanField(required=False)
+    required_tools = serializers.ListField(child=serializers.CharField(), required=False)
     active = serializers.BooleanField(required=False)
 
 
@@ -249,6 +262,7 @@ class AgentSummarySerializer(serializers.Serializer):
     model = serializers.CharField(allow_null=True)
     file_upload = serializers.BooleanField()
     rag = serializers.BooleanField()
+    vision = serializers.BooleanField()
 
 
 class AgentInfoSerializer(serializers.Serializer):
@@ -259,6 +273,7 @@ class AgentInfoSerializer(serializers.Serializer):
     description = serializers.CharField(allow_null=True)
     file_upload = serializers.BooleanField()
     rag = serializers.BooleanField()
+    vision = serializers.BooleanField()
     instructions = serializers.CharField(allow_null=True)
     permissions = ObjectPermissionsSerializer()
 
@@ -298,6 +313,8 @@ class AgentSettingsSerializer(serializers.ModelSerializer):
             "title_generation",
             "max_history",
             "file_upload",
+            "vision",
+            "required_tools",
             "active",
             "created_at",
             "updated_at",

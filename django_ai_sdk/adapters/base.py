@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import StreamingChunk, ToolCall
+from haystack.dataclasses import ImageContent, StreamingChunk, ToolCall
 
 from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
 from django_ai_sdk.adapters.utils import merge_messages
@@ -151,6 +151,25 @@ def get_error_event(info: ErrorInfo) -> ErrorEvent:
     return ErrorEvent(error_code=info.spec.code, ref=info.ref)
 
 
+def get_user_text(message: ChatMessage) -> str:
+    """User text followed by the context line of each attachment."""
+    hints = [a.context for a in message.attachments if a.context]
+    return "\n\n".join([message.content, *hints]) if hints else message.content
+
+
+def get_user_message(message: ChatMessage) -> HaystackChatMessage:
+    """Haystack user message, multimodal when images were inlined for a vision model."""
+    text = get_user_text(message)
+    images = [
+        ImageContent(base64_image=a.data, mime_type=a.media_type)
+        for a in message.attachments
+        if a.data
+    ]
+    if not images:
+        return HaystackChatMessage.from_user(text)
+    return HaystackChatMessage.from_user(content_parts=[text, *images] if text else images)
+
+
 class Run:
     """
     Runnable Haystack adapter.
@@ -176,7 +195,7 @@ class Run:
         converted: list[HaystackChatMessage] = []
         for msg in conversation:
             if msg.role == "user":
-                converted.append(HaystackChatMessage.from_user(msg.content))  # type: ignore[arg-type]
+                converted.append(get_user_message(msg))
             elif msg.role == "assistant":
                 converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
         return converted
@@ -227,6 +246,8 @@ class Stream:
     model: str | None = None
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None
+    # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
+    hook_context: dict[str, Any] | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -314,12 +335,16 @@ class Stream:
             if message is not None:
                 converted_messages.extend(self.replay_handoff(message))
                 continue
-            pairs = (
-                merge_messages(group)
-                if self.merge_messages
-                else [(msg.role, msg.content) for msg in group]
-            )
-            for role, content in pairs:
+            if not self.merge_messages:
+                for msg in group:
+                    if msg.role == "user":
+                        converted_messages.append(get_user_message(msg))
+                    elif msg.role == "assistant":
+                        converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
+                continue
+            # ponytail: merging is text-only, inlined images are dropped here
+            texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
+            for role, content in merge_messages(texts):
                 if role == "user":
                     converted_messages.append(HaystackChatMessage.from_user(content))
                 elif role == "assistant":
@@ -438,7 +463,9 @@ class Stream:
         """Create and schedule the pipeline or agent coroutine as a Task."""
         if self.agent_component:
             coro = self.agent_component.run_async(
-                messages=haystack_messages, streaming_callback=streaming_callback
+                messages=haystack_messages,
+                streaming_callback=streaming_callback,
+                hook_context=self.hook_context,
             )
         else:
             coro = self.pipeline.run_async({"messages": haystack_messages})

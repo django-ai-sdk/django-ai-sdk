@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from functools import lru_cache
 from io import BytesIO
@@ -334,3 +335,65 @@ class AnyDocFileProcessor(BaseFileProcessor):
             logger.info("anydoc could not convert %s, passing on", name, exc_info=True)
             return None
         return text if text.strip() else None
+
+
+# Describe + transcribe: the description makes photos retrievable, the verbatim
+# transcription makes screenshots/text-heavy images retrievable.
+IMAGE_CAPTION_PROMPT = (
+    "Describe this image in detail for later search and retrieval: the main "
+    "subject, setting, notable objects, people, colours, and any diagrams or "
+    "charts. Then, under a line 'Transcription:', transcribe ALL visible text in "
+    "the image verbatim. If the image contains no text, write 'Transcription: (none)'."
+)
+
+
+def get_vision_model() -> str | None:
+    """The model used for image questions (`AI_SDK_VISION_MODEL`), None if unset."""
+    return resolve_setting("AI_SDK_VISION_MODEL", None)
+
+
+async def describe_image(
+    data: bytes, mime_type: str, prompt: str, *, model: str | None = None
+) -> str | None:
+    """Ask a vision model `prompt` about an image; returns its text reply."""
+    from haystack.dataclasses import ChatMessage as HaystackChatMessage
+    from haystack.dataclasses import ImageContent
+
+    from django_ai_sdk.generators import openai_chat
+
+    image = ImageContent(base64_image=base64.b64encode(data).decode(), mime_type=mime_type)
+    message = HaystackChatMessage.from_user(content_parts=[prompt, image])
+    generator = openai_chat(model=model or get_vision_model())
+    result = await generator.run_async(messages=[message])
+    replies = result.get("replies") or []
+    return replies[0].text if replies else None
+
+
+class ImageCaptionProcessor(BaseFileProcessor):
+    """Turn an uploaded image into searchable text via a vision model.
+
+    Returns a description plus a verbatim transcription of any visible text, so
+    a photo or screenshot becomes retrievable like any other document, and
+    agents whose model can't see images still know what it shows. Uses
+    `AI_SDK_VISION_MODEL`, falling back to `AI_SDK_DEFAULT_MODEL`.
+    """
+
+    ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    )
+    step: ClassVar[str | None] = "captioning"
+
+    async def run(self, file: FileSource) -> str | None:
+        data = await read_aio_bytes(file)
+        if not data:
+            logger.warning("ImageCaptionProcessor: could not read image bytes")
+            return None
+        mime_type = await get_mime_type(file) or "image/jpeg"
+        model = get_vision_model() or resolve_setting("AI_SDK_DEFAULT_MODEL", None)
+        caption = await describe_image(data, mime_type, IMAGE_CAPTION_PROMPT, model=model)
+        if not caption:
+            logger.warning("ImageCaptionProcessor: vision model returned no reply")
+        return caption

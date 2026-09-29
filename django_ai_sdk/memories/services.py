@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import os
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -8,12 +10,14 @@ from asgiref.sync import async_to_sync, sync_to_async
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, QuerySet
+from django.urls import reverse
 from django.utils import timezone
 
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.errors import ErrorCode, NotFound, UserError, get_error_spec
 from django_ai_sdk.files.common import compute_file_hash
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories.models import (
     Entry,
     EntryDocument,
@@ -43,6 +47,9 @@ from django_ai_sdk.permissions import (
 )
 from django_ai_sdk.storage.services import ThreadService
 from django_ai_sdk.tasks import TaskStatus, aget_task_status
+from django_ai_sdk.utils import resolve_setting
+
+logger = get_logger(__name__)
 
 # Catches the worker dying outright (nothing left to hit PIPELINE_TIMEOUT_SECONDS'
 # own except block), so this can only ever fire after that would already have.
@@ -53,7 +60,39 @@ if TYPE_CHECKING:
 
     from django.core.files.base import File
 
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.types import UserType
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_document(doc: EntryDocument) -> bytes:
+    with doc.file.open("rb") as f:
+        return f.read()
+
+
+async def aread_document(doc: EntryDocument) -> bytes:
+    """A document's bytes (Django storage has no async API, so in a thread)."""
+    return await sync_to_async(_read_document)(doc)
+
+
+def get_thread_file_url(doc: EntryDocument, thread_id: str) -> str:
+    """URL the frontend shows a thread file with.
+
+    `AI_SDK_THREAD_FILE_URL_NAME` names the project's (permission-checked)
+    download view, reversed with `thread_id` and `doc_id`. Unset: the storage
+    url, fine for public storage only.
+    """
+    url_name = resolve_setting("AI_SDK_THREAD_FILE_URL_NAME", None)
+    if url_name:
+        return reverse(url_name, kwargs={"thread_id": thread_id, "doc_id": str(doc.id)})
+    return doc.file.url if doc.file else ""
 
 
 async def _aget_or_not_found(qs: Any, **lookup: Any) -> Any:
@@ -905,6 +944,28 @@ class MemoryService(PermissionsMixin):
         return [cls._entry_doc_to_out(ed) async for ed in entry_docs]
 
     @classmethod
+    async def get_thread_file(cls, thread_id: str, doc_id: str, *, user: UserType) -> EntryDocument:
+        """Return a thread's file (EntryDocument), e.g. to serve its bytes."""
+        thread = await _aget_or_not_found(Thread.objects.all(), id=thread_id)
+        agent_id = thread.metadata.get("agent_id") or None
+        if agent_id is None:
+            raise ValueError("Thread has no agent")
+        agent = await AgentService.get(agent_id)
+        await ThreadService.has_perms(user, Operation.VIEW_FILE, thread)
+        await has_perms(
+            user,
+            Operation.VIEW_FILE,
+            thread,
+            permissions=get_agent_permissions(agent),
+            agent=agent,
+        )
+        if not thread.file_memory_id or not _is_uuid(doc_id):
+            raise NotFound("File not found")
+        return await _aget_or_not_found(
+            EntryDocument.objects.all(), id=doc_id, memory_id=thread.file_memory_id
+        )
+
+    @classmethod
     async def delete_thread_file(cls, thread_id: str, doc_id: str, *, user: UserType) -> None:
         """Delete a file from a thread by its EntryDocument id.
 
@@ -1172,6 +1233,62 @@ class MemoryService(PermissionsMixin):
 
         return entry.content
 
+    @classmethod
+    async def resolve_attachments(
+        cls,
+        thread_id: str,
+        messages: list[ChatMessage],
+        *,
+        agent: Any,
+        inline_images: bool = False,
+    ) -> None:
+        """Validate message attachments against the thread's files, in place.
+
+        Attachments are client-supplied references: ids that are not a document
+        of this thread's file memory are dropped. The rest get their canonical
+        name/type, a fresh url and the agent's context hint. With
+        `inline_images`, images on the last user message also get their
+        base64 bytes for a vision model.
+        """
+        ids = {a.document_id for m in messages for a in m.attachments}
+        valid_ids = [i for i in ids if _is_uuid(i)]
+        docs: dict[str, EntryDocument] = {}
+        if valid_ids:
+            qs = EntryDocument.objects.filter(
+                id__in=valid_ids, memory__thread_files__id=thread_id
+            ).select_related("entry", "memory")
+            docs = {str(doc.id): doc async for doc in qs}
+        if dropped := ids - docs.keys():
+            logger.warning(f"Dropping attachments not in thread {thread_id}: {sorted(dropped)}")
+
+        last_user = next((m for m in reversed(messages) if m.role == "user"), None)
+        max_bytes = resolve_setting("AI_SDK_MAX_INLINE_IMAGE_BYTES", 5 * 1024 * 1024)
+
+        for message in messages:
+            attachments = []
+            for attachment in message.attachments:
+                doc = docs.get(attachment.document_id)
+                if doc is None:
+                    continue
+                attachment.media_type = doc.content_type or attachment.media_type
+                attachment.filename = doc.file_name
+                attachment.memory_id = str(doc.memory.id) if doc.memory else ""
+                attachment.url = get_thread_file_url(doc, thread_id)
+                if not attachment.media_type.startswith("image/"):
+                    attachment.context = agent.format_attachment(doc)
+                    attachments.append(attachment)
+                    continue
+                inline = (
+                    inline_images
+                    and message is last_user
+                    and (max_bytes is None or doc.file_size <= max_bytes)
+                )
+                if inline:
+                    attachment.data = base64.b64encode(await aread_document(doc)).decode("ascii")
+                attachment.context = agent.format_image_attachment(doc, inline=inline)
+                attachments.append(attachment)
+            message.attachments = attachments
+
     # ============================================================================
     # Private helpers
     # ============================================================================
@@ -1227,6 +1344,7 @@ disconnect_memory_from_thread = async_to_sync(MemoryService.disconnect_memory_fr
 get_or_create_thread_file_memory = async_to_sync(MemoryService.get_or_create_thread_file_memory)
 upload_thread_file = async_to_sync(MemoryService.upload_thread_file)
 list_thread_files = async_to_sync(MemoryService.list_thread_files)
+get_thread_file = async_to_sync(MemoryService.get_thread_file)
 delete_thread_file = async_to_sync(MemoryService.delete_thread_file)
 get_document_status = async_to_sync(MemoryService.get_document_status)
 get_task_status = async_to_sync(MemoryService.get_task_status)

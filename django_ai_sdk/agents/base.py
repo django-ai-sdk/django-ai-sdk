@@ -13,6 +13,7 @@ from django_ai_sdk.adapters.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
+from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
@@ -79,7 +80,7 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
         return tool
 
 
-class Agent(ABC, AgentInfoMixin):
+class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     """
     Base class for AI agents in the Django AI SDK.
 
@@ -199,6 +200,9 @@ class Agent(ABC, AgentInfoMixin):
 
     # Enable file upload UI for this agent's threads.
     file_upload: bool = False
+
+    # Tools the agent must call before it may finish a run.
+    required_tools: list[str] = []
 
     # Declare one FilePipeline per supported file type.
     # First pipeline whose processor accepts the uploaded file is used.
@@ -479,6 +483,9 @@ class Agent(ABC, AgentInfoMixin):
 
         # subagent tools
         result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
+
+        # questions about uploaded images, answered by the vision model
+        result.extend(self.get_attachment_tools(thread_id))
 
         return result
 
@@ -932,6 +939,11 @@ class Agent(ABC, AgentInfoMixin):
         chat_messages = await storage.get_messages()
         logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
 
+        if any(m.attachments for m in chat_messages):
+            from django_ai_sdk.memories.services import MemoryService
+
+            await MemoryService.resolve_attachments(thread_id, chat_messages, agent=self)
+
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
 
@@ -997,6 +1009,19 @@ class Agent(ABC, AgentInfoMixin):
                 f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
             )
 
+        # Attachments are client-supplied: validate them against the thread's
+        # files before they are stored or reach the model.
+        if any(m.attachments for m in messages):
+            if thread:
+                from django_ai_sdk.memories.services import MemoryService
+
+                await MemoryService.resolve_attachments(
+                    str(thread.id), messages, agent=self, inline_images=self.has_vision()
+                )
+            else:
+                for message in messages:
+                    message.attachments = []
+
         # Get storage adapter for thread
         storage_adapter = await self.get_storage_adapter(thread_id)
 
@@ -1037,6 +1062,8 @@ class Agent(ABC, AgentInfoMixin):
             suggestion_generator = self.get_suggestion_generator()
             if suggestion_generator:
                 adapter.suggestion_generator = suggestion_generator
+            if required_tools := self.get_run_required_tools(messages):
+                adapter.hook_context = {"required_tools": required_tools}
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 
