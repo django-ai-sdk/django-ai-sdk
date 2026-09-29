@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from asgiref.sync import async_to_sync
 
 from django_ai_sdk.agents.services import AgentService
+from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     Operation,
@@ -288,13 +289,13 @@ class ThreadService(PermissionsMixin):
         """
         thread = await _get_thread(thread_id)
         if not thread:
-            raise ValueError("Thread not found")
+            raise NotFound("Thread not found")
         await cls.has_perms(user, Operation.RATE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.rate_message(message_id, rating, feedback, user=user)
         if not success:
-            raise ValueError("Message not found")
+            raise NotFound("Message not found")
         return True
 
     @classmethod
@@ -316,13 +317,13 @@ class ThreadService(PermissionsMixin):
         """
         thread = await _get_thread(thread_id)
         if not thread:
-            raise ValueError("Thread not found")
+            raise NotFound("Thread not found")
         await cls.has_perms(user, Operation.DELETE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.delete_message(message_id)
         if not success:
-            raise ValueError("Message not found")
+            raise NotFound("Message not found")
         return True
 
     @classmethod
@@ -344,13 +345,13 @@ class ThreadService(PermissionsMixin):
         """
         thread = await _get_thread(thread_id)
         if not thread:
-            raise ValueError("Thread not found")
+            raise NotFound("Thread not found")
         await cls.has_perms(user, Operation.RESTORE_MESSAGE, thread)
 
         storage = await _get_storage(thread)
         success = await storage.restore_message(message_id)
         if not success:
-            raise ValueError("Message not found")
+            raise NotFound("Message not found")
         return True
 
     @classmethod
@@ -375,7 +376,7 @@ class ThreadService(PermissionsMixin):
         """
         thread = await _get_thread(thread_id)
         if thread is None:
-            raise ValueError(f"Thread not found: {thread_id}")
+            raise NotFound(f"Thread not found: {thread_id}")
         await cls.has_perms(user, Operation.VIEW_THREAD, thread)
         return await _get_storage(thread)
 
@@ -395,7 +396,10 @@ class ThreadService(PermissionsMixin):
         """
         storage_class = agent.storage_adapter
         if storage_class is None:
-            raise ValueError(f"Agent '{agent.agent_id}' has no storage_adapter configured")
+            raise AiSdkError(
+                f"Agent '{agent.agent_id}' has no storage_adapter configured",
+                ErrorCode.CONFIGURATION_ERROR,
+            )
         return storage_class
 
 
@@ -463,7 +467,7 @@ async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, 
     """
     thread = await _get_thread(thread_id)
     if thread is None:
-        raise ValueError("Thread not found")
+        raise NotFound("Thread not found")
     await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
 
     from django_ai_sdk.memories.models import Entry  # noqa: PLC0415

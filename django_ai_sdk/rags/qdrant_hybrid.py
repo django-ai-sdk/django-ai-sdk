@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -102,8 +103,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             extra.setdefault("index", "documents")
 
             for attempt in Retrying(
-                stop=stop_after_delay(300),
-                wait=wait_exponential(multiplier=1, min=1, max=30),
+                stop=stop_after_delay(storage.lock_timeout),
+                wait=wait_exponential(multiplier=0.25, max=2),
                 retry=retry_if_exception(
                     lambda e: isinstance(e, RuntimeError) and "already accessed" in str(e)
                 ),
@@ -115,7 +116,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 ),
             ):
                 with attempt:
-                    return QdrantDocumentStore(
+                    store = QdrantDocumentStore(
                         path=storage.persist_path,
                         recreate_index=recreate,
                         return_embedding=True,
@@ -124,6 +125,11 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                         similarity=storage.similarity,
                         **extra,
                     )
+                    # The folder lock is taken on first use. A ValueError is about
+                    # the index, not the lock.
+                    with contextlib.suppress(ValueError):
+                        store.count_documents()
+                    return store
             raise RuntimeError("Failed to create QdrantDocumentStore after retries")
         else:
             return QdrantDocumentStore(
@@ -203,19 +209,16 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             logger.warning("No document store available, cannot remove documents")
             return
 
-        try:
-            # Use delete_by_filter with metadata filtering
-            # Build filter for doc_id field in metadata
-            from qdrant_client.http.models import FieldCondition, Filter, MatchAny
+        # Use delete_by_filter with metadata filtering
+        # Build filter for doc_id field in metadata
+        from qdrant_client.http.models import FieldCondition, Filter, MatchAny
 
-            filter_obj = Filter(
-                should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
-            )
+        filter_obj = Filter(
+            should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
+        )
 
-            self._cached_document_store.delete_by_filter(filters=filter_obj)  # ty: ignore[invalid-argument-type]
-            logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
-        except Exception as e:
-            logger.error(f"Failed to remove documents: {e}")
+        self._cached_document_store.delete_by_filter(filters=filter_obj)  # ty: ignore[invalid-argument-type]
+        logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
 
     async def warmup(self, force_rebuild: bool = False) -> None:
         """
@@ -239,7 +242,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
 
         storage = self.config.storage
-        document_store = self._create_document_store(recreate=force_rebuild)
+        document_store = await asyncio.to_thread(
+            self._create_document_store, recreate=force_rebuild
+        )
 
         if (
             not force_rebuild
@@ -263,7 +268,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         # If server collection was deleted externally, recreate the store
         # so _index_documents has a collection to write into.
         if not force_rebuild and storage.is_server and not self._has_existing_index(document_store):
-            document_store = self._create_document_store(recreate=True)
+            document_store = await asyncio.to_thread(self._create_document_store, recreate=True)
 
         if storage.is_server:
             collection = storage.extra.get("index", "default")
@@ -303,7 +308,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 await self.warmup()
                 document_store = self._cached_document_store
         else:
-            document_store = self._create_document_store(recreate=False)
+            document_store = await asyncio.to_thread(self._create_document_store, recreate=False)
 
             if not self._has_existing_index(document_store):
                 haystack_docs = self._convert_documents()

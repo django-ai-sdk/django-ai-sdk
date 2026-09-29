@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from cashews import Cache, CircuitBreakerOpen
 
+from django_ai_sdk.errors import UserError
 from django_ai_sdk.permissions import Operation, PermissionDomain
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class IntegrationNotConnectable(Exception):
+class IntegrationNotConnectable(UserError):
     """Raised when connect() is called on an integration that doesn't support it."""
 
 
@@ -329,8 +330,10 @@ class ResilientCache:
                     self._cb_cooldown,
                 )
             return self._empty()
-        except Exception:
-            logger.warning("Integration fetch failed/timed out for %r", key, exc_info=True)
+        except Exception as exc:
+            # Expected while a server is down, so the traceback is debug only.
+            logger.warning("Integration fetch failed/timed out for %r: %r", key, exc)
+            logger.debug("Integration fetch failure for %r", key, exc_info=True)
             self._last_ok[k] = False
             self._breaker_open.discard(k)
             return self._empty()

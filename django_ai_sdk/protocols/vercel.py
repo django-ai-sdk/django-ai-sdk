@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field
 
 from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.errors import ErrorCode, get_error_spec
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
@@ -224,6 +225,45 @@ class ToolOutputAvailablePart(Schema):
     output: dict[str, Any]
 
 
+class ToolOutputErrorPart(Schema):
+    """A failed tool call. `errorText` carries an error code, never the tool's error text."""
+
+    type: Literal["tool-output-error"] = "tool-output-error"
+    tool_call_id: str = Field(validation_alias="tool_call_id", serialization_alias="toolCallId")
+    error_text: str = Field(validation_alias="error_text", serialization_alias="errorText")
+
+
+def unwrap_tool_output(raw: Any) -> tuple[bool, dict[str, Any]]:
+    """Unwrap Haystack's `{result, origin, error}` tool result into `(failed, output)`.
+
+    On failure the output is dropped: it is the invocation's error text.
+    """
+    if isinstance(raw, dict) and raw.get("error"):
+        return True, {}
+    output = raw.get("result", raw) if isinstance(raw, dict) else raw
+    if not isinstance(output, dict):
+        output = {"result": output}
+    return False, output
+
+
+def public_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
+    """A stored tool call as a client sees it: a failed result becomes its code."""
+    failed, _ = unwrap_tool_output(tool_call.get("result") or {})
+    if not failed:
+        return tool_call
+    return {**tool_call, "result": {"error": str(ErrorCode.TOOL_FAILED)}}
+
+
+def error_data(code: str, ref: str) -> dict[str, Any]:
+    spec = get_error_spec(code)
+    return {
+        "code": spec.code,
+        "message": str(spec.message),
+        "retryable": spec.retryable,
+        "ref": ref,
+    }
+
+
 # === Step Parts ===
 
 
@@ -281,6 +321,7 @@ StreamChunk = (
     | ToolInputDeltaPart
     | ToolInputAvailablePart
     | ToolOutputAvailablePart
+    | ToolOutputErrorPart
     | StartStepPart
     | FinishStepPart
     | FinishPart
@@ -341,13 +382,18 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.tool_calls:
                 for tool_call in chat_message.tool_calls:
-                    part = {
+                    part: dict[str, Any] = {
                         "type": f"tool-{tool_call.get('name', 'unknown')}",
                         "toolCallId": tool_call.get("id"),
-                        "state": "output-available",
                         "input": tool_call.get("arguments", {}),
-                        "output": tool_call.get("result", {}),
                     }
+                    failed, output = unwrap_tool_output(tool_call.get("result") or {})
+                    if failed:
+                        part["state"] = "output-error"
+                        part["errorText"] = str(ErrorCode.TOOL_FAILED)
+                    else:
+                        part["state"] = "output-available"
+                        part["output"] = output
 
                     # add metadata about the agent that made the call
                     if who := agent_provider_metadata(
@@ -356,13 +402,21 @@ class VercelProtocolHandler(BaseProtocolHandler):
                         part["callProviderMetadata"] = who
                     parts.append(part)
 
+            if chat_message.has_errors:
+                parts.append(
+                    {
+                        "type": "data-error",
+                        "data": error_data(chat_message.error_code, chat_message.error_ref),
+                    }
+                )
+
             result.append(
                 {
                     "id": chat_message.id,
                     "role": chat_message.role,
                     "parts": parts,
                     "finish_reason": chat_message.finish_reason,
-                    "tool_calls": chat_message.tool_calls,
+                    "tool_calls": [public_tool_call(tc) for tc in chat_message.tool_calls],
                     "processing_time_ms": chat_message.processing_time_ms,
                     "has_errors": chat_message.has_errors,
                     "feedbacks": chat_message.metadata.get("feedbacks", []),
@@ -485,19 +539,17 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "tool_output":
                     tool_output_event = cast("ToolOutputEvent", event)
-                    raw = tool_output_event.tool_output
-                    # Haystack wraps the tool return value in {result, origin, error}.
-                    # Unwrap so the frontend receives the actual tool return value.
-                    output = raw.get("result", raw) if isinstance(raw, dict) else raw
-                    if not isinstance(output, dict):
-                        output = {"result": output}
-                    # Preserve the error flag so the frontend knows this tool failed.
-                    if isinstance(raw, dict) and "error" in raw:
-                        output["error"] = raw["error"]
-                    yield ToolOutputAvailablePart(
-                        tool_call_id=tool_output_event.tool_call_id,
-                        output=output,
-                    )
+                    failed, output = unwrap_tool_output(tool_output_event.tool_output)
+                    if failed:
+                        yield ToolOutputErrorPart(
+                            tool_call_id=tool_output_event.tool_call_id,
+                            error_text=str(ErrorCode.TOOL_FAILED),
+                        )
+                    else:
+                        yield ToolOutputAvailablePart(
+                            tool_call_id=tool_output_event.tool_call_id,
+                            output=output,
+                        )
 
                 case "data":
                     # Convert intermediate DataEvent to Vercel DataPart
@@ -521,7 +573,10 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
                 case "error":
                     error_event = cast("ErrorEvent", event)
-                    yield ErrorPart(error_text=error_event.error_message)
+                    # data-error stays in message.parts, as on reload; error triggers onError.
+                    data = error_data(error_event.error_code, error_event.ref)
+                    yield DataPart(type="data-error", data=data)
+                    yield ErrorPart(error_text=data["code"])
 
                 case "message_end":
                     end_event = cast("MessageEndEvent", event)

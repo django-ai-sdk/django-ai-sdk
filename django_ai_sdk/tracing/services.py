@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from asgiref.sync import async_to_sync
 
 from django_ai_sdk.conversation.models import Message
+from django_ai_sdk.errors import NotFound
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.storage.services import ThreadService
 from django_ai_sdk.tracing.models import Trace
@@ -155,7 +156,7 @@ class TraceService:
     async def get_permissions(cls, thread_id: str | uuid.UUID, *, user: UserType) -> None:
         """Enforce the thread's view permission"""
         if await ThreadService.get_thread(str(thread_id), user=user) is None:
-            raise ValueError("Thread not found")
+            raise NotFound("Thread not found")
 
     @classmethod
     async def _thread_message(cls, message_id: str | uuid.UUID) -> uuid.UUID:
@@ -169,7 +170,7 @@ class TraceService:
             .afirst()
         )
         if thread_id is None:
-            raise ValueError("Message not found")
+            raise NotFound("Message not found")
         return thread_id
 
     @classmethod

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ImproperlyConfigured
+
+from django_ai_sdk.errors import UserError
 from django_ai_sdk.permissions import Operation, PermissionDomain, PermissionsMixin, user_pk
 from django_ai_sdk.workflows.actions import get_action_registry
 from django_ai_sdk.workflows.definitions import inputs_json_schema
@@ -14,6 +17,14 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
+
+
+def _validate_submitted(workflow: WorkflowDefinition) -> None:
+    """A definition the caller sent: an illegal one is their bad request."""
+    try:
+        validate_definition(workflow)
+    except ImproperlyConfigured as exc:
+        raise UserError(str(exc)) from exc
 
 
 class WorkflowService(PermissionsMixin):
@@ -29,7 +40,7 @@ class WorkflowService(PermissionsMixin):
     ) -> WorkflowRun:
 
         await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
-        validate_definition(workflow)
+        _validate_submitted(workflow)
         # Checked here rather than in the worker: a caller who supplied the wrong
         # inputs should hear about it on the call that queued the run.
         validate_inputs(workflow, inputs or {})
@@ -59,9 +70,9 @@ class WorkflowService(PermissionsMixin):
         from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
 
         if run_id and inputs:
-            raise ValueError("A resumed run reuses its own inputs; do not pass new ones.")
+            raise UserError("A resumed run reuses its own inputs; do not pass new ones.")
         if force and not run_id:
-            raise ValueError("`force` only applies when resuming a run.")
+            raise UserError("`force` only applies when resuming a run.")
 
         await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
         record = await WorkflowSettings.objects.aget(id=workflow_id, active=True)
@@ -135,7 +146,7 @@ class WorkflowService(PermissionsMixin):
         from django_ai_sdk.workflows.models import WorkflowSettings
 
         await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
-        validate_definition(workflow)
+        _validate_submitted(workflow)
 
         record = WorkflowSettings(
             name=name,
@@ -173,7 +184,7 @@ class WorkflowService(PermissionsMixin):
     ) -> Any:
         record = await cls._managed(workflow_id, user)
         if workflow is not None:
-            validate_definition(workflow)
+            _validate_submitted(workflow)
             record.definition = workflow.model_dump()
         if name is not None:
             record.name = name

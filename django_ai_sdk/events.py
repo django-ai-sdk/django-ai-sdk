@@ -111,11 +111,11 @@ class MessageEndEvent(StreamEvent):
 
 
 class ErrorEvent(StreamEvent):
-    """Error during streaming."""
+    """Error during streaming, as a client may see it (see django_ai_sdk.errors)."""
 
     event_type: Literal["error"] = "error"
-    error_message: str
-    error_code: str | None = None
+    error_code: str = "unknown"
+    ref: str = ""
 
 
 class StreamEndEvent(StreamEvent):

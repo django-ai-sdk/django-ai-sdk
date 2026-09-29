@@ -312,7 +312,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
-    "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
+    "EXCEPTION_HANDLER": "django_ai_sdk.contrib.drf.exception_handler",
 }
 
 # Allowed upload filetypes

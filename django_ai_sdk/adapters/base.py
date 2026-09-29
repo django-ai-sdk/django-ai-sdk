@@ -19,6 +19,7 @@ from django_ai_sdk.common import (
     MessageChunk,
     StreamWriter,
 )
+from django_ai_sdk.errors import ErrorInfo, describe_error
 from django_ai_sdk.events import (
     ErrorEvent,
     MessageEndEvent,
@@ -132,11 +133,22 @@ def _get_message_pairs(
     return runs
 
 
-def get_error_chunk(e: Exception) -> MessageChunk:
+def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
+    """The stored error: raw text for admins, plus what a client sees."""
     return MessageChunk(
         type="error",
-        content={"error_message": str(e), "error_type": type(e).__name__},
+        content={
+            # A bare TimeoutError() has no text; the type then tells the admin something.
+            "error_message": str(e) or type(e).__name__,
+            "error_type": type(e).__name__,
+            "error_code": info.spec.code,
+            "error_ref": info.ref,
+        },
     )
+
+
+def get_error_event(info: ErrorInfo) -> ErrorEvent:
+    return ErrorEvent(error_code=info.spec.code, ref=info.ref)
 
 
 class Run:
@@ -691,16 +703,19 @@ class Stream:
             try:
                 await self.get_pipeline_result(pipeline_task, stream_writer)
             except Exception as pipeline_error:
+                info = describe_error(pipeline_error)
                 logger.opt(exception=pipeline_error).error(
-                    "Pipeline task failed: {}", pipeline_error
+                    "Pipeline task failed [{}] {}: {}: {}",
+                    info.ref,
+                    info.code,
+                    type(pipeline_error).__name__,
+                    pipeline_error,
                 )
                 if stream_writer:
-                    stream_writer.add_chunk(get_error_chunk(pipeline_error))
+                    stream_writer.add_chunk(get_error_chunk(pipeline_error, info))
                     self.message_result = await stream_writer.finalize("error")
                     _finalize_called = True
-                yield ErrorEvent(
-                    error_message=f"Pipeline failed: {type(pipeline_error).__name__}: {str(pipeline_error)}"
-                )
+                yield get_error_event(info)
                 yield StreamEndEvent()
                 return
 
@@ -716,18 +731,19 @@ class Stream:
             # Don't f-string `critical_error`: its text can contain braces,
             # which would crash this logging call itself (see suggestions
             # generator for the same fix and rationale).
+            info = describe_error(critical_error)
             logger.opt(exception=critical_error).error(
-                "Critical error in stream: {}: {}",
+                "Critical error in stream [{}] {}: {}: {}",
+                info.ref,
+                info.code,
                 type(critical_error).__name__,
                 critical_error,
             )
             if stream_writer and not _finalize_called:
-                stream_writer.add_chunk(get_error_chunk(critical_error))
+                stream_writer.add_chunk(get_error_chunk(critical_error, info))
                 self.message_result = await stream_writer.finalize("error")
                 _finalize_called = True
-            yield ErrorEvent(
-                error_message=f"{type(critical_error).__name__}: {str(critical_error)}"
-            )
+            yield get_error_event(info)
 
         finally:
             if pipeline_task is not None and not pipeline_task.done():

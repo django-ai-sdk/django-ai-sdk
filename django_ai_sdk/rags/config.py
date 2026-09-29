@@ -57,6 +57,8 @@ class QdrantStorageConfig(BaseStorageConfig):
     backend: Literal[":memory:", "persistent", "server"] = Field(default=":memory:")
     location: str | None = Field(default=None)
     similarity: Literal["cosine", "dot", "euclidean"] = Field(default="cosine")
+    # Seconds to wait for another process to release a "persistent" store's lock.
+    lock_timeout: float = Field(default=10.0, ge=0)
 
     @property
     def is_server(self) -> bool:

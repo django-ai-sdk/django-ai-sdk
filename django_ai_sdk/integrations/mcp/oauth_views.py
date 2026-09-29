@@ -84,7 +84,8 @@ async def _resolve_token_endpoint(
     try:
         discovery = await discover(config.oauth_discovery_url or config.url)
     except (httpx.HTTPError, ValueError) as e:
-        raise OAuthCallbackError(f"Cannot determine token endpoint: {e}", http_status=500) from e
+        logger.exception("Token endpoint discovery failed for %r", config.url)
+        raise OAuthCallbackError("Cannot determine token endpoint", http_status=500) from e
     return discovery.token_endpoint
 
 
@@ -127,9 +128,9 @@ async def oauth_callback(
             await mcp_service.store_token(
                 user=user, server_name=server_name, token_response=token_response
             )
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, ValueError):
             logger.exception("Token exchange/store failed for %r", server_name)
-            return JsonResponse({"error": f"Token exchange failed: {e}"}, status=500)
+            return JsonResponse({"error": "Token exchange failed"}, status=500)
 
         # A pre-connect status/tool check (e.g. the settings page) may have already
         # cached "disconnected"/no-tools for this user before the token existed.

@@ -119,6 +119,7 @@ class TestProcessAsync:
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED
         assert "Unsupported or empty file" in entry_doc.processing_error
+        assert entry_doc.processing_error_code == "file_unsupported"
         assert entry_doc.entry_id is None
 
     async def test_pipeline_returning_none_falls_through_to_next(self):
@@ -645,7 +646,8 @@ class TestGetDocumentStatus:
         )
 
         assert result.status == "failed"
-        assert result.error == "File type not supported"
+        assert result.error_code == "file_processing_failed"
+        assert "File type not supported" not in result.model_dump_json()
 
 
 # ---------------------------------------------------------------------------
@@ -806,8 +808,9 @@ class TestCancelDocument:
         result = await MemoryService.cancel_document(str(entry_doc.id), user=user)
 
         assert result.status == "cancelled"
-        assert result.error == "Cancelled by user"
+        assert result.error_code == ""
         await entry_doc.arefresh_from_db()
+        assert entry_doc.processing_error == "Cancelled by user"
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.CANCELLED
         assert entry_doc.cancelled_at is not None
 
@@ -871,9 +874,11 @@ class TestSelfHealStaleProcessing:
         result = await _get_status_with_mocked_task(entry_doc, mock_task_status)
 
         assert result.status == "failed"
-        assert "RuntimeError: boom" in result.error
+        assert result.error_code == "file_processing_failed"
+        assert "boom" not in result.model_dump_json()
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.FAILED
+        assert "RuntimeError: boom" in entry_doc.processing_error
 
     async def test_marks_failed_when_running_past_timeout_grace(self):
         """Task backend still says RUNNING but the worker is long gone."""

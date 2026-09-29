@@ -17,22 +17,15 @@ Including another URLconf
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from django.contrib import admin
-from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
 from django.urls import include, path
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.contrib.ninja import register_error_handlers
 from ninja import NinjaAPI
 from ninja.security import SessionAuth
 
 from apps.agents.views.ninja import router as agents_router
 from apps.integrations.views.ninja import router as integrations_router
 from apps.memories.views.ninja import router as memories_router
-
-if TYPE_CHECKING:
-    from django.http import HttpRequest, HttpResponse
-
 
 # Create the main API instance
 api = NinjaAPI(title="Django AI SDK Demo", version="1.0.0", auth=SessionAuth())
@@ -45,29 +38,7 @@ api.add_router("/memories", memories_router)
 # must sit at a fixed URL (included in urlpatterns below).
 api.add_router("/integrations", integrations_router)
 
-
-# Global safety net so service-layer errors never surface as 500s.
-# Endpoints may still catch these earlier for custom payloads.
-@api.exception_handler(PermissionDenied)
-def _on_permission_denied(request: HttpRequest, exc: PermissionDenied) -> HttpResponse:
-    return api.create_response(request, {"detail": str(exc)}, status=403)
-
-
-@api.exception_handler(ObjectDoesNotExist)
-def _on_does_not_exist(request: HttpRequest, exc: ObjectDoesNotExist) -> HttpResponse:
-    return api.create_response(request, {"detail": "Not found"}, status=404)
-
-
-@api.exception_handler(ImproperlyConfigured)
-def _on_improperly_configured(request: HttpRequest, exc: ImproperlyConfigured) -> HttpResponse:
-    # A workflow definition the engine could not run is the caller's bad request.
-    return api.create_response(request, {"detail": str(exc)}, status=400)
-
-
-@api.exception_handler(ValueError)
-def _on_value_error(request: HttpRequest, exc: ValueError) -> HttpResponse:
-    # Service-layer convention: ValueError means a referenced object was not found.
-    return api.create_response(request, {"detail": str(exc)}, status=404)
+register_error_handlers(api)
 
 
 urlpatterns = [

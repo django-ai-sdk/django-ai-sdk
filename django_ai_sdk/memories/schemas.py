@@ -102,7 +102,7 @@ class DocumentOut(BaseModel):
 
     `id` is the EntryDocument id (stable across the upload → processing →
     completed/failed lifecycle). `status` reflects EntryDocument.processing_status
-    and `error` carries any processing failure message. `content`/`extraction` are
+    and `error_code`/`error` describe a processing failure (never its raw text). `content`/`extraction` are
     only populated once processing has produced an Entry.
     """
 
@@ -117,6 +117,7 @@ class DocumentOut(BaseModel):
     file_extension: str
     status: str
     error: str = ""
+    error_code: str = ""
     processing_step: str | None = None
     created_at: str
     updated_at: str
@@ -154,6 +155,7 @@ class DocumentStatusOut(BaseModel):
     id: str
     status: str
     error: str = ""
+    error_code: str = ""
     processing_step: str | None = None
     task: TaskStatus | None = None
 
