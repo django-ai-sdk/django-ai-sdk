@@ -250,12 +250,15 @@ class TestQdrantFileLockRetry:
     @pytest.fixture(autouse=True)
     def no_retry_wait(self):
         """Disable retry backoff sleeps so exhaustion tests run instantly."""
-        with patch(
-            "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
-            return_value=wait_none(),
-        ), patch(
-            "django_ai_sdk.rags.qdrant_hybrid.stop_after_delay",
-            return_value=tenacity_stop_after_delay(0.1),
+        with (
+            patch(
+                "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
+                return_value=wait_none(),
+            ),
+            patch(
+                "django_ai_sdk.rags.qdrant_hybrid.stop_after_delay",
+                return_value=tenacity_stop_after_delay(0.1),
+            ),
         ):
             yield
 
@@ -299,6 +302,7 @@ class TestQdrantFileLockRetry:
     @pytest.mark.asyncio
     async def test_exhausts_retries(self, rag):
         """Verify retry raises after exhausting attempts."""
+
         def always_fail(*args, **kwargs):
             raise RuntimeError(
                 f"Storage folder {rag.config.storage.persist_path} is already accessed by "
@@ -371,3 +375,91 @@ class TestQdrantRealFileLock:
             holder.close()
 
         assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE
+
+
+class TestQdrantIndexBehindSourceDocuments:
+    """A document saved while this process held no index must still get indexed.
+
+    Uploads are processed by another process (the worker). Its signal handler finds no
+    cached index, so nothing is added, and the next chat used to open the stale index
+    on disk as if it were complete.
+    """
+
+    @staticmethod
+    def rag(path, documents):
+        storage = QdrantStorageConfig(backend="persistent", persist_path=str(path))
+        return QdrantBM25HybridRAG(
+            documents=documents, config=QdrantBM25HybridRAGConfig(storage=storage)
+        )
+
+    @staticmethod
+    def indexed_ids(rag):
+        store = rag._cached_document_store
+        return set(store.get_metadata_field_unique_values("doc_id", size=100)[0])
+
+    @pytest.mark.asyncio
+    async def test_a_document_missing_from_the_existing_index_is_indexed(self, tmp_path):
+        acme = RagDocument(id="acme", content="Invoice from Acme for two servers")
+        globex = RagDocument(id="globex", content="Invoice from Globex for cloud hosting")
+
+        first = self.rag(tmp_path, [acme])
+        await first.warmup()
+        first._cached_document_store._client.close()  # the other process lets go
+
+        second = self.rag(tmp_path, [acme, globex])
+        await second.warmup()
+
+        assert self.indexed_ids(second) == {"acme", "globex"}
+
+    @pytest.mark.asyncio
+    async def test_documents_already_indexed_are_not_indexed_again(self, tmp_path):
+        docs = [RagDocument(id="acme", content="Invoice from Acme")]
+        first = self.rag(tmp_path, docs)
+        await first.warmup()
+        first._cached_document_store._client.close()
+
+        second = self.rag(tmp_path, docs)
+        with patch.object(second, "_index_documents", AsyncMock()) as index:
+            await second.warmup()
+
+        index.assert_not_awaited()
+        assert second._is_warmed_up
+
+    @pytest.mark.asyncio
+    async def test_a_document_deleted_elsewhere_is_removed_from_the_index(self, tmp_path):
+        acme = RagDocument(id="acme", content="Invoice from Acme")
+        globex = RagDocument(id="globex", content="Invoice from Globex")
+        first = self.rag(tmp_path, [acme, globex])
+        await first.warmup()
+        first._cached_document_store._client.close()
+
+        second = self.rag(tmp_path, [acme])
+        await second.warmup()
+
+        assert self.indexed_ids(second) == {"acme"}
+
+    @pytest.mark.asyncio
+    async def test_an_edited_document_replaces_its_old_chunks(self, tmp_path):
+        first = self.rag(tmp_path, [RagDocument(id="acme", content="Invoice from Acme")])
+        await first.warmup()
+        first._cached_document_store._client.close()
+
+        second = self.rag(tmp_path, [RagDocument(id="acme", content="Credit note from Acme")])
+        await second.warmup()
+
+        contents = [d.content for d in second._cached_document_store.filter_documents()]
+        assert contents == ["Credit note from Acme"]
+
+    @pytest.mark.asyncio
+    async def test_a_warm_index_syncs_when_told_the_documents_changed(self, tmp_path):
+        acme = RagDocument(id="acme", content="Invoice from Acme")
+        globex = RagDocument(id="globex", content="Invoice from Globex")
+        rag = self.rag(tmp_path, [acme])
+        await rag.warmup()
+
+        await rag.sync_documents([acme, globex])
+        assert self.indexed_ids(rag) == {"acme", "globex"}
+
+        await rag.sync_documents([globex])
+        assert self.indexed_ids(rag) == {"globex"}
+        assert rag.documents == [globex]

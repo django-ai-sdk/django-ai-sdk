@@ -184,8 +184,9 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
             and self.config.storage.is_persistent
             and self._has_existing_index(document_store)
         ):
-            existing_count = document_store.count_documents()
             self._cached_document_store = document_store
+            await self.sync_documents(self.documents)
+            existing_count = document_store.count_documents()
             self._is_warmed_up = True
             logger.info(
                 f"Using existing Chroma index from {self.config.storage.persist_path} with {existing_count} chunks"

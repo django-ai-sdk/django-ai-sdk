@@ -216,3 +216,36 @@ class TestChromaRAGRefreshDocuments:
 
         # Should reuse the same store instance
         assert rag._cached_document_store is old_store
+
+
+@pytest.mark.asyncio
+async def test_an_existing_index_catches_up_with_documents_changed_meanwhile(tmp_path):
+    """Opening a persisted index adds what is missing, redoes edits and drops deletes."""
+    from django_ai_sdk.rags.config import ChromaStorageConfig
+
+    def rag(documents):
+        storage = ChromaStorageConfig(backend="persistent", persist_path=str(tmp_path))
+        config = ChromaDBQueryExpanderRAGConfig(storage=storage)
+        return ChromaDBQueryExpanderRAG(documents=documents, config=config)
+
+    await rag(
+        [
+            RagDocument(id="acme", content="Invoice from Acme"),
+            RagDocument(id="initech", content="Invoice from Initech"),
+        ]
+    ).warmup()
+
+    reopened = rag(
+        [
+            RagDocument(id="acme", content="Credit note from Acme"),
+            RagDocument(id="globex", content="Invoice from Globex"),
+        ]
+    )
+    await reopened.warmup()
+
+    chunks = reopened._cached_document_store.filter_documents()
+    assert sorted(chunk.content for chunk in chunks) == [
+        "Credit note from Acme",
+        "Invoice from Globex",
+    ]
+

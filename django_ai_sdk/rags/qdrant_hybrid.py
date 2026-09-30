@@ -147,6 +147,19 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         except ValueError:
             return False
 
+    async def _indexed(self) -> tuple[set[str], set[str]] | None:
+        """Read from the payload index, without loading every chunk and its vectors."""
+        document_store = self._cached_document_store
+        if document_store is None:
+            return None
+
+        def unique(field: str) -> set[str]:
+            size = document_store.count_documents()
+            values, _ = document_store.get_metadata_field_unique_values(field, size=size)
+            return {str(value) for value in values}
+
+        return await asyncio.to_thread(lambda: (unique("doc_id"), unique("doc_version")))
+
     async def add_documents(self, documents: list[RagDocument]) -> None:
         """Add documents to the existing Qdrant index."""
         if self._cached_document_store is None:
@@ -251,8 +264,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             and (storage.is_persistent or storage.is_server)
             and self._has_existing_index(document_store)
         ):
-            existing_count = document_store.count_documents()
             self._cached_document_store = document_store
+            await self.sync_documents(self.documents)
+            existing_count = document_store.count_documents()
             self._is_warmed_up = True
             if storage.is_server:
                 collection = storage.extra.get("index", "default")

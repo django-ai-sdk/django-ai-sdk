@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING, Any
 
 from haystack import Document as HaystackDocument
@@ -28,8 +29,15 @@ def to_document(doc: RagDocument) -> HaystackDocument:
     return HaystackDocument(
         id=doc.id,
         content=doc.content,
-        meta=doc.metadata,
+        # Kept on every chunk, so an index can tell which documents it holds and
+        # whether they changed (see RAGBase.sync_documents).
+        meta={**doc.metadata, "doc_id": doc.id, "doc_version": doc_version(doc)},
     )
+
+
+def doc_version(doc: RagDocument) -> str:
+    """Changes when the document's content does."""
+    return f"{doc.id}:{hashlib.sha256(doc.content.encode()).hexdigest()[:16]}"
 
 
 async def queryset_to_rag_documents(queryset: Any, **kwargs: Any) -> list[RagDocument]:

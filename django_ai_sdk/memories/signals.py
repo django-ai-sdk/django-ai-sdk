@@ -30,7 +30,6 @@ async def on_entry_saved(
 
         if documents:
             await agent.rag_provider.add_documents(agent, memory_id, documents)
-            logger.info(f"Added/updated document in RAG for {memory_id}")
 
 
 @receiver(post_delete, sender=Entry)
@@ -41,4 +40,3 @@ async def on_entry_deleted(sender: type[Model], instance: Entry, **kwargs: objec
 
     for agent in await AgentService.get_rag_agents():
         await agent.rag_provider.remove_documents(agent, memory_id, [str(instance.id)])
-        logger.info(f"Removed document from RAG for {memory_id}")

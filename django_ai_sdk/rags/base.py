@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.rags.utils import doc_version
 
 logger = get_logger(__name__)
 
@@ -171,6 +173,46 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         logger.debug(f"Refreshing documents for {self.__class__.__name__}")
         self.documents = documents
         await self.warmup(force_rebuild=True)
+
+    async def sync_documents(self, documents: list[RagDocument]) -> None:
+        """
+        Bring a built index in line with `documents`, redoing only what changed.
+
+        Called when an existing index is opened and when a cached one is used after its
+        documents changed in another process. Without a readable index it falls back
+        to a full refresh.
+
+        Args:
+            documents: The new complete set of documents.
+        """
+        indexed = await self._indexed()
+        if indexed is None:
+            await self.refresh_documents(documents)
+            return
+        self.documents = documents
+
+        indexed_ids, indexed_versions = indexed
+        wanted = {doc.id: doc for doc in documents if doc.id}
+        gone = indexed_ids - wanted.keys()
+        redo = [doc for doc in wanted.values() if doc_version(doc) not in indexed_versions]
+        if not (gone or redo):
+            return
+
+        logger.info(f"Syncing the index: {len(redo)} added or edited, {len(gone)} removed")
+        await self.remove_documents([*gone, *(doc.id for doc in redo)])
+        if redo:
+            await self.add_documents(redo)
+
+    async def _indexed(self) -> tuple[set[str], set[str]] | None:
+        """The doc_ids and doc_versions in the index, or None if there is no index to read."""
+        document_store = getattr(self, "_cached_document_store", None)
+        if document_store is None:
+            return None
+        chunks = await asyncio.to_thread(document_store.filter_documents)
+        return (
+            {str(chunk.meta.get("doc_id", chunk.id)) for chunk in chunks},
+            {str(chunk.meta.get("doc_version")) for chunk in chunks},
+        )
 
     async def get_chunk(self, chunk_id: str) -> str | None:
         """Return the content of a specific chunk by its Haystack document ID.
