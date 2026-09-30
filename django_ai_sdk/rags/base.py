@@ -24,7 +24,7 @@ Your task is to generate search queries based on the user's original query to im
 The goal is to capture different ways users might phrase the same question, including the original query itself.
 
 RULES:
-1. Output exactly {{n_expansions}} queries, one per line
+1. Output exactly {{n_expansions}} queries
 2. The FIRST query MUST be the original query verbatim
 3. The remaining queries should focus on different aspects or use different terminology
 4. Use the SAME LANGUAGE as the original query
@@ -32,7 +32,8 @@ RULES:
 
 Original query: {{query}}
 
-Generate {{n_expansions}} queries (FIRST must be the original query):
+Respond with only a JSON object containing a "queries" array, no other text.
+Example: {"queries": ["original query", "variation 1", "variation 2"]}
 """
 
 
