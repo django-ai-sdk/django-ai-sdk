@@ -230,8 +230,7 @@ class ThreadViewSet(ApiViewSet):
     @action(detail=True, methods=["get"], url_path=rf"files/(?P<doc_id>{ID})/download")
     def download_file(self, request: Request, thread_id: str, doc_id: str) -> FileResponse:
         """The file's bytes. Only raster images render inline; everything else downloads."""
-        doc = memory_services.get_thread_file(thread_id, doc_id, user=request.user)
-        return thread_file_response(doc)
+        return thread_file_response(thread_id, doc_id, user=request.user)
 
     @action(detail=True, methods=["get"], url_path=rf"files/(?P<doc_id>{ID})/status")
     def file_status(self, request: Request, thread_id: str, doc_id: str) -> Response:

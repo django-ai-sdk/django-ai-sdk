@@ -88,6 +88,17 @@ class TestDownload:
 
 
 @pytest.mark.django_db
+def test_the_helper_checks_permissions_on_its_own(stranger, thread_file):
+    """Not only the endpoints: a project's own download view can't skip the check."""
+    from django_ai_sdk.permissions import PermissionDenied
+    from django_ai_sdk.views.files import thread_file_response
+
+    thread_id, image_id, _ = thread_file
+    with pytest.raises(PermissionDenied):
+        thread_file_response(thread_id, image_id, user=stranger)
+
+
+@pytest.mark.django_db
 class TestThreadFileUrl:
     def test_reverses_the_download_view_or_falls_back_to_storage(self, settings, tmp_path):
         from django_ai_sdk.memories.models import EntryDocument
