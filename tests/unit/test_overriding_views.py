@@ -12,14 +12,22 @@ from django.urls import include, path
 from ninja import NinjaAPI
 from ninja.security import SessionAuth, django_auth_superuser
 from ninja.throttling import AuthRateThrottle
+from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed
 from rest_framework.response import Response
 from rest_framework.routers import DefaultRouter
 
-from django_ai_sdk.contrib import ninja as ai
-from django_ai_sdk.contrib.drf import ThreadViewSet, WorkflowViewSet, exception_handler
-from django_ai_sdk.contrib.ninja import threads
+from django_ai_sdk.contrib import ninja as ai_sdk_routers
+from django_ai_sdk.contrib.drf import (
+    ApiPagination,
+    MemoryViewSet,
+    ThreadViewSet,
+    WorkflowViewSet,
+    exception_handler,
+)
+from django_ai_sdk.contrib.drf.serializers import MemorySerializer
+from django_ai_sdk.contrib.ninja import schemas, threads
 from django_ai_sdk.errors import NotFound, error_response
 from django_ai_sdk.views.chat import ChatView
 
@@ -29,10 +37,10 @@ pytestmark = pytest.mark.urls(__name__)
 # --- Ninja -----------------------------------------------------------------
 
 # Replace one endpoint: exclude it, then wrap the SDK's own function.
-threads_router = ai.get_threads_router(exclude={"list_threads"})
+threads_router = ai_sdk_routers.get_threads_router(exclude={"list_threads"})
 
 
-@threads_router.get("/threads/", response=threads.ThreadListResponse, operation_id="list_threads")
+@threads_router.get("/threads/", response=schemas.ThreadListResponse, operation_id="list_threads")
 async def list_threads(request, limit: int = 100, offset: int = 0):
     response = await threads.list_threads(request, limit=limit, offset=offset)
     response.threads = [t for t in response.threads if t.message_count > 0]
@@ -46,12 +54,12 @@ async def export_thread(request, thread_id: str):
 
 
 api = NinjaAPI(auth=SessionAuth(), urls_namespace="overrides")
-ai.register_error_handlers(api)
+ai_sdk_routers.register_error_handlers(api)
 api.add_router("/", threads_router)
 # Stricter auth for one group of endpoints.
-api.add_router("/", ai.get_agents_router(), auth=django_auth_superuser)
+api.add_router("/", ai_sdk_routers.get_agents_router(), auth=django_auth_superuser)
 # Throttling per mount.
-api.add_router("/", ai.get_workflows_router(), throttle=AuthRateThrottle("100/h"))
+api.add_router("/", ai_sdk_routers.get_workflows_router(), throttle=AuthRateThrottle("100/h"))
 
 
 # Your own error shape for one exception, after the SDK's handlers.
@@ -95,7 +103,24 @@ class ErrorShapeThreadViewSet(ThreadViewSet):
         return my_handler
 
 
+# Swap a request serializer.
+class StrictMemorySerializer(MemorySerializer):
+    name = drf_serializers.CharField(min_length=3, max_length=80)
+
+
+class SmallPages(ApiPagination):
+    default_limit = 20
+    max_limit = 50
+
+
+class MyMemoryViewSet(MemoryViewSet):
+    serializer_classes = {**MemoryViewSet.serializer_classes, "create": StrictMemorySerializer}
+    # Change paging.
+    pagination_class = SmallPages
+
+
 router = DefaultRouter()
+router.register("memories", MyMemoryViewSet, basename="memory")
 router.register("shaped-threads", ErrorShapeThreadViewSet, basename="shaped-thread")
 router.register("threads", MyThreadViewSet, basename="thread")
 router.register("workflows", WorkflowViewSet, basename="workflow")
@@ -184,6 +209,22 @@ class TestDrfRecipes:
         response = client.get("/drf/shaped-threads/nope/")
         assert response.status_code == 404
         assert response["X-Error-Ref"] == response.json()["ref"]
+
+    def test_a_swapped_serializer_validates_the_request(self, client, user):
+        client.force_login(user)
+        response = client.post("/drf/memories/", {"name": "ab"}, content_type="application/json")
+        assert response.status_code == 400
+        assert "name" in response.json()
+
+    def test_paging_can_be_narrowed(self, client, user):
+        from unittest.mock import patch
+
+        client.force_login(user)
+        with patch("django_ai_sdk.memories.services.list_memories", return_value=[]) as listed:
+            client.get("/drf/memories/")
+            assert listed.call_args.kwargs["limit"] == 20
+            client.get("/drf/memories/?limit=500")
+            assert listed.call_args.kwargs["limit"] == 50
 
     def test_other_viewsets_are_registered_unchanged(self, client, user):
         client.force_login(user)

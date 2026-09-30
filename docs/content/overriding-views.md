@@ -21,7 +21,7 @@ Every recipe on this page runs in the test suite (`tests/unit/test_overriding_vi
 Decorate the returned router like any other:
 
 ```python
-router = ai.get_threads_router()
+router = ai_sdk_routers.get_threads_router()
 
 @router.get("/threads/{thread_id}/export/")
 async def export_thread(request, thread_id: str):
@@ -37,11 +37,11 @@ Or keep your endpoints in your own `Router` and mount it on the same `NinjaAPI`;
 Exclude it by name, then register yours on the same path. Every SDK endpoint is an importable function, so you can call it and adjust its result:
 
 ```python
-from django_ai_sdk.contrib.ninja import threads
+from django_ai_sdk.contrib.ninja import schemas, threads
 
-router = ai.get_threads_router(exclude={"list_threads"})
+router = ai_sdk_routers.get_threads_router(exclude={"list_threads"})
 
-@router.get("/threads/", response=threads.ThreadListResponse, operation_id="list_threads")
+@router.get("/threads/", response=schemas.ThreadListResponse, operation_id="list_threads")
 async def list_threads(request, limit: int = 100, offset: int = 0):
     response = await threads.list_threads(request, limit=limit, offset=offset)
     response.threads = [t for t in response.threads if t.message_count > 0]
@@ -49,7 +49,7 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
 ```
 
 - Names in `exclude` are the endpoint function names, which are also the OpenAPI `operationId`s. A name that doesn't exist raises `ValueError` at startup, so a typo can't silently leave the original in place.
-- Pass the same `operation_id` to keep a generated frontend client unchanged.
+- Pass the same `operation_id` and response schema (all of them live in `django_ai_sdk.contrib.ninja.schemas`) to keep a generated frontend client unchanged.
 - Need a different response shape? Skip the wrapper and call the service (`ThreadService.threads(...)`) with your own schema.
 
 ### Remove an endpoint
@@ -57,7 +57,7 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
 Exclude it and don't add a replacement:
 
 ```python
-api.add_router("/", ai.get_threads_router(exclude={"delete_all_threads"}))
+api.add_router("/", ai_sdk_routers.get_threads_router(exclude={"delete_all_threads"}))
 ```
 
 ### Change auth or throttling for a group of endpoints
@@ -68,11 +68,11 @@ api.add_router("/", ai.get_threads_router(exclude={"delete_all_threads"}))
 from ninja.security import django_auth_superuser
 from ninja.throttling import AuthRateThrottle
 
-api.add_router("/", ai.get_agents_router(), auth=django_auth_superuser)
-api.add_router("/", ai.get_workflows_router(), throttle=AuthRateThrottle("100/h"))
+api.add_router("/", ai_sdk_routers.get_agents_router(), auth=django_auth_superuser)
+api.add_router("/", ai_sdk_routers.get_workflows_router(), throttle=AuthRateThrottle("100/h"))
 ```
 
-The same keywords can go to the factory instead (`ai.get_agents_router(auth=...)`); they are passed straight to `Router(...)`.
+The same keywords can go to the factory instead (`ai_sdk_routers.get_agents_router(auth=...)`); they are passed straight to `Router(...)`.
 
 ### Change error responses
 
@@ -81,7 +81,7 @@ The same keywords can go to the factory instead (`ai.get_agents_router(auth=...)
 ```python
 from django_ai_sdk.errors import NotFound
 
-ai.register_error_handlers(api)
+ai_sdk_routers.register_error_handlers(api)
 
 @api.exception_handler(NotFound)
 def not_found(request, exc):
@@ -143,7 +143,41 @@ class MyThreadViewSet(ThreadViewSet):
         return Response({"thread_id": thread_id, "format": "markdown"})
 ```
 
-Inside an action, `self.call(service_method, ...)` runs an async service from the sync view, `self.payload(Model, request.data)` validates a body with a pydantic model, and `self.page(request)` reads `limit`/`offset`. Raise service errors as-is; the viewset maps them.
+Inside an action, use DRF as usual: `self.get_serializer(data=request.data)` validates a body with the serializer registered for the action in `serializer_classes`, and `self.page(request)` returns `(limit, offset)` from the pagination class. Call the services' sync wrappers (`django_ai_sdk.memories.services.list_memories(...)` and friends), and raise service errors as they are; the viewset maps them.
+
+### Swap a request serializer
+
+Each viewset maps actions to request serializers in `serializer_classes`. Extend it with a stricter or larger serializer; the action itself stays the SDK's:
+
+```python
+from rest_framework import serializers
+
+from django_ai_sdk.contrib.drf import MemoryViewSet
+from django_ai_sdk.contrib.drf.serializers import MemorySerializer
+
+class StrictMemorySerializer(MemorySerializer):
+    name = serializers.CharField(min_length=3, max_length=80)
+
+class MyMemoryViewSet(MemoryViewSet):
+    serializer_classes = {**MemoryViewSet.serializer_classes, "create": StrictMemorySerializer}
+```
+
+Keep the field names the action reads (here `name`, `slug`, `description`, `is_public`); extra fields are yours to use in an overridden action.
+
+### Change paging
+
+List actions read `?limit=&offset=` through `pagination_class`, which defaults to `ApiPagination` (default 100, max 100):
+
+```python
+from django_ai_sdk.contrib.drf import ApiPagination, ThreadViewSet
+
+class SmallPages(ApiPagination):
+    default_limit = 20
+    max_limit = 50
+
+class MyThreadViewSet(ThreadViewSet):
+    pagination_class = SmallPages
+```
 
 ### Remove an action
 
@@ -199,7 +233,7 @@ class MyThreadViewSet(ThreadViewSet):
 
 ## The chat view
 
-`ChatView` has two hooks:
+`ChatView` takes an `agent` (for URLs without a thread, see [Your own views](/views-and-routing/#your-own-views)) and has two hooks:
 
 ```python
 from django.http import JsonResponse
