@@ -1,14 +1,12 @@
-"""Shared plumbing for the DRF viewsets: error codes and pydantic in/out."""
+"""Shared plumbing for the DRF viewsets: error codes, pagination, per-action serializers."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from asgiref.sync import async_to_sync
-from pydantic import BaseModel
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.exceptions import APIException
+from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
@@ -16,8 +14,6 @@ from django_ai_sdk.errors import error_response
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-M = TypeVar("M", bound=BaseModel)
 
 
 def exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
@@ -32,40 +28,43 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
     return Response(body, status=status)
 
 
-class Page(BaseModel):
-    limit: int = 100
-    offset: int = 0
+class ApiPagination(LimitOffsetPagination):
+    """``?limit=&offset=`` for the list actions.
+
+    The services page in the database, so only the parameters are read; responses stay
+    plain lists (the services return no totals for a ``count``).
+    """
+
+    default_limit = 100
+    # Same bound as the Ninja layer. Services accept `limit=None` (everything);
+    # over HTTP a client pages through with `offset`.
+    max_limit = 100
 
 
-def to_data(obj: Any) -> Any:
-    """Make service return values (pydantic models, dataclasses, lists) renderable."""
-    if isinstance(obj, BaseModel):
-        return obj.model_dump(mode="json")
-    if is_dataclass(obj) and not isinstance(obj, type):
-        return asdict(obj)
-    if isinstance(obj, list | tuple):
-        return [to_data(item) for item in obj]
-    return obj
+class ApiViewSet(viewsets.GenericViewSet):
+    """Base for the SDK's viewsets.
 
+    Auth, permission and throttle classes come from your ``REST_FRAMEWORK`` settings
+    (or set them on a subclass); per-object access is decided by the services. Request
+    serializers are looked up per action in ``serializer_classes``, so a subclass can
+    swap one without touching the action.
+    """
 
-class SDKViewSet(viewsets.ViewSet):
-    """Base for the SDK's viewsets. Auth, permission and throttle classes come from
-    your ``REST_FRAMEWORK`` settings (or set them on a subclass); per-object access
-    is decided by the SDK services themselves."""
+    pagination_class = ApiPagination
+    serializer_classes: ClassVar[dict[str, type[serializers.Serializer]]] = {}
+
+    def get_serializer_class(self) -> type[serializers.Serializer]:
+        # Actions without a request body get an empty serializer (browsable API, schemas).
+        return self.serializer_classes.get(self.action or "", serializers.Serializer)
 
     def get_exception_handler(self) -> Callable[..., Response]:
         # Set here, so the SDK views answer with error codes whatever your settings say.
         return exception_handler
 
-    @staticmethod
-    def call(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Run an async service method from a sync DRF view."""
-        return async_to_sync(func)(*args, **kwargs)
-
-    @staticmethod
-    def payload(model: type[M], data: Any) -> M:
-        return model.model_validate(data)
-
-    @staticmethod
-    def page(request: Any, **defaults: int) -> Page:
-        return Page.model_validate({**defaults, **request.query_params.dict()})
+    def page(self, request: Any) -> tuple[int, int]:
+        """``(limit, offset)`` from the query string, bounded by ``pagination_class``."""
+        paginator = self.paginator
+        assert isinstance(paginator, LimitOffsetPagination)
+        return paginator.get_limit(request) or paginator.default_limit, paginator.get_offset(
+            request
+        )

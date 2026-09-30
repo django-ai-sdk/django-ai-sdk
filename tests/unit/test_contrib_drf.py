@@ -51,11 +51,20 @@ class TestThreads:
         assert client.delete(f"/drf/threads/{thread_id}/").status_code == 204
         assert client.get("/drf/threads/").json() == []
 
-    def test_a_bad_page_is_an_invalid_request(self, client, users):
+    def test_paging_follows_limit_offset_pagination(self, client, users):
+        """DRF's own rules: a bad limit falls back to the default, a big one is capped."""
+        from unittest.mock import patch
+
         client.force_login(users[0])
-        response = client.get("/drf/threads/?limit=lots")
-        assert response.status_code == 400
-        assert response.json()["code"] == "invalid_request"
+        with patch("django_ai_sdk.storage.services.list_threads", return_value=[]) as list_threads:
+            assert client.get("/drf/threads/?limit=lots").status_code == 200
+            assert list_threads.call_args.kwargs["limit"] == 100
+            client.get("/drf/threads/?limit=5000&offset=20")
+            assert list_threads.call_args.kwargs == {
+                "user": users[0],
+                "limit": 100,
+                "offset": 20,
+            }
 
     def test_chat_is_mounted_next_to_the_viewsets(self, client, users):
         client.force_login(users[0])
@@ -135,3 +144,56 @@ class TestErrorHandler:
         response = exception_handler(PermissionDenied("no"), {})
         assert response.status_code == 403
         assert response.data["code"] == "permission_denied"
+
+
+def _pairs():
+    from django_ai_sdk.agents.services import AgentSummary
+    from django_ai_sdk.contrib.drf import serializers as s
+    from django_ai_sdk.integrations.schemas import AgentIntegrationStatus, IntegrationOut
+    from django_ai_sdk.memories import schemas as m
+    from django_ai_sdk.permissions import ObjectPermissions
+    from django_ai_sdk.storage.schemas import ThreadInfo
+    from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
+    from django_ai_sdk.views import schemas as v
+
+    return [
+        # Responses: the services' own models.
+        (s.ThreadSerializer, ThreadInfo),
+        (s.MemoryOutSerializer, m.MemoryOut),
+        (s.DocumentSerializer, m.DocumentOut),
+        (s.DocumentStatusSerializer, m.DocumentStatusOut),
+        (s.UploadResultSerializer, m.DocumentUploadResponse),
+        (s.ThreadMemorySerializer, m.ThreadMemoryOut),
+        (s.MemoryMemberSerializer, m.MemoryUserOut),
+        (s.MemoryGroupMemberSerializer, m.MemoryGroupOut),
+        (s.TraceSerializer, TraceOut),
+        (s.TokenUsageSerializer, TokenUsage),
+        (s.IntegrationSerializer, IntegrationOut),
+        (s.AgentIntegrationStatusSerializer, AgentIntegrationStatus),
+        (s.ObjectPermissionsSerializer, ObjectPermissions),
+        (s.AgentSummarySerializer, AgentSummary),
+        # Requests: the payloads the Ninja layer validates with.
+        (s.ChatRequestSerializer, v.ChatRequest),
+        (s.RateMessageSerializer, v.RateMessagePayload),
+        (s.AgentSwitchSerializer, v.PatchThreadPayload),
+        (s.MemorySerializer, v.MemoryIn),
+        (s.BulkConnectSerializer, v.BulkConnectMemoriesIn),
+        (s.ToggleActiveSerializer, v.ToggleMemoryActiveIn),
+        (s.AddUserSerializer, v.AddMemoryUserIn),
+        (s.AddUserSerializer, v.AddAgentUserIn),
+        (s.UpdateUserSerializer, v.UpdateMemoryUserIn),
+        (s.AddGroupSerializer, v.AddMemoryGroupIn),
+        (s.RuntimeAgentCreateSerializer, v.AgentSettingsCreateIn),
+        (s.RuntimeAgentUpdateSerializer, v.AgentSettingsUpdateIn),
+        (s.WorkflowCreateSerializer, v.WorkflowCreateRequest),
+        (s.WorkflowUpdateSerializer, v.WorkflowUpdateRequest),
+        (s.WorkflowRunRequestSerializer, v.WorkflowRunRequest),
+        (s.WorkflowRunByIdSerializer, v.WorkflowRunByIdRequest),
+    ]
+
+
+@pytest.mark.parametrize(("serializer", "model"), _pairs(), ids=lambda x: x.__name__)
+def test_serializers_mirror_the_sdk_models(serializer, model):
+    """The DRF layer spells the fields out again; this is what keeps it from drifting."""
+    fields = getattr(model, "model_fields", None) or model.__annotations__
+    assert set(serializer().fields) == set(fields)
