@@ -4,19 +4,32 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Collection
-from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
 from django.http import HttpRequest
-from ninja import Router, Schema
+from ninja import Router
 
 from django_ai_sdk import Agent
 from django_ai_sdk.agents.services import AgentService, AgentUpdateData
-from django_ai_sdk.contrib.ninja.routing import Routes
-from django_ai_sdk.contrib.ninja.threads import RunResponse, Success
+from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.schemas import (
+    AgentGroupOut,
+    AgentInfoResponse,
+    AgentItem,
+    AgentSettingsOut,
+    AgentsListResponse,
+    AgentUserOut,
+    IntegrationStatusOut,
+    RunResponse,
+    RuntimeAgentBaseItem,
+    RuntimeAgentToolItem,
+    Success,
+    Tool,
+    ToolsResponse,
+)
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.permissions import ObjectPermissions, Operation, PermissionDenied
+from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.views.permissions import aagent_permissions
 from django_ai_sdk.views.schemas import (
     AddAgentGroupIn,
@@ -28,95 +41,7 @@ from django_ai_sdk.views.schemas import (
 )
 
 logger = get_logger(__name__)
-routes = Routes()
-
-
-class AgentItem(Schema):
-    id: str
-    name: str | None = None
-    model: str | None = None
-    file_upload: bool = False
-    rag: bool = False
-
-
-class AgentsListResponse(Schema):
-    agents: list[AgentItem]
-
-
-class AgentInfoResponse(Schema):
-    id: str
-    name: str | None = None
-    model: str | None = None
-    class_name: str
-    description: str | None = None
-    instructions: str | None = None
-    file_upload: bool = False
-    rag: bool = False
-    permissions: ObjectPermissions = ObjectPermissions()
-
-
-class Tool(Schema):
-    label: str
-    description: str | None = None
-    children: list[Tool] = []
-
-
-class IntegrationStatusOut(Schema):
-    server_name: str
-    label: str
-    type: str
-    status: str
-    tool_names: list[str]
-
-
-class ToolsResponse(Schema):
-    tools: list[Tool]
-    integrations: list[IntegrationStatusOut] = []
-
-
-class AgentSettingsOut(Schema):
-    id: UUID
-    name: str
-    slug: str
-    agent: str
-    model: str
-    system_prompt: str
-    tools: list[str]
-    integrations: list[str]
-    memories: list[str]
-    suggestion_enabled: bool
-    title_generation: bool
-    max_history: int | None
-    file_upload: bool
-    active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class RuntimeAgentBaseItem(Schema):
-    path: str
-    name: str
-
-
-class RuntimeAgentToolItem(Schema):
-    key: str
-    path: str
-
-
-class AgentUserOut(Schema):
-    user_id: str
-    email: str = ""
-    first_name: str = ""
-    last_name: str = ""
-    can_manage: bool
-    created_at: str
-
-
-class AgentGroupOut(Schema):
-    group_id: int
-    group_name: str
-    can_manage: bool
-    created_at: str
+routes = ApiRouter()
 
 
 def _user_out(entry: Any) -> AgentUserOut:
@@ -253,7 +178,11 @@ async def delete_agent_group(request: HttpRequest, runtime_id: UUID, group_id: i
 
 
 @routes.get("/agents/", response=AgentsListResponse)
-async def list_agents(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+async def list_agents(
+    request: HttpRequest,
+    limit: Limit = 100,
+    offset: Offset = 0,
+) -> Any:
     items = await AgentService.list_agents(user=request.user, limit=limit, offset=offset)
     return AgentsListResponse(agents=[AgentItem(**item) for item in items])
 

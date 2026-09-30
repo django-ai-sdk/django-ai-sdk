@@ -6,10 +6,15 @@ from collections.abc import Collection
 from typing import Any
 
 from django.http import HttpRequest
-from ninja import File, Router, Schema
+from ninja import File, Router
 from ninja.files import UploadedFile
 
-from django_ai_sdk.contrib.ninja.routing import ERRORS, Routes
+from django_ai_sdk.contrib.ninja.routing import ERRORS, ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.schemas import (
+    MemoryOutResponse,
+    SourceContentOut,
+    UploadSettingsOut,
+)
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.memories.schemas import (
     DocumentOut,
@@ -21,7 +26,6 @@ from django_ai_sdk.memories.schemas import (
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import ObjectPermissions
 from django_ai_sdk.views.permissions import amemory_permissions
 from django_ai_sdk.views.schemas import (
     AddMemoryGroupIn,
@@ -32,23 +36,10 @@ from django_ai_sdk.views.schemas import (
     UpdateMemoryUserIn,
 )
 
-routes = Routes()
+routes = ApiRouter()
 
 NO_CONTENT = {204: None, **ERRORS}
 ACCEPTED = {202: DocumentUploadResponse, **ERRORS, 409: ERRORS[400]}
-
-
-class MemoryOutResponse(MemoryOut):
-    permissions: ObjectPermissions = ObjectPermissions()
-
-
-class SourceContentOut(Schema):
-    content: str
-
-
-class UploadSettingsOut(Schema):
-    max_upload_size: int
-    allowed_mime_types: list[str]
 
 
 @routes.get("/settings", response=UploadSettingsOut)
@@ -73,7 +64,11 @@ async def create_memory(request: HttpRequest, payload: MemoryIn) -> Any:
 
 
 @routes.get("", response=list[MemoryOutResponse])
-async def list_memories(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+async def list_memories(
+    request: HttpRequest,
+    limit: Limit = 100,
+    offset: Offset = 0,
+) -> Any:
     memories = await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
     return [
         MemoryOutResponse(
@@ -123,7 +118,10 @@ async def get_document_status(request: HttpRequest, memory_id: str, doc_id: str)
 
 @routes.get("/{memory_id}/documents", response=list[DocumentOut])
 async def list_documents(
-    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
+    request: HttpRequest,
+    memory_id: str,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     return await MemoryService.list_documents(
         memory_id, user=request.user, limit=limit, offset=offset
@@ -155,7 +153,10 @@ async def unlink_thread(request: HttpRequest, memory_id: str, thread_id: str) ->
 
 @routes.get("/thread/{thread_id}", response=list[ThreadMemoryOut])
 async def list_thread_memories(
-    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
+    request: HttpRequest,
+    thread_id: str,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     return await MemoryService.list_thread_memories(
         thread_id, user=request.user, limit=limit, offset=offset
@@ -187,7 +188,10 @@ async def get_thread_file_status(request: HttpRequest, thread_id: str, doc_id: s
 
 @routes.get("/thread/{thread_id}/files", response=list[DocumentOut])
 async def list_thread_files(
-    request: HttpRequest, thread_id: str, limit: int = 100, offset: int = 0
+    request: HttpRequest,
+    thread_id: str,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     return await MemoryService.list_thread_files(
         thread_id, user=request.user, limit=limit, offset=offset
@@ -219,7 +223,10 @@ async def disconnect_memory_from_thread(
 
 @routes.get("/{memory_id}/users/", response=list[MemoryUserOut])
 async def list_memory_users(
-    request: HttpRequest, memory_id: str, limit: int = 100, offset: int = 0
+    request: HttpRequest,
+    memory_id: str,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     return await MemoryService.list_memory_users(
         memory_id, user=request.user, limit=limit, offset=offset

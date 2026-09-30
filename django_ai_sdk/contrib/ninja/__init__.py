@@ -2,15 +2,15 @@
 
 Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
 
-    from django_ai_sdk.contrib import ninja as ai
+    from django_ai_sdk.contrib import ninja as ai_sdk_routers
 
     api = NinjaAPI(auth=SessionAuth())
-    ai.register_error_handlers(api)
-    api.add_router("/", ai.get_threads_router())
-    api.add_router("/", ai.get_agents_router())
-    api.add_router("/", ai.get_workflows_router())
-    api.add_router("/memories", ai.get_memories_router())
-    api.add_router("/integrations", ai.get_integrations_router())
+    ai_sdk_routers.register_error_handlers(api)
+    api.add_router("/", ai_sdk_routers.get_threads_router())
+    api.add_router("/", ai_sdk_routers.get_agents_router())
+    api.add_router("/", ai_sdk_routers.get_workflows_router())
+    api.add_router("/memories", ai_sdk_routers.get_memories_router())
+    api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
 
 Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
 ``exclude={"delete_all_threads"}`` and add your own on the result.

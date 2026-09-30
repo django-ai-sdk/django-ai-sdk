@@ -6,99 +6,39 @@ from collections.abc import Collection
 from typing import Any
 
 from django.http import HttpRequest
-from ninja import Router, Schema
+from ninja import Router
 
 from django_ai_sdk.agents.services import AgentService
-from django_ai_sdk.contrib.ninja.routing import Routes
+from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.schemas import (
+    CreateThreadResponse,
+    DeleteAllThreadsResponse,
+    MessageResponse,
+    RunResponse,
+    Success,
+    ThreadDetailResponse,
+    ThreadFileMeta,
+    ThreadListItem,
+    ThreadListResponse,
+    ThreadTracesResponse,
+)
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.permissions import ObjectPermissions
-from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.storage.services import ThreadService, aget_thread_file_meta, aget_thread_history
-from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
+from django_ai_sdk.tracing.schemas import TokenUsage
 from django_ai_sdk.tracing.services import TraceService
 from django_ai_sdk.views.permissions import athread_permissions
 from django_ai_sdk.views.schemas import ChatRequest, PatchThreadPayload, RateMessagePayload
 
-routes = Routes()
-
-
-class Success(Schema):
-    success: bool
-    message: str | None = None
-
-
-class ThreadListItem(Schema):
-    id: str
-    title: str
-    agent_id: str
-    created_at: str
-    updated_at: str
-    message_count: int
-
-
-class ThreadListResponse(Schema):
-    threads: list[ThreadListItem]
-
-
-class CreateThreadResponse(Schema):
-    thread_id: str | None = None
-
-
-class FeedbackResponse(Schema):
-    id: str
-    user_id: str | None = None
-    rating: int
-    feedback: str
-    created_at: str | None = None
-
-
-class ThreadMessage(Schema):
-    id: str
-    role: str
-    parts: list = []
-    finish_reason: str | None = None
-    tool_calls: list = []
-    processing_time_ms: int | None = None
-    has_errors: bool = False
-    usage: dict | None = None
-    feedback: FeedbackResponse | None = None
-    created_at: str | None = None
-
-
-class ThreadDetailResponse(Schema):
-    thread: ThreadInfo
-    messages: list[ThreadMessage]
-    permissions: ObjectPermissions = ObjectPermissions()
-
-
-class ThreadFileMeta(Schema):
-    file_count: int = 0
-    file_memory_id: str | None = None
-
-
-class DeleteAllThreadsResponse(Schema):
-    success: bool
-    deleted_count: int
-
-
-class MessageResponse(Schema):
-    id: str
-    is_deleted: bool = False
-    feedback: FeedbackResponse | None = None
-
-
-class RunResponse(Schema):
-    result: str | None = None
-    thread_id: str
-
-
-class ThreadTracesResponse(Schema):
-    traces: list[TraceOut]
+routes = ApiRouter()
 
 
 @routes.get("/threads/", response=ThreadListResponse)
-async def list_threads(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+async def list_threads(
+    request: HttpRequest,
+    limit: Limit = 100,
+    offset: Offset = 0,
+) -> Any:
     threads = await ThreadService.threads(user=request.user, limit=limit, offset=offset)
     return ThreadListResponse(
         threads=[
@@ -215,8 +155,8 @@ async def get_thread_traces(
     thread_id: str,
     message_id: str | None = None,
     operation_name: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     traces = await TraceService.thread_traces(
         thread_id,
@@ -239,8 +179,8 @@ async def get_message_traces(
     request: HttpRequest,
     message_id: str,
     operation_name: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: Limit = 100,
+    offset: Offset = 0,
 ) -> Any:
     traces = await TraceService.message_traces(
         message_id, user=request.user, operation_name=operation_name, limit=limit, offset=offset

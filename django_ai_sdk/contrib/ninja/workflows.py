@@ -6,9 +6,17 @@ from collections.abc import Collection
 from typing import Any
 
 from django.http import HttpRequest
-from ninja import Router, Schema
+from ninja import Router
 
-from django_ai_sdk.contrib.ninja.routing import ERRORS, Routes
+from django_ai_sdk.contrib.ninja.routing import ERRORS, ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.schemas import (
+    WorkflowActionItem,
+    WorkflowItem,
+    WorkflowRunDetailOut,
+    WorkflowRunOut,
+    WorkflowRunResponse,
+    WorkflowRunStepOut,
+)
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.views.schemas import (
     WorkflowCreateRequest,
@@ -18,51 +26,7 @@ from django_ai_sdk.views.schemas import (
 )
 from django_ai_sdk.workflows.services import WorkflowService
 
-routes = Routes()
-
-
-class WorkflowRunResponse(Schema):
-    run_id: str
-    status: str
-
-
-class WorkflowActionItem(Schema):
-    key: str
-    description: str
-
-
-class WorkflowRunStepOut(Schema):
-    id: str
-    sequence: int
-    # The step's name is its key: its output is filed under it.
-    step_name: str
-    output: dict | None = None
-    status: str
-    error: str
-    started_at: str | None = None
-    completed_at: str | None = None
-
-
-class WorkflowRunOut(Schema):
-    id: str
-    workflow_id: str | None = None
-    status: str
-    outputs: dict | None = None
-    error: str
-    created_at: str
-    started_at: str | None = None
-    completed_at: str | None = None
-
-
-class WorkflowRunDetailOut(WorkflowRunOut):
-    steps: list[WorkflowRunStepOut] = []
-
-
-class WorkflowItem(Schema):
-    id: str
-    name: str
-    definition: dict
-    active: bool
+routes = ApiRouter()
 
 
 def _iso(value: Any) -> str | None:
@@ -101,7 +65,11 @@ def list_workflow_actions(request: HttpRequest) -> Any:
 
 
 @routes.get("/workflows/", response=list[WorkflowItem])
-async def list_workflows(request: HttpRequest, limit: int = 100, offset: int = 0) -> Any:
+async def list_workflows(
+    request: HttpRequest,
+    limit: Limit = 100,
+    offset: Offset = 0,
+) -> Any:
     records = await WorkflowService.list_workflows(user=request.user, limit=limit, offset=offset)
     return [_item(r) for r in records]
 
@@ -114,7 +82,10 @@ async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) 
 
 @routes.get("/workflows/{workflow_id}/runs/", response=list[WorkflowRunOut])
 async def list_workflow_runs(
-    request: HttpRequest, workflow_id: str, limit: int = 50, offset: int = 0
+    request: HttpRequest,
+    workflow_id: str,
+    limit: Limit = 50,
+    offset: Offset = 0,
 ) -> Any:
     runs = await WorkflowService.list_runs(
         workflow_id, user=request.user, limit=limit, offset=offset

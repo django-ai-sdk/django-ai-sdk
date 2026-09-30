@@ -1,17 +1,19 @@
-"""Route tables that build fresh Ninja Routers, and the error handlers.
+"""Endpoint tables that build fresh Ninja Routers, and the error handlers.
 
-A Ninja ``Router`` can be attached to one API only, so each module keeps a
-:class:`Routes` table and hands out a new Router per call (``get_threads_router()``
-and friends). ``exclude`` drops endpoints by function name so you can replace them.
+Each module keeps an :class:`ApiRouter` and hands out a new ``ninja.Router`` per call
+(``get_threads_router()`` and friends). A fresh Router per call is what makes
+``exclude`` possible: Ninja can't remove an endpoint from a router, and adding your own
+endpoints to a shared module-level router would change it for every project using it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
 from types import FunctionType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from ninja import Router
+from pydantic import Field
 
 from django_ai_sdk.errors import error_response
 from django_ai_sdk.views.schemas import ErrorResponse
@@ -21,11 +23,23 @@ if TYPE_CHECKING:
     from ninja import NinjaAPI
 
 
+# Paging for list endpoints. Services accept `limit=None` (everything); over HTTP a
+# page is bounded, and a client pages through with `offset`.
+MAX_PAGE_SIZE = 100
+Limit = Annotated[int, Field(ge=1, le=MAX_PAGE_SIZE)]
+Offset = Annotated[int, Field(ge=0)]
+
 # Documented on every operation; raised by services, answered by the handlers below.
 ERRORS = {400: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 500: ErrorResponse}
 
 
-class Routes:
+class ApiRouter:
+    """A table of endpoints; ``build()`` turns it into a new ``ninja.Router``.
+
+    Not a ``ninja.Router`` subclass: it records endpoints with the same decorators
+    (``get``, ``post``, ...) so every build starts from the full set.
+    """
+
     def __init__(self) -> None:
         self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = []
 

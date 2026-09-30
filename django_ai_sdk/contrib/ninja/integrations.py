@@ -11,29 +11,19 @@ from typing import Any
 
 from django.http import HttpRequest
 from django.urls import reverse
-from ninja import Router, Schema
+from ninja import Router
 
-from django_ai_sdk.contrib.ninja.routing import Routes
+from django_ai_sdk.contrib.ninja.routing import ApiRouter
+from django_ai_sdk.contrib.ninja.schemas import (
+    ConnectOut,
+    DetailOut,
+    StatusOut,
+)
 from django_ai_sdk.errors import NotFound
-from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.schemas import IntegrationOut
 from django_ai_sdk.integrations.services import IntegrationService
 
-routes = Routes()
-
-
-class DetailOut(Schema):
-    detail: str
-
-
-class ConnectOut(Schema):
-    """Where the client should go to complete a connection (e.g. an OAuth redirect)."""
-
-    redirect_url: str
-
-
-class StatusOut(Schema):
-    status: IntegrationStatus
+routes = ApiRouter()
 
 
 @routes.get("/", response=list[IntegrationOut])

@@ -10,7 +10,7 @@ import json
 import pytest
 from ninja import NinjaAPI
 
-from django_ai_sdk.contrib import ninja as ai
+from django_ai_sdk.contrib import ninja as ai_sdk_routers
 from tests.urls import api
 
 WORKFLOWS = "/api/workflows/"
@@ -58,18 +58,18 @@ class TestRouterFactories:
 
     def test_a_router_can_be_mounted_on_a_second_api(self):
         other = NinjaAPI(urls_namespace="second")
-        other.add_router("/", ai.get_threads_router())
+        other.add_router("/", ai_sdk_routers.get_threads_router())
         assert "/threads/" in other.get_openapi_schema(path_prefix="")["paths"]
 
     def test_excluded_endpoints_are_left_out(self):
         other = NinjaAPI(urls_namespace="trimmed")
-        other.add_router("/", ai.get_threads_router(exclude={"delete_all_threads"}))
+        other.add_router("/", ai_sdk_routers.get_threads_router(exclude={"delete_all_threads"}))
         methods = other.get_openapi_schema(path_prefix="")["paths"]["/threads/"]
         assert "delete" not in methods and "get" in methods
 
     def test_a_misspelt_exclude_fails_loudly(self):
         with pytest.raises(ValueError, match="delete_all_thread"):
-            ai.get_threads_router(exclude={"delete_all_thread"})
+            ai_sdk_routers.get_threads_router(exclude={"delete_all_thread"})
 
 
 @pytest.mark.django_db(transaction=True)
@@ -82,6 +82,13 @@ class TestThreads:
         response = client.delete("/api/threads/00000000-0000-0000-0000-000000000000/")
         assert response.status_code == 404
         assert response.json()["code"] == "not_found"
+
+    def test_pages_are_bounded(self, client, users):
+        """Services take limit=None (everything); over HTTP a page is at most 100."""
+        client.force_login(users[0])
+        assert client.get("/api/threads/?limit=100").status_code == 200
+        assert client.get("/api/threads/?limit=101").status_code == 422
+        assert client.get("/api/threads/?offset=-1").status_code == 422
 
     def test_a_thread_is_created_listed_and_deleted(self, client, users, mock_agents_registry):
         client.force_login(users[0])
