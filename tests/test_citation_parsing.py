@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 from django_ai_sdk.adapters import base
 from django_ai_sdk.adapters.base import Stream
@@ -121,3 +122,32 @@ def test_formatter_tells_model_to_say_not_found():
     preamble, reminder = text.split('\n<source id="1">')[0], text.rsplit("</source>", 1)[1]
     assert "say you could not find it" in preamble
     assert "say you could not find it" in reminder
+
+
+class TestStoredSourcesDedupe:
+    """A chunk retrieved by two searches is listed once, but a cited index always survives."""
+
+    @staticmethod
+    async def _stored(cited: set[int]) -> list[int]:
+        registry = CitationRegistry()
+        # Searches one and two both return chunk "a"; "b" and "c" appear once.
+        for index, chunk in enumerate(["a", "b", "a", "c", "a"], start=1):
+            registry.add(
+                [NumberedSource(index=index, title=chunk, content="", doc_id="d", chunk_id=chunk)]
+            )
+        stream = Stream.__new__(Stream)
+        stream.citation_registry = registry
+        stream.cited_ids = cited
+        writer = MagicMock()
+        writer.finalize = AsyncMock()
+        await stream.get_final_message(writer)
+        return [source["index"] for source in writer.message.sources]
+
+    async def test_uncited_duplicates_keep_only_the_first(self):
+        assert await self._stored(cited=set()) == [1, 2, 4]
+
+    async def test_a_cited_duplicate_is_kept_so_its_citation_resolves(self):
+        assert await self._stored(cited={3}) == [2, 3, 4]
+
+    async def test_every_cited_index_of_a_chunk_is_kept(self):
+        assert await self._stored(cited={1, 5}) == [1, 2, 4, 5]
