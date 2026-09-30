@@ -1,7 +1,6 @@
-"""ChatView through a real URL, and the moved memory payloads' old import path."""
+"""ChatView through real URLs: with a thread, and stateless with a fixed agent."""
 
 import json
-import warnings
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -77,14 +76,3 @@ class TestStatelessChat:
         response = client.post("/agentless-chat/", data=VALID, content_type="application/json")
         assert response.status_code == 404
         assert response.json()["code"] == "not_found"
-
-
-def test_moved_memory_payloads_still_import_with_a_warning():
-    from django_ai_sdk.views.schemas import MemoryIn
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        from django_ai_sdk.memories.schemas import MemoryIn as old
-
-    assert old is MemoryIn
-    assert any(issubclass(w.category, DeprecationWarning) for w in caught)

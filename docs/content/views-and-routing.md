@@ -330,10 +330,14 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
 Agents declare `permissions` classes; `as_view()`, `history()`, and `AgentService` check them before acting, raising `PermissionDenied` when access is denied.
 
 ```python
-from django_ai_sdk.views.permissions import agent_permissions, memory_permissions, thread_permissions
+from django_ai_sdk.views.permissions import aagent_permissions, agent_permissions
 
-perms = await agent_permissions(request.user, agent_id)  # ObjectPermissions(can_read=..., ...)
+perms = await aagent_permissions(request.user, agent_id)  # async views (Ninja, ChatView)
+perms = agent_permissions(request.user, agent_id)  # sync views (DRF)
+# -> ObjectPermissions(can_read=..., can_write=..., can_manage=...)
 ```
+
+Threads and memories work the same way: `athread_permissions` / `thread_permissions` and `amemory_permissions` / `memory_permissions`.
 
 Return `ObjectPermissions` in your responses so the frontend can show or hide controls; both contrib layers already do. Domain-wide overrides live in settings:
 
