@@ -6,13 +6,18 @@ import logging
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import IO, Any, ClassVar, Protocol
+from typing import IO, TYPE_CHECKING, Any, ClassVar, Protocol
 
 import aiofiles
 import puremagic
+from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import File
+from django.utils.module_loading import import_string
 
 from django_ai_sdk.utils import resolve_setting
+
+if TYPE_CHECKING:
+    from django_ai_sdk.agents.base import Agent
 
 type FileSource = str | Path | File | IO[bytes]
 
@@ -352,19 +357,55 @@ def get_vision_model() -> str | None:
     return resolve_setting("AI_SDK_VISION_MODEL", None)
 
 
-async def describe_image(
-    data: bytes, mime_type: str, prompt: str, *, model: str | None = None
-) -> str | None:
-    """Ask a vision model `prompt` about an image; returns its text reply."""
+def get_vision_agent() -> Agent | None:
+    """An instance of `AI_SDK_VISION_AGENT` (dotted path to an Agent subclass), or None.
+
+    The agent answers every image question: captions for uploads and `ask_image`.
+    Make it `hidden = True` so it isn't listed or chattable.
+    """
+    from django_ai_sdk.agents.base import Agent
+
+    path = resolve_setting("AI_SDK_VISION_AGENT", None)
+    if not path:
+        return None
+    agent_class = import_string(path)
+    if not (isinstance(agent_class, type) and issubclass(agent_class, Agent)):
+        raise ImproperlyConfigured(f"AI_SDK_VISION_AGENT must name an Agent subclass: {path!r}")
+    return agent_class()
+
+
+def has_vision_support() -> bool:
+    """Whether images can be described and asked about: a vision agent or model is set."""
+    return bool(resolve_setting("AI_SDK_VISION_AGENT", None) or get_vision_model())
+
+
+async def describe_image(data: bytes, mime_type: str, prompt: str) -> str | None:
+    """Ask about an image; returns the text reply.
+
+    With `AI_SDK_VISION_AGENT` set, that agent runs with the image attached (its
+    model, prompt and generator are yours to choose). Otherwise the model is
+    called directly: `AI_SDK_VISION_MODEL`, falling back to `AI_SDK_DEFAULT_MODEL`.
+    """
+    encoded = base64.b64encode(data).decode()
+    if (agent := get_vision_agent()) is not None:
+        from django_ai_sdk.common import Attachment, ChatMessage
+
+        image = Attachment(document_id="", media_type=mime_type, data=encoded)
+        reply = await agent.run(
+            [ChatMessage(role="user", content=prompt, attachments=[image])],
+            response_format=None,
+        )
+        return reply if isinstance(reply, str) else None
+
     from haystack.dataclasses import ChatMessage as HaystackChatMessage
     from haystack.dataclasses import ImageContent
 
     from django_ai_sdk.generators import openai_chat
 
-    image = ImageContent(base64_image=base64.b64encode(data).decode(), mime_type=mime_type)
-    message = HaystackChatMessage.from_user(content_parts=[prompt, image])
-    generator = openai_chat(model=model or get_vision_model())
-    result = await generator.run_async(messages=[message])
+    image_content = ImageContent(base64_image=encoded, mime_type=mime_type)
+    message = HaystackChatMessage.from_user(content_parts=[prompt, image_content])
+    model = get_vision_model() or resolve_setting("AI_SDK_DEFAULT_MODEL", None)
+    result = await openai_chat(model=model).run_async(messages=[message])
     replies = result.get("replies") or []
     return replies[0].text if replies else None
 
@@ -375,7 +416,8 @@ class ImageCaptionProcessor(BaseFileProcessor):
     Returns a description plus a verbatim transcription of any visible text, so
     a photo or screenshot becomes retrievable like any other document, and
     agents whose model can't see images still know what it shows. Uses
-    `AI_SDK_VISION_MODEL`, falling back to `AI_SDK_DEFAULT_MODEL`.
+    `AI_SDK_VISION_AGENT` if set, else `AI_SDK_VISION_MODEL`, falling back to
+    `AI_SDK_DEFAULT_MODEL` (see `describe_image`).
     """
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
@@ -392,8 +434,7 @@ class ImageCaptionProcessor(BaseFileProcessor):
             logger.warning("ImageCaptionProcessor: could not read image bytes")
             return None
         mime_type = await get_mime_type(file) or "image/jpeg"
-        model = get_vision_model() or resolve_setting("AI_SDK_DEFAULT_MODEL", None)
-        caption = await describe_image(data, mime_type, IMAGE_CAPTION_PROMPT, model=model)
+        caption = await describe_image(data, mime_type, IMAGE_CAPTION_PROMPT)
         if not caption:
             logger.warning("ImageCaptionProcessor: vision model returned no reply")
         return caption

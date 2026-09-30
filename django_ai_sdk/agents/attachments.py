@@ -15,7 +15,7 @@ class InlineFileCapability:
     Every attachment becomes a context line (`format_attachment` /
     `format_image_attachment`). Images go inline as pixels when the agent
     `has_vision()`; otherwise the model gets their extracted description plus,
-    with `AI_SDK_VISION_MODEL` set, the `ask_image` tool.
+    with a vision agent or model configured, the `ask_image` tool.
     """
 
     # Provided by Agent.
@@ -49,11 +49,11 @@ class InlineFileCapability:
         return []
 
     def get_attachment_tools(self, thread_id: str) -> list[Any]:
-        """`ask_image`, when this agent takes uploads and a vision model is set."""
-        from django_ai_sdk.files.processors import get_vision_model
+        """`ask_image`, when this agent takes uploads and a vision agent or model is set."""
+        from django_ai_sdk.files.processors import has_vision_support
         from django_ai_sdk.memories.tools import ask_image_tool
 
-        if self.file_upload and thread_id and get_vision_model():
+        if self.file_upload and thread_id and has_vision_support():
             return [ask_image_tool(thread_id)]
         return []
 
@@ -76,10 +76,10 @@ class InlineFileCapability:
         """Context line for an image attached to a user message.
 
         `inline` means the model gets the pixels with this message; otherwise it
-        gets the description from memory extraction and, when a vision model is
-        configured, is pointed at the `ask_image` tool.
+        gets the description from memory extraction and, when a vision agent or
+        model is configured, is pointed at the `ask_image` tool.
         """
-        from django_ai_sdk.files.processors import get_vision_model
+        from django_ai_sdk.files.processors import has_vision_support
         from django_ai_sdk.memories.tools import ASK_IMAGE_TOOL
 
         line = f'[Attached image "{doc.file_name}", document id {doc.id}'
@@ -93,7 +93,7 @@ class InlineFileCapability:
             line += f". You can't see it; auto-generated description: {caption}"
         else:
             line += ". You can't see it and it has no description yet."
-        if get_vision_model():
+        if has_vision_support():
             line += (
                 f" For anything the description doesn't answer, call {ASK_IMAGE_TOOL}"
                 f" with document id {doc.id}."

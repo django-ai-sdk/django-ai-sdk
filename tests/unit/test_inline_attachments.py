@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from typing import ClassVar
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from haystack.components.agents.state.state import State
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 
 from django_ai_sdk.adapters.base import get_user_message
+from django_ai_sdk.agents.base import Agent
 from django_ai_sdk.agents.tool_agent import RequireToolsHook
 from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -325,3 +327,70 @@ class TestAskImageTool:
             assert describe.await_args.args == (PNG, "image/png", "colour?")
             missing = await tool.async_function(image=str(foreign.id), question="colour?")
         assert "No image" in missing
+
+
+class RecordingVisionAgent(Agent):
+    """A project's own vision agent, as AI_SDK_VISION_AGENT would name it."""
+
+    hidden = True
+    model = "vision-test"
+    calls: ClassVar[list] = []
+
+    async def get_pipeline_adapter(self, thread_id=None, user=None):
+        raise NotImplementedError
+
+    async def run(self, messages, **kwargs):
+        type(self).calls.append((messages, kwargs))
+        return "a grey cat"
+
+
+VISION_AGENT = f"{__name__}.RecordingVisionAgent"
+
+
+class TestVisionAgent:
+    async def test_the_vision_agent_answers_with_the_image_attached(self, settings):
+        from django_ai_sdk.files.processors import describe_image
+
+        settings.AI_SDK_VISION_AGENT = VISION_AGENT
+        RecordingVisionAgent.calls.clear()
+
+        assert await describe_image(PNG, "image/png", "What is it?") == "a grey cat"
+
+        ((messages, kwargs),) = RecordingVisionAgent.calls
+        (message,) = messages
+        assert message.content == "What is it?"
+        (image,) = message.attachments
+        assert (image.media_type, base64.b64decode(image.data)) == ("image/png", PNG)
+        assert kwargs["response_format"] is None
+
+    async def test_without_an_agent_the_vision_model_is_called(self, settings):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from django_ai_sdk.files.processors import describe_image
+
+        settings.AI_SDK_VISION_AGENT = None
+        settings.AI_SDK_VISION_MODEL = "vision-model"
+        generator = MagicMock()
+        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="a dog")]})
+        with patch("django_ai_sdk.generators.openai_chat", return_value=generator) as chat:
+            assert await describe_image(PNG, "image/png", "What is it?") == "a dog"
+        chat.assert_called_once_with(model="vision-model")
+
+    def test_vision_support_needs_an_agent_or_a_model(self, settings):
+        from django_ai_sdk.files.processors import has_vision_support
+
+        settings.AI_SDK_VISION_AGENT, settings.AI_SDK_VISION_MODEL = None, None
+        assert not has_vision_support()
+        settings.AI_SDK_VISION_AGENT = VISION_AGENT
+        assert has_vision_support()
+        settings.AI_SDK_VISION_AGENT, settings.AI_SDK_VISION_MODEL = None, "vision-model"
+        assert has_vision_support()
+
+    def test_the_setting_must_name_an_agent(self, settings):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from django_ai_sdk.files.processors import get_vision_agent
+
+        settings.AI_SDK_VISION_AGENT = "django_ai_sdk.common.ChatMessage"
+        with pytest.raises(ImproperlyConfigured, match="Agent subclass"):
+            get_vision_agent()
