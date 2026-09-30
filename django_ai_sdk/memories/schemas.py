@@ -66,7 +66,7 @@ class DocumentExtraction(BaseModel):
     events: list[Event] = Field(..., description="Events extracted from text")
 
 
-# Service output schemas
+# What MemoryService returns (also reused as API response shapes)
 
 
 class MemoryOut(BaseModel):
@@ -154,32 +154,3 @@ class MemoryGroupOut(BaseModel):
     group_name: str
     can_manage: bool
     created_at: str
-
-
-# HTTP payloads moved to django_ai_sdk.views.schemas; old import path kept working.
-_MOVED_TO_VIEWS = frozenset(
-    {
-        "AddMemoryUserIn",
-        "DocumentIn",
-        "AddMemoryGroupIn",
-        "UpdateMemoryUserIn",
-        "ToggleMemoryActiveIn",
-        "MemoryIn",
-        "BulkConnectMemoriesIn",
-    }
-)
-
-
-def __getattr__(name: str) -> object:
-    if name in _MOVED_TO_VIEWS:
-        import warnings
-
-        from django_ai_sdk.views import schemas
-
-        warnings.warn(
-            f"django_ai_sdk.memories.schemas.{name} moved to django_ai_sdk.views.schemas.{name}",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(schemas, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
