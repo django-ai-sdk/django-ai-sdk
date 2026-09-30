@@ -274,6 +274,9 @@ class TestVisionFallback:
         settings.AI_SDK_IMAGE_CAPTION_LIMIT = 0  # off
         assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
 
+        settings.AI_SDK_IMAGE_CAPTION_LIMIT = None  # off too, like AI_SDK_MAX_INLINE_IMAGE_BYTES
+        assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
+
     def test_images_do_not_require_attachment_tools(self):
         from django_ai_sdk.agents.base import Agent
 

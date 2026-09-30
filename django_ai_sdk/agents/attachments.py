@@ -87,7 +87,7 @@ class InlineFileCapability:
             return line + ", included in this message.]"
         caption = (doc.entry.content if doc.entry else "").strip()
         limit = resolve_setting("AI_SDK_IMAGE_CAPTION_LIMIT", 1500)
-        if limit > 0 and len(caption) > limit:
+        if limit and limit > 0 and len(caption) > limit:
             caption = caption[:limit].rstrip() + "…"
         if caption:
             line += f". You can't see it; auto-generated description: {caption}"
