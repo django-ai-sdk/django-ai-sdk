@@ -9,7 +9,7 @@ Swap a request serializer by overriding ``serializer_classes`` on a viewset subc
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
@@ -39,15 +39,40 @@ class PydanticField(serializers.Field):
 
 
 class MessagePartSerializer(serializers.Serializer):
-    """A Vercel UI message part. Keys keep the client's camelCase spelling."""
+    """A Vercel UI message part.
+
+    Fields are snake_case like the SDK's ``MessagePart``; on the wire they keep the
+    client's camelCase (``mediaType``, ``providerMetadata``), in both directions and in
+    validation errors.
+    """
+
+    WIRE_NAMES: ClassVar[dict[str, str]] = {
+        "media_type": "mediaType",
+        "provider_metadata": "providerMetadata",
+    }
 
     type = serializers.CharField()
     text = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     # file parts
     url = serializers.CharField(required=False, allow_null=True)
-    mediaType = serializers.CharField(required=False, allow_null=True)  # noqa: N815
+    media_type = serializers.CharField(required=False, allow_null=True)
     filename = serializers.CharField(required=False, allow_null=True)
-    providerMetadata = serializers.DictField(required=False, allow_null=True)  # noqa: N815
+    provider_metadata = serializers.DictField(required=False, allow_null=True)
+
+    def to_internal_value(self, data: Any) -> Any:
+        if isinstance(data, dict):
+            to_field = {wire: field for field, wire in self.WIRE_NAMES.items()}
+            data = {to_field.get(key, key): value for key, value in data.items()}
+        try:
+            return super().to_internal_value(data)
+        except serializers.ValidationError as exc:
+            if isinstance(exc.detail, dict):
+                exc.detail = {self.WIRE_NAMES.get(k, k): v for k, v in exc.detail.items()}
+            raise
+
+    def to_representation(self, instance: Any) -> Any:
+        data = super().to_representation(instance)
+        return {self.WIRE_NAMES.get(key, key): value for key, value in data.items()}
 
 
 class MessageSerializer(serializers.Serializer):

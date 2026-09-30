@@ -91,6 +91,16 @@ class TestFileParts:
         file_part = messages[0].parts[1]
         assert (file_part.url, file_part.media_type) == (part["url"], "image/png")
 
+    def test_part_keys_stay_camel_case_on_the_wire(self):
+        from django_ai_sdk.contrib.drf.serializers import MessagePartSerializer
+
+        bad = MessagePartSerializer(data={"type": "file", "mediaType": ["not", "a", "string"]})
+        assert not bad.is_valid()
+        assert "mediaType" in bad.errors
+
+        out = MessagePartSerializer({"type": "file", "media_type": "image/png"}).data
+        assert out["mediaType"] == "image/png" and "media_type" not in out
+
 
 @pytest.mark.django_db
 class TestAgents:
@@ -216,7 +226,8 @@ def _pairs():
 @pytest.mark.parametrize(("serializer", "model"), _pairs(), ids=lambda x: x.__name__)
 def test_serializers_mirror_the_sdk_models(serializer, model):
     """The DRF layer spells the fields out again; this is what keeps it from drifting."""
-    fields = getattr(model, "model_fields", None)
-    # A serializer spells a field the way the client sends it: the pydantic alias.
-    names = {f.alias or name for name, f in fields.items()} if fields else model.__annotations__
-    assert set(serializer().fields) == set(names)
+    fields = getattr(model, "model_fields", None) or model.__annotations__
+    assert set(serializer().fields) == set(fields)
+    # Wire names (camelCase keys the client sends) must match the pydantic aliases.
+    for field, wire in getattr(serializer, "WIRE_NAMES", {}).items():
+        assert model.model_fields[field].alias == wire
