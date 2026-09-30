@@ -33,7 +33,7 @@ Principles:
 ## Setup
 
 ```bash
-make setup      # demo/runtime extras only
+make setup      # runtime + demo extras only
 make setup-all  # every extra, including the torch-based transformers stack
 ```
 
@@ -41,9 +41,10 @@ Pytest config (`pyproject.toml`):
 
 ```toml
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "demo.settings"
+DJANGO_SETTINGS_MODULE = "tests.settings"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -52,27 +53,36 @@ python_functions = ["test_*"]
 ## Running Tests
 
 ```bash
-# Everything (uses the demo Django settings)
+# Everything
 make test
-# equivalent: PYTHONPATH=demo uv run pytest tests -v
+# equivalent: uv run pytest tests -v
 
 # A single file
-PYTHONPATH=demo uv run pytest tests/integration/test_protocol_handlers.py -v
+uv run pytest tests/integration/test_protocol_handlers.py -v
 
 # A single test
-PYTHONPATH=demo uv run pytest tests/unit/test_thread_service.py::test_something -v
+uv run pytest tests/unit/test_thread_service.py::test_something -v
 
 # Debug
-PYTHONPATH=demo uv run pytest -x
-PYTHONPATH=demo uv run pytest --pdb
+uv run pytest -x
+uv run pytest --pdb
+
+# The demo projects' own tests (each demo in demos/ runs with its own settings)
+make test-demos
 ```
 
-The `PYTHONPATH=demo` prefix makes `demo.settings` importable (it lives in the `demo` directory).
+`tests/settings.py` is a minimal Django project: the SDK apps, an in-memory SQLite
+database, and `tests.testapp` with an email-only `User` (no `username` field, like many
+host projects). It never imports from `demos/`. Tests that depend on a specific
+permission class set it themselves (see `tests/mocks/permissions.py`).
 
 ## Test Structure
 
 ```
 tests/
+├── settings.py          # minimal Django settings for the suite
+├── urls.py
+├── testapp/             # email-only User model
 ├── conftest.py          # shared fixtures, session event loop
 ├── factories/           # polyfactory-based model factories
 │   ├── db.py            # Django ORM factories

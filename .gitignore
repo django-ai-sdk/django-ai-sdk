@@ -223,8 +223,8 @@ logs/
 tmp/
 
 # Local
-demo/memories
-demo/stores
+demos/*/memories
+demos/*/stores
 
 # Internal dev checks, not part of the published package or CI
 check-extras.sh

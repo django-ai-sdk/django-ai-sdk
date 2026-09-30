@@ -602,6 +602,16 @@ class PermissionsMixin:
         return result
 
     @classmethod
+    async def get_object_permissions(cls, user: UserType, obj: Any) -> ObjectPermissions:
+        """The `can_*` flags a client needs to show or hide actions on `obj`."""
+        flags = await cls.get_object_permissions_map(user, obj)
+        return ObjectPermissions(
+            can_read=flags.get("read", False),
+            can_write=flags.get("write", False),
+            can_manage=flags.get("manage", False),
+        )
+
+    @classmethod
     def has_queryset_perms(
         cls,
         user: UserType,

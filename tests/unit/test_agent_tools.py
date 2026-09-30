@@ -9,6 +9,7 @@ from django_ai_sdk.memories.models import Entry, ThreadMemory
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from tests.factories.db import MemoryFactory
+from tests.mocks.permissions import memory_permissions
 
 
 class RagToolsAgent(Agent):
@@ -26,6 +27,12 @@ class RagToolsAgent(Agent):
 @pytest.mark.asyncio
 class TestAgentGetRagTools:
     """Tests for Agent.get_rag_tools()."""
+
+    @pytest.fixture(autouse=True)
+    def _anonymous_can_read_memories(self):
+        # These tests run as user=None; permissions are not what they test.
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
+            yield
 
     async def test_returns_empty_when_no_rag_provider(self):
         agent = RagToolsAgent()

@@ -29,6 +29,11 @@ wheels = [
 ]
 
 [[package]]
+name = "ai-sdk-demo-base"
+version = "0.0.0"
+source = { editable = "demos/base" }
+
+[[package]]
 name = "aiofiles"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -935,6 +940,9 @@ chroma = [
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
 ]
+drf = [
+    { name = "djangorestframework" },
+]
 embeddings = [
     { name = "fastembed-haystack" },
     { name = "haystack-ai" },
@@ -958,6 +966,9 @@ mcp = [
 ]
 mistral = [
     { name = "mistral-haystack" },
+]
+ninja = [
+    { name = "django-ninja" },
 ]
 ollama = [
     { name = "ollama-haystack" },
@@ -988,18 +999,6 @@ transformers = [
 ]
 
 [package.dev-dependencies]
-demo = [
-    { name = "daphne" },
-    { name = "ddgs-haystack" },
-    { name = "django-allauth", extra = ["headless"] },
-    { name = "django-cors-headers" },
-    { name = "django-environ" },
-    { name = "django-ninja" },
-    { name = "django-tasks-db" },
-    { name = "django-watchfiles" },
-    { name = "djangorestframework" },
-    { name = "trafilatura" },
-]
 dev = [
     { name = "django-stubs" },
     { name = "factory-boy" },
@@ -1013,6 +1012,19 @@ dev = [
     { name = "pytest-mock" },
     { name = "ruff" },
     { name = "ty" },
+]
+studio = [
+    { name = "ai-sdk-demo-base" },
+    { name = "daphne" },
+    { name = "ddgs-haystack" },
+    { name = "django-allauth", extra = ["headless"] },
+    { name = "django-cors-headers" },
+    { name = "django-environ" },
+    { name = "django-ninja" },
+    { name = "django-tasks-db" },
+    { name = "django-watchfiles" },
+    { name = "djangorestframework" },
+    { name = "trafilatura" },
 ]
 
 [package.metadata]
@@ -1029,7 +1041,9 @@ requires-dist = [
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'qdrant'" },
     { name = "django-ai-sdk", extras = ["files", "haystack", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
+    { name = "django-ninja", marker = "extra == 'ninja'", specifier = ">=1.6.2" },
     { name = "django-tasks", specifier = ">=0.12.0" },
+    { name = "djangorestframework", marker = "extra == 'drf'", specifier = ">=3.17.1" },
     { name = "fastembed-haystack", marker = "extra == 'embeddings'", specifier = ">=2.4.0" },
     { name = "firecrawl-anydoc", marker = "extra == 'files'", specifier = ">=0.2.4" },
     { name = "haystack-ai", specifier = ">=3.0.0" },
@@ -1050,21 +1064,9 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "transformers-haystack", marker = "extra == 'transformers'", specifier = ">=0.3.0" },
 ]
-provides-extras = ["all", "providers", "rag", "haystack", "mcp", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
+provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
 
 [package.metadata.requires-dev]
-demo = [
-    { name = "daphne", specifier = ">=4.2.3" },
-    { name = "ddgs-haystack", specifier = ">=1.1.0" },
-    { name = "django-allauth", extras = ["headless"], specifier = ">=65.18.0" },
-    { name = "django-cors-headers", specifier = ">=4.9.0" },
-    { name = "django-environ", specifier = ">=0.14.0" },
-    { name = "django-ninja", specifier = ">=1.6.2" },
-    { name = "django-tasks-db", specifier = ">=0.12.0" },
-    { name = "django-watchfiles", specifier = ">=1.4.0" },
-    { name = "djangorestframework", specifier = ">=3.17.1" },
-    { name = "trafilatura", specifier = ">=2.2.0" },
-]
 dev = [
     { name = "django-stubs", specifier = ">=6.0.7" },
     { name = "factory-boy", specifier = ">=3.3.3" },
@@ -1078,6 +1080,19 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.15.1" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "ty", specifier = ">=0.0.65" },
+]
+studio = [
+    { name = "ai-sdk-demo-base", editable = "demos/base" },
+    { name = "daphne", specifier = ">=4.2.3" },
+    { name = "ddgs-haystack", specifier = ">=1.1.0" },
+    { name = "django-allauth", extras = ["headless"], specifier = ">=65.18.0" },
+    { name = "django-cors-headers", specifier = ">=4.9.0" },
+    { name = "django-environ", specifier = ">=0.14.0" },
+    { name = "django-ninja", specifier = ">=1.6.2" },
+    { name = "django-tasks-db", specifier = ">=0.12.0" },
+    { name = "django-watchfiles", specifier = ">=1.4.0" },
+    { name = "djangorestframework", specifier = ">=3.17.1" },
+    { name = "trafilatura", specifier = ">=2.2.0" },
 ]
 
 [[package]]

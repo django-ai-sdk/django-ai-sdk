@@ -66,16 +66,7 @@ class DocumentExtraction(BaseModel):
     events: list[Event] = Field(..., description="Events extracted from text")
 
 
-# View Schemas
-
-
-class MemoryIn(BaseModel):
-    """Schema for creating a memory."""
-
-    name: str
-    slug: str = ""
-    description: str = ""
-    is_public: bool = True
+# What MemoryService returns (also reused as API response shapes)
 
 
 class MemoryOut(BaseModel):
@@ -89,12 +80,6 @@ class MemoryOut(BaseModel):
     document_count: int
     created_at: str
     updated_at: str
-
-
-class DocumentIn(BaseModel):
-    """Schema for creating a document."""
-
-    content: str = ""
 
 
 class DocumentOut(BaseModel):
@@ -134,12 +119,6 @@ class ThreadMemoryOut(BaseModel):
     created_at: str
 
 
-class BulkConnectMemoriesIn(BaseModel):
-    """Schema for bulk connecting memories to a thread."""
-
-    memory_ids: list[str]
-
-
 class DocumentUploadResponse(BaseModel):
     """Schema to return after upload"""
 
@@ -160,12 +139,6 @@ class DocumentStatusOut(BaseModel):
     task: TaskStatus | None = None
 
 
-class ToggleMemoryActiveIn(BaseModel):
-    """Schema for toggling memory active status."""
-
-    active: bool
-
-
 class MemoryUserOut(BaseModel):
     """Schema for memory user output."""
 
@@ -181,23 +154,3 @@ class MemoryGroupOut(BaseModel):
     group_name: str
     can_manage: bool
     created_at: str
-
-
-class AddMemoryUserIn(BaseModel):
-    """Schema for adding a user to a memory."""
-
-    user_id: str
-    can_manage: bool = False
-
-
-class UpdateMemoryUserIn(BaseModel):
-    """Schema for updating a memory user."""
-
-    can_manage: bool
-
-
-class AddMemoryGroupIn(BaseModel):
-    """Schema for adding a group to a memory."""
-
-    group_id: int
-    can_manage: bool = False

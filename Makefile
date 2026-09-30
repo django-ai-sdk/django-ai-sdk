@@ -1,7 +1,7 @@
-PHONY: setup setup-all format test typecheck tag build publish release docs-graphs docs-build docs-serve
+PHONY: setup setup-all format test test-demos typecheck tag build publish release docs-graphs docs-build docs-serve
 
-DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group demo
-TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers
+DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
+TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf
 
 setup:
 	uv sync $(DEMO_EXTRAS)
@@ -15,13 +15,17 @@ lint:
 	make format
 	make typecheck
 	make test
+	make test-demos
 
 format:
 	uv run ruff check --fix
 	uv run ruff format .
 
 test:
-	PYTHONPATH=demo uv run $(TEST_EXTRAS) pytest tests -v
+	uv run $(TEST_EXTRAS) pytest tests -v
+
+test-demos:
+	for d in demos/*/; do [ -f $$d/manage.py ] || continue; (cd $$d && make test) || exit 1; done
 
 typecheck:
 	uv run $(TEST_EXTRAS) ty check

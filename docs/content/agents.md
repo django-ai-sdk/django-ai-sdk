@@ -220,7 +220,7 @@ class MySubagent(Agent):
     instructions = prompt("You are a subagent. Complete delegated tasks concisely.")
 ```
 
-Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
 
 ### Observability
 
@@ -232,7 +232,7 @@ config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
 
 The two swarm demos wire it into both the coordinator and (via `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls **and** for the subagent's calls: the coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default), and `SubagentStreamFilter` passes only tool-related chunks through — the subagent's raw text tokens are dropped so the report isn't streamed twice. Those forwarded chunks are persisted into the conversation history as they happen — in the order the calls actually start, so the stored history matches the streamed one and subagent tool activity survives a page reload.
 
-Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
 
 ### Overriding `get_tools()`
 
@@ -447,7 +447,7 @@ class MyAgent(Agent):
 
 ## Reference Agents
 
-The demo project ships seven agents in `demo/apps/agents/`, each showcasing a different pattern:
+The demo project ships seven agents in `demos/studio/apps/agents/`, each showcasing a different pattern:
 
 | Agent | Pattern |
 | --- | --- |
