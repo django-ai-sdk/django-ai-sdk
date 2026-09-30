@@ -59,6 +59,26 @@ class TestChatView:
         assert client.get("/chat/t1/").status_code == 405
 
 
+@pytest.mark.django_db
+class TestStatelessChat:
+    def test_the_views_agent_answers_without_a_thread(self, client, mock_agents_registry):
+        agent = mock_agents_registry.get.return_value
+        agent.as_view = AsyncMock(return_value=HttpResponse("streamed"))
+        body = json.dumps({**json.loads(VALID), "agent_id": "someone-else"})
+
+        response = client.post("/stateless-chat/", data=body, content_type="application/json")
+
+        assert response.content == b"streamed"
+        # The URL's agent, never the payload's; and no thread, so nothing is stored.
+        mock_agents_registry.get.assert_called_with("test-agent")
+        assert agent.as_view.await_args.kwargs["thread_id"] is None
+
+    def test_without_an_agent_there_is_nothing_to_chat_with(self, client):
+        response = client.post("/agentless-chat/", data=VALID, content_type="application/json")
+        assert response.status_code == 404
+        assert response.json()["code"] == "not_found"
+
+
 def test_moved_memory_payloads_still_import_with_a_warning():
     from django_ai_sdk.views.schemas import MemoryIn
 
