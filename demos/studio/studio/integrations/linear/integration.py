@@ -1,4 +1,4 @@
-"""Linear, with what this demo's own Linear workspace actually contains."""
+"""Linear, with what the studio's own Linear workspace actually contains."""
 
 from __future__ import annotations
 

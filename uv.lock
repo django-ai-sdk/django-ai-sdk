@@ -29,6 +29,11 @@ wheels = [
 ]
 
 [[package]]
+name = "ai-sdk-demo-base"
+version = "0.0.0"
+source = { editable = "demos/base" }
+
+[[package]]
 name = "aiofiles"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1009,6 +1014,7 @@ dev = [
     { name = "ty" },
 ]
 studio = [
+    { name = "ai-sdk-demo-base" },
     { name = "daphne" },
     { name = "ddgs-haystack" },
     { name = "django-allauth", extra = ["headless"] },
@@ -1076,6 +1082,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.65" },
 ]
 studio = [
+    { name = "ai-sdk-demo-base", editable = "demos/base" },
     { name = "daphne", specifier = ">=4.2.3" },
     { name = "ddgs-haystack", specifier = ">=1.1.0" },
     { name = "django-allauth", extras = ["headless"], specifier = ">=65.18.0" },

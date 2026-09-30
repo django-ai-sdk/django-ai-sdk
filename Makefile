@@ -15,6 +15,7 @@ lint:
 	make format
 	make typecheck
 	make test
+	make test-demos
 
 format:
 	uv run ruff check --fix
@@ -24,7 +25,7 @@ test:
 	uv run $(TEST_EXTRAS) pytest tests -v
 
 test-demos:
-	for d in demos/*/; do (cd $$d && make test) || exit 1; done
+	for d in demos/*/; do [ -f $$d/manage.py ] || continue; (cd $$d && make test) || exit 1; done
 
 typecheck:
 	uv run $(TEST_EXTRAS) ty check

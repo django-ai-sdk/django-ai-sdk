@@ -1,5 +1,5 @@
 """
-ASGI config for demo project.
+ASGI config for the studio demo.
 
 It exposes the ASGI callable as a module-level variable named ``application``.
 
@@ -13,6 +13,6 @@ import os
 
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "demo.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "studio.settings")
 
 application = get_asgi_application()

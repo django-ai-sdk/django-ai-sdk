@@ -5,6 +5,6 @@ from django_ai_sdk.integrations.apps import IntegrationAppConfig
 
 class LinearConfig(IntegrationAppConfig):
     default = True
-    name = "piratespeak.integrations.linear"
-    label = "piratespeak_linear"
-    integration = "piratespeak.integrations.linear.integration.LinearIntegration"
+    name = "studio.integrations.linear"
+    label = "studio_linear"
+    integration = "studio.integrations.linear.integration.LinearIntegration"

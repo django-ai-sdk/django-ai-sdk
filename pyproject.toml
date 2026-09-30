@@ -79,8 +79,9 @@ openrouter = ["openrouter-haystack>=1.2.0"]
 transformers = ["transformers-haystack>=0.3.0"]
 
 [dependency-groups]
-# Stack for the demo projects in demos/.
+# Stack for the demo projects in demos/ (demos/base holds their shared settings).
 studio = [
+  "ai-sdk-demo-base",
   "daphne>=4.2.3",
   "ddgs-haystack>=1.1.0",
   "django-allauth[headless]>=65.18.0",
@@ -107,6 +108,9 @@ dev = [
   "ty>=0.0.65",
 ]
 
+[tool.uv.sources]
+ai-sdk-demo-base = { path = "demos/base", editable = true }
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 asyncio_mode = "auto"
@@ -131,7 +135,7 @@ exclude = [
   "**/tests/**",
   "**/conftest.py",
 ]
-src = ["django_ai_sdk", "demos/studio"]
+src = ["django_ai_sdk", "demos/studio", "demos/base"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -148,6 +152,8 @@ ignore = ["ANN401", "E501"]
 [tool.ruff.lint.per-file-ignores]
 # Ninja reads endpoint annotations at runtime; they cannot move under TYPE_CHECKING.
 "django_ai_sdk/contrib/ninja/*" = ["TCH"]
+# Demo settings build on demo_base.settings with a star import, after loading .env.
+"demos/**/settings.py" = ["E402", "F403", "F405"]
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]

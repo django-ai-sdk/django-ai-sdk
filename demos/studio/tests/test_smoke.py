@@ -2,7 +2,7 @@
 
 import pytest
 
-from demo.urls import api
+from studio.urls import api
 
 
 def test_the_api_combines_sdk_and_studio_endpoints():
