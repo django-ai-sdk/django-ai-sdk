@@ -27,6 +27,7 @@ from django_ai_sdk.permissions import (
     check_permissions,
     get_agent_permissions,
 )
+from django_ai_sdk.progress import report_stage, report_unavailable
 from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
@@ -650,6 +651,7 @@ class Agent(ABC, AgentInfoMixin):
                 )
             used_names.add(spec.name)
 
+            report_stage("knowledge", memory.name)
             tool = await self.rag_provider.get_tool(
                 self,
                 str(memory.id),
@@ -859,10 +861,12 @@ class Agent(ABC, AgentInfoMixin):
             return []
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
+            report_stage("integrations", integration.label)
             try:
                 tools = await integration.get_tools(user, agent=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration {!r}", integration.name)
+                report_unavailable("integrations", integration.label)
                 return []
             return [_namespaced(integration.name, tool, integration.hint) for tool in tools]
 

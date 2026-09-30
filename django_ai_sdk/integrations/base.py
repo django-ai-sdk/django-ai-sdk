@@ -10,6 +10,7 @@ from cashews import Cache, CircuitBreakerOpen
 
 from django_ai_sdk.errors import UserError
 from django_ai_sdk.permissions import Operation, PermissionDomain
+from django_ai_sdk.progress import report_unavailable
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -260,8 +261,11 @@ class ResilientCache:
         timeout: float,
         cb_cooldown: float = 60,
         empty: Callable[[], Any] = list,
+        label: str = "",
     ) -> None:
         self._timeout = timeout
+        # Names the integration in the warning a chat shows when a fetch fails.
+        self._label = label
         self._empty = empty
         self._cb_cooldown = cb_cooldown
         # Per-key record of whether the last attempt succeeded, for status_for().
@@ -329,6 +333,7 @@ class ResilientCache:
                     key,
                     self._cb_cooldown,
                 )
+            # No fetch was tried, so a chat is not told again while the breaker cools down.
             return self._empty()
         except Exception as exc:
             # Expected while a server is down, so the traceback is debug only.
@@ -336,6 +341,7 @@ class ResilientCache:
             logger.debug("Integration fetch failure for %r", key, exc_info=True)
             self._last_ok[k] = False
             self._breaker_open.discard(k)
+            report_unavailable("integrations", self._label)
             return self._empty()
         self._last_ok[k] = True
         if was_ok is False or k in self._breaker_open:

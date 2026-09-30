@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import StreamingHttpResponse
 
@@ -9,6 +10,7 @@ from django_ai_sdk.common import StreamWriter
 from django_ai_sdk.errors import describe_error
 from django_ai_sdk.events import MessageStartEvent, StreamEndEvent
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.progress import reporting_to
 from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.utils import resolve_setting
 
@@ -53,7 +55,17 @@ async def _ensure_adapter(
     try:
         if callable(adapter):
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
-            adapter = await factory()
+            # Build in a task so progress reports can stream while it runs.
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+            with reporting_to(queue):
+                task = asyncio.create_task(factory())
+            task.add_done_callback(queue.put_nowait)  # the finished task is the last item
+            try:
+                while not isinstance(item := await queue.get(), asyncio.Task):
+                    yield format_sse(item)
+                adapter = item.result()
+            finally:
+                task.cancel()
     except Exception as exc:
         # Imported here: adapters.base imports agents, which imports this module.
         from django_ai_sdk.adapters.base import get_error_chunk, get_error_event
@@ -82,7 +94,7 @@ async def _ensure_adapter(
         return
 
     yield format_sse({"type": "data-warmup", "data": {"status": "ready"}, "transient": True})
-    async for chunk in protocol_handler.sse(adapter, messages):
+    async for chunk in protocol_handler.sse(cast("Streamable", adapter), messages):
         yield chunk
 
 

@@ -76,6 +76,24 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 
 `DataPart.type` is dynamic and must start with `data-`. Suggestions are emitted as `data-suggestions`.
 
+## Warmup and unavailable parts
+
+Before the reply streams, the chat builds its adapter: it fetches integration tools and opens knowledge bases. `stream_response` sends transient parts (never stored with the message) so a client can say what it waits on:
+
+```
+{"type":"data-warmup","data":{"status":"start"}}
+{"type":"data-warmup","data":{"status":"start","stage":"integrations","detail":"Zendesk"}}
+{"type":"data-warmup","data":{"status":"start","stage":"knowledge","detail":"HR Knowledge"}}
+{"type":"data-unavailable","data":{"stage":"integrations","detail":"Zendesk"}}
+{"type":"data-warmup","data":{"status":"ready"}}
+```
+
+- `status` is `start`, then `ready` or `failed`. Every stage part keeps `status: "start"`, so a client that ignores `stage` still shows its wait indicator until `ready` or `failed`.
+- `stage` is `integrations` or `knowledge`, and `detail` names the integration or knowledge base. Integrations load concurrently, so their stages can interleave; show the latest.
+- `data-unavailable` says that part of the build could not be used and the reply continues without it. With `stage: "integrations"` and a `detail`, that integration's tools are missing from this reply. It is sent when a fetch was tried and failed or timed out. While an integration's circuit breaker is open (a minute after repeated failures) nothing is fetched, so nothing is sent.
+
+Your own code on the build path can report progress with `report_stage(stage, detail)` and `report_unavailable(stage, detail)` from `django_ai_sdk.progress`. Both do nothing outside a streamed chat.
+
 ## Event → Part Mapping
 
 `VercelProtocolHandler.handle_stream()` maps events to parts:
