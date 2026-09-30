@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.utils import resolve_setting
+
 if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.memories.models import EntryDocument
@@ -83,8 +85,10 @@ class InlineFileCapability:
         line = f'[Attached image "{doc.file_name}", document id {doc.id}'
         if inline:
             return line + ", included in this message.]"
-        # ponytail: fixed cap on the caption, make it a setting if it's too short
-        caption = (doc.entry.content if doc.entry else "")[:1500]
+        caption = (doc.entry.content if doc.entry else "").strip()
+        limit = resolve_setting("AI_SDK_IMAGE_CAPTION_LIMIT", 1500)
+        if limit > 0 and len(caption) > limit:
+            caption = caption[:limit].rstrip() + "…"
         if caption:
             line += f". You can't see it; auto-generated description: {caption}"
         else:

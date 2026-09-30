@@ -259,6 +259,19 @@ class TestVisionFallback:
         assert "A grey cat." in hint
         assert "ask_image" not in hint
 
+    def test_a_long_caption_is_capped_by_the_setting(self, settings):
+        from django_ai_sdk.agents.base import Agent
+
+        doc = SimpleNamespace(id="d1", file_name="cat.png", entry=SimpleNamespace(content="x" * 50))
+        settings.AI_SDK_VISION_MODEL = None
+
+        settings.AI_SDK_IMAGE_CAPTION_LIMIT = 10
+        assert "x" * 10 + "…" in Agent.format_image_attachment(None, doc, inline=False)
+        assert "x" * 11 not in Agent.format_image_attachment(None, doc, inline=False)
+
+        settings.AI_SDK_IMAGE_CAPTION_LIMIT = 0  # off
+        assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
+
     def test_images_do_not_require_attachment_tools(self):
         from django_ai_sdk.agents.base import Agent
 
