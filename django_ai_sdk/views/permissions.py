@@ -7,8 +7,9 @@ object yields all-False rather than an error.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 
 from django_ai_sdk.permissions import ObjectPermissions, PermissionDenied
@@ -17,15 +18,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.types import UserType
 
 
-def _flags(raw: dict[str, Any]) -> ObjectPermissions:
-    return ObjectPermissions(
-        can_read=raw.get("read", False),
-        can_write=raw.get("write", False),
-        can_manage=raw.get("manage", False),
-    )
-
-
-async def thread_permissions(user: UserType, thread_id: str) -> ObjectPermissions:
+async def athread_permissions(user: UserType, thread_id: str) -> ObjectPermissions:
     from django_ai_sdk.storage.services import ThreadService
 
     try:
@@ -34,10 +27,10 @@ async def thread_permissions(user: UserType, thread_id: str) -> ObjectPermission
         return ObjectPermissions()
     if thread is None:
         return ObjectPermissions()
-    return _flags(await ThreadService.get_object_permissions_map(user, thread))
+    return await ThreadService.get_object_permissions(user, thread)
 
 
-async def agent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
+async def aagent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.agents.services import AgentService
 
@@ -48,10 +41,10 @@ async def agent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
             config = await AgentSettings.objects.aget(id=agent_id)
         except (AgentSettings.DoesNotExist, ValueError, ValidationError):
             return ObjectPermissions()
-    return _flags(await AgentService.get_object_permissions_map(user, config))
+    return await AgentService.get_object_permissions(user, config)
 
 
-async def memory_permissions(user: UserType, memory_id: str) -> ObjectPermissions:
+async def amemory_permissions(user: UserType, memory_id: str) -> ObjectPermissions:
     from django_ai_sdk.memories.models import Memory
     from django_ai_sdk.memories.services import MemoryService
 
@@ -59,4 +52,9 @@ async def memory_permissions(user: UserType, memory_id: str) -> ObjectPermission
         memory = await Memory.objects.aget(id=memory_id)
     except (Memory.DoesNotExist, ValidationError):
         return ObjectPermissions()
-    return _flags(await MemoryService.get_object_permissions_map(user, memory))
+    return await MemoryService.get_object_permissions(user, memory)
+
+
+thread_permissions = async_to_sync(athread_permissions)
+agent_permissions = async_to_sync(aagent_permissions)
+memory_permissions = async_to_sync(amemory_permissions)

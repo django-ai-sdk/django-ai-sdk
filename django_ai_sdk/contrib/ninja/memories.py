@@ -22,7 +22,7 @@ from django_ai_sdk.memories.schemas import (
 )
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.permissions import ObjectPermissions
-from django_ai_sdk.views.permissions import memory_permissions
+from django_ai_sdk.views.permissions import amemory_permissions
 from django_ai_sdk.views.schemas import (
     AddMemoryGroupIn,
     AddMemoryUserIn,
@@ -77,7 +77,7 @@ async def list_memories(request: HttpRequest, limit: int = 100, offset: int = 0)
     memories = await MemoryService.list_memories(user=request.user, limit=limit, offset=offset)
     return [
         MemoryOutResponse(
-            **m.model_dump(), permissions=await memory_permissions(request.user, m.id)
+            **m.model_dump(), permissions=await amemory_permissions(request.user, m.id)
         )
         for m in memories
     ]
@@ -86,7 +86,7 @@ async def list_memories(request: HttpRequest, limit: int = 100, offset: int = 0)
 @routes.get("/{memory_id}", response=MemoryOutResponse)
 async def get_memory(request: HttpRequest, memory_id: str) -> Any:
     memory = await MemoryService.get_memory(memory_id, user=request.user)
-    perms = await memory_permissions(request.user, memory_id)
+    perms = await amemory_permissions(request.user, memory_id)
     return MemoryOutResponse(**memory.model_dump(), permissions=perms)
 
 

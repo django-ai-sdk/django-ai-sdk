@@ -31,9 +31,9 @@ from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.storage.services import ThreadService, aget_thread_file_meta, aget_thread_history
 from django_ai_sdk.tracing.services import TraceService
 from django_ai_sdk.views.permissions import (
-    agent_permissions,
-    memory_permissions,
-    thread_permissions,
+    aagent_permissions,
+    amemory_permissions,
+    athread_permissions,
 )
 from django_ai_sdk.views.schemas import (
     AddAgentGroupIn,
@@ -104,7 +104,7 @@ class ThreadViewSet(SDKViewSet):
             message["feedback"] = next(
                 (fb for fb in feedbacks if fb.get("user_id") == user_pk), None
             )
-        data["permissions"] = self.call(thread_permissions, request.user, thread_id)
+        data["permissions"] = self.call(athread_permissions, request.user, thread_id)
         return Response(to_data(data))
 
     def partial_update(self, request: Request, thread_id: str) -> Response:
@@ -292,7 +292,7 @@ class AgentViewSet(SDKViewSet):
         agent = self.call(AgentService.get, agent_id)
         info = to_data(self.call(AgentService.get_agent_info, agent_id, user=request.user))
         info["instructions"] = agent.get_system_prompt()
-        info["permissions"] = to_data(self.call(agent_permissions, request.user, agent_id))
+        info["permissions"] = to_data(self.call(aagent_permissions, request.user, agent_id))
         return Response(info)
 
     @action(detail=True, methods=["get"])
@@ -623,7 +623,7 @@ class MemoryViewSet(SDKViewSet):
         return Response(status=NO_CONTENT)
 
     def _with_permissions(self, request: Request, memory: Any) -> dict[str, Any]:
-        perms = self.call(memory_permissions, request.user, memory.id)
+        perms = self.call(amemory_permissions, request.user, memory.id)
         return {**to_data(memory), "permissions": to_data(perms)}
 
 

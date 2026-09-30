@@ -17,7 +17,7 @@ from django_ai_sdk.storage.schemas import ThreadInfo
 from django_ai_sdk.storage.services import ThreadService, aget_thread_file_meta, aget_thread_history
 from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
 from django_ai_sdk.tracing.services import TraceService
-from django_ai_sdk.views.permissions import thread_permissions
+from django_ai_sdk.views.permissions import athread_permissions
 from django_ai_sdk.views.schemas import ChatRequest, PatchThreadPayload, RateMessagePayload
 
 routes = Routes()
@@ -133,7 +133,7 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
     for message in data.get("messages", []):
         feedbacks = message.pop("feedbacks", [])
         message["feedback"] = next((fb for fb in feedbacks if fb.get("user_id") == user_pk), None)
-    perms = await thread_permissions(request.user, thread_id)
+    perms = await athread_permissions(request.user, thread_id)
     return ThreadDetailResponse(**data, permissions=perms)
 
 

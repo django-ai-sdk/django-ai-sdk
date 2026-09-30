@@ -17,7 +17,7 @@ from django_ai_sdk.contrib.ninja.routing import Routes
 from django_ai_sdk.contrib.ninja.threads import RunResponse, Success
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import ObjectPermissions, Operation, PermissionDenied
-from django_ai_sdk.views.permissions import agent_permissions
+from django_ai_sdk.views.permissions import aagent_permissions
 from django_ai_sdk.views.schemas import (
     AddAgentGroupIn,
     AddAgentUserIn,
@@ -271,7 +271,7 @@ async def get_agent_info(request: HttpRequest, agent_id: str) -> Any:
         instructions=agent.get_system_prompt(),
         file_upload=info.file_upload,
         rag=info.rag,
-        permissions=await agent_permissions(request.user, agent_id),
+        permissions=await aagent_permissions(request.user, agent_id),
     )
 
 
