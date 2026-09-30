@@ -942,7 +942,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         if any(m.attachments for m in chat_messages):
             from django_ai_sdk.memories.services import MemoryService
 
-            await MemoryService.resolve_attachments(thread_id, chat_messages, agent=self)
+            await MemoryService.resolve_attachments(thread_id, chat_messages, user=user, agent=self)
 
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
@@ -1016,7 +1016,11 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 from django_ai_sdk.memories.services import MemoryService
 
                 await MemoryService.resolve_attachments(
-                    str(thread.id), messages, agent=self, inline_images=self.has_vision()
+                    str(thread.id),
+                    messages,
+                    user=user,
+                    agent=self,
+                    inline_images=self.has_vision(),
                 )
             else:
                 for message in messages:

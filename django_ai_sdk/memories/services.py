@@ -1239,6 +1239,7 @@ class MemoryService(PermissionsMixin):
         thread_id: str,
         messages: list[ChatMessage],
         *,
+        user: UserType,
         agent: Any,
         inline_images: bool = False,
     ) -> None:
@@ -1249,7 +1250,22 @@ class MemoryService(PermissionsMixin):
         name/type, a fresh url and the agent's context hint. With
         `inline_images`, images on the last user message also get their
         base64 bytes for a vision model.
+
+        Raises:
+            NotFound: The thread doesn't exist.
+            PermissionDenied: `user` may not view the thread's files (checked against
+                the thread's and the agent's permissions, as in `get_thread_file`).
         """
+        thread = await _aget_or_not_found(Thread.objects.all(), id=thread_id)
+        await ThreadService.has_perms(user, Operation.VIEW_FILE, thread)
+        await has_perms(
+            user,
+            Operation.VIEW_FILE,
+            thread,
+            permissions=get_agent_permissions(agent),
+            agent=agent,
+        )
+
         ids = {a.document_id for m in messages for a in m.attachments}
         valid_ids = [i for i in ids if _is_uuid(i)]
         docs: dict[str, EntryDocument] = {}

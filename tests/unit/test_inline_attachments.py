@@ -84,12 +84,25 @@ class TestResolveAttachments:
     def tmp_media(self, tmp_path, settings):
         settings.MEDIA_ROOT = str(tmp_path / "media")
 
-    async def _thread_with_image(self):
+    @staticmethod
+    async def _user():
+        from tests.factories.db import UserFactory
+
+        return await UserFactory.acreate()
+
+    @staticmethod
+    def _agent(**formatters):
+        from django_ai_sdk.permissions import AllowAll
+
+        # The thread's own permissions decide in these tests.
+        return SimpleNamespace(permissions=[AllowAll], is_runtime=False, **formatters)
+
+    async def _thread_with_image(self, user=None):
         from django_ai_sdk.conversation.models import Thread
         from django_ai_sdk.memories.models import EntryDocument, Memory
 
         memory = await Memory.objects.acreate(name="files", description="Thread file uploads")
-        thread = await Thread.objects.acreate(file_memory=memory)
+        thread = await Thread.objects.acreate(file_memory=memory, user=user)
         doc = EntryDocument(
             memory=memory, file_name="cat.png", file_size=len(PNG), content_type="image/png"
         )
@@ -100,9 +113,10 @@ class TestResolveAttachments:
     async def test_foreign_ids_dropped_and_last_image_inlined(self):
         from django_ai_sdk.memories.services import MemoryService
 
-        thread, doc = await self._thread_with_image()
-        other_thread, other_doc = await self._thread_with_image()
-        agent = SimpleNamespace(
+        owner = await self._user()
+        thread, doc = await self._thread_with_image(owner)
+        other_thread, other_doc = await self._thread_with_image(owner)
+        agent = self._agent(
             format_attachment=lambda d: f"[{d.file_name}]",
             format_image_attachment=lambda d, inline: f"[{d.file_name} inline={inline}]",
         )
@@ -120,7 +134,7 @@ class TestResolveAttachments:
         ]
 
         await MemoryService.resolve_attachments(
-            str(thread.id), messages, agent=agent, inline_images=True
+            str(thread.id), messages, user=owner, agent=agent, inline_images=True
         )
 
         first, _, last = messages
@@ -135,18 +149,38 @@ class TestResolveAttachments:
     async def test_oversized_image_not_inlined(self, settings):
         from django_ai_sdk.memories.services import MemoryService
 
+        owner = await self._user()
         settings.AI_SDK_MAX_INLINE_IMAGE_BYTES = 1
-        thread, doc = await self._thread_with_image()
-        agent = SimpleNamespace(
-            format_attachment=lambda d: "",
-            format_image_attachment=lambda d, inline: "",
+        thread, doc = await self._thread_with_image(owner)
+        agent = self._agent(
+            format_attachment=lambda d: "", format_image_attachment=lambda d, inline: ""
         )
         messages = [ChatMessage(role="user", attachments=[Attachment(document_id=str(doc.id))])]
 
         await MemoryService.resolve_attachments(
-            str(thread.id), messages, agent=agent, inline_images=True
+            str(thread.id), messages, user=owner, agent=agent, inline_images=True
         )
         assert messages[0].attachments[0].data == ""
+
+    async def test_someone_elses_thread_files_are_not_read(self):
+        from django_ai_sdk.memories.services import MemoryService
+        from django_ai_sdk.permissions import PermissionDenied
+
+        owner = await self._user()
+        stranger = await self._user()
+        thread, doc = await self._thread_with_image(owner)
+        agent = self._agent(
+            format_attachment=lambda d: "", format_image_attachment=lambda d, inline: ""
+        )
+        messages = [ChatMessage(role="user", attachments=[Attachment(document_id=str(doc.id))])]
+
+        with pytest.raises(PermissionDenied):
+            await MemoryService.resolve_attachments(
+                str(thread.id), messages, user=stranger, agent=agent, inline_images=True
+            )
+        # Nothing was read or rewritten.
+        assert messages[0].attachments[0].data == ""
+        assert messages[0].attachments[0].filename != "cat.png"
 
 
 class TestRequireToolsHook:
@@ -213,9 +247,7 @@ class TestVisionFallback:
         doc = SimpleNamespace(
             id="d1", file_name="cat.png", entry=SimpleNamespace(content="A grey cat.")
         )
-        assert "included in this message" in Agent.format_image_attachment(
-            None, doc, inline=True
-        )
+        assert "included in this message" in Agent.format_image_attachment(None, doc, inline=True)
 
         settings.AI_SDK_VISION_MODEL = "vision-model"
         hint = Agent.format_image_attachment(None, doc, inline=False)
