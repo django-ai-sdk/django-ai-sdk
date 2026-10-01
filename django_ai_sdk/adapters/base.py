@@ -134,11 +134,8 @@ def _get_message_pairs(
 
 
 def get_reasoning_text(reasoning: ReasoningContent) -> str:
-    """A chunk's reasoning text, also when the provider sends raw reasoning.
-
-    OpenAI sends a reasoning summary. gpt-oss on vLLM (Nebul) or OpenRouter sends the raw
-    reasoning as the item's `content` instead; Haystack keeps that only in `extra`, on the
-    item's final chunk (it drops their streamed deltas), so it arrives at once.
+    """
+    A chunk's reasoning text, also when the provider sends raw reasoning.
     """
     if reasoning.reasoning_text:
         return reasoning.reasoning_text
