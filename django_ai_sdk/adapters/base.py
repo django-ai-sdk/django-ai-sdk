@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import ImageContent, StreamingChunk, ToolCall
+from haystack.dataclasses import ImageContent, ReasoningContent, StreamingChunk, ToolCall
 
 from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
 from django_ai_sdk.adapters.utils import merge_messages
@@ -131,6 +131,16 @@ def _get_message_pairs(
     if current:
         runs.append((None, current))
     return runs
+
+
+def get_reasoning_text(reasoning: ReasoningContent) -> str:
+    """
+    A chunk's reasoning text, also when the provider sends raw reasoning.
+    """
+    if reasoning.reasoning_text:
+        return reasoning.reasoning_text
+    parts = (reasoning.extra or {}).get("content") or []
+    return "".join(p.get("text", "") for p in parts if p.get("type") == "reasoning_text")
 
 
 def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
@@ -368,6 +378,23 @@ class Stream:
             return f"{source.doc_id}:{source.chunk_id}"
         return source.doc_id
 
+    def _without_uncited_duplicates(self, sources: list[NumberedSource]) -> list[NumberedSource]:
+        """Drop repeats of a chunk that two searches both retrieved.
+
+        A cited entry is always kept, so `<source id="N" />` still resolves. When no
+        entry of a chunk was cited, only its first is kept.
+        """
+        groups: dict[str, list[NumberedSource]] = {}
+        for src in sources:
+            if (source_id := self.get_source_id(src)) is not None:
+                groups.setdefault(source_id, []).append(src)
+
+        keep: set[int] = set()
+        for group in groups.values():
+            cited = [s.index for s in group if s.index in self.cited_ids]
+            keep.update(cited or [group[0].index])
+        return [s for s in sources if self.get_source_id(s) is None or s.index in keep]
+
     def get_attribution(self, tool_name: str, subagent: str | None = None) -> dict[str, str]:
         """Metadata naming attribution ran a tool call."""
         if subagent:
@@ -507,12 +534,10 @@ class Stream:
                 yield TextChunkEvent(content=text)
 
             # Reasoning models stream their summary separately from the answer.
-            if chunk.reasoning and chunk.reasoning.reasoning_text:
+            if chunk.reasoning and (reasoning := get_reasoning_text(chunk.reasoning)):
                 if stream_writer:
-                    stream_writer.add_chunk(
-                        MessageChunk(type="reasoning", content=chunk.reasoning.reasoning_text)
-                    )
-                yield ReasoningChunkEvent(content=chunk.reasoning.reasoning_text)
+                    stream_writer.add_chunk(MessageChunk(type="reasoning", content=reasoning))
+                yield ReasoningChunkEvent(content=reasoning)
 
             if chunk.tool_calls:
                 subagent = chunk.meta.get(SUBAGENT_META_KEY)
@@ -632,7 +657,7 @@ class Stream:
 
         if self.citation_registry and self.citation_registry.all_sources:
             sources_list = []
-            for src in self.citation_registry.all_sources:
+            for src in self._without_uncited_duplicates(self.citation_registry.all_sources):
                 source_id = self.get_source_id(src)
                 if source_id is None:
                     continue
