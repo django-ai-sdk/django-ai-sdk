@@ -229,20 +229,6 @@ class TestRequireToolsHook:
 
 
 class TestVisionFallback:
-    def _agent(self, vision=False, model="text-model"):
-        return SimpleNamespace(vision=vision, get_model=lambda: model)
-
-    def test_has_vision(self, settings):
-        from django_ai_sdk.agents.base import Agent
-
-        settings.AI_SDK_VISION_MODEL = "vision-model"
-        assert Agent.has_vision(self._agent(vision=True))
-        assert Agent.has_vision(self._agent(model="vision-model"))
-        assert not Agent.has_vision(self._agent())
-
-        settings.AI_SDK_VISION_MODEL = None
-        assert not Agent.has_vision(self._agent())
-
     def test_image_hint_falls_back_to_caption(self, settings):
         from django_ai_sdk.agents.base import Agent
 
@@ -251,12 +237,12 @@ class TestVisionFallback:
         )
         assert "included in this message" in Agent.format_image_attachment(None, doc, inline=True)
 
-        settings.AI_SDK_VISION_MODEL = "vision-model"
+        settings.AI_SDK_VISION_AGENT = VISION_AGENT
         hint = Agent.format_image_attachment(None, doc, inline=False)
         assert "A grey cat." in hint
         assert "ask_image" in hint
 
-        settings.AI_SDK_VISION_MODEL = None
+        settings.AI_SDK_VISION_AGENT = None
         hint = Agent.format_image_attachment(None, doc, inline=False)
         assert "A grey cat." in hint
         assert "ask_image" not in hint
@@ -265,7 +251,7 @@ class TestVisionFallback:
         from django_ai_sdk.agents.base import Agent
 
         doc = SimpleNamespace(id="d1", file_name="cat.png", entry=SimpleNamespace(content="x" * 50))
-        settings.AI_SDK_VISION_MODEL = None
+        settings.AI_SDK_VISION_AGENT = None
 
         settings.AI_SDK_IMAGE_CAPTION_LIMIT = 10
         assert "x" * 10 + "…" in Agent.format_image_attachment(None, doc, inline=False)
@@ -279,6 +265,9 @@ class TestVisionFallback:
 
     def test_no_run_required_tools_by_default(self):
         from django_ai_sdk.agents.base import Agent
+
+        pdf = Attachment(document_id="b", media_type="application/pdf")
+        assert Agent.get_run_required_tools(None, [ChatMessage(role="user", attachments=[pdf])]) == []
 
 
 @pytest.mark.django_db
@@ -357,28 +346,17 @@ class TestVisionAgent:
         assert (image.media_type, base64.b64decode(image.data)) == ("image/png", PNG)
         assert kwargs["response_format"] is None
 
-    async def test_without_an_agent_the_vision_model_is_called(self, settings):
-        from unittest.mock import AsyncMock, MagicMock, patch
+    async def test_without_an_agent_images_are_not_processed(self, settings, tmp_path):
+        from django_ai_sdk.files.processors import ImageCaptionProcessor, describe_image
 
-        from django_ai_sdk.files.processors import describe_image
+        image = tmp_path / "cat.png"
+        image.write_bytes(PNG)
 
         settings.AI_SDK_VISION_AGENT = None
-        settings.AI_SDK_VISION_MODEL = "vision-model"
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="a dog")]})
-        with patch("django_ai_sdk.generators.openai_chat", return_value=generator) as chat:
-            assert await describe_image(PNG, "image/png", "What is it?") == "a dog"
-        chat.assert_called_once_with(model="vision-model")
-
-    def test_vision_support_needs_an_agent_or_a_model(self, settings):
-        from django_ai_sdk.files.processors import has_vision_support
-
-        settings.AI_SDK_VISION_AGENT, settings.AI_SDK_VISION_MODEL = None, None
-        assert not has_vision_support()
+        assert await describe_image(PNG, "image/png", "What is it?") is None
+        assert not await ImageCaptionProcessor().is_valid(str(image))
         settings.AI_SDK_VISION_AGENT = VISION_AGENT
-        assert has_vision_support()
-        settings.AI_SDK_VISION_AGENT, settings.AI_SDK_VISION_MODEL = None, "vision-model"
-        assert has_vision_support()
+        assert await ImageCaptionProcessor().is_valid(str(image))
 
     def test_the_setting_must_name_an_agent(self, settings):
         from django.core.exceptions import ImproperlyConfigured

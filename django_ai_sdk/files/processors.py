@@ -352,11 +352,6 @@ IMAGE_CAPTION_PROMPT = (
 )
 
 
-def get_vision_model() -> str | None:
-    """The model used for image questions (`AI_SDK_VISION_MODEL`), None if unset."""
-    return resolve_setting("AI_SDK_VISION_MODEL", None)
-
-
 def get_vision_agent() -> Agent | None:
     """An instance of `AI_SDK_VISION_AGENT` (dotted path to an Agent subclass), or None.
 
@@ -375,39 +370,27 @@ def get_vision_agent() -> Agent | None:
 
 
 def has_vision_support() -> bool:
-    """Whether images can be described and asked about: a vision agent or model is set."""
-    return bool(resolve_setting("AI_SDK_VISION_AGENT", None) or get_vision_model())
+    """Whether images can be described and asked about: a vision agent is set."""
+    return bool(resolve_setting("AI_SDK_VISION_AGENT", None))
 
 
 async def describe_image(data: bytes, mime_type: str, prompt: str) -> str | None:
-    """Ask about an image; returns the text reply.
+    """Ask the `AI_SDK_VISION_AGENT` about an image; its text reply, None without one.
 
-    With `AI_SDK_VISION_AGENT` set, that agent runs with the image attached (its
-    model, prompt and generator are yours to choose). Otherwise the model is
-    called directly: `AI_SDK_VISION_MODEL`, falling back to `AI_SDK_DEFAULT_MODEL`.
+    The agent runs with the image attached to a user message whose text is
+    `prompt`; its model, instructions and generator are yours to choose.
     """
-    encoded = base64.b64encode(data).decode()
-    if (agent := get_vision_agent()) is not None:
-        from django_ai_sdk.common import Attachment, ChatMessage
+    from django_ai_sdk.common import Attachment, ChatMessage
 
-        image = Attachment(document_id="", media_type=mime_type, data=encoded)
-        reply = await agent.run(
-            [ChatMessage(role="user", content=prompt, attachments=[image])],
-            response_format=None,
-        )
-        return reply if isinstance(reply, str) else None
-
-    from haystack.dataclasses import ChatMessage as HaystackChatMessage
-    from haystack.dataclasses import ImageContent
-
-    from django_ai_sdk.generators import openai_chat
-
-    image_content = ImageContent(base64_image=encoded, mime_type=mime_type)
-    message = HaystackChatMessage.from_user(content_parts=[prompt, image_content])
-    model = get_vision_model() or resolve_setting("AI_SDK_DEFAULT_MODEL", None)
-    result = await openai_chat(model=model).run_async(messages=[message])
-    replies = result.get("replies") or []
-    return replies[0].text if replies else None
+    agent = get_vision_agent()
+    if agent is None:
+        return None
+    image = Attachment(document_id="", media_type=mime_type, data=base64.b64encode(data).decode())
+    reply = await agent.run(
+        [ChatMessage(role="user", content=prompt, attachments=[image])],
+        response_format=None,
+    )
+    return reply if isinstance(reply, str) else None
 
 
 class ImageCaptionProcessor(BaseFileProcessor):
@@ -415,9 +398,8 @@ class ImageCaptionProcessor(BaseFileProcessor):
 
     Returns a description plus a verbatim transcription of any visible text, so
     a photo or screenshot becomes retrievable like any other document, and
-    agents whose model can't see images still know what it shows. Uses
-    `AI_SDK_VISION_AGENT` if set, else `AI_SDK_VISION_MODEL`, falling back to
-    `AI_SDK_DEFAULT_MODEL` (see `describe_image`).
+    agents whose model can't see images still know what it shows. Asks the
+    `AI_SDK_VISION_AGENT` (see `describe_image`); without one it takes no files.
     """
 
     ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
@@ -427,6 +409,9 @@ class ImageCaptionProcessor(BaseFileProcessor):
         "image/gif",
     )
     step: ClassVar[str | None] = "captioning"
+
+    async def is_valid(self, file: FileSource) -> bool:
+        return has_vision_support() and await super().is_valid(file)
 
     async def run(self, file: FileSource) -> str | None:
         data = await read_aio_bytes(file)

@@ -128,12 +128,9 @@ AI_SDK_FILE_UPLOAD_TO = "my/custom/path/"
 
 ## Images and vision
 
-An uploaded image goes through `ImageCaptionProcessor`, which asks a vision model for a description plus a transcription of any visible text. That caption makes the image searchable, and it is what an agent without vision gets to see. When a vision model or agent is configured, agents also get the `ask_image` tool for questions the caption doesn't answer.
+An uploaded image goes through `ImageCaptionProcessor`, which asks your vision agent for a description plus a transcription of any visible text. That caption makes the image searchable, and it is what an agent without vision gets to see. Agents also get the `ask_image` tool for questions the caption doesn't answer.
 
-Configure one of:
-
-- `AI_SDK_VISION_MODEL = "gpt-4o"`: the SDK calls that model directly.
-- `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`: your own agent answers instead, so you choose the model, the instructions and the generator (provider, reasoning settings, ...).
+Both need `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`: your own agent answers every image question, so you choose the model, the instructions and the generator (provider, reasoning settings, ...). Without it, images are not captioned and there is no `ask_image`.
 
 ```python
 # myapp/agents.py
@@ -153,7 +150,7 @@ class ImageAgent(Agent):
         return Run(generator=self.get_llm(), model=self.model)
 ```
 
-The agent is called through `Agent.run()` with the image attached to a user message whose text is the question or the caption prompt. An agent whose own model can see images (`vision = True`, or running on `AI_SDK_VISION_MODEL`) gets image attachments in a chat as pixels, up to `AI_SDK_MAX_INLINE_IMAGE_BYTES`; others get the caption, capped at `AI_SDK_IMAGE_CAPTION_LIMIT` characters.
+The agent is called through `Agent.run()` with the image attached to a user message whose text is the question or the caption prompt. An agent whose own model can see images (`vision = True`) gets image attachments in a chat as pixels, up to `AI_SDK_MAX_INLINE_IMAGE_BYTES`; others get the caption, capped at `AI_SDK_IMAGE_CAPTION_LIMIT` characters.
 
 ## Thread File Memory
 

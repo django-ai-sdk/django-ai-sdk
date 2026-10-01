@@ -85,9 +85,10 @@ AI_SDK_PERMISSIONS = {
 
 # Files and images
 
-# Answers image questions (ask_image) and captions uploaded images. Agents on this model
-# get image attachments as pixels; others get the caption.
+# A vision-capable model for VisionAgent (our setting; the SDK doesn't read it). The agent
+# captions uploaded images and answers ask_image. Unset: no captions, no ask_image.
 AI_SDK_VISION_MODEL = env("AI_SDK_VISION_MODEL", default=None)
+AI_SDK_VISION_AGENT = "apps.agents.vision.VisionAgent" if AI_SDK_VISION_MODEL else None
 
 # The thread-file download view (storage isn't publicly served); file parts in the chat
 # link to it. Ninja names routes "<namespace>:<view function>".

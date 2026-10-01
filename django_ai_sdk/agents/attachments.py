@@ -14,30 +14,23 @@ class InlineFileCapability:
     Every attachment becomes a context line (`format_attachment` /
     `format_image_attachment`). Images go inline as pixels when the agent
     `has_vision()`; otherwise the model gets their extracted description plus,
-    with a vision agent or model configured, the `ask_image` tool. To make
-    the model look a file up first, override `Agent.get_run_required_tools`.
+    with a vision agent configured, the `ask_image` tool. To make the
+    model look a file up first, override `Agent.get_run_required_tools`.
     """
 
     # Provided by Agent.
     file_upload: bool
 
-    def get_model(self) -> str:
-        raise NotImplementedError
-
     # The model accepts images: image attachments on the latest user message are
-    # sent as pixels. Also true without this flag when the agent runs on
-    # AI_SDK_VISION_MODEL (see has_vision).
+    # sent as pixels.
     vision: bool = False
 
     def has_vision(self) -> bool:
         """Whether this agent's own model gets image attachments as pixels."""
-        from django_ai_sdk.files.processors import get_vision_model
-
-        vision_model = get_vision_model()
-        return self.vision or bool(vision_model and self.get_model() == vision_model)
+        return self.vision
 
     def get_attachment_tools(self, thread_id: str) -> list[Any]:
-        """`ask_image`, when this agent takes uploads and a vision agent or model is set."""
+        """`ask_image`, when this agent takes uploads and a vision agent is set."""
         from django_ai_sdk.files.processors import has_vision_support
         from django_ai_sdk.memories.tools import ask_image_tool
 
@@ -64,8 +57,8 @@ class InlineFileCapability:
         """Context line for an image attached to a user message.
 
         `inline` means the model gets the pixels with this message; otherwise it
-        gets the description from memory extraction and, when a vision agent or
-        model is configured, is pointed at the `ask_image` tool.
+        gets the description from memory extraction and, when a vision agent
+        is configured, is pointed at the `ask_image` tool.
         """
         from django_ai_sdk.files.processors import has_vision_support
         from django_ai_sdk.memories.tools import ASK_IMAGE_TOOL
