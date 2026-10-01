@@ -14,6 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import File
 from django.utils.module_loading import import_string
 
+from django_ai_sdk.common import prompt
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
@@ -342,16 +343,6 @@ class AnyDocFileProcessor(BaseFileProcessor):
         return text if text.strip() else None
 
 
-# Describe + transcribe: the description makes photos retrievable, the verbatim
-# transcription makes screenshots/text-heavy images retrievable.
-IMAGE_CAPTION_PROMPT = (
-    "Describe this image in detail for later search and retrieval: the main "
-    "subject, setting, notable objects, people, colours, and any diagrams or "
-    "charts. Then, under a line 'Transcription:', transcribe ALL visible text in "
-    "the image verbatim. If the image contains no text, write 'Transcription: (none)'."
-)
-
-
 def get_vision_agent() -> Agent | None:
     """An instance of `AI_SDK_VISION_AGENT` (dotted path to an Agent subclass), or None.
 
@@ -410,6 +401,15 @@ class ImageCaptionProcessor(BaseFileProcessor):
     )
     step: ClassVar[str | None] = "captioning"
 
+    # What the vision agent is asked for each uploaded image.
+    caption_prompt: ClassVar[str] = prompt("""\
+        Describe this image in detail for later search and retrieval: the main
+        subject, setting, notable objects, people, colours, and any diagrams or
+        charts. Then, under a line 'Transcription:', transcribe ALL visible text
+        in the image verbatim. If the image contains no text, write
+        'Transcription: (none)'.
+    """)
+
     async def is_valid(self, file: FileSource) -> bool:
         return has_vision_support() and await super().is_valid(file)
 
@@ -419,7 +419,7 @@ class ImageCaptionProcessor(BaseFileProcessor):
             logger.warning("ImageCaptionProcessor: could not read image bytes")
             return None
         mime_type = await get_mime_type(file) or "image/jpeg"
-        caption = await describe_image(data, mime_type, IMAGE_CAPTION_PROMPT)
+        caption = await describe_image(data, mime_type, self.caption_prompt)
         if not caption:
             logger.warning("ImageCaptionProcessor: vision model returned no reply")
         return caption
