@@ -494,7 +494,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # subagent tools
         result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
 
-        # questions about uploaded images, answered by the vision model
+        # info about uploaded files
         result.extend(self.get_attachment_tools(thread_id))
 
         return result

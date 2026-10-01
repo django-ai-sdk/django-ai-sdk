@@ -342,7 +342,7 @@ class Stream:
                     elif msg.role == "assistant":
                         converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
                 continue
-            # ponytail: merging is text-only, inlined images are dropped here
+            # merging is text-only, inlined images are dropped here
             texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
             for role, content in merge_messages(texts):
                 if role == "user":
