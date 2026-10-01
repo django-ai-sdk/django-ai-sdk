@@ -286,6 +286,10 @@ class RAGProvider:
                         await rag.warmup(force_rebuild)
             except Exception as exc:
                 raise _knowledge_unavailable(cache_key, exc) from exc
+            if rag is None:
+                # A memory without documents has no index. Not cached, so the first
+                # document it gets is not hidden behind a remembered "nothing".
+                return None
             self._cache[cache_key] = rag
             self._markers[cache_key] = marker
 

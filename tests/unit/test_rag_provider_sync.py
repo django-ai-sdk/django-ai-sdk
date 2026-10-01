@@ -176,3 +176,16 @@ class TestFingerprint:
 
         # Every step differs from the one before it (a delete lands back on an empty memory).
         assert all(before != after for before, after in zip(seen, seen[1:]))
+
+
+@pytest.mark.asyncio
+async def test_a_memory_without_documents_is_not_remembered_as_empty() -> None:
+    """The first upload to a memory that was opened empty must still get indexed."""
+    rag, provider = warm_rag(), RAGProvider()
+    agent = MagicMock()
+    agent.__class__.__name__ = "MockAgent"
+    agent.get_rag_pipeline = AsyncMock(side_effect=[None, rag])
+
+    with patch.object(RAGProvider, "_fingerprint", AsyncMock(return_value=(0, None))):
+        assert await provider.get_rag_instance(agent, "m1") is None  # no documents yet
+        assert await provider.get_rag_instance(agent, "m1") is rag  # after the first upload
