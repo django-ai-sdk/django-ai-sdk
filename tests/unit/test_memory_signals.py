@@ -24,7 +24,11 @@ class TestEntrySignals:
 
         cls = get_runtime_agent_class(None)
         provider = RAGProvider()
-        rag = MagicMock(add_documents=AsyncMock(), remove_documents=AsyncMock())
+        rag = MagicMock(
+            spec=["add_documents", "remove_documents"],
+            add_documents=AsyncMock(),
+            remove_documents=AsyncMock(),
+        )
         provider._cache[f"{cls.__name__}_{memory.id}"] = rag
 
         with patch.object(cls, "rag_provider", provider):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import TYPE_CHECKING, Any
 
 from haystack import Document as HaystackDocument
@@ -35,8 +36,9 @@ def to_document(doc: RagDocument) -> HaystackDocument:
 
 
 def doc_version(doc: RagDocument) -> str:
-    """Changes when the document's content does."""
-    return f"{doc.id}:{hashlib.sha256(doc.content.encode()).hexdigest()[:16]}"
+    """Changes when what is indexed for the document changes: its content or its metadata."""
+    payload = json.dumps([doc.content, doc.metadata], sort_keys=True, default=str)
+    return f"{doc.id}:{hashlib.sha256(payload.encode()).hexdigest()[:16]}"
 
 
 async def queryset_to_rag_documents(queryset: Any, **kwargs: Any) -> list[RagDocument]:

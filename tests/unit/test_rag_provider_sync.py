@@ -212,3 +212,24 @@ async def test_a_memory_without_documents_is_not_remembered_as_empty() -> None:
     with patch.object(RAGProvider, "_fingerprint", AsyncMock(return_value=(0, None))):
         assert await provider.get_rag_instance(agent, "m1") is None  # no documents yet
         assert await provider.get_rag_instance(agent, "m1") is rag  # after the first upload
+
+
+@pytest.mark.asyncio
+async def test_a_saved_document_replaces_what_is_indexed_for_it() -> None:
+    """A saved entry may be an edit: the index must not keep the old text next to the new."""
+    provider = RAGProvider()
+    rag = MagicMock(
+        spec=["needs_warmup", "warmup", "sync_documents", "upsert_documents", "add_documents"]
+    )
+    rag.needs_warmup = False
+    rag.sync_documents = AsyncMock()
+    rag.upsert_documents = AsyncMock()
+    rag.add_documents = AsyncMock()
+    agent = agent_for(rag)
+
+    with patch.object(RAGProvider, "_fingerprint", AsyncMock(return_value=(1, "t1"))):
+        await provider.get_rag_instance(agent, "m1")
+    await provider.add_documents(agent, "m1", DOCS)
+
+    rag.upsert_documents.assert_awaited_once_with(DOCS)
+    rag.add_documents.assert_not_awaited()
