@@ -264,7 +264,7 @@ class TestReasoningStream:
         ]
 
     async def test_raw_reasoning_content_becomes_an_event(self):
-        # gpt-oss on vLLM (Nebul) or OpenRouter sends raw reasoning as the item's
+        # Some providers sends raw reasoning as the item's
         # `content`; Haystack leaves reasoning_text empty and keeps it in `extra`,
         # on the item's done chunk (the added chunk has no content yet).
         def item(content):
