@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from django.http import StreamingHttpResponse
 
@@ -13,7 +13,7 @@ from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable, Coroutine
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine
 
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
@@ -47,10 +47,21 @@ async def _ensure_adapter(
     messages: list[ChatMessage],
     protocol_handler: BaseProtocolHandler,
     storage_adapter: BaseStorageAdapter | None = None,
+    warmup: AsyncIterator[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     yield format_sse({"type": "data-warmup", "data": {"status": "start"}, "transient": True})
 
     try:
+        if warmup is not None:
+            named = False
+            async for part in warmup:
+                named = True
+                yield format_sse(part)
+            if named:
+                # The step last named is done; the build that follows is not that step.
+                yield format_sse(
+                    {"type": "data-warmup", "data": {"status": "start"}, "transient": True}
+                )
         if callable(adapter):
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
@@ -92,6 +103,7 @@ async def stream_response(
     protocol_handler: BaseProtocolHandler,
     extra_headers: dict[str, str] | None = None,
     storage_adapter: BaseStorageAdapter | None = None,
+    warmup: AsyncIterator[dict[str, Any]] | None = None,
 ) -> StreamingHttpResponse:
     """
     Generic streaming chat view that works with any pipeline adapter and protocol handler.
@@ -102,6 +114,7 @@ async def stream_response(
         protocol_handler: Protocol handler instance for formatting output
         extra_headers: Optional additional headers to include in response
         storage_adapter: Stores an errored reply if the adapter factory itself fails
+        warmup: Parts to stream, as they arrive, before the adapter factory runs
 
     Returns:
         StreamingHttpResponse with SSE-formatted AI responses
@@ -110,7 +123,7 @@ async def stream_response(
         f"Stream response initiated: adapter={type(adapter).__name__ if not callable(adapter) else 'factory'}, messages={len(messages)}, protocol={type(protocol_handler).__name__}"
     )
 
-    sse_stream = _ensure_adapter(adapter, messages, protocol_handler, storage_adapter)
+    sse_stream = _ensure_adapter(adapter, messages, protocol_handler, storage_adapter, warmup)
 
     # Build streaming HTTP response
     response = StreamingHttpResponse(  # type: ignore[arg-type]

@@ -591,6 +591,51 @@ class TestMCPIntegrationGetStatus:
         assert integration.kind == "token"
 
 
+class TestWarmupProgress:
+    """A chat names a degraded integration while it prepares, using the real integrations."""
+
+    @staticmethod
+    def _agent(health_check):
+        from django_ai_sdk.agents.base import Agent
+
+        class CheckedIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "checked"
+            label = "Checked"
+            tools = []
+
+        CheckedIntegration.health_check = staticmethod(health_check)
+        register(CheckedIntegration())
+
+        class FakeAgent(Agent):
+            name = "Fake"
+            description = ""
+            model = "gpt-fake"
+            integrations = ["checked"]
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                raise NotImplementedError
+
+        return FakeAgent()
+
+    async def test_a_failing_health_check_is_reported_as_unavailable(self):
+        async def fails():
+            raise RuntimeError("503 Service Unavailable")
+
+        parts = [p async for p in self._agent(fails).warmup_progress()]
+
+        assert [p["type"] for p in parts] == ["data-warmup", "data-unavailable"]
+        assert parts[1]["data"] == {"stage": "integrations", "detail": "Checked"}
+
+    async def test_a_healthy_integration_is_named_but_not_reported(self):
+        async def succeeds():
+            return None
+
+        parts = [p async for p in self._agent(succeeds).warmup_progress()]
+
+        assert [p["type"] for p in parts] == ["data-warmup"]
+
+
 class TestAPIIntegrationGetStatus:
     """A hand-written API integration must report real health too — a down backend
     shows up as DEGRADED, not a hardcoded ACTIVE."""
