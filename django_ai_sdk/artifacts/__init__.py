@@ -17,6 +17,9 @@ from django_ai_sdk.artifacts.schemas import (
     DataTableArtifact,
     DataTableColumn,
     DataTableData,
+    FileArtifact,
+    FileData,
+    FileItem,
     ImageArtifact,
     ImageData,
     OptionListArtifact,
@@ -44,6 +47,7 @@ from django_ai_sdk.artifacts.schemas import (
     TestSuite,
     _to_snake,
 )
+from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
 
 __all__ = [
     "ArtifactModel",
@@ -86,6 +90,10 @@ __all__ = [
     "TaskArtifact",
     "TaskData",
     "TaskItem",
+    "FileArtifact",
+    "FileData",
+    "FileItem",
     "ImageArtifact",
     "ImageData",
+    "ToolArtifact",
 ]
