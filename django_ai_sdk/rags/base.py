@@ -175,25 +175,47 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         self.documents = documents
         await self.warmup(force_rebuild=True)
 
+    async def upsert_documents(self, documents: list[RagDocument]) -> None:
+        """Add documents, then drop what an earlier version of them left in the index.
+
+        The new text is searchable before the old goes, so a failure halfway leaves
+        the index with too much, never with a document missing.
+        """
+        await self.add_documents(documents)
+        await self._drop_outdated({doc.id: doc_version(doc) for doc in documents if doc.id})
+
     async def sync_documents(self, documents: list[RagDocument]) -> None:
-        """Bring a built index in line with `documents`, redoing only what changed."""
+        """Bring a built index in line with `documents`, redoing only what changed.
+
+        Convergent: whatever state the index is in (a document missing, edited, removed,
+        or left with chunks of an older version), a sync ends with exactly `documents`.
+        """
         indexed = await self._indexed()
-        if indexed is None:
-            await self.refresh_documents(documents)
+        if indexed is None or not all(doc.id for doc in documents):
+            await self.refresh_documents(documents)  # nothing to compare with
             return
         self.documents = documents
 
-        indexed_ids, indexed_versions = indexed
-        wanted = {doc.id: doc for doc in documents if doc.id}
-        gone = indexed_ids - wanted.keys()
-        redo = [doc for doc in wanted.values() if doc_version(doc) not in indexed_versions]
-        if not (gone or redo):
+        wanted = {doc.id: doc for doc in documents}
+        gone = indexed.keys() - wanted.keys()
+        changed = [
+            doc for doc in wanted.values() if doc_version(doc) not in indexed.get(doc.id, set())
+        ]
+        # Chunks of an older version next to the current one, e.g. an edit made without a sync.
+        leftovers = {
+            doc_id: doc_version(wanted[doc_id])
+            for doc_id, versions in indexed.items()
+            if doc_id in wanted and versions - {doc_version(wanted[doc_id])}
+        }
+        if not (gone or changed or leftovers):
             return
 
-        logger.info(f"Syncing the index: {len(redo)} added or edited, {len(gone)} removed")
-        await self.remove_documents([*gone, *(doc.id for doc in redo)])
-        if redo:
-            await self.add_documents(redo)
+        logger.info(f"Syncing the index: {len(changed)} added or edited, {len(gone)} removed")
+        if changed:
+            await self.add_documents(changed)
+        if gone:
+            await self.remove_documents(list(gone))
+        await self._drop_outdated({**leftovers, **{doc.id: doc_version(doc) for doc in changed}})
 
     async def sync_or_keep(self, documents: list[RagDocument]) -> None:
         """Sync, or keep using the index as it is and mark it stale so it is tried again."""
@@ -205,16 +227,37 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         else:
             self.stale = False
 
-    async def _indexed(self) -> tuple[set[str], set[str]] | None:
-        """The doc_ids and doc_versions in the index, or None if there is no index to read."""
+    async def _indexed(self) -> dict[str, set[str]] | None:
+        """The doc_versions the index holds per doc_id, or None if there is no index to read."""
         document_store = getattr(self, "_cached_document_store", None)
         if document_store is None:
             return None
         chunks = await asyncio.to_thread(document_store.filter_documents)
-        return (
-            {str(chunk.meta.get("doc_id", chunk.id)) for chunk in chunks},
-            {str(chunk.meta.get("doc_version")) for chunk in chunks},
-        )
+        indexed: dict[str, set[str]] = {}
+        for chunk in chunks:
+            doc_id = str(chunk.meta.get("doc_id", chunk.id))
+            indexed.setdefault(doc_id, set()).add(str(chunk.meta.get("doc_version")))
+        return indexed
+
+    async def _drop_outdated(self, current: dict[str, str]) -> None:
+        """Delete the chunks of these documents that are not of the given (current) version."""
+        document_store = getattr(self, "_cached_document_store", None)
+        if document_store is None or not current:
+            return
+
+        def drop() -> None:
+            chunks = document_store.filter_documents(
+                filters={"field": "meta.doc_id", "operator": "in", "value": list(current)}
+            )
+            outdated = [
+                chunk.id
+                for chunk in chunks
+                if chunk.meta.get("doc_version") != current.get(str(chunk.meta.get("doc_id")))
+            ]
+            if outdated:
+                document_store.delete_documents(document_ids=outdated)
+
+        await asyncio.to_thread(drop)
 
     async def get_chunk(self, chunk_id: str) -> str | None:
         """Return the content of a specific chunk by its Haystack document ID.

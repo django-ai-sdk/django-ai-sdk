@@ -166,8 +166,10 @@ class RAGProvider:
         rag = self._cache.get(cache_key)
 
         if rag is not None and hasattr(rag, "add_documents"):
+            # Saved documents may be edits: replace what is indexed for them, not add next to it.
+            add = getattr(rag, "upsert_documents", rag.add_documents)
             try:
-                await rag.add_documents(documents)
+                await add(documents)
             except Exception as exc:
                 raise _knowledge_unavailable(cache_key, exc) from exc
             logger.info(f"Added {len(documents)} documents to {cache_key}")
@@ -327,7 +329,9 @@ class RAGProvider:
                 return
             try:
                 fresh = await agent.get_rag_pipeline(memory_id)
-                if (documents := getattr(fresh, "documents", None)) is not None:
+                # No pipeline means the memory has no documents left: the index must empty out.
+                documents = [] if fresh is None else getattr(fresh, "documents", None)
+                if documents is not None:
                     await rag.sync_documents(documents)
             except Exception:
                 logger.exception(f"Could not sync {cache_key}, using the index as it is")

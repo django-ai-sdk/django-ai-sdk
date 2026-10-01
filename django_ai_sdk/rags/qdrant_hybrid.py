@@ -147,18 +147,27 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         except ValueError:
             return False
 
-    async def _indexed(self) -> tuple[set[str], set[str]] | None:
-        """Read from the payload index, without loading every chunk and its vectors."""
+    async def _indexed(self) -> dict[str, set[str]] | None:
+        """Read from the payload index, without loading every chunk."""
         document_store = self._cached_document_store
         if document_store is None:
             return None
 
-        def unique(field: str) -> set[str]:
+        def read() -> dict[str, set[str]]:
             size = document_store.count_documents()
-            values, _ = document_store.get_metadata_field_unique_values(field, size=size)
-            return {str(value) for value in values}
 
-        return await asyncio.to_thread(lambda: (unique("doc_id"), unique("doc_version")))
+            def unique(field: str) -> set[str]:
+                values, _ = document_store.get_metadata_field_unique_values(field, size=size)
+                return {str(value) for value in values}
+
+            # A version reads "<doc_id>:<hash>" (see doc_version); a chunk from before
+            # versions existed has a doc_id but no version, so it is never "current".
+            indexed: dict[str, set[str]] = {doc_id: set() for doc_id in unique("doc_id")}
+            for version in unique("doc_version"):
+                indexed.setdefault(version.rpartition(":")[0], set()).add(version)
+            return indexed
+
+        return await asyncio.to_thread(read)
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
         """Add documents to the existing Qdrant index."""
