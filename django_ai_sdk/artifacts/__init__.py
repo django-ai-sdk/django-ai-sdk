@@ -47,6 +47,11 @@ from django_ai_sdk.artifacts.schemas import (
     TestSuite,
     _to_snake,
 )
+from django_ai_sdk.artifacts.tool_artifacts import (
+    ToolArtifact,
+    apply_tool_artifacts,
+    with_tool_artifact,
+)
 
 __all__ = [
     "ArtifactModel",
@@ -94,4 +99,7 @@ __all__ = [
     "FileItem",
     "ImageArtifact",
     "ImageData",
+    "ToolArtifact",
+    "apply_tool_artifacts",
+    "with_tool_artifact",
 ]

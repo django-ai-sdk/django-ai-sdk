@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from haystack.tools import Tool
 
+from django_ai_sdk.artifacts.schemas import FileArtifact
+from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
 from django_ai_sdk.files.processors import describe_image
 from django_ai_sdk.memories.models import EntryDocument
 from django_ai_sdk.memories.services import aread_document
@@ -61,3 +64,15 @@ def ask_image_tool(thread_id: str) -> Tool:
         },
         async_function=_run,
     )
+
+
+async def _get_image(
+    arguments: dict[str, Any], result: str, thread_id: str
+) -> dict[str, list[dict[str, str]]] | None:
+    doc = await get_thread_image(thread_id, str(arguments.get("image", "")))
+    return {"files": [{"documentId": str(doc.id)}]} if doc else None
+
+
+#: Show the image `ask_image` looked at, as a file artifact:
+#: ``tool_artifacts = {ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT}``.
+ASK_IMAGE_ARTIFACT = ToolArtifact(FileArtifact, _get_image)

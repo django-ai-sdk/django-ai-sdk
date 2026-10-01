@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
 from django_ai_sdk.conversation.models import Thread
-from django_ai_sdk.memories.models import Entry
+from django_ai_sdk.memories.models import Entry, EntryDocument
+from django_ai_sdk.memories.tools import ASK_IMAGE_ARTIFACT, ASK_IMAGE_TOOL
 from haystack.tools import Tool
 
 if TYPE_CHECKING:
@@ -121,8 +123,32 @@ def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
     )
 
 
+async def _looked_up_files(
+    arguments: dict[str, Any],
+    result: list[dict[str, Any]] | dict[str, Any],
+    thread_id: str,
+) -> dict[str, list[dict[str, str]]] | None:
+    """The thread uploads get_memory_file found; knowledge-base entries have no file."""
+    if not isinstance(result, list):  # the "no file matching" error
+        return None
+    entry_ids = [f["entry_id"] for f in result if f["source"] == "attachment"]
+    doc_ids = [
+        str(doc_id)
+        async for doc_id in EntryDocument.objects.filter(
+            entry_id__in=entry_ids, memory__thread_files__id=thread_id
+        ).values_list("id", flat=True)
+    ]
+    return {"files": [{"documentId": i} for i in doc_ids]} if doc_ids else None
+
+
 class FileLookupMixin:
-    """A turn with an attached file looks it up with get_memory_file first."""
+    """A turn with an attached file looks it up with get_memory_file first, and the
+    file a tool looked at is shown as a file artifact after its answer."""
+
+    tool_artifacts = {
+        ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT,
+        "get_memory_file": ToolArtifact(FileArtifact, _looked_up_files),
+    }
 
     def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
         # Images are covered by their pixels or caption; ask_image stays optional.

@@ -288,6 +288,25 @@ class MyAgent(Agent):
     artifacts = [MyArtifact]
 ```
 
+### Artifacts after a tool
+
+`tool_artifacts` shows an artifact every time a tool runs, without the model calling the artifact tool. It is keyed by tool name, so it also works for tools you didn't write (package or hidden tools):
+
+```python
+from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
+
+
+async def looked_up_file(arguments, result, thread_id):
+    # Artifact data from the tool call, or None for no artifact this time.
+    return {"files": [{"documentId": arguments["document_id"]}]}
+
+
+class MyAgent(Agent):
+    tool_artifacts = {"lookup_file": ToolArtifact(FileArtifact, looked_up_file)}
+```
+
+After the tool returns, the artifact is stored and streamed as its own `artifact_*` tool part, as if the model had called it. The frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped; the tool result is unchanged. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It applies to every tool of the run, also ones your `get_pipeline_adapter` adds after `get_tools()` (e.g. RAG tools).
+
 ---
 
 ## Retrieval-Augmented Generation (RAG)

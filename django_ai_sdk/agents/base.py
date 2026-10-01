@@ -16,6 +16,7 @@ from django_ai_sdk.adapters.citations import (
 from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
+from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact, apply_tool_artifacts
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import (
     generate_thread_title,
@@ -169,6 +170,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     # ArtifactSchema subclasses to register as tools in stream pipelines.
     artifacts: list[type[BaseModel]] = []
+
+    # Artifacts shown after a tool runs, by tool name, without the model calling.
+    # Streamed runs whose pipeline is a Haystack Agent only.
+    tool_artifacts: dict[str, ToolArtifact] = {}
 
     # Delegate-able subagent classes.
     agents: list[type[Agent]] = []
@@ -1083,6 +1088,14 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 adapter.suggestion_generator = suggestion_generator
             if required_tools := self.get_run_required_tools(messages):
                 adapter.hook_context = {"required_tools": required_tools}
+            # Here, not in get_tools: this sees every tool of the run, also those
+            # get_pipeline_adapter adds (e.g. RAG tools).
+            component = getattr(adapter, "agent_component", None)
+            # An artifact is stored on the thread: none without one.
+            if self.tool_artifacts and thread_id and component is not None:
+                adapter.tools = apply_tool_artifacts(
+                    list(component.tools), self.tool_artifacts, thread_id=thread_id, user=user
+                )
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 

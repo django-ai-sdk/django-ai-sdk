@@ -258,6 +258,8 @@ class Stream:
     suggestion_generator: SuggestionGenerator | None = None
     # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
+    # Per-run tool list replacing the agent's own, e.g. with tool artifacts.
+    tools: list[Any] | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -493,6 +495,7 @@ class Stream:
                 messages=haystack_messages,
                 streaming_callback=streaming_callback,
                 hook_context=self.hook_context,
+                tools=self.tools,
             )
         else:
             coro = self.pipeline.run_async({"messages": haystack_messages})
