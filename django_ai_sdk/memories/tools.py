@@ -9,7 +9,7 @@ from django_ai_sdk.artifacts.schemas import FileArtifact
 from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
 from django_ai_sdk.files.processors import describe_image
 from django_ai_sdk.memories.models import EntryDocument
-from django_ai_sdk.memories.services import aread_document
+from django_ai_sdk.memories.services import aread_document, get_thread_file_url
 
 ASK_IMAGE_TOOL = "ask_image"
 
@@ -66,11 +66,21 @@ def ask_image_tool(thread_id: str) -> Tool:
     )
 
 
+def get_thread_file(doc: EntryDocument, thread_id: str) -> dict[str, str]:
+    """Document of the thread."""
+    return {
+        "documentId": str(doc.id),
+        "filename": doc.file_name,
+        "mediaType": doc.content_type,
+        "url": get_thread_file_url(doc, thread_id),
+    }
+
+
 async def _get_image(
     arguments: dict[str, Any], result: str, thread_id: str
 ) -> dict[str, list[dict[str, str]]] | None:
     doc = await get_thread_image(thread_id, str(arguments.get("image", "")))
-    return {"files": [{"documentId": str(doc.id)}]} if doc else None
+    return {"files": [get_thread_file(doc, thread_id)]} if doc else None
 
 
 #: Show the image `ask_image` looked at, as a file artifact:

@@ -193,42 +193,24 @@ class TestFileArtifact:
         return thread_id, upload("cat.png", "image/png"), upload("a.pdf", "application/pdf")
 
     @pytest.mark.asyncio
-    async def test_fills_in_files_from_the_thread(self, thread_files):
+    async def test_stores_the_files_of_the_thread(self, thread_files):
         from django_ai_sdk.artifacts import FileArtifact
+        from django_ai_sdk.memories.tools import get_thread_file
         from django_ai_sdk.artifacts.models import Artifact
+        from django_ai_sdk.memories.models import EntryDocument
 
         thread_id, image_id, pdf_id = thread_files
-        tool = FileArtifact.as_tool(thread_id=thread_id)
-        assert tool.name == "artifact_file_artifact"
+        docs = [await EntryDocument.objects.aget(id=i) for i in (image_id, pdf_id)]
 
-        # A made-up url from the model is replaced by the real one.
-        result = json.loads(
-            await tool.invoke_async(
-                files=[{"documentId": image_id.upper(), "url": "http://evil"}, {"documentId": pdf_id}]
-            )
+        result = await FileArtifact.store(
+            {"files": [get_thread_file(doc, thread_id) for doc in docs]}, thread_id
         )
 
         files = result["files"]
         assert [f["documentId"] for f in files] == [image_id, pdf_id]
         assert [f["filename"] for f in files] == ["cat.png", "a.pdf"]
         assert [f["mediaType"] for f in files] == ["image/png", "application/pdf"]
-        assert all("evil" not in f["url"] for f in files)
+        assert all(f["url"] for f in files)
         artifact = await Artifact.objects.aget(id=result["artifact_id"])
         assert artifact.artifact_type == "file"
         assert artifact.data == {"files": files}
-
-    @pytest.mark.asyncio
-    async def test_rejects_files_outside_the_thread(self, thread_files):
-        from django_ai_sdk.artifacts import FileArtifact
-        from django_ai_sdk.artifacts.models import Artifact
-
-        thread_id, image_id, _ = thread_files
-        tool = FileArtifact.as_tool(thread_id=thread_id)
-        other = str(uuid.uuid4())
-
-        result = json.loads(
-            await tool.invoke_async(files=[{"documentId": image_id}, {"documentId": other}, {"documentId": "cat"}])
-        )
-
-        assert other in result["error"] and "cat" in result["error"]
-        assert not await Artifact.objects.aexists()

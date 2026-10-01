@@ -90,7 +90,7 @@ class TestToolArtifacts:
 
     async def test_rejected_data_leaves_the_result_alone(self):
         thread_id, _ = await self._thread_image()
-        spec = ToolArtifact(FileArtifact, lambda args, result, tid: {"files": [{"documentId": "nope"}]})
+        spec = ToolArtifact(FileArtifact, lambda args, result, tid: {"files": []})
         tool = with_tool_artifact(_plain_tool(), spec, thread_id=thread_id)
         queue: asyncio.Queue = asyncio.Queue()
 

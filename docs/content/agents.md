@@ -311,11 +311,16 @@ class MyAgent(Agent):
 
 ```python
 from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
+from django_ai_sdk.memories.models import EntryDocument
+from django_ai_sdk.memories.tools import get_thread_file
 
 
 async def looked_up_file(arguments, result, thread_id):
     # Artifact data from the tool call, or None for no artifact this time.
-    return {"files": [{"documentId": arguments["document_id"]}]}
+    doc = await EntryDocument.objects.filter(
+        id=arguments["document_id"], memory__thread_files__id=thread_id
+    ).afirst()
+    return {"files": [get_thread_file(doc, thread_id)]} if doc else None
 
 
 class MyAgent(Agent):

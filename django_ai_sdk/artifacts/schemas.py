@@ -4,7 +4,7 @@ import json
 import re
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from haystack.tools import Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -631,16 +631,8 @@ class ImageArtifact(ArtifactSchema):
 # ── File ──────────────────────────────────────────────────────────────────────
 
 
-def _normalize_uuid(value: str) -> str | None:
-    try:
-        return str(UUID(value))
-    except ValueError:
-        return None
-
-
 class FileItem(ArtifactModel):
     document_id: str = Field(alias="documentId")
-    # Filled in from the thread's files; whatever the model passes is replaced.
     filename: str | None = None
     media_type: str | None = Field(default=None, alias="mediaType")
     url: str | None = None
@@ -654,43 +646,15 @@ class FileArtifact(ArtifactSchema):
     """Files (images or documents) uploaded to this thread, shown to the user."""
 
     artifact_type: ClassVar[ArtifactType] = ArtifactType.FILE
+
     system_prompt_hint: ClassVar[str] = prompt("""
         Use artifact_file_artifact() to show the user the uploaded files or images
         your answer is about, e.g. when you refer to a file.
-        Pass only `files: [{documentId}]`, using the document ids from the
-        attachment context; filename, type and link are filled in for you.
         Call it at most once per answer, with all files in that one call.
     """)
+
     reply_hint: ClassVar[str] = (
         "Once it returns artifact_id, the files are shown to the user: continue your "
         "answer as normal, without repeating file names or links."
     )
     data: FileData
-
-    @classmethod
-    async def resolve(cls, data: dict[str, Any], thread_id: str) -> dict[str, Any]:
-        from django_ai_sdk.memories.models import EntryDocument  # noqa: PLC0415
-        from django_ai_sdk.memories.services import get_thread_file_url  # noqa: PLC0415
-
-        raw_ids = [FileItem.model_validate(f).document_id for f in data["files"]]
-        ids = [_normalize_uuid(i) or i for i in raw_ids]
-        uuids = [i for i in map(_normalize_uuid, raw_ids) if i]
-        docs = {
-            str(doc.id): doc
-            async for doc in EntryDocument.objects.filter(
-                memory__thread_files__id=thread_id, id__in=uuids
-            )
-        }
-        if missing := [i for i in ids if i not in docs]:
-            raise ValueError(f"Not a file in this thread: {', '.join(missing)}")
-        return {
-            "files": [
-                {
-                    "documentId": doc_id,
-                    "filename": docs[doc_id].file_name,
-                    "mediaType": docs[doc_id].content_type,
-                    "url": get_thread_file_url(docs[doc_id], thread_id),
-                }
-                for doc_id in ids
-            ]
-        }
