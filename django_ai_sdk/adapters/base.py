@@ -14,6 +14,7 @@ from haystack.dataclasses import ImageContent, ReasoningContent, StreamingChunk,
 from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
+from django_ai_sdk.artifacts.tool_artifacts import build_artifact
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -42,9 +43,12 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
+    from haystack.dataclasses import ToolCallResult
+
     from django_ai_sdk.adapters.citations import CitationRegistry, NumberedSource
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
+    from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -258,8 +262,11 @@ class Stream:
     suggestion_generator: SuggestionGenerator | None = None
     # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
-    # Per-run tool list replacing the agent's own, e.g. with tool artifacts.
-    tools: list[Any] | None = None
+    # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
+    # user they are stored for; set per run by Agent.stream.
+    tool_artifacts: dict[str, ToolArtifact] = {}  # noqa: RUF012
+    thread_id: str | None = None
+    user: Any = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -456,6 +463,45 @@ class Stream:
         ids.add(chunk.content["tool_call_id"])
         stream_writer.add_chunk(chunk)
 
+    async def _tool_artifact(
+        self, stream_writer: StreamWriter | None, result: ToolCallResult
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """The artifact `tool_artifacts` maps to this tool, as its own tool call events."""
+        spec = self.tool_artifacts.get(result.origin.tool_name)
+        if spec is None or not self.thread_id:
+            return
+        tool_result = result.result
+        if isinstance(tool_result, str):
+            try:  # Haystack sends lists and dicts as JSON
+                tool_result = json.loads(tool_result)
+            except json.JSONDecodeError:
+                pass
+        built = await build_artifact(
+            spec, result.origin.arguments, tool_result, self.thread_id, self.user
+        )
+        if built is None:
+            return
+        data, payload = built
+        name = spec.artifact.tool_name()
+        tool_call_id = f"{name}-{payload['artifact_id']}"
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_call_start",
+                content={"tool_call_id": tool_call_id, "tool_name": name},
+            ),
+        )
+        yield ToolCallStartEvent(tool_call_id=tool_call_id, tool_name=name)
+        yield self._tool_input(stream_writer, tool_call_id, name, {}, data)
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_output",
+                content={"tool_call_id": tool_call_id, "tool_output": payload},
+            ),
+        )
+        yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=payload)
+
     def _tool_input(
         self,
         stream_writer: StreamWriter | None,
@@ -495,7 +541,6 @@ class Stream:
                 messages=haystack_messages,
                 streaming_callback=streaming_callback,
                 hook_context=self.hook_context,
-                tools=self.tools,
             )
         else:
             coro = self.pipeline.run_async({"messages": haystack_messages})
@@ -603,6 +648,9 @@ class Stream:
                     ),
                 )
                 yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
+                if not result.error:
+                    async for event in self._tool_artifact(stream_writer, result):
+                        yield event
 
                 if self.citation_registry is not None:
                     all_sources = self.citation_registry.all_sources

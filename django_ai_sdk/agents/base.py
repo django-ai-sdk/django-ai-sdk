@@ -16,7 +16,6 @@ from django_ai_sdk.adapters.citations import (
 from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
-from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact, apply_tool_artifacts
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import (
     generate_thread_title,
@@ -49,6 +48,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
+    from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
@@ -172,7 +172,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     artifacts: list[type[BaseModel]] = []
 
     # Artifacts shown after a tool runs, by tool name, without the model calling.
-    # Streamed runs whose pipeline is a Haystack Agent only.
     tool_artifacts: dict[str, ToolArtifact] = {}
 
     # Delegate-able subagent classes.
@@ -1092,14 +1091,12 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 adapter.suggestion_generator = suggestion_generator
             if required_tools := self.get_run_required_tools(messages):
                 adapter.hook_context = {"required_tools": required_tools}
-            # Here, not in get_tools: this sees every tool of the run, also those
-            # get_pipeline_adapter adds (e.g. RAG tools).
-            component = getattr(adapter, "agent_component", None)
+            # The stream adds them after each mapped tool's result, for any tool of the run.
             # An artifact is stored on the thread: none without one.
-            if self.tool_artifacts and thread_id and component is not None:
-                adapter.tools = apply_tool_artifacts(
-                    list(component.tools), self.tool_artifacts, thread_id=thread_id, user=user
-                )
+            if self.tool_artifacts and thread_id:
+                adapter.tool_artifacts = self.tool_artifacts
+                adapter.thread_id = thread_id
+                adapter.user = user
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 

@@ -327,7 +327,7 @@ class MyAgent(Agent):
     tool_artifacts = {"lookup_file": ToolArtifact(FileArtifact, looked_up_file)}
 ```
 
-After the tool returns, the artifact is stored and streamed as its own `artifact_*` tool part, as if the model had called it. The frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped; the tool result is unchanged. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It applies to every tool of the run, also ones your `get_pipeline_adapter` adds after `get_tools()` (e.g. RAG tools).
+When the stream sees the tool's result, the builder gets the tool's arguments and its result (a returned list or dict comes back as one). The artifact is then stored and streamed right after it as its own `artifact_*` tool part: the frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It works for any tool of the run: your own, package, MCP or RAG tools, also ones your `get_pipeline_adapter` adds after `get_tools()`.
 
 ---
 
