@@ -109,10 +109,10 @@ class TestThreadFileUrl:
         doc.file.save("cat.png", ContentFile(PNG), save=False)
 
         # tests/urls.py mounts the contrib memories router on the "ai-test" API.
-        settings.AI_SDK_THREAD_FILE_URL_NAME = "ai-test:download_thread_file"
+        settings.AI_SDK_THREAD_FILE_URL = "ai-test:download_thread_file"
         assert get_thread_file_url(doc, "t1") == (
             f"/api/memories/thread/t1/files/{doc.id}/download"
         )
 
-        settings.AI_SDK_THREAD_FILE_URL_NAME = None
+        settings.AI_SDK_THREAD_FILE_URL = None
         assert get_thread_file_url(doc, "t1") == doc.file.url

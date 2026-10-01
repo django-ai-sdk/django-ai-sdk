@@ -78,18 +78,13 @@ def _read_document(doc: EntryDocument) -> bytes:
 
 
 async def aread_document(doc: EntryDocument) -> bytes:
-    """A document's bytes (Django storage has no async API, so in a thread)."""
+    """Read document from storage."""
     return await sync_to_async(_read_document)(doc)
 
 
 def get_thread_file_url(doc: EntryDocument, thread_id: str) -> str:
-    """URL the frontend shows a thread file with.
-
-    `AI_SDK_THREAD_FILE_URL_NAME` names the project's (permission-checked)
-    download view, reversed with `thread_id` and `doc_id`. Unset: the storage
-    url, fine for public storage only.
-    """
-    url_name = resolve_setting("AI_SDK_THREAD_FILE_URL_NAME", None)
+    """URL the frontend shows a thread file with."""
+    url_name = resolve_setting("AI_SDK_THREAD_FILE_URL", None)
     if url_name:
         return reverse(url_name, kwargs={"thread_id": thread_id, "doc_id": str(doc.id)})
     return doc.file.url if doc.file else ""

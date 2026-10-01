@@ -26,5 +26,5 @@ def test_the_drf_api_is_mounted(client, django_user_model):
 def test_the_thread_file_url_setting_resolves(settings):
     from django.urls import reverse
 
-    url = reverse(settings.AI_SDK_THREAD_FILE_URL_NAME, kwargs={"thread_id": "t1", "doc_id": "d1"})
+    url = reverse(settings.AI_SDK_THREAD_FILE_URL, kwargs={"thread_id": "t1", "doc_id": "d1"})
     assert url == "/api/memories/thread/t1/files/d1/download"

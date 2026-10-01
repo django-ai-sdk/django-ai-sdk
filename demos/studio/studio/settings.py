@@ -91,7 +91,7 @@ AI_SDK_VISION_MODEL = env("AI_SDK_VISION_MODEL", default=None)
 
 # The thread-file download view (storage isn't publicly served); file parts in the chat
 # link to it. Ninja names routes "<namespace>:<view function>".
-AI_SDK_THREAD_FILE_URL_NAME = "api-1.0.0:download_thread_file"
+AI_SDK_THREAD_FILE_URL = "api-1.0.0:download_thread_file"
 
 # The shared text types, plus what the studio's PDF and image pipelines read.
 AI_SDK_ALLOWED_FILES = {
