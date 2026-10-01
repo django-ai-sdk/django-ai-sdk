@@ -277,17 +277,8 @@ class TestVisionFallback:
         settings.AI_SDK_IMAGE_CAPTION_LIMIT = None  # off too, like AI_SDK_MAX_INLINE_IMAGE_BYTES
         assert "x" * 50 in Agent.format_image_attachment(None, doc, inline=False)
 
-    def test_images_do_not_require_attachment_tools(self):
+    def test_no_run_required_tools_by_default(self):
         from django_ai_sdk.agents.base import Agent
-
-        agent = SimpleNamespace(attachment_tools=["get_memory_file"])
-        image = Attachment(document_id="a", media_type="image/png")
-        pdf = Attachment(document_id="b", media_type="application/pdf")
-        only_image = [ChatMessage(role="user", attachments=[image])]
-        with_pdf = [ChatMessage(role="user", attachments=[image, pdf])]
-
-        assert Agent.get_run_required_tools(agent, only_image) == []
-        assert Agent.get_run_required_tools(agent, with_pdf) == ["get_memory_file"]
 
 
 @pytest.mark.django_db

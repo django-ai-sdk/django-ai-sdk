@@ -17,7 +17,10 @@ from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
-from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
+from django_ai_sdk.conversation.utils import (
+    generate_thread_title,
+    get_title_sanity_limit,
+)
 from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
@@ -431,7 +434,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         Uses the `llm` factory if set, otherwise OpenAI's Responses API. Keyword
         arguments override `llm_kwargs`, and the agent always supplies the model.
         """
-        from django_ai_sdk.generators import merge_generation_kwargs, openai_responses_chat
+        from django_ai_sdk.generators import (
+            merge_generation_kwargs,
+            openai_responses_chat,
+        )
 
         factory = self.llm or openai_responses_chat
         if not callable(factory):
@@ -451,6 +457,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         if not self.suggestion_generator:
             return None
         return self.suggestion_generator(agent=self)
+
+    def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
+        """Tools this run must call on top of `required_tools`, chosen per run"""
+        return []
 
     async def get_tools(
         self,
@@ -921,7 +931,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         if not storage:
             raise AiSdkError(
-                f"No storage adapter found for thread: {thread_id}", ErrorCode.CONFIGURATION_ERROR
+                f"No storage adapter found for thread: {thread_id}",
+                ErrorCode.CONFIGURATION_ERROR,
             )
 
         # Get thread metadata
@@ -932,7 +943,11 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # The agent chain gates the agent, not whose thread this is.
         await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread_info)
         await check_object_permissions(
-            user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
+            user,
+            Operation.VIEW_THREAD,
+            thread_info,
+            get_agent_permissions(self),
+            agent=self,
         )
 
         # Get messages using the instance method
@@ -1073,5 +1088,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         logger.debug("Initiating stream response")
         return await stream_response(
-            build_adapter, messages, self.protocol_handler, storage_adapter=storage_adapter
+            build_adapter,
+            messages,
+            self.protocol_handler,
+            storage_adapter=storage_adapter,
         )

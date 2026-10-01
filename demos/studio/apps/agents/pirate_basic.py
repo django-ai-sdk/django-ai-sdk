@@ -30,6 +30,7 @@ from django_ai_sdk.storage.db import DbStorageAdapter
 
 from .extraction import PirateExtractionAgent
 from .tools import get_memory_file, get_memory_files, get_today
+from .tools.memories import FileLookupMixin
 from .transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 
 
 @auto_register
-class PirateBasicAgent(Agent):
+class PirateBasicAgent(FileLookupMixin, Agent):
     name = "Basic Pirate Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     llm = openai_responses_chat
@@ -72,9 +73,6 @@ class PirateBasicAgent(Agent):
 
     # Enable file upload UI for this agent
     file_upload = True
-
-    # A turn with an attached file must search it before answering.
-    attachment_tools = ["search_uploaded_documents"]
 
     file_pipelines = [
         FilePipeline(

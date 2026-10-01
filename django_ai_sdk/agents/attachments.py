@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.memories.models import EntryDocument
 
 
@@ -15,7 +14,8 @@ class InlineFileCapability:
     Every attachment becomes a context line (`format_attachment` /
     `format_image_attachment`). Images go inline as pixels when the agent
     `has_vision()`; otherwise the model gets their extracted description plus,
-    with a vision agent or model configured, the `ask_image` tool.
+    with a vision agent or model configured, the `ask_image` tool. To make
+    the model look a file up first, override `Agent.get_run_required_tools`.
     """
 
     # Provided by Agent.
@@ -29,24 +29,12 @@ class InlineFileCapability:
     # AI_SDK_VISION_MODEL (see has_vision).
     vision: bool = False
 
-    # Tools the agent must call on a run whose latest user message has
-    # attachments other than images (images are covered by pixels or caption).
-    attachment_tools: list[str] = []
-
     def has_vision(self) -> bool:
         """Whether this agent's own model gets image attachments as pixels."""
         from django_ai_sdk.files.processors import get_vision_model
 
         vision_model = get_vision_model()
         return self.vision or bool(vision_model and self.get_model() == vision_model)
-
-    def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
-        """Tools this run must call on top of `required_tools` (enforced by the tool agent)."""
-        last_user = next((m for m in reversed(messages) if m.role == "user"), None)
-        # Images are covered by their pixels or caption; ask_image stays optional.
-        if last_user and any(not a.media_type.startswith("image/") for a in last_user.attachments):
-            return list(self.attachment_tools)
-        return []
 
     def get_attachment_tools(self, thread_id: str) -> list[Any]:
         """`ask_image`, when this agent takes uploads and a vision agent or model is set."""
