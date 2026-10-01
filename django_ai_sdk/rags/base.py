@@ -88,6 +88,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
     """Abstract base class for Haystack RAG implementations."""
 
     _is_warmed_up: bool = False
+    stale: bool = False
     config: ConfigT
 
     @abstractmethod
@@ -175,16 +176,7 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         await self.warmup(force_rebuild=True)
 
     async def sync_documents(self, documents: list[RagDocument]) -> None:
-        """
-        Bring a built index in line with `documents`, redoing only what changed.
-
-        Called when an existing index is opened and when a cached one is used after its
-        documents changed in another process. Without a readable index it falls back
-        to a full refresh.
-
-        Args:
-            documents: The new complete set of documents.
-        """
+        """Bring a built index in line with `documents`, redoing only what changed."""
         indexed = await self._indexed()
         if indexed is None:
             await self.refresh_documents(documents)
@@ -202,6 +194,16 @@ class RAGBase[ConfigT: RAGConfig](ABC):
         await self.remove_documents([*gone, *(doc.id for doc in redo)])
         if redo:
             await self.add_documents(redo)
+
+    async def sync_or_keep(self, documents: list[RagDocument]) -> None:
+        """Sync, or keep using the index as it is and mark it stale so it is tried again."""
+        try:
+            await self.sync_documents(documents)
+        except Exception:
+            logger.exception("Could not sync the index, using it as it is")
+            self.stale = True
+        else:
+            self.stale = False
 
     async def _indexed(self) -> tuple[set[str], set[str]] | None:
         """The doc_ids and doc_versions in the index, or None if there is no index to read."""

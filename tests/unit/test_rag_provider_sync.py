@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from django_ai_sdk.errors import AiSdkError, ErrorCode
+from django_ai_sdk.rags.base import RAGBase
 from django_ai_sdk.rags.bm25 import BM25QueryExpanderRAG
 from django_ai_sdk.rags.provider import RAGProvider
 from django_ai_sdk.rags.schemas import RagDocument
@@ -63,7 +63,7 @@ async def test_a_change_made_elsewhere_syncs_the_warm_index_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_sync_is_knowledge_unavailable_and_tried_again() -> None:
+async def test_a_failed_sync_keeps_the_index_and_is_tried_again() -> None:
     rag, provider = warm_rag(), RAGProvider()
     rag.sync_documents.side_effect = [RuntimeError("store locked"), None]
     agent = agent_for(rag, MORE_DOCS, MORE_DOCS)
@@ -71,12 +71,35 @@ async def test_a_failed_sync_is_knowledge_unavailable_and_tried_again() -> None:
 
     with patch.object(RAGProvider, "_fingerprint", fingerprints):
         await provider.get_rag_instance(agent, "m1")
-        with pytest.raises(AiSdkError) as raised:
-            await provider.get_rag_instance(agent, "m1")
+        assert await provider.get_rag_instance(agent, "m1") is rag
         await provider.get_rag_instance(agent, "m1")
 
-    assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE
     assert rag.sync_documents.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_an_index_opened_stale_is_synced_on_its_next_use() -> None:
+    rag, provider = warm_rag(), RAGProvider()
+    rag.stale = True
+    agent = agent_for(rag, MORE_DOCS)
+
+    with patch.object(RAGProvider, "_fingerprint", AsyncMock(return_value=(1, "t1"))):
+        await provider.get_rag_instance(agent, "m1")
+        await provider.get_rag_instance(agent, "m1")
+
+    rag.sync_documents.assert_awaited_once_with(MORE_DOCS)
+
+
+@pytest.mark.asyncio
+async def test_sync_or_keep_marks_the_index_stale_instead_of_raising() -> None:
+    index = SimpleNamespace(sync_documents=AsyncMock(side_effect=RuntimeError("locked")))
+
+    await RAGBase.sync_or_keep(index, DOCS)
+    assert index.stale is True
+
+    index.sync_documents.side_effect = None
+    await RAGBase.sync_or_keep(index, DOCS)
+    assert index.stale is False
 
 
 @pytest.mark.asyncio

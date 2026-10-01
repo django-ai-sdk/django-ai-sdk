@@ -52,9 +52,7 @@ class RAGProvider:
         # a second concurrent call for the same key would crash rather than wait.
         # Using one asyncio.Lock per key keeps the fast path (warm cache) lock-free.
         self._warmup_locks: dict[str, asyncio.Lock] = {}
-        # What the documents looked like when each cached RAG last matched them (see
-        # _fingerprint). Another process may add, edit or delete documents while this one
-        # holds a warm index; a changed fingerprint is how a cache hit notices.
+        # The documents' fingerprint when each cached RAG last matched them.
         self._markers: dict[str, Any] = {}
 
     async def warmup(
@@ -252,8 +250,7 @@ class RAGProvider:
         """
         cache_key = self._get_cache_key(agent, memory_id)
 
-        # Fast path: return immediately if already cached and no rebuild requested,
-        # after checking that its documents did not change in another process.
+        # Fast path: return immediately if already cached and no rebuild requested.
         if cache_key in self._cache and not force_rebuild:
             logger.debug(f"Using cached RAG for {cache_key}")
             self._cache.move_to_end(cache_key)  # mark as recently used
@@ -273,8 +270,7 @@ class RAGProvider:
                 return self._cache[cache_key]
 
             logger.debug(f"Creating RAG for {cache_key} (force_rebuild={force_rebuild})")
-            # Taken before the documents are loaded: a change made meanwhile shows up
-            # as a difference on the next use instead of being missed.
+            # Taken before the documents load, so a change made meanwhile shows on the next use.
             marker = await self._fingerprint(agent, memory_id)
             try:
                 rag = await agent.get_rag_pipeline(memory_id)
@@ -287,11 +283,11 @@ class RAGProvider:
             except Exception as exc:
                 raise _knowledge_unavailable(cache_key, exc) from exc
             if rag is None:
-                # A memory without documents has no index. Not cached, so the first
-                # document it gets is not hidden behind a remembered "nothing".
+                # No documents, no index: not cached, so its first document is not missed.
                 return None
             self._cache[cache_key] = rag
-            self._markers[cache_key] = marker
+            if not getattr(rag, "stale", False):
+                self._markers[cache_key] = marker
 
             # Evict LRU entries when over the cap; clean up their locks too
             while len(self._cache) > self._MAX_CACHE_SIZE:
@@ -304,15 +300,12 @@ class RAGProvider:
             return self._cache[cache_key]
 
     async def _fingerprint(self, agent: Agent, memory_id: str | None) -> tuple[Any, ...] | None:
-        """How many documents the memory has and when one last changed, or None if unknown.
-
-        One aggregate query, cheap enough to run on every use of a cached index.
-        """
+        """How many documents the memory has and when one last changed, or None if unknown."""
         try:
             queryset = await agent.get_rag_queryset(memory_id)
             try:
                 found = await queryset.aaggregate(count=Count("pk"), latest=Max("updated_at"))
-            except FieldError:  # a model without updated_at: only adds and deletes show
+            except FieldError:  # no updated_at: only adds and deletes show
                 found = await queryset.aaggregate(count=Count("pk"))
         except Exception:
             logger.warning("Cannot tell if the documents of {} changed", memory_id, exc_info=True)
@@ -330,13 +323,13 @@ class RAGProvider:
             return
 
         async with self._warmup_locks.setdefault(cache_key, asyncio.Lock()):
-            if marker == self._markers.get(cache_key):  # another request already synced
+            if marker == self._markers.get(cache_key):
                 return
             try:
-                # Built the agent's way, so a custom get_rag_pipeline picks its own documents.
                 fresh = await agent.get_rag_pipeline(memory_id)
                 if (documents := getattr(fresh, "documents", None)) is not None:
                     await rag.sync_documents(documents)
-            except Exception as exc:
-                raise _knowledge_unavailable(cache_key, exc) from exc
+            except Exception:
+                logger.exception(f"Could not sync {cache_key}, using the index as it is")
+                return
             self._markers[cache_key] = marker

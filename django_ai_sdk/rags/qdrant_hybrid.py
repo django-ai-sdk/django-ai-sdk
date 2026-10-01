@@ -265,7 +265,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             and self._has_existing_index(document_store)
         ):
             self._cached_document_store = document_store
-            await self.sync_documents(self.documents)
+            await self.sync_or_keep(self.documents)
             existing_count = document_store.count_documents()
             self._is_warmed_up = True
             if storage.is_server:

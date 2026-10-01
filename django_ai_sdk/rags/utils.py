@@ -29,8 +29,7 @@ def to_document(doc: RagDocument) -> HaystackDocument:
     return HaystackDocument(
         id=doc.id,
         content=doc.content,
-        # Kept on every chunk, so an index can tell which documents it holds and
-        # whether they changed (see RAGBase.sync_documents).
+        # Lets an index tell which documents it holds (see RAGBase.sync_documents).
         meta={**doc.metadata, "doc_id": doc.id, "doc_version": doc_version(doc)},
     )
 

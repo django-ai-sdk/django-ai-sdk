@@ -412,6 +412,21 @@ class TestQdrantIndexBehindSourceDocuments:
         assert self.indexed_ids(second) == {"acme", "globex"}
 
     @pytest.mark.asyncio
+    async def test_a_failed_sync_leaves_the_existing_index_in_use(self, tmp_path):
+        acme = RagDocument(id="acme", content="Invoice from Acme for two servers")
+        globex = RagDocument(id="globex", content="Invoice from Globex for cloud hosting")
+        first = self.rag(tmp_path, [acme])
+        await first.warmup()
+        first._cached_document_store._client.close()
+
+        second = self.rag(tmp_path, [acme, globex])
+        with patch.object(second, "sync_documents", AsyncMock(side_effect=RuntimeError("locked"))):
+            await second.warmup()
+
+        assert second.stale is True
+        assert self.indexed_ids(second) == {"acme"}
+
+    @pytest.mark.asyncio
     async def test_documents_already_indexed_are_not_indexed_again(self, tmp_path):
         docs = [RagDocument(id="acme", content="Invoice from Acme")]
         first = self.rag(tmp_path, docs)
