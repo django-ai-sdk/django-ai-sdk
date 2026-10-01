@@ -343,6 +343,23 @@ class Stream:
             return f"{source.doc_id}:{source.chunk_id}"
         return source.doc_id
 
+    def _without_uncited_duplicates(self, sources: list[NumberedSource]) -> list[NumberedSource]:
+        """Drop repeats of a chunk that two searches both retrieved.
+
+        A cited entry is always kept, so `<source id="N" />` still resolves. When no
+        entry of a chunk was cited, only its first is kept.
+        """
+        groups: dict[str, list[NumberedSource]] = {}
+        for src in sources:
+            if (source_id := self.get_source_id(src)) is not None:
+                groups.setdefault(source_id, []).append(src)
+
+        keep: set[int] = set()
+        for group in groups.values():
+            cited = [s.index for s in group if s.index in self.cited_ids]
+            keep.update(cited or [group[0].index])
+        return [s for s in sources if self.get_source_id(s) is None or s.index in keep]
+
     def get_attribution(self, tool_name: str, subagent: str | None = None) -> dict[str, str]:
         """Metadata naming attribution ran a tool call."""
         if subagent:
@@ -605,7 +622,7 @@ class Stream:
 
         if self.citation_registry and self.citation_registry.all_sources:
             sources_list = []
-            for src in self.citation_registry.all_sources:
+            for src in self._without_uncited_duplicates(self.citation_registry.all_sources):
                 source_id = self.get_source_id(src)
                 if source_id is None:
                     continue
