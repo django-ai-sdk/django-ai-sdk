@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import StreamingChunk, ToolCall
+from haystack.dataclasses import ReasoningContent, StreamingChunk, ToolCall
 
 from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
 from django_ai_sdk.adapters.utils import merge_messages
@@ -131,6 +131,16 @@ def _get_message_pairs(
     if current:
         runs.append((None, current))
     return runs
+
+
+def get_reasoning_text(reasoning: ReasoningContent) -> str:
+    """
+    A chunk's reasoning text, also when the provider sends raw reasoning.
+    """
+    if reasoning.reasoning_text:
+        return reasoning.reasoning_text
+    parts = (reasoning.extra or {}).get("content") or []
+    return "".join(p.get("text", "") for p in parts if p.get("type") == "reasoning_text")
 
 
 def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
@@ -497,12 +507,10 @@ class Stream:
                 yield TextChunkEvent(content=text)
 
             # Reasoning models stream their summary separately from the answer.
-            if chunk.reasoning and chunk.reasoning.reasoning_text:
+            if chunk.reasoning and (reasoning := get_reasoning_text(chunk.reasoning)):
                 if stream_writer:
-                    stream_writer.add_chunk(
-                        MessageChunk(type="reasoning", content=chunk.reasoning.reasoning_text)
-                    )
-                yield ReasoningChunkEvent(content=chunk.reasoning.reasoning_text)
+                    stream_writer.add_chunk(MessageChunk(type="reasoning", content=reasoning))
+                yield ReasoningChunkEvent(content=reasoning)
 
             if chunk.tool_calls:
                 subagent = chunk.meta.get(SUBAGENT_META_KEY)

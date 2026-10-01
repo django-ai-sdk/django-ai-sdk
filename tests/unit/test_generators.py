@@ -263,6 +263,22 @@ class TestReasoningStream:
             ("text_chunk", "answer"),
         ]
 
+    async def test_raw_reasoning_content_becomes_an_event(self):
+        # Some providers sends raw reasoning as the item's
+        # `content`; Haystack leaves reasoning_text empty and keeps it in `extra`,
+        # on the item's done chunk (the added chunk has no content yet).
+        def item(content):
+            extra = {"type": "reasoning", "summary": [], "content": content}
+            return StreamingChunk(
+                content="", index=0, reasoning=ReasoningContent(reasoning_text="", extra=extra)
+            )
+
+        events = await self._events(
+            item([]), item([{"type": "reasoning_text", "text": "17*23 = 391."}])
+        )
+
+        assert [(e.event_type, e.content) for e in events] == [("reasoning_chunk", "17*23 = 391.")]
+
 
 class TestAgentHook:
     """Agent.llm / llm_kwargs / get_llm()."""
