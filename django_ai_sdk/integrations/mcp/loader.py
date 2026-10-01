@@ -74,7 +74,6 @@ class DynamicMCPIntegration(Integration):
             ttl=resolve_setting("AI_SDK_INTEGRATION_CACHE_TTL", 900),
             timeout=self._timeout,
             cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
-            label=config.label or name.title(),
         )
         self.label = config.label or name.title()
         self.hint = config.hint

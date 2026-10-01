@@ -171,56 +171,6 @@ class TestResilientCache:
         assert result == []  # degrades to empty rather than hanging
         assert elapsed < 0.5  # bounded by `timeout`, not the 10s fetch
 
-    async def test_a_failed_fetch_tells_the_chat_which_integration_is_unavailable(self):
-        from django_ai_sdk.progress import reporting_to
-
-        cache = ResilientCache(ttl=60, timeout=0.05, label="MediaWiki")
-
-        async def times_out():
-            await asyncio.sleep(10)
-
-        async def works():
-            return ["tool"]
-
-        queue: asyncio.Queue = asyncio.Queue()
-        with reporting_to(queue):
-            await cache.get("slow", times_out)
-            await cache.get("ok", works)
-        await asyncio.sleep(0)  # let the reports reach the queue
-
-        warnings = [queue.get_nowait() for _ in range(queue.qsize())]
-        assert warnings == [
-            {
-                "type": "data-unavailable",
-                "data": {"stage": "integrations", "detail": "MediaWiki"},
-                "transient": True,
-            }
-        ]
-
-    async def test_only_a_fetch_that_was_tried_tells_the_chat_it_failed(self):
-        from django_ai_sdk.progress import reporting_to
-
-        cache = ResilientCache(ttl=60, timeout=1, label="MediaWiki")
-        calls = 0
-
-        async def always_fails():
-            nonlocal calls
-            calls += 1
-            raise RuntimeError("dead server")
-
-        queue: asyncio.Queue = asyncio.Queue()
-        with reporting_to(queue):
-            for _ in range(3):  # the breaker is closed: each get really tries
-                await cache.get("k", always_fails)
-            await asyncio.sleep(0)
-            assert queue.qsize() == 3
-
-            # The breaker is now open: served empty without a fetch, so nothing more is reported.
-            await cache.get("k", always_fails)
-            await asyncio.sleep(0)
-        assert calls == 3
-        assert queue.qsize() == 3
-
     async def test_circuit_breaker_opens_after_repeated_failures_and_stops_retrying(
         self,
     ):
@@ -639,6 +589,51 @@ class TestMCPIntegrationGetStatus:
         # The failed build leaves a *static* placeholder config behind; the reported kind
         # must still describe what the deployer is configuring, not the placeholder.
         assert integration.kind == "token"
+
+
+class TestWarmupProgress:
+    """A chat names a degraded integration while it prepares, using the real integrations."""
+
+    @staticmethod
+    def _agent(health_check):
+        from django_ai_sdk.agents.base import Agent
+
+        class CheckedIntegration(APIIntegration):
+            permissions = [AllowAll]
+            name = "checked"
+            label = "Checked"
+            tools = []
+
+        CheckedIntegration.health_check = staticmethod(health_check)
+        register(CheckedIntegration())
+
+        class FakeAgent(Agent):
+            name = "Fake"
+            description = ""
+            model = "gpt-fake"
+            integrations = ["checked"]
+
+            async def get_pipeline_adapter(self, thread_id=None, user=None):
+                raise NotImplementedError
+
+        return FakeAgent()
+
+    async def test_a_failing_health_check_is_reported_as_unavailable(self):
+        async def fails():
+            raise RuntimeError("503 Service Unavailable")
+
+        parts = [p async for p in self._agent(fails).warmup_progress()]
+
+        assert [p["type"] for p in parts] == ["data-warmup", "data-unavailable"]
+        assert parts[1]["data"] == {"stage": "integrations", "detail": "Checked"}
+
+    async def test_a_healthy_integration_is_named_but_not_reported(self):
+        async def succeeds():
+            return None
+
+        parts = [p async for p in self._agent(succeeds).warmup_progress()]
+
+        assert [p["type"] for p in parts] == ["data-warmup"]
 
 
 class TestAPIIntegrationGetStatus:

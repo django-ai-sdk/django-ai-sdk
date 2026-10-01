@@ -18,6 +18,7 @@ from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
 from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
 from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
+from django_ai_sdk.integrations.base import IntegrationStatus
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
@@ -27,7 +28,6 @@ from django_ai_sdk.permissions import (
     check_permissions,
     get_agent_permissions,
 )
-from django_ai_sdk.progress import report_stage, report_unavailable
 from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
@@ -37,7 +37,7 @@ from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
@@ -54,6 +54,24 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
+
+
+def _warmup_part(stage: str, detail: str) -> dict[str, Any]:
+    """Says which part of the chat build is running; `status: "start"` keeps a wait indicator up."""
+    return {
+        "type": "data-warmup",
+        "data": {"status": "start", "stage": stage, "detail": detail},
+        "transient": True,
+    }
+
+
+def _unavailable_part(stage: str, detail: str) -> dict[str, Any]:
+    """Says a part of the chat build was tried, failed, and the reply goes on without it."""
+    return {
+        "type": "data-unavailable",
+        "data": {"stage": stage, "detail": detail},
+        "transient": True,
+    }
 
 
 def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
@@ -651,7 +669,6 @@ class Agent(ABC, AgentInfoMixin):
                 )
             used_names.add(spec.name)
 
-            report_stage("knowledge", memory.name)
             tool = await self.rag_provider.get_tool(
                 self,
                 str(memory.id),
@@ -844,6 +861,15 @@ class Agent(ABC, AgentInfoMixin):
     #: an MCP integration's `default_tools` allow-list.
     integrations: list[str] = []
 
+    async def _allowed_integrations(
+        self, user: AbstractBaseUser | AnonymousUser | None = None
+    ) -> list[Any]:
+        """The integrations in `self.integrations` that `user` may use."""
+        if not self.integrations:
+            return []
+        services = (await get_integrations(self.integrations)).values()
+        return [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
+
     async def _get_integration_tools(
         self,
         user: AbstractBaseUser | AnonymousUser | None = None,
@@ -857,23 +883,61 @@ class Agent(ABC, AgentInfoMixin):
         reach the model. Runs the remaining integrations concurrently — each one's
         get_tools() is individually bounded.
         """
-        if not self.integrations:
-            return []
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
-            report_stage("integrations", integration.label)
             try:
                 tools = await integration.get_tools(user, agent=self, thread_id=thread_id)
             except Exception:
                 logger.exception("Failed to load tools for integration {!r}", integration.name)
-                report_unavailable("integrations", integration.label)
                 return []
             return [_namespaced(integration.name, tool, integration.hint) for tool in tools]
 
-        services = (await get_integrations(self.integrations)).values()
-        allowed = [s for s in services if await s.has_perms(user, Operation.USE_INTEGRATION)]
+        allowed = await self._allowed_integrations(user)
         results = await asyncio.gather(*(_safe_get_tools(i) for i in allowed))
         return [tool for tools in results for tool in tools]
+
+    async def warmup_progress(
+        self,
+        thread_id: str | None = None,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Open the slow parts of the chat build, yielding what is being waited on.
+
+        What is opened here is cached, so `get_pipeline_adapter()` finds it ready.
+        """
+        if self.rag_provider and thread_id:
+            from django_ai_sdk.memories.services import MemoryService
+
+            for memory in await MemoryService.get_thread_memories(thread_id, user=user):
+                yield _warmup_part("knowledge", memory.name)
+                await self.rag_provider.get_rag_instance(self, str(memory.id))
+
+        async def load(integration: Any) -> tuple[Any, dict[str, Any] | None]:
+            # Only DEGRADED is a failure; DISCONNECTED and EXPIRED are setup states.
+            try:
+                status = await integration.get_status(user, agent=self)
+            except Exception:
+                logger.exception("Failed to check integration {!r}", integration.name)
+                return integration, _unavailable_part("integrations", integration.label)
+            if status == IntegrationStatus.DEGRADED:
+                return integration, _unavailable_part("integrations", integration.label)
+            return integration, None
+
+        waiting = await self._allowed_integrations(user)
+        loads = [asyncio.ensure_future(load(i)) for i in waiting]
+        if waiting:
+            yield _warmup_part("integrations", ", ".join(i.label for i in waiting))
+        try:
+            for finished in asyncio.as_completed(loads):
+                integration, part = await finished
+                waiting.remove(integration)
+                if part:
+                    yield part
+                if waiting:
+                    yield _warmup_part("integrations", ", ".join(i.label for i in waiting))
+        finally:
+            for task in loads:
+                task.cancel()
 
     async def get_pipeline_adapter(
         self,
@@ -1046,5 +1110,9 @@ class Agent(ABC, AgentInfoMixin):
 
         logger.debug("Initiating stream response")
         return await stream_response(
-            build_adapter, messages, self.protocol_handler, storage_adapter=storage_adapter
+            build_adapter,
+            messages,
+            self.protocol_handler,
+            storage_adapter=storage_adapter,
+            warmup=self.warmup_progress(thread_id, user),
         )

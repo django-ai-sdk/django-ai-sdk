@@ -113,7 +113,6 @@ class APIIntegration(Integration):
                 ttl=resolve_setting("AI_SDK_INTEGRATION_CACHE_TTL", 900),
                 timeout=resolve_setting("AI_SDK_INTEGRATION_TIMEOUT", 3),
                 cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
-                label=self.label,
             )
             if self.health_check is not None
             else None
