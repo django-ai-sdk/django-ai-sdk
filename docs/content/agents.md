@@ -251,6 +251,23 @@ class MyAgent(Agent):
         return tools
 ```
 
+### Required tools
+
+`required_tools` lists tools the model must call before it may answer. If it tries to stop without calling them, it is told to call them now; that happens at most twice per run. Override `get_run_required_tools()` to choose them per run, e.g. a file lookup when the user attached a file:
+
+```python
+class MyAgent(Agent):
+    required_tools = ["get_today"]
+
+    def get_run_required_tools(self, messages):
+        last = next((m for m in reversed(messages) if m.role == "user"), None)
+        if last and any(not a.media_type.startswith("image/") for a in last.attachments):
+            return ["get_memory_file"]
+        return []
+```
+
+Tools the agent doesn't have in a run are ignored.
+
 ### Integration tools
 
 Declare `integrations = ["linear", "weather"]` and every tool that integration exposes reaches the model. Tools are namespaced (`linear_list_issues`) so unrelated integrations never collide. Unauthorized users' tools never reach the model. See the [Integrations guide](/integrations/).

@@ -39,6 +39,7 @@ class AgentSummary(TypedDict):
     name: str | None
     model: str | None
     file_upload: bool
+    vision: bool
     rag: bool
 
 
@@ -55,6 +56,8 @@ class AgentCreateData(TypedDict, total=False):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    vision: bool
+    required_tools: list[str]
 
 
 class AgentUpdateData(TypedDict, total=False):
@@ -69,6 +72,8 @@ class AgentUpdateData(TypedDict, total=False):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    vision: bool
+    required_tools: list[str]
     active: bool
 
 
@@ -202,6 +207,7 @@ class AgentService(PermissionsMixin):
                         name=agent.name,
                         model=agent.model,
                         file_upload=getattr(agent, "file_upload", False),
+                        vision=getattr(agent, "vision", False),
                         rag=True if getattr(agent, "rag_provider", False) else False,
                     )
                 )
@@ -231,6 +237,7 @@ class AgentService(PermissionsMixin):
                     name=config.name,
                     model=config.model,
                     file_upload=getattr(agent, "file_upload", False),
+                    vision=getattr(agent, "vision", False),
                     rag=True if getattr(agent, "rag_provider", None) else False,
                 )
             )
@@ -530,6 +537,8 @@ class AgentService(PermissionsMixin):
             title_generation=data.get("title_generation", True),
             max_history=data.get("max_history"),
             file_upload=data.get("file_upload", False),
+            vision=data.get("vision", False),
+            required_tools=data.get("required_tools", []),
         )
         await config.asave()
         if user is not None and bool(user.is_authenticated):

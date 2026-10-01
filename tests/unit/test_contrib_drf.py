@@ -73,6 +73,36 @@ class TestThreads:
 
 
 @pytest.mark.django_db
+class TestFileParts:
+    def test_a_file_part_reaches_the_agent_intact(self, client, users, mock_agents_registry):
+        from unittest.mock import AsyncMock
+
+        agent = mock_agents_registry.get.return_value
+        agent.run = AsyncMock(return_value="ok")
+        agent.protocol_handler.to_chat_messages.return_value = []
+        client.force_login(users[0])
+        part = {"type": "file", "url": "data:image/png;base64,AA", "mediaType": "image/png"}
+        body = {"messages": [{"role": "user", "parts": [{"type": "text", "text": "hi"}, part]}]}
+
+        response = post_json(client, "/drf/agents/test-agent/run/", body)
+
+        assert response.status_code == 200, response.content
+        (messages,) = agent.protocol_handler.to_chat_messages.call_args.args
+        file_part = messages[0].parts[1]
+        assert (file_part.url, file_part.media_type) == (part["url"], "image/png")
+
+    def test_part_keys_stay_camel_case_on_the_wire(self):
+        from django_ai_sdk.contrib.drf.serializers import MessagePartSerializer
+
+        bad = MessagePartSerializer(data={"type": "file", "mediaType": ["not", "a", "string"]})
+        assert not bad.is_valid()
+        assert "mediaType" in bad.errors
+
+        out = MessagePartSerializer({"type": "file", "media_type": "image/png"}).data
+        assert out["mediaType"] == "image/png" and "media_type" not in out
+
+
+@pytest.mark.django_db
 class TestAgents:
     def test_an_unknown_agent_is_not_found(self, client, users):
         client.force_login(users[0])
@@ -174,6 +204,7 @@ def _pairs():
         (s.AgentSummarySerializer, AgentSummary),
         # Requests: the payloads the Ninja layer validates with.
         (s.ChatRequestSerializer, v.ChatRequest),
+        (s.MessagePartSerializer, v.MessagePart),
         (s.RateMessageSerializer, v.RateMessagePayload),
         (s.AgentSwitchSerializer, v.PatchThreadPayload),
         (s.MemorySerializer, v.MemoryIn),
@@ -197,3 +228,6 @@ def test_serializers_mirror_the_sdk_models(serializer, model):
     """The DRF layer spells the fields out again; this is what keeps it from drifting."""
     fields = getattr(model, "model_fields", None) or model.__annotations__
     assert set(serializer().fields) == set(fields)
+    # Wire names (camelCase keys the client sends) must match the pydantic aliases.
+    for field, wire in getattr(serializer, "WIRE_NAMES", {}).items():
+        assert model.model_fields[field].alias == wire

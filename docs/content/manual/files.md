@@ -126,6 +126,32 @@ STORAGES = {
 AI_SDK_FILE_UPLOAD_TO = "my/custom/path/"
 ```
 
+## Images and vision
+
+An uploaded image goes through `ImageCaptionProcessor`, which asks your vision agent for a description plus a transcription of any visible text. That caption makes the image searchable, and it is what an agent without vision gets to see. Agents also get the `ask_image` tool for questions the caption doesn't answer.
+
+Both need `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`: your own agent answers every image question, so you choose the model, the instructions and the generator (provider, reasoning settings, ...). Without it, images are not captioned and there is no `ask_image`.
+
+```python
+# myapp/agents.py
+from django_ai_sdk import Agent
+from django_ai_sdk.adapters.base import Run
+from django_ai_sdk.generators import openai_chat
+
+
+class ImageAgent(Agent):
+    name = "Image describer"
+    model = "gpt-4o"
+    hidden = True  # never listed or chattable; only used for images
+    instructions = ["Describe images precisely. Transcribe text exactly as written."]
+    llm = openai_chat
+
+    async def get_run_adapter(self, thread_id=None, user=None):
+        return Run(generator=self.get_llm(), model=self.model)
+```
+
+The agent is called through `Agent.run()` with the image attached to a user message whose text is the question or the caption prompt. An agent whose own model can see images (`vision = True`) gets image attachments in a chat as pixels, up to `AI_SDK_MAX_INLINE_IMAGE_BYTES`; others get the caption, capped at `AI_SDK_IMAGE_CAPTION_LIMIT` characters.
+
 ## Thread File Memory
 
 Thread uploads are backed by a hidden memory created on demand per thread:

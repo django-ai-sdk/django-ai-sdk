@@ -26,6 +26,7 @@ from django_ai_sdk.memories.schemas import (
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.services import MemoryService
+from django_ai_sdk.views.files import athread_file_response
 from django_ai_sdk.views.permissions import amemory_permissions
 from django_ai_sdk.views.schemas import (
     AddMemoryGroupIn,
@@ -184,6 +185,12 @@ async def upload_thread_file(
 @routes.get("/thread/{thread_id}/files/{doc_id}/status", response=DocumentStatusOut)
 async def get_thread_file_status(request: HttpRequest, thread_id: str, doc_id: str) -> Any:
     return await MemoryService.get_document_status(doc_id, user=request.user)
+
+
+@routes.get("/thread/{thread_id}/files/{doc_id}/download")
+async def download_thread_file(request: HttpRequest, thread_id: str, doc_id: str) -> Any:
+    """The file's bytes. Only raster images render inline; everything else downloads."""
+    return await athread_file_response(thread_id, doc_id, user=request.user)
 
 
 @routes.get("/thread/{thread_id}/files", response=list[DocumentOut])

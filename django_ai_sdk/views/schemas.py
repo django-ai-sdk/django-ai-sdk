@@ -8,14 +8,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
 class MessagePart(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     type: str
     text: str | None = None
+    # file parts
+    url: str | None = None
+    media_type: str | None = Field(default=None, alias="mediaType")
+    filename: str | None = None
+    provider_metadata: dict | None = Field(default=None, alias="providerMetadata")
 
 
 class Message(BaseModel):
@@ -133,6 +140,8 @@ class AgentSettingsCreateIn(BaseModel):
     title_generation: bool = True
     max_history: int | None = None
     file_upload: bool = False
+    vision: bool = False
+    required_tools: list[str] = []
 
 
 class AgentSettingsUpdateIn(BaseModel):
@@ -147,6 +156,8 @@ class AgentSettingsUpdateIn(BaseModel):
     title_generation: bool | None = None
     max_history: int | None = None
     file_upload: bool | None = None
+    vision: bool | None = None
+    required_tools: list[str] | None = None
     active: bool | None = None
 
 
