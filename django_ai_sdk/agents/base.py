@@ -464,7 +464,11 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return self.suggestion_generator(agent=self)
 
     def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
-        """Tools this run must call on top of `required_tools`, chosen per run"""
+        """Names of tools the model must have called before it answers this turn.
+
+        On top of `required_tools`, decided from this turn's `messages`. Enforced on
+        exit by RequireToolsHook; the tools themselves come from `get_tools()`.
+        """
         return []
 
     async def get_tools(

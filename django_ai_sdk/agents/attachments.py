@@ -22,7 +22,7 @@ class InlineFileCapability:
         return self.vision
 
     def get_attachment_tools(self, thread_id: str) -> list[Any]:
-        """`ask_image`, when this agent takes uploads and a vision agent is set."""
+        """Tools the model can use for files uploaded to the thread."""
         from django_ai_sdk.files.processors import has_vision_support
         from django_ai_sdk.memories.tools import ask_image_tool
 

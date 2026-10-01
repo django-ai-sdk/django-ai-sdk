@@ -251,22 +251,39 @@ class MyAgent(Agent):
         return tools
 ```
 
-### Required tools
+### Tools for uploaded files, and required tools
 
-`required_tools` lists tools the model must call before it may answer. If it tries to stop without calling them, it is told to call them now; that happens at most twice per run. Override `get_run_required_tools()` to choose them per run, e.g. a file lookup when the user attached a file:
+Two hooks, two questions:
+
+| | `get_attachment_tools(thread_id)` | `get_run_required_tools(messages)` |
+| --- | --- | --- |
+| Answers | Which tools *can* the model use? | Which of those *must* it have called before it answers this turn? |
+| Returns | `Tool` objects, added to the toolset by `get_tools()` | Tool names |
+| Decided | Per thread: a file uploaded three turns ago is still reachable | Per turn, from this turn's messages |
+| Default | `ask_image`, when the agent takes uploads and a vision agent is set | `[]` |
+
+`required_tools` (a class attribute) lists names that are required on every run; `get_run_required_tools()` adds names for one turn.
+
+A required tool is not run for you: the model supplies the arguments, so the model calls it. When it tries to answer without having called a required tool, it is told to call it now and gets another turn; that happens at most twice per run. A required name the run has no tool for is ignored, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
+
+For example, always read an attached PDF with your own tool:
 
 ```python
 class MyAgent(Agent):
     required_tools = ["get_today"]
 
+    def get_attachment_tools(self, thread_id):
+        # Keep ask_image, add a PDF reader for this thread's files.
+        return [*super().get_attachment_tools(thread_id), read_pdf_tool(thread_id)]
+
     def get_run_required_tools(self, messages):
         last = next((m for m in reversed(messages) if m.role == "user"), None)
-        if last and any(not a.media_type.startswith("image/") for a in last.attachments):
-            return ["get_memory_file"]
+        if last and any(a.media_type == "application/pdf" for a in last.attachments):
+            return ["read_pdf"]
         return []
 ```
 
-Tools the agent doesn't have in a run are ignored.
+To give the model a file's content without any tool call, override `format_attachment()` instead: its text goes straight into the context line of the attachment.
 
 ### Integration tools
 
