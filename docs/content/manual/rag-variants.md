@@ -86,13 +86,15 @@ Base config for all variants:
 | `min_score` | `None` | Drop documents below this relevance score (`None` disables) |
 | `n_expansions` | `4` | Number of query variations to generate (`1` = no expansion) |
 | `expander_model` | `"gpt-4o-mini"` | LLM used for query expansion |
-| `expander_prompt` | built-in | Prompt template for query expansion |
+| `expander_prompt` | built-in | Prompt template for query expansion; `{{context}}` gets what the searched documents are about |
 | `chunk_size` | `100` | Chunk size for document splitting |
 | `chunk_overlap` | `50` | Chunk overlap for document splitting |
 
 ### Query Expansion
 
 Expansion generates several phrasings of the user's query to improve recall. The first query is always the original, verbatim; `n_expansions = 1` disables expansion. Expansion forces **same-language** queries so results match the user's language.
+
+The expander is told what the documents are about (`{{context}}`: their most common keywords and some file names, see `expander_context`). Without it, it guesses: "SABRE" in a set of CVs became the airline booking system.
 
 ```
 User Query: "What is the pirate code?"

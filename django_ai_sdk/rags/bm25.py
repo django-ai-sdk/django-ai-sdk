@@ -3,14 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from haystack import Pipeline
-from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack.document_stores.types import DuplicatePolicy
 from haystack.tools import ComponentTool
 
-from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import MultiQueryBM25Retriever
@@ -144,13 +142,7 @@ class BM25QueryExpanderRAG(RAGBase):
                 haystack_docs = self._convert_documents()
                 self._write_documents(haystack_docs, document_store)
 
-        expander_generator = openai_chat(model=self.config.expander_model)
-
-        query_expander = QueryExpander(
-            chat_generator=expander_generator,
-            n_expansions=self.config.n_expansions,
-            prompt_template=self.config.expander_prompt,
-        )
+        query_expander = self.get_query_expander()
 
         retriever = MultiQueryBM25Retriever(
             document_store=document_store,
