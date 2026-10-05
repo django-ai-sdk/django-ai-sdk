@@ -105,8 +105,10 @@ Query Expansion (via expander_model)
 ├─ "Pirate code of conduct"
 └─ "Pirate laws and regulations"
            ↓
-Search All Variations → Merge & Deduplicate → Return top-k
+Search All Variations (4 × top_k candidates each) → Fuse ranks → Return top-k
 ```
+
+**Fusing.** The results are merged by reciprocal rank fusion (`fuse_and_rank`): a document several queries find ranks high, whatever each query scored it (scores of different queries don't compare). One more ranking counts the words of the user's own query found verbatim in a candidate, weighing as much as all queries together, so an exact term the embeddings don't know (an acronym, a code, a name) lifts the document that contains it. Words in most candidates ("the", "is") don't count. Every search logs one line: the queries, hits per query, the exact terms and what was kept (`RAG search: ...`); one query means the expander fell back to the original.
 
 ### Persistent Storage
 

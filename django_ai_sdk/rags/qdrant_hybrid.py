@@ -30,7 +30,7 @@ from tenacity import (
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
-from django_ai_sdk.rags.components import MultiQueryDeduplicationMixin
+from django_ai_sdk.rags.components import CANDIDATES_PER_QUERY, MultiQueryDeduplicationMixin
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
 
@@ -376,7 +376,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         rag_super = SuperComponent(
             pipeline=pipeline,
-            input_mapping={"query": ["expander.query"]},
+            input_mapping={"query": ["expander.query", "retriever.query"]},
             output_mapping={"retriever.documents": "documents"},
         )
 
@@ -463,7 +463,7 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
 
     @component.output_types(documents=list[HaystackDocument])
     def run(
-        self, queries: str | list[str], top_k: int | None = None
+        self, queries: str | list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         """
         Run hybrid search with multiple queries.
@@ -471,6 +471,7 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         Args:
             queries: Single query string or list of query strings
             top_k: Maximum documents to return
+            query: The user's query before expansion (its words count verbatim)
 
         Returns:
             Dict with deduplicated documents sorted by score
@@ -489,9 +490,9 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
 
         # Run hybrid search for all queries
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            sparse_result = self._sparse_embedder.run(text=query)
-            dense_result = self._dense_embedder.run(text=query)
+        for q in queries:
+            sparse_result = self._sparse_embedder.run(text=q)
+            dense_result = self._dense_embedder.run(text=q)
             retriever = QdrantHybridRetriever(
                 document_store=self.document_store,
                 score_threshold=self.min_score,
@@ -499,17 +500,16 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
             result = retriever.run(
                 query_sparse_embedding=sparse_result["sparse_embedding"],
                 query_embedding=dense_result["embedding"],
-                top_k=k,
+                top_k=k * CANDIDATES_PER_QUERY,
             )
             results.append(result)
 
-        # Deduplicate and rank using mixin
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}
 
     @component.output_types(documents=list[HaystackDocument])
     async def run_async(
-        self, queries: str | list[str], top_k: int | None = None
+        self, queries: str | list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         if isinstance(queries, str):
             queries = [queries]
@@ -519,9 +519,9 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         if self._sparse_embedder is None or self._dense_embedder is None:
             raise ValueError("Embedders not initialized after warm_up()")
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=query)
-            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=query)
+        for q in queries:
+            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=q)
+            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=q)
             retriever = QdrantHybridRetriever(
                 document_store=self.document_store,
                 score_threshold=self.min_score,
@@ -530,8 +530,8 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
                 retriever.run,
                 query_sparse_embedding=sparse_result["sparse_embedding"],
                 query_embedding=dense_result["embedding"],
-                top_k=k,
+                top_k=k * CANDIDATES_PER_QUERY,
             )
             results.append(result)
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}

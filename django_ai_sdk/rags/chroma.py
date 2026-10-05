@@ -280,7 +280,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
 
         rag_super = SuperComponent(
             pipeline=pipeline,
-            input_mapping={"query": ["expander.query"]},
+            input_mapping={"query": ["expander.query", "retriever.query"]},
             output_mapping={"retriever.documents": "documents"},
         )
 
