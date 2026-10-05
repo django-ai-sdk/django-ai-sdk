@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from django_ai_sdk.common import ChatMessage, prompt
 from django_ai_sdk.logger import get_logger
@@ -32,15 +32,17 @@ class SuggestionGenerator(Protocol):
 
 
 class FollowUpSuggestions(BaseModel):
-    follow_ups: list[str]
+    follow_ups: list[str] = Field(
+        description="Messages the USER could send next to the agent, in the user's voice"
+    )
 
 
 def format_conversation(messages: list[ChatMessage], response: str) -> str:
     """Format conversation history into a string for the prompt."""
+    # One label per side: the prompt speaks of the user and the agent.
+    label = {"user": "USER", "assistant": "AGENT"}
     lines = [
-        f"{msg.role.upper()}: {msg.content}"
-        for msg in messages
-        if msg.role in ("user", "assistant") and msg.content
+        f"{label[msg.role]}: {msg.content}" for msg in messages if msg.role in label and msg.content
     ]
     lines.append(f"AGENT: {response}")
     return "\n\n".join(lines)
@@ -54,12 +56,15 @@ class DefaultSuggestionGenerator:
     """
 
     DEFAULT_PROMPT = prompt("""\
-        You are a helpful agent that suggests follow-up questions.
-        Task: Suggest 2-3 relevant follow-up questions that the user might naturally ask next
-        based on the conversation and the agent's previous response.
+        You suggest what the user could say next in a conversation with an agent.
+        Task: Write 2-3 short messages the USER might naturally send next, based on the
+        conversation and the agent's last response. They are clickable suggestions: clicking
+        one sends it to the agent as the user's own message.
 
         Guidelines:
-        - Write questions from the user's point of view, as if they're asking the agent.
+        - Each suggestion is a message the user sends to the agent: a question or request
+          to it. Never a question the agent asks the user ("Would you like me to…", "Do you have…",
+          "Which … are you interested in?").
         - Make questions concise, clear, and directly related to the discussed topic.
         - Suggest follow-ups that make sense given the context and don't repeat what was already covered.
         - Detect the conversation's language and use the same language for questions.
@@ -90,11 +95,14 @@ class DefaultSuggestionGenerator:
 
                 Conversation:
                 {conversation}
-                Based on this conversation, suggest follow-up questions.
+                Based on this conversation, write the user's possible next messages.
             """)
 
             result = await self.agent.run(
-                messages=messages,
+                # The conversation is in the system prompt. Passed as chat messages
+                # too, the model carries on as the assistant and suggests what *it*
+                # would ask the user ("...the projects you'd like me to analyze?").
+                messages=[ChatMessage(role="user", content="Suggest the follow-up questions.")],
                 system_prompt=system_prompt,
                 response_format=FollowUpSuggestions,
             )
