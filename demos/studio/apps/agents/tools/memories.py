@@ -61,8 +61,10 @@ def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
     if not files:
         # An empty list is easy to gloss over; say plainly the file isn't there.
         return {
-            "error": f"No file matching '{filename}' in this thread. Tell the user it is "
-            "not available; do not describe its contents."
+            "error": f"No file named '{filename}' in this thread. If this is a topic rather "
+            "than a file name, search the knowledge bases with the search tools instead; "
+            "otherwise tell the user the file is not available, without describing its "
+            "contents."
         }
     return files
 
@@ -101,7 +103,9 @@ def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
             "Look up a file in the current thread by name and return what it is "
             "about: summary, keywords, facts, entities and a content preview, "
             "plus the same fields as get_memory_files. Use this when the user "
-            "names a file ('what is in cv.pdf?'). Then search the file's memory "
+            "names a file ('what is in xxx.pdf?'). Not for topics or keywords: "
+            "to find what documents say, use the search "
+            "tools. After the lookup, search the file's memory "
             "(source 'attachment': the uploaded-documents search tool) using its "
             "keywords, facts or entities as the query, and answer from the "
             "search results so the answer can cite them."

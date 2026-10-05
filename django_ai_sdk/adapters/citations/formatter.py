@@ -60,15 +60,17 @@ class DefaultCitationFormatter:
         "Never combine ids in one tag.\n"
         "- Do not add a 'Sources:' or 'References:' section - citations are inline only.\n"
         "- Do not explain or reason about citations, only add them.\n"
-        "- Only state what the sources below say. If none of them are about what the user "
+        "- Answer from the sources below: they were retrieved for this question and usually "
+        "hold the answer, also when they word it differently or it has to be read from a "
+        "table, a code or a field definition. Only when none of them is about what the user "
         "asked (e.g. a different file than the one named), say you could not find it; never "
         "fill in from general knowledge."
     )
 
     # Repeated after the sources
     CITATION_REMINDER = (
-        'Reminder: cite inline with <source id="N" />, one tag per source id. '
-        "If no source is about what the user asked, say you could not find it."
+        'Reminder: answer from the sources above, citing inline with <source id="N" />, '
+        "one tag per source id."
     )
 
     def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
@@ -76,6 +78,7 @@ class DefaultCitationFormatter:
             return "", []
         sources: list[NumberedSource] = []
         lines: list[str] = [self.RAG_TEMPLATE]
+        files: dict[str, int] = {}  # passages per file, in order of first appearance
 
         for offset, doc in enumerate(documents):
             idx = start_index + offset
@@ -88,6 +91,7 @@ class DefaultCitationFormatter:
                 or meta.get("topic")
                 or f"Document {idx}"
             )
+            files[base] = files.get(base, 0) + 1
             split_id = meta.get("split_id")
             page_number = meta.get("page_number")
             title = f"{base} · §{split_id + 1}" if split_id is not None else base
@@ -108,5 +112,22 @@ class DefaultCitationFormatter:
                 )
             )
             lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
+        lines.insert(1, self.files_line(files))
         lines.append(self.CITATION_REMINDER)
+        # Its own last line, where it weighs most (4 of 5 answers then named the file,
+        # 2 of 5 when it was part of the reminder): the files, not "the document".
+        lines.append(f"Name the file each point comes from ({', '.join(files)}).")
         return "\n".join(lines), sources
+
+    @staticmethod
+    def files_line(files: dict[str, int]) -> str:
+        """Which files the passages come from, so the answer can name them ("only
+        cv.pdf mentions Java") instead of "the consultant" or "the document"."""
+        listed = ", ".join(
+            f"{name} ({count} passage{'s' if count > 1 else ''})" for name, count in files.items()
+        )
+        total = sum(files.values())
+        return (
+            f"These {total} passages come from {len(files)} "
+            f"{'file' if len(files) == 1 else 'files'}: {listed}.\n"
+        )

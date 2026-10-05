@@ -112,16 +112,19 @@ class TestStreamCitations:
 
 def test_formatter_reminder_follows_sources():
     text, _ = DefaultCitationFormatter().format([{"content": "x", "meta": {}}], start_index=1)
-    assert text.rstrip().endswith(DefaultCitationFormatter.CITATION_REMINDER)
-    assert text.index("</source>") < text.index("Reminder:")
+    assert DefaultCitationFormatter.CITATION_REMINDER in text.rsplit("</source>", 1)[1]
 
 
-def test_formatter_tells_model_to_say_not_found():
-    # A search that returns other files must not be answered from general knowledge.
+def test_formatter_says_not_found_only_when_no_source_is_about_the_question():
+    # A search that returns other files must not be answered from general knowledge,
+    # but the closing reminder asks for an answer: repeating "say you could not find it"
+    # last made gpt-oss refuse answers that were in the sources.
     text, _ = DefaultCitationFormatter().format([{"content": "x", "meta": {}}], start_index=1)
     preamble, reminder = text.split('\n<source id="1">')[0], text.rsplit("</source>", 1)[1]
+    assert "Only when none of them is about what the user asked" in preamble
     assert "say you could not find it" in preamble
-    assert "say you could not find it" in reminder
+    assert "answer from the sources" in reminder
+    assert "could not find" not in reminder
 
 
 class TestStoredSourcesDedupe:
@@ -151,3 +154,16 @@ class TestStoredSourcesDedupe:
 
     async def test_every_cited_index_of_a_chunk_is_kept(self):
         assert await self._stored(cited={1, 5}) == [1, 2, 4, 5]
+
+
+def test_formatter_says_which_files_the_passages_come_from():
+    # So an answer can name them ("only cv.pdf mentions Java") instead of "the consultant".
+    docs = [
+        {"content": "Java EE", "meta": {"name": "cv.pdf", "split_id": 0}},
+        {"content": "Spring", "meta": {"name": "cv.pdf", "split_id": 5}},
+        {"content": "C++", "meta": {"name": "other.pdf", "split_id": 2}},
+    ]
+    text, _ = DefaultCitationFormatter().format(docs, start_index=1)
+    preamble, end = text.split('\n<source id="1">')[0], text.rsplit("</source>", 1)[1]
+    assert "come from 2 files: cv.pdf (2 passages), other.pdf (1 passage)" in preamble
+    assert "Name the file each point comes from (cv.pdf, other.pdf)" in end
