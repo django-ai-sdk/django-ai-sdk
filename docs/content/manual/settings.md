@@ -28,7 +28,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_VECTOR_STORE_PATH` | `None` | Base directory for persistent vector stores. Storage configs build per-backend, per-memory paths as `{path}/{backend}/{memory_id}`; unset means in-memory stores. See [RAG Variants](/manual/rag-variants/). |
-| `AI_SDK_VECTOR_STORE_URL` | `None` | Qdrant server URL. When set, Qdrant storage uses `backend="server"` with collection index `memory_{memory_id}` (or `default`). |
+| `AI_SDK_VECTOR_STORE_URL` | `None` | Qdrant server URL. When set, Qdrant storage uses `backend="server"` with collection index `memory_{memory_id}` (or `default`). Needed when uploads are processed by a task worker: the worker writes new documents into the shared server index, so chat finds them. A local or in-memory index belongs to one process. |
 
 ## Files and Uploads
 
