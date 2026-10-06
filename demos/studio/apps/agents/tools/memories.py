@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import difflib
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
 from django.db.models import Q
+from django_ai_sdk.adapters.citations import NumberedSource, current_registry
+from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
+from django_ai_sdk.common import prompt
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.memories.models import Entry, EntryDocument
-from django_ai_sdk.memories.tools import ASK_IMAGE_ARTIFACT, ASK_IMAGE_TOOL, get_thread_file
+from django_ai_sdk.memories.tools import (
+    ASK_IMAGE_ARTIFACT,
+    ASK_IMAGE_TOOL,
+    get_thread_file,
+)
 from haystack.tools import Tool
 
 if TYPE_CHECKING:
@@ -17,10 +24,10 @@ if TYPE_CHECKING:
 PREVIEW_CHARS = 2000
 
 
-def get_files(entries: QuerySet[Entry], thread_id: str) -> list[tuple[Entry, dict]]:
+async def get_files(entries: QuerySet[Entry], thread_id: str) -> list[tuple[Entry, dict]]:
     """Each entry with its listing fields, newest first."""
     file_memory_id = (
-        Thread.objects.filter(id=thread_id).values_list("file_memory_id", flat=True).first()
+        await Thread.objects.filter(id=thread_id).values_list("file_memory_id", flat=True).afirst()
     )
     return [
         (
@@ -36,17 +43,17 @@ def get_files(entries: QuerySet[Entry], thread_id: str) -> list[tuple[Entry, dic
                 "created_at": entry.created_at.isoformat(),
             },
         )
-        for entry in entries.order_by("-created_at")
+        async for entry in entries.order_by("-created_at")
     ]
 
 
-def list_memory_files(thread_id: str, keywords: list[str] | None = None) -> list[dict] | dict:
+async def list_memory_files(thread_id: str, keywords: list[str] | None = None) -> list[dict] | dict:
     """All files, or with ``keywords`` those whose name, summary, keywords or facts
     contain every term (partial, case-insensitive), with their summary and keywords."""
     entries = Entry.objects.for_rag(thread_id)
     terms = [t.strip() for t in keywords or [] if t and t.strip()]
     if not terms:
-        return [info for _, info in get_files(entries, thread_id)]
+        return [info for _, info in await get_files(entries, thread_id)]
     for term in terms:
         # keywords and facts are JSON lists, matched as their text
         entries = entries.filter(
@@ -56,7 +63,7 @@ def list_memory_files(thread_id: str, keywords: list[str] | None = None) -> list
             | Q(data__facts__icontains=term)
         )
     files = []
-    for entry, info in get_files(entries, thread_id):
+    for entry, info in await get_files(entries, thread_id):
         extraction = entry.extraction
         files.append(
             info
@@ -79,11 +86,18 @@ def list_memory_files(thread_id: str, keywords: list[str] | None = None) -> list
     }
 
 
-def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
+async def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
     """Files matching ``filename`` (partial, case-insensitive), with their details."""
-    entries = Entry.objects.for_rag(thread_id).filter(name__icontains=filename)
+    allowed = Entry.objects.for_rag(thread_id)
+    entries = allowed.filter(name__icontains=filename)
+    if filename and not await entries.aexists():
+        # Copying a long hashed name, a model can slip a character: the closest name.
+        names = [name async for name in allowed.values_list("name", flat=True)]
+        entries = allowed.filter(
+            name__in=difflib.get_close_matches(filename, names, n=1, cutoff=0.9)
+        )
     files = []
-    for entry, info in get_files(entries, thread_id):
+    for entry, info in await get_files(entries, thread_id):
         extraction = entry.extraction
         files.append(
             info
@@ -109,32 +123,36 @@ def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
 
 
 def get_memory_files(thread_id: str = "", **kwargs: object) -> Tool:
+    async def _run(keywords: list[str] | None = None, **_: object) -> list[dict] | dict:
+        return await list_memory_files(thread_id, keywords)
+
     return Tool(
         name="get_files",
-        description=(
-            "List files available in the current thread (knowledge base + "
-            "attachments), newest first. Returns entry_id, filename, "
-            "memory_name, memory_slug, file_size (bytes for uploads, "
-            "characters for text-only entries), source ('attachment' for "
-            "uploads vs 'knowledge_base'), and created_at for each. Use this "
-            "to enumerate available documents — "
-            "for example to answer 'what files are available?', to discover "
-            "an entry_id needed by another tool (e.g. search_memory), or to "
-            "check whether a specific file is present before deciding how to "
-            "handle a request. "
-            "For 'all / which / list files about X' questions, pass short keyword "
-            "stems in `keywords` (e.g. ['lesson', '2026']) instead of searching: "
-            "it returns every file whose name, summary, keywords or facts contain "
-            "all of them, with its summary and keywords. Then search inside the "
-            "matched files for details. "
-            "If the user asked about a file's content (what's in it, summarise "
-            "it, etc.), listing alone does not answer that: call "
-            "get_file with its name, then search that file's memory "
-            "using what get_file found (keywords, facts, entities) as "
-            "the query. Only stop at the listing "
-            "itself when the user asked to enumerate files, not about their "
-            "content."
-        ),
+        description=prompt("""\
+            List files available in the current thread (knowledge base +
+            attachments), newest first. Returns entry_id, filename,
+            memory_name, memory_slug, file_size (bytes for uploads, characters
+            for text-only entries), source ('attachment' for uploads vs
+            'knowledge_base'), and created_at for each.
+
+            Use this to enumerate available documents, for example to answer
+            'what files are available?', to discover an entry_id needed by
+            another tool (e.g. search_memory), or to check whether a specific
+            file is present before deciding how to handle a request.
+
+            For 'all / which / list files about X' questions, pass short keyword
+            stems in `keywords` (e.g. ['lesson', '2026']) instead of searching:
+            it returns every file whose name, summary, keywords or facts contain
+            all of them, with its summary and keywords. Then search inside the
+            matched files for details.
+
+            If the user asked about a file's content (what's in it, summarise
+            it, etc.), listing alone does not answer that: call get_file with
+            its name, then search that file's memory using what get_file found
+            (keywords, facts, entities) as the query. Only stop at the listing
+            itself when the user asked to enumerate files, not about their
+            content.
+            """),
         parameters={
             "type": "object",
             "properties": {
@@ -147,11 +165,38 @@ def get_memory_files(thread_id: str = "", **kwargs: object) -> Tool:
             },
             "required": [],
         },
-        function=lambda keywords=None, **_: list_memory_files(thread_id, keywords),
+        async_function=_run,
     )
 
 
+def file_source(file: dict) -> NumberedSource:
+    """A looked-up file as a source of the turn"""
+    facts = "\n".join(f"- {fact}" for fact in file["facts"])
+    parts = [
+        ("Summary", file["summary"]),
+        ("Facts", facts),
+        ("Preview", file["preview"]),
+    ]
+    return NumberedSource(
+        title=file["filename"],
+        content="\n\n".join(f"## {label}\n{text}" for label, text in parts if text),
+        doc_id=file["entry_id"],
+        chunk_id="file",
+    )
+
+
+async def look_up_file(thread_id: str, filename: str) -> list[dict] | dict:
+    files = await list_memory_file(thread_id, filename)
+    # Citable like results
+    if isinstance(files, list) and (registry := current_registry.get()) is not None:
+        registry.add([file_source(file) for file in files])
+    return files
+
+
 def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
+    async def _run(filename: str) -> list[dict] | dict:
+        return await look_up_file(thread_id, filename)
+
     return Tool(
         name="get_file",
         description=(
@@ -175,7 +220,7 @@ def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
             },
             "required": ["filename"],
         },
-        function=lambda filename: list_memory_file(thread_id, filename),
+        async_function=_run,
     )
 
 
@@ -184,7 +229,7 @@ async def get_looked_up_files(
     result: list[dict[str, Any]] | dict[str, Any],
     thread_id: str,
 ) -> dict[str, list[dict[str, str]]] | None:
-    """The thread uploads get_memory_file found"""
+    """The thread uploads get_file found"""
     if not isinstance(result, list):
         return None
     entry_ids = [f["entry_id"] for f in result if f["source"] == "attachment"]
@@ -194,17 +239,26 @@ async def get_looked_up_files(
 
 
 class FileLookupMixin:
-    """A turn with an attached file looks it up with get_memory_file first"""
+    """A turn with an attached file"""
 
     tool_artifacts = {
         ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT,
-        # here is different syntax: for demo
-        "get_memory_file": ToolArtifact(FileArtifact, get_looked_up_files),
+        "get_file": ToolArtifact(FileArtifact, get_looked_up_files),
     }
+
+    async def get_citation_sources(
+        self, thread_id: str, user: object = None
+    ) -> list[NumberedSource]:
+        """The thread's uploads, citable in every turn: the model knows them from their
+        attachment context without a tool call."""
+        files = await list_memory_file(thread_id, "")
+        if not isinstance(files, list):  # nothing uploaded
+            return []
+        return [file_source(f) for f in files if f["source"] == "attachment"]
 
     def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
         """Names of tools the model must have called before it answers this turn."""
         last = next((m for m in reversed(messages) if m.role == "user"), None)
         if last and any(not a.media_type.startswith("image/") for a in last.attachments):
-            return ["get_memory_file"]
+            return ["get_file"]
         return []
