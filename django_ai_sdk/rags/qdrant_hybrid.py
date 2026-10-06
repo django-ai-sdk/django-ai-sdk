@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from haystack import Pipeline, component
+from haystack.components.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from haystack.components.preprocessors import RecursiveDocumentSplitter
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
@@ -28,16 +29,50 @@ from tenacity import (
     wait_exponential,
 )
 
+from django_ai_sdk.generators.base import build_kwargs, resolve_secret
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import CANDIDATES_PER_QUERY, MultiQueryDeduplicationMixin
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
+
+DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
+    return build_kwargs(
+        {
+            "api_key": resolve_secret("OPENAI_API_KEY"),
+            "api_base_url": resolve_setting("OPENAI_API_URL"),
+        },
+        kwargs,
+    )
+
+
+def dense_document_embedder(
+    model: str, remote: bool, meta_fields_to_embed: list[str]
+) -> FastembedDocumentEmbedder | OpenAIDocumentEmbedder:
+    """Embeds documents locally with FastEmbed, or through an OpenAI-compatible API."""
+    if remote:
+        return OpenAIDocumentEmbedder(
+            **_openai_kwargs(model=model, meta_fields_to_embed=meta_fields_to_embed)
+        )
+    return FastembedDocumentEmbedder(model=model, meta_fields_to_embed=meta_fields_to_embed)
+
+
+def dense_text_embedder(
+    model: str, remote: bool, prefix: str = ""
+) -> FastembedTextEmbedder | OpenAITextEmbedder:
+    """Embeds a query locally with FastEmbed, or through an OpenAI-compatible API."""
+    if remote:
+        return OpenAITextEmbedder(**_openai_kwargs(model=model, prefix=prefix))
+    return FastembedTextEmbedder(model=model, prefix=prefix)
 
 
 class QdrantBM25HybridRAGConfig(RAGConfig):
@@ -47,9 +82,16 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
         default="Qdrant/bm42-all-minilm-l6-v2-attentions",
     )
     dense_embedder_model: str = Field(
-        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        default_factory=lambda: resolve_setting("AI_SDK_EMBEDDINGS_MODEL") or DEFAULT_DENSE_MODEL,
     )
-    embedding_dim: int = Field(default=384, ge=1)
+    remote_embeddings: bool = Field(
+        default_factory=lambda: bool(resolve_setting("AI_SDK_EMBEDDINGS_MODEL")),
+    )
+    embedding_dim: int = Field(
+        default_factory=lambda: resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384), ge=1
+    )
+    # Prepended to queries only, for instruction-tuned models such as Qwen3-Embedding.
+    query_prefix: str = ""
     chunk_size: int = Field(default=500, ge=1)
     chunk_overlap: int = Field(default=150, ge=0)
     meta_fields_to_embed: list[str] = Field(default=["title"])
@@ -181,9 +223,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
         indexing_pipeline.add_component(
             "dense_doc_embedder",
-            FastembedDocumentEmbedder(
-                model=self.config.dense_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            dense_document_embedder(
+                self.config.dense_embedder_model,
+                self.config.remote_embeddings,
+                self.config.meta_fields_to_embed,
             ),
         )
         indexing_pipeline.add_component(
@@ -324,6 +367,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 min_score=self.config.min_score,
                 sparse_embedder_model=self.config.sparse_embedder_model,
                 dense_embedder_model=self.config.dense_embedder_model,
+                remote_embeddings=self.config.remote_embeddings,
+                query_prefix=self.config.query_prefix,
             ),
         )
 
@@ -438,13 +483,17 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         top_k: int = 3,
         min_score: float | None = None,
         sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
-        dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        dense_embedder_model: str = DEFAULT_DENSE_MODEL,
+        remote_embeddings: bool = False,
+        query_prefix: str = "",
     ) -> None:
         self.document_store = document_store
         self.top_k = top_k
         self.min_score = min_score
         self.sparse_embedder_model = sparse_embedder_model
         self.dense_embedder_model = dense_embedder_model
+        self.remote_embeddings = remote_embeddings
+        self.query_prefix = query_prefix
         self._sparse_embedder: Any | None = None
         self._dense_embedder: Any | None = None
 
@@ -456,8 +505,8 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         )
         self._sparse_embedder.warm_up()
 
-        self._dense_embedder = FastembedTextEmbedder(
-            model=self.dense_embedder_model,
+        self._dense_embedder = dense_text_embedder(
+            self.dense_embedder_model, self.remote_embeddings, self.query_prefix
         )
         self._dense_embedder.warm_up()
 

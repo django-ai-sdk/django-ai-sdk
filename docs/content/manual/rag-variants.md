@@ -122,6 +122,17 @@ config = QdrantStorageConfig.from_settings(memory_id="mem-1")
 
 See the [Settings Reference](/manual/settings/) for both settings.
 
+### Remote Embeddings
+
+Qdrant hybrid RAG embeds locally with FastEmbed by default. To send dense embeddings to an OpenAI-compatible endpoint instead (a hosted model, no local inference):
+
+```python
+AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
+AI_SDK_EMBEDDINGS_DIM = 4096
+```
+
+Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](/cli/)).
+
 ## Documents
 
 ### RagDocument

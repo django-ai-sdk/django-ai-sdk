@@ -10,7 +10,18 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from django_ai_sdk.rags.qdrant_hybrid import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
+from django_ai_sdk.rags.qdrant_hybrid import (
+    MultiQueryQdrantHybridRetriever,
+    QdrantBM25HybridRAG,
+    QdrantBM25HybridRAGConfig,
+    dense_document_embedder,
+    dense_text_embedder,
+)
+from haystack.components.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
+from haystack_integrations.components.embedders.fastembed import (
+    FastembedSparseTextEmbedder,
+    FastembedTextEmbedder,
+)
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.schemas import RagDocument
 from tenacity import stop_after_delay as tenacity_stop_after_delay, wait_none
@@ -40,6 +51,47 @@ class TestQdrantRAGInit:
         rag = QdrantBM25HybridRAG(documents=docs)
         assert len(rag.documents) == 1
         assert rag.documents[0].id == "1"
+
+
+class TestQdrantRAGRemoteEmbeddings:
+    """AI_SDK_EMBEDDINGS_MODEL moves dense embeddings to the OpenAI-compatible API."""
+
+    def test_local_fastembed_by_default(self):
+        config = QdrantBM25HybridRAGConfig()
+        assert not config.remote_embeddings
+        assert config.embedding_dim == 384
+        assert isinstance(
+            dense_text_embedder(config.dense_embedder_model, config.remote_embeddings),
+            FastembedTextEmbedder,
+        )
+
+    def test_setting_switches_dense_embedders_to_the_api(self, settings):
+        settings.OPENAI_API_KEY = "test"
+        settings.OPENAI_API_URL = "https://example.test/v1"
+        settings.AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
+        settings.AI_SDK_EMBEDDINGS_DIM = 4096
+        config = QdrantBM25HybridRAGConfig(query_prefix="Query: ")
+        assert config.embedding_dim == 4096
+
+        doc = dense_document_embedder(
+            config.dense_embedder_model, config.remote_embeddings, ["name"]
+        )
+        assert isinstance(doc, OpenAIDocumentEmbedder)
+        assert doc.model == "Qwen/Qwen3-Embedding-8B"
+        assert doc.api_base_url == "https://example.test/v1"
+        assert doc.meta_fields_to_embed == ["name"]
+        assert doc.prefix == ""
+
+        retriever = MultiQueryQdrantHybridRetriever(
+            document_store=None,
+            dense_embedder_model=config.dense_embedder_model,
+            remote_embeddings=config.remote_embeddings,
+            query_prefix=config.query_prefix,
+        )
+        with patch.object(FastembedSparseTextEmbedder, "warm_up"):
+            retriever.warm_up()
+        assert isinstance(retriever._dense_embedder, OpenAITextEmbedder)
+        assert retriever._dense_embedder.prefix == "Query: "
 
 
 class TestQdrantRAGWarmup:

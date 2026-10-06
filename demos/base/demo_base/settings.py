@@ -140,7 +140,13 @@ REST_FRAMEWORK = {
 
 OPENAI_API_KEY = env("OPENAI_API_KEY", default=None)
 OPENAI_API_URL = env("OPENAI_API_URL", default=None)
+
+# Default LLM model
 AI_SDK_DEFAULT_MODEL = env("AI_SDK_DEFAULT_MODEL", default="openai/gpt-oss-120b")
+
+# Dense RAG embeddings through the OpenAI-compatible API
+AI_SDK_EMBEDDINGS_MODEL = env("AI_SDK_EMBEDDINGS_MODEL", default=None)
+AI_SDK_EMBEDDINGS_DIM = env.int("AI_SDK_EMBEDDINGS_DIM", default=384)
 
 # Relative to the working directory: each demo keeps its own vector stores.
 AI_SDK_VECTOR_STORE_PATH = "stores/"
