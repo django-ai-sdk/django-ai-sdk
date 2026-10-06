@@ -37,6 +37,17 @@ class TestWithoutTools:
 
         assert result == Out(value="x")
 
+    async def test_a_structured_call_without_reply_text_gives_none(self):
+        class Out(BaseModel):
+            value: str
+
+        # E.g. the token limit spent on reasoning: a reply without text.
+        reply = HaystackChatMessage.from_assistant(None, meta={"finish_reason": "length"})
+        generator = MagicMock()
+        generator.run_async = AsyncMock(return_value={"replies": [reply]})
+
+        assert await Run(generator=generator).run([user_message()], response_format=Out) is None
+
 
 @pytest.mark.django_db(transaction=True)
 class TestAgentRunToolsDefault:

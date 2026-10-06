@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         MessageEndEvent,
         MessageStartEvent,
         ReasoningChunkEvent,
-        SourceEvent,
         StreamEvent,
         SuggestionEvent,
         TextChunkEvent,
@@ -595,15 +594,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     suggestion_event = cast("SuggestionEvent", event)
                     yield DataPart(
                         type="data-suggestions", data={"suggestions": suggestion_event.suggestions}
-                    )
-
-                case "source":
-                    src = cast("SourceEvent", event)
-                    yield SourceDocumentPart(
-                        source_id=src.source_id,
-                        media_type=src.media_type,
-                        title=src.title,
-                        provider_metadata={"citation": {"index": src.index}},
                     )
 
                 case "error":

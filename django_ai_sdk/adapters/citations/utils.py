@@ -2,52 +2,34 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .formatter import NumberedSource, SourceFormatter, SourcesFormatter, from_document
+from .registry import current_registry
+
 if TYPE_CHECKING:
-    from haystack.tools import ComponentTool
+    from collections.abc import Callable
 
-    from .formatter import CitationFormatter
-    from .registry import CitationRegistry
+    from haystack.tools import Tool
+
+    from .registry import SourceRegistry
 
 
-def attach_citations(
-    tool: ComponentTool,
-    formatter: CitationFormatter,
-    registry: CitationRegistry,
-    documents_key: str = "documents",
-) -> ComponentTool:
-    """Wire citations into a RAG tool so the LLM sees [1] [2] [3] markers.
+def collect_sources(
+    tool: Tool,
+    registry: SourceRegistry | None = None,
+    *,
+    formatter: SourceFormatter | None = None,
+    key: str | None = "documents",
+    to_source: Callable[[Any], NumberedSource] = from_document,
+) -> Tool:
+    """Register what `tool` returns as sources of this turn; the model reads them as text"""
+    formatter = formatter or SourcesFormatter()
 
-    How it works:
-    1. Tool retrieves raw documents (e.g., chunks from a PDF)
-    2. Handler converts them to dicts and runs through the formatter
-    3. Formatter returns: XML with <source id="1"> tags for the LLM,
-       plus a list of NumberedSource objects
-    4. Registry stores the NumberedSource objects for persistence/emission
-    5. LLM-visible string with [N] markers is returned to the tool
-    6. Raw documents are preserved unchanged (for downstream processors)
+    def _handler(items: Any) -> str:
+        found = [to_source(item) for item in items or []]
+        if not found:
+            return "No results."
+        turn = registry if registry is not None else current_registry.get()
+        return formatter.render(turn.add(found) if turn is not None else found)
 
-    The registry counter increments so multiple RAG calls in one turn get
-    non-overlapping indices: tool1 gets [1,2,3], tool2 gets [4,5].
-    """
-
-    def _handler(documents: list[Any] | None) -> str:
-        # Convert Haystack Document objects to plain dicts for the formatter.
-        as_dicts = []
-        for d in documents or []:
-            if hasattr(d, "meta"):
-                as_dicts.append(
-                    {
-                        "chunk_id": getattr(d, "id", None),
-                        "content": getattr(d, "content", "") or "",
-                        "meta": dict(getattr(d, "meta", {}) or {}),
-                    }
-                )
-            else:
-                as_dicts.append(dict(d))
-
-        text, sources = formatter.format(as_dicts, start_index=registry.next_index)
-        registry.add(sources)
-        return text
-
-    tool.outputs_to_string = {"source": documents_key, "handler": _handler}
+    tool.outputs_to_string = {"handler": _handler} | ({"source": key} if key else {})
     return tool
