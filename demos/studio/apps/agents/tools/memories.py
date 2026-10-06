@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from django.db.models import Q
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.memories.models import Entry
 from haystack.tools import Tool
@@ -36,8 +37,43 @@ def get_files(entries: QuerySet[Entry], thread_id: str) -> list[tuple[Entry, dic
     ]
 
 
-def list_memory_files(thread_id: str) -> list[dict]:
-    return [info for _, info in get_files(Entry.objects.for_rag(thread_id), thread_id)]
+def list_memory_files(thread_id: str, keywords: list[str] | None = None) -> list[dict] | dict:
+    """All files, or with ``keywords`` those whose name, summary, keywords or facts
+    contain every term (partial, case-insensitive), with their summary and keywords."""
+    entries = Entry.objects.for_rag(thread_id)
+    terms = [t.strip() for t in keywords or [] if t and t.strip()]
+    if not terms:
+        return [info for _, info in get_files(entries, thread_id)]
+    for term in terms:
+        # keywords and facts are JSON lists, matched as their text
+        entries = entries.filter(
+            Q(name__icontains=term)
+            | Q(data__summary__icontains=term)
+            | Q(data__keywords__icontains=term)
+            | Q(data__facts__icontains=term)
+        )
+    files = []
+    for entry, info in get_files(entries, thread_id):
+        extraction = entry.extraction
+        files.append(
+            info
+            | {
+                "summary": extraction.summary if extraction else "",
+                "keywords": extraction.keywords if extraction else [],
+            }
+        )
+    if not files:
+        return {
+            "error": f"No file matches all of {terms}. Retry with fewer or shorter keywords, "
+            "or search the knowledge bases with the search tools instead."
+        }
+    return {
+        "files": files,
+        # Read when picking the next step: a list alone gives nothing to cite
+        "next": "Search the knowledge bases with these files' keywords for the "
+        "details, and answer from both: this list for completeness, the passages "
+        "to cite.",
+    }
 
 
 def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
@@ -71,7 +107,7 @@ def list_memory_file(thread_id: str, filename: str) -> list[dict] | dict:
 
 def get_memory_files(thread_id: str = "", **kwargs: object) -> Tool:
     return Tool(
-        name="get_memory_files",
+        name="get_files",
         description=(
             "List files available in the current thread (knowledge base + "
             "attachments), newest first. Returns entry_id, filename, "
@@ -83,26 +119,42 @@ def get_memory_files(thread_id: str = "", **kwargs: object) -> Tool:
             "an entry_id needed by another tool (e.g. search_memory), or to "
             "check whether a specific file is present before deciding how to "
             "handle a request. "
+            "For 'all / which / list files about X' questions, pass short keyword "
+            "stems in `keywords` (e.g. ['lesson', '2026']) instead of searching: "
+            "it returns every file whose name, summary, keywords or facts contain "
+            "all of them, with its summary and keywords. Then search inside the "
+            "matched files for details. "
             "If the user asked about a file's content (what's in it, summarise "
             "it, etc.), listing alone does not answer that: call "
-            "get_memory_file with its name, then search that file's memory "
-            "using what get_memory_file found (keywords, facts, entities) as "
+            "get_file with its name, then search that file's memory "
+            "using what get_file found (keywords, facts, entities) as "
             "the query. Only stop at the listing "
             "itself when the user asked to enumerate files, not about their "
             "content."
         ),
-        parameters={"type": "object", "properties": {}, "required": []},
-        function=lambda: list_memory_files(thread_id),
+        parameters={
+            "type": "object",
+            "properties": {
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional. Short stems a file must all contain "
+                    "(partial, case-insensitive). Omit to list every file.",
+                }
+            },
+            "required": [],
+        },
+        function=lambda keywords=None, **_: list_memory_files(thread_id, keywords),
     )
 
 
 def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
     return Tool(
-        name="get_memory_file",
+        name="get_file",
         description=(
             "Look up a file in the current thread by name and return what it is "
             "about: summary, keywords, facts, entities and a content preview, "
-            "plus the same fields as get_memory_files. Use this when the user "
+            "plus the same fields as get_files. Use this when the user "
             "names a file ('what is in xxx.pdf?'). Not for topics or keywords: "
             "to find what documents say, use the search "
             "tools. After the lookup, search the file's memory "
