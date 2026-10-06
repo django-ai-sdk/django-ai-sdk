@@ -298,3 +298,38 @@ async def test_the_stream_no_longer_rewrites_the_answer_text():
     events = [e async for e in stream.get_events(queue, None)]
     assert "".join(e.content for e in events) == 'Optional [1] <source id="2" /> arr[2]'
 
+
+@pytest.fixture
+def owner(django_user_model):
+    return django_user_model.objects.create(email="owner@example.com")
+
+
+@pytest.fixture
+def stranger(django_user_model):
+    return django_user_model.objects.create(email="stranger@example.com")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("url", ["/api/threads/{t}/sources/", "/drf/threads/{t}/sources/"])
+def test_the_thread_lists_each_source_once(client, owner, stranger, url):
+    from django_ai_sdk.artifacts.models import Artifact
+    from django_ai_sdk.conversation.models import Thread
+
+    thread = Thread.objects.create(user=owner)
+    shared = {"key": "doc:d1:c1", "title": "XAF", "content": "POSTAL ADDRESS 0..*, F"}
+    for cited in (False, True):  # two turns found the same chunk; the second cited it
+        Artifact.objects.create(
+            thread=thread,
+            schema_name="CitationsArtifact",
+            artifact_type="citations",
+            data={"citations": [], "sources": [shared | {"cited": cited}]},
+        )
+
+    client.force_login(owner)
+    response = client.get(url.format(t=thread.id))
+    assert response.status_code == 200
+    (source,) = response.json()["sources"]
+    assert (source["key"], source["cited"]) == ("doc:d1:c1", True)
+
+    client.force_login(stranger)
+    assert client.get(url.format(t=thread.id)).status_code == 403
