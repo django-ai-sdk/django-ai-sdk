@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,7 @@ class Command(BaseCommand):
         agent = await self._agent(agent_name)
         name = agent.__class__.__name__
         self.stdout.write(f"Reindexing {len(memories)} memories with {name}'s RAG config...")
+        self.stdout.write(f"Dense embeddings: {self._embeddings()}")
         failed = 0
         for memory_id, memory_name in memories:
             try:
@@ -55,6 +57,15 @@ class Command(BaseCommand):
         if failed:
             raise CommandError(f"{failed} of {len(memories)} memories failed")
         self.stdout.write(self.style.SUCCESS("Reindex complete."))
+
+    @staticmethod
+    def _embeddings() -> str:
+        # check if remote embeddings are used
+        if model := resolve_setting("AI_SDK_EMBEDDINGS_MODEL"):
+            dim = resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384)
+            url = resolve_setting("OPENAI_API_URL") or "OpenAI"
+            return f"remote, {model} ({dim} dims) via {url}"
+        return "local FastEmbed model (384 dims)"
 
     async def _agent(self, name: str | None) -> Agent:
         from django_ai_sdk.agents.registry import registry

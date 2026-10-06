@@ -67,6 +67,19 @@ class TestReindexMemories:
         }
         assert "Empty" in out and "skipped" in out and "Reindex complete" in out
 
+    def test_says_where_dense_embeddings_are_made(self, settings):
+        Memory.objects.create(name="Test Me")
+
+        assert "Dense embeddings: local FastEmbed" in run(FakeAgent())
+
+        settings.AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
+        settings.AI_SDK_EMBEDDINGS_DIM = 4096
+        settings.OPENAI_API_URL = "https://api.inference.nebul.io/v1"
+        assert (
+            "Dense embeddings: remote, Qwen/Qwen3-Embedding-8B (4096 dims) via "
+            "https://api.inference.nebul.io/v1"
+        ) in run(FakeAgent())
+
     def test_one_memory(self):
         a = Memory.objects.create(name="Test Me")
         Memory.objects.create(name="HR")
