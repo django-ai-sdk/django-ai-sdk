@@ -97,6 +97,8 @@ Ready-made memory endpoints ship in the contrib layers: `get_memories_router()` 
 | `GET /memories/{id}/documents/` | List documents |
 | `GET /memories/{id}/documents/{doc_id}/` · `DELETE` | Get · delete document |
 | `GET /memories/{id}/documents/{doc_id}/status/` | Processing status (`DocumentStatusOut`) |
+| `POST /memories/{id}/documents/{doc_id}/cancel/` | Cancel a pending or processing document |
+| `GET /memories/tasks/{task_id}/status/` | Processing status by task id |
 | `POST /memories/{id}/link/{thread_id}/` · `DELETE` | Link · unlink thread |
 | `GET /memories/thread/{thread_id}/` | List thread memories |
 | `POST /memories/thread/{thread_id}/bulk/` | Bulk-connect memories |

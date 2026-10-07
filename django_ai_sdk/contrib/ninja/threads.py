@@ -87,17 +87,21 @@ async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: C
 
 @routes.patch("/threads/{thread_id}/", response=Success)
 async def patch_thread(request: HttpRequest, thread_id: str, payload: PatchThreadPayload) -> Any:
-    """Switch the thread to another agent, moving the linked memories along."""
-    await AgentService.get(payload.agent_id)
+    """Rename the thread and/or switch it to another agent, moving the linked memories along."""
+    if payload.agent_id:
+        await AgentService.get(payload.agent_id)
     thread = await ThreadService.get_thread(thread_id, user=request.user)
     if thread is None:
         raise NotFound("Thread not found")
-    if thread.agent_id:
-        await MemoryService.unlink_memories(thread.agent_id, thread_id, user=request.user)
-    await ThreadService.update_thread(
-        thread_id, metadata={"agent_id": payload.agent_id}, user=request.user
-    )
-    await MemoryService.link_memories(payload.agent_id, thread_id, user=request.user)
+    if payload.agent_id:
+        if thread.agent_id:
+            await MemoryService.unlink_memories(thread.agent_id, thread_id, user=request.user)
+        await ThreadService.update_thread(
+            thread_id, metadata={"agent_id": payload.agent_id}, user=request.user
+        )
+        await MemoryService.link_memories(payload.agent_id, thread_id, user=request.user)
+    if payload.title:
+        await ThreadService.update_thread(thread_id, title=payload.title, user=request.user)
     return Success(success=True)
 
 

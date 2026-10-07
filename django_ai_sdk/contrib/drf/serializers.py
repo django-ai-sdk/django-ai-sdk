@@ -65,8 +65,9 @@ class RateMessageSerializer(serializers.Serializer):
     feedback = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-class AgentSwitchSerializer(serializers.Serializer):
-    agent_id = serializers.CharField()
+class ThreadUpdateSerializer(serializers.Serializer):
+    agent_id = serializers.CharField(required=False)
+    title = serializers.CharField(required=False)
 
 
 class MemorySerializer(serializers.Serializer):
@@ -309,11 +310,19 @@ class AgentMemberSerializer(serializers.Serializer):
 
     user_id = serializers.CharField()
     email = serializers.SerializerMethodField()
+    first_name = serializers.SerializerMethodField()
+    last_name = serializers.SerializerMethodField()
     can_manage = serializers.BooleanField()
     created_at = serializers.DateTimeField()
 
     def get_email(self, obj: Any) -> str:
         return getattr(obj.user, "email", "") or ""
+
+    def get_first_name(self, obj: Any) -> str:
+        return getattr(obj.user, "first_name", "") or ""
+
+    def get_last_name(self, obj: Any) -> str:
+        return getattr(obj.user, "last_name", "") or ""
 
 
 class AgentGroupMemberSerializer(serializers.Serializer):
@@ -383,6 +392,9 @@ class ThreadMemorySerializer(serializers.Serializer):
 
 class MemoryMemberSerializer(serializers.Serializer):
     user_id = serializers.CharField()
+    email = serializers.CharField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
     can_manage = serializers.BooleanField()
     created_at = serializers.CharField()
 

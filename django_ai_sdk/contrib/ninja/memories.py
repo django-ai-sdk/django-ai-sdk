@@ -116,6 +116,16 @@ async def get_document_status(request: HttpRequest, memory_id: str, doc_id: str)
     return await MemoryService.get_document_status(doc_id, user=request.user)
 
 
+@routes.post("/{memory_id}/documents/{doc_id}/cancel", response=DocumentStatusOut)
+async def cancel_document(request: HttpRequest, memory_id: str, doc_id: str) -> Any:
+    return await MemoryService.cancel_document(doc_id, user=request.user)
+
+
+@routes.get("/tasks/{task_id}/status", response=DocumentStatusOut)
+async def get_task_status(request: HttpRequest, task_id: str) -> Any:
+    return await MemoryService.get_task_status(task_id, user=request.user)
+
+
 @routes.get("/{memory_id}/documents", response=list[DocumentOut])
 async def list_documents(
     request: HttpRequest,

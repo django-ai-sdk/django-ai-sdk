@@ -158,11 +158,13 @@ class AgentSettingsOut(Schema):
     active: bool
     created_at: datetime
     updated_at: datetime
+    permissions: ObjectPermissions = ObjectPermissions()
 
 
 class RuntimeAgentBaseItem(Schema):
     path: str
     name: str
+    base_system_prompt: str | None = None
 
 
 class RuntimeAgentToolItem(Schema):
