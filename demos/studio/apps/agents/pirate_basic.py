@@ -38,6 +38,11 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
     from django.db.models import QuerySet
 
+SEARCH_IS_NOT_A_LIST = (
+    " Returns only the most relevant passages, never a complete list: for "
+    "'all / list / which / how many' questions call get_files with keywords first."
+)
+
 
 @auto_register
 class PirateBasicAgent(FileLookupMixin, Agent):
@@ -65,6 +70,12 @@ class PirateBasicAgent(FileLookupMixin, Agent):
           search tool or a knowledge-base search tool, and both are available, call
           both before answering — search as broadly as the available tools allow,
           don't assume the answer lives in only one place.
+        - For "all / which / list / how many X" questions, ALWAYS call get_files with
+          keywords first: it lists every matching file, search returns only a few
+          passages. E.g. "List all incidents in 2025" → get_files(keywords=["incident",
+          "2025"]). Then search the knowledge bases with those files' keywords for the
+          details, and answer from both: the file list for completeness, the passages
+          to cite.
     """)
 
     protocol = VercelProtocolHandler
@@ -192,6 +203,10 @@ class PirateBasicAgent(FileLookupMixin, Agent):
                 citation_formatter=citation_formatter,
                 user=user,
             )
+            if any(tool.name == "get_files" for tool in tools):
+                # Read where the tool is picked: search alone can't answer "all X"
+                for rag_tool in rag_tools:
+                    rag_tool.description += SEARCH_IS_NOT_A_LIST
             tools.extend(rag_tools)
 
         # Build tool agent with all tools

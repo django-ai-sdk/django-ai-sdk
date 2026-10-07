@@ -7,13 +7,20 @@ from django.dispatch import receiver
 
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.memories.models import Entry
+from django_ai_sdk.memories.models import Entry, Memory
 from django_ai_sdk.rags.utils import queryset_to_rag_documents
 
 if TYPE_CHECKING:
     from django.db.models.base import Model
 
 logger = get_logger(__name__)
+
+
+async def forget_index_signature(memory_id: str) -> None:
+    rows = Memory.objects.filter(id=memory_id)
+    metadata = await rows.values_list("metadata", flat=True).afirst()
+    if metadata and metadata.get("sdk", {}).pop("rag", None) is not None:
+        await rows.aupdate(metadata=metadata)
 
 
 @receiver(post_save, sender=Entry)
@@ -28,9 +35,17 @@ async def on_entry_saved(
         queryset = Entry.objects.filter(id=instance.id)
         documents = await queryset_to_rag_documents(queryset)
 
-        if documents:
-            await agent.rag_provider.add_documents(agent, memory_id, documents)
+        if not documents:
+            continue
+        try:
+            added = await agent.rag_provider.add_documents(agent, memory_id, documents)
+        except Exception:
+            await forget_index_signature(memory_id)
+            raise
+        if added:
             logger.info(f"Added/updated document in RAG for {memory_id}")
+        else:  # no index in this process to write to
+            await forget_index_signature(memory_id)
 
 
 @receiver(post_delete, sender=Entry)
@@ -40,5 +55,14 @@ async def on_entry_deleted(sender: type[Model], instance: Entry, **kwargs: objec
     logger.info(f"Entry deleted for memory_id={memory_id}")
 
     for agent in await AgentService.get_rag_agents():
-        await agent.rag_provider.remove_documents(agent, memory_id, [str(instance.id)])
-        logger.info(f"Removed document from RAG for {memory_id}")
+        try:
+            removed = await agent.rag_provider.remove_documents(
+                agent, memory_id, [str(instance.id)]
+            )
+        except Exception:
+            await forget_index_signature(memory_id)
+            raise
+        if removed:
+            logger.info(f"Removed document from RAG for {memory_id}")
+        else:
+            await forget_index_signature(memory_id)

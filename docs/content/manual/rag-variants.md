@@ -86,13 +86,15 @@ Base config for all variants:
 | `min_score` | `None` | Drop documents below this relevance score (`None` disables) |
 | `n_expansions` | `4` | Number of query variations to generate (`1` = no expansion) |
 | `expander_model` | `"gpt-4o-mini"` | LLM used for query expansion |
-| `expander_prompt` | built-in | Prompt template for query expansion |
+| `expander_prompt` | built-in | Prompt template for query expansion; `{{context}}` gets what the searched documents are about |
 | `chunk_size` | `100` | Chunk size for document splitting |
 | `chunk_overlap` | `50` | Chunk overlap for document splitting |
 
 ### Query Expansion
 
 Expansion generates several phrasings of the user's query to improve recall. The first query is always the original, verbatim; `n_expansions = 1` disables expansion. Expansion forces **same-language** queries so results match the user's language.
+
+The expander is told what the documents are about (`{{context}}`: their most common keywords and some file names, see `expander_context`). Without it, it guesses: "SABRE" in a set of CVs became the airline booking system.
 
 ```
 User Query: "What is the pirate code?"
@@ -103,8 +105,10 @@ Query Expansion (via expander_model)
 ├─ "Pirate code of conduct"
 └─ "Pirate laws and regulations"
            ↓
-Search All Variations → Merge & Deduplicate → Return top-k
+Search All Variations (4 × top_k candidates each) → Fuse ranks → Return top-k
 ```
+
+**Fusing.** The results are merged by reciprocal rank fusion (`fuse_and_rank`): a document several queries find ranks high, whatever each query scored it (scores of different queries don't compare). One more ranking counts the words of the user's own query found verbatim in a candidate, weighing as much as all queries together, so an exact term the embeddings don't know (an acronym, a code, a name) lifts the document that contains it. Words in most candidates ("the", "is") don't count. Every search logs one line: the queries, hits per query, the exact terms and what was kept (`RAG search: ...`); one query means the expander fell back to the original.
 
 ### Persistent Storage
 
@@ -117,6 +121,17 @@ config = QdrantStorageConfig.from_settings(memory_id="mem-1")
 ```
 
 See the [Settings Reference](/manual/settings/) for both settings.
+
+### Remote Embeddings
+
+Qdrant hybrid RAG embeds locally with FastEmbed by default. To send dense embeddings to an OpenAI-compatible endpoint instead (a hosted model, no local inference):
+
+```python
+AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
+AI_SDK_EMBEDDINGS_DIM = 4096
+```
+
+Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](/cli/)).
 
 ## Documents
 

@@ -660,10 +660,12 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             ):
                 spec.name = "search_uploaded_documents"
                 spec.description = (
-                    f"Search documents uploaded to this conversation "
-                    f"{spec.doc_count or 0} available. Use this whenever the "
-                    f"user refers to 'this document', 'the file I just uploaded', "
-                    f"or asks about content from an attachment they added to the chat."
+                    f"Search the files the user attached to this conversation "
+                    f"({spec.doc_count or 0} available). Search this first, before any "
+                    f"other knowledge base, whenever the question may concern what they "
+                    f"attached. That includes follow-up questions about a topic already "
+                    f"raised in this chat, even when they do not say 'this document' or "
+                    f"'the file I just uploaded'."
                 )
 
             if spec.name in used_names:

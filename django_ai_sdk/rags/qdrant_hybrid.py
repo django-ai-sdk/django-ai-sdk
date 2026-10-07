@@ -6,8 +6,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from haystack import Pipeline, component
+from haystack.components.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from haystack.components.preprocessors import RecursiveDocumentSplitter
-from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.dataclasses import Document as HaystackDocument
@@ -29,17 +29,50 @@ from tenacity import (
     wait_exponential,
 )
 
-from django_ai_sdk.generators import openai_chat
+from django_ai_sdk.generators.base import build_kwargs, resolve_secret
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
-from django_ai_sdk.rags.components import MultiQueryDeduplicationMixin
+from django_ai_sdk.rags.components import CANDIDATES_PER_QUERY, MultiQueryDeduplicationMixin
 from django_ai_sdk.rags.config import QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django_ai_sdk.rags.schemas import RagDocument
 
 logger = get_logger(__name__)
+
+DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
+    return build_kwargs(
+        {
+            "api_key": resolve_secret("OPENAI_API_KEY"),
+            "api_base_url": resolve_setting("OPENAI_API_URL"),
+        },
+        kwargs,
+    )
+
+
+def dense_document_embedder(
+    model: str, remote: bool, meta_fields_to_embed: list[str]
+) -> FastembedDocumentEmbedder | OpenAIDocumentEmbedder:
+    """Embeds documents locally with FastEmbed, or through an OpenAI-compatible API."""
+    if remote:
+        return OpenAIDocumentEmbedder(
+            **_openai_kwargs(model=model, meta_fields_to_embed=meta_fields_to_embed)
+        )
+    return FastembedDocumentEmbedder(model=model, meta_fields_to_embed=meta_fields_to_embed)
+
+
+def dense_text_embedder(
+    model: str, remote: bool, prefix: str = ""
+) -> FastembedTextEmbedder | OpenAITextEmbedder:
+    """Embeds a query locally with FastEmbed, or through an OpenAI-compatible API."""
+    if remote:
+        return OpenAITextEmbedder(**_openai_kwargs(model=model, prefix=prefix))
+    return FastembedTextEmbedder(model=model, prefix=prefix)
 
 
 class QdrantBM25HybridRAGConfig(RAGConfig):
@@ -49,9 +82,16 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
         default="Qdrant/bm42-all-minilm-l6-v2-attentions",
     )
     dense_embedder_model: str = Field(
-        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        default_factory=lambda: resolve_setting("AI_SDK_EMBEDDINGS_MODEL") or DEFAULT_DENSE_MODEL,
     )
-    embedding_dim: int = Field(default=384, ge=1)
+    remote_embeddings: bool = Field(
+        default_factory=lambda: bool(resolve_setting("AI_SDK_EMBEDDINGS_MODEL")),
+    )
+    embedding_dim: int = Field(
+        default_factory=lambda: resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384), ge=1
+    )
+    # Prepended to queries only, for instruction-tuned models such as Qwen3-Embedding.
+    query_prefix: str = ""
     chunk_size: int = Field(default=500, ge=1)
     chunk_overlap: int = Field(default=150, ge=0)
     meta_fields_to_embed: list[str] = Field(default=["title"])
@@ -140,6 +180,33 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 embedding_dim=self.config.embedding_dim,
             )
 
+    async def embed_missing(self) -> tuple[int, int]:
+        """Embed the chunks stored without a dense vector"""
+        store = self._cached_document_store or await asyncio.to_thread(self._create_document_store)
+        try:
+            return await asyncio.to_thread(self._embed_missing, store)
+        finally:
+            if store is not self._cached_document_store:
+                store.close()  # releases a local store's lock
+
+    def _embed_missing(self, store: QdrantDocumentStore) -> tuple[int, int]:
+        # reads every chunk to find the few without a vector.
+        missing = [doc for doc in store.filter_documents() if doc.embedding is None]
+        if not missing:
+            return 0, 0
+        embedder = dense_document_embedder(
+            self.config.dense_embedder_model,
+            self.config.remote_embeddings,
+            self.config.meta_fields_to_embed,
+        )
+        embedder.warm_up()
+        embedded = [
+            doc for doc in embedder.run(documents=missing)["documents"] if doc.embedding is not None
+        ]
+        # Same ids, sparse vectors kept, fills in just the dense vector.
+        store.write_documents(embedded, policy=DuplicatePolicy.OVERWRITE)
+        return len(embedded), len(missing) - len(embedded)
+
     def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
         try:
@@ -183,9 +250,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
         indexing_pipeline.add_component(
             "dense_doc_embedder",
-            FastembedDocumentEmbedder(
-                model=self.config.dense_embedder_model,
-                meta_fields_to_embed=self.config.meta_fields_to_embed,
+            dense_document_embedder(
+                self.config.dense_embedder_model,
+                self.config.remote_embeddings,
+                self.config.meta_fields_to_embed,
             ),
         )
         indexing_pipeline.add_component(
@@ -314,13 +382,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
-        expander_generator = openai_chat(model=self.config.expander_model)
-
-        query_expander = QueryExpander(
-            chat_generator=expander_generator,
-            n_expansions=self.config.n_expansions,
-            prompt_template=self.config.expander_prompt,
-        )
+        query_expander = self.get_query_expander()
 
         query_pipeline = Pipeline()
         query_pipeline.add_component("expander", query_expander)
@@ -332,6 +394,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 min_score=self.config.min_score,
                 sparse_embedder_model=self.config.sparse_embedder_model,
                 dense_embedder_model=self.config.dense_embedder_model,
+                remote_embeddings=self.config.remote_embeddings,
+                query_prefix=self.config.query_prefix,
             ),
         )
 
@@ -384,7 +448,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         rag_super = SuperComponent(
             pipeline=pipeline,
-            input_mapping={"query": ["expander.query"]},
+            input_mapping={"query": ["expander.query", "retriever.query"]},
             output_mapping={"retriever.documents": "documents"},
         )
 
@@ -446,13 +510,17 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         top_k: int = 3,
         min_score: float | None = None,
         sparse_embedder_model: str = "Qdrant/bm42-all-minilm-l6-v2-attentions",
-        dense_embedder_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        dense_embedder_model: str = DEFAULT_DENSE_MODEL,
+        remote_embeddings: bool = False,
+        query_prefix: str = "",
     ) -> None:
         self.document_store = document_store
         self.top_k = top_k
         self.min_score = min_score
         self.sparse_embedder_model = sparse_embedder_model
         self.dense_embedder_model = dense_embedder_model
+        self.remote_embeddings = remote_embeddings
+        self.query_prefix = query_prefix
         self._sparse_embedder: Any | None = None
         self._dense_embedder: Any | None = None
 
@@ -464,14 +532,14 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         )
         self._sparse_embedder.warm_up()
 
-        self._dense_embedder = FastembedTextEmbedder(
-            model=self.dense_embedder_model,
+        self._dense_embedder = dense_text_embedder(
+            self.dense_embedder_model, self.remote_embeddings, self.query_prefix
         )
         self._dense_embedder.warm_up()
 
     @component.output_types(documents=list[HaystackDocument])
     def run(
-        self, queries: str | list[str], top_k: int | None = None
+        self, queries: str | list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         """
         Run hybrid search with multiple queries.
@@ -479,6 +547,7 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         Args:
             queries: Single query string or list of query strings
             top_k: Maximum documents to return
+            query: The user's query before expansion (its words count verbatim)
 
         Returns:
             Dict with deduplicated documents sorted by score
@@ -497,9 +566,9 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
 
         # Run hybrid search for all queries
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            sparse_result = self._sparse_embedder.run(text=query)
-            dense_result = self._dense_embedder.run(text=query)
+        for q in queries:
+            sparse_result = self._sparse_embedder.run(text=q)
+            dense_result = self._dense_embedder.run(text=q)
             retriever = QdrantHybridRetriever(
                 document_store=self.document_store,
                 score_threshold=self.min_score,
@@ -507,17 +576,16 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
             result = retriever.run(
                 query_sparse_embedding=sparse_result["sparse_embedding"],
                 query_embedding=dense_result["embedding"],
-                top_k=k,
+                top_k=k * CANDIDATES_PER_QUERY,
             )
             results.append(result)
 
-        # Deduplicate and rank using mixin
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}
 
     @component.output_types(documents=list[HaystackDocument])
     async def run_async(
-        self, queries: str | list[str], top_k: int | None = None
+        self, queries: str | list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         if isinstance(queries, str):
             queries = [queries]
@@ -527,9 +595,9 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
         if self._sparse_embedder is None or self._dense_embedder is None:
             raise ValueError("Embedders not initialized after warm_up()")
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=query)
-            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=query)
+        for q in queries:
+            sparse_result = await asyncio.to_thread(self._sparse_embedder.run, text=q)
+            dense_result = await asyncio.to_thread(self._dense_embedder.run, text=q)
             retriever = QdrantHybridRetriever(
                 document_store=self.document_store,
                 score_threshold=self.min_score,
@@ -538,8 +606,8 @@ class MultiQueryQdrantHybridRetriever(MultiQueryDeduplicationMixin):
                 retriever.run,
                 query_sparse_embedding=sparse_result["sparse_embedding"],
                 query_embedding=dense_result["embedding"],
-                top_k=k,
+                top_k=k * CANDIDATES_PER_QUERY,
             )
             results.append(result)
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}
