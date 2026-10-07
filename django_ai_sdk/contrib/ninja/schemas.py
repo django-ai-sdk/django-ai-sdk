@@ -104,6 +104,7 @@ class AgentItem(Schema):
     model: str | None = None
     file_upload: bool = False
     rag: bool = False
+    vision: bool = False
 
 
 class AgentsListResponse(Schema):
@@ -119,6 +120,7 @@ class AgentInfoResponse(Schema):
     instructions: str | None = None
     file_upload: bool = False
     rag: bool = False
+    vision: bool = False
     permissions: ObjectPermissions = ObjectPermissions()
 
 
@@ -155,6 +157,8 @@ class AgentSettingsOut(Schema):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    vision: bool
+    required_tools: list[str]
     active: bool
     created_at: datetime
     updated_at: datetime

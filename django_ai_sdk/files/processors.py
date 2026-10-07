@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import IO, Any, ClassVar, Protocol
+from typing import IO, TYPE_CHECKING, Any, ClassVar, Protocol
 
 import aiofiles
 import puremagic
+from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import File
+from django.utils.module_loading import import_string
 
+from django_ai_sdk.common import prompt
 from django_ai_sdk.utils import resolve_setting
+
+if TYPE_CHECKING:
+    from django_ai_sdk.agents.base import Agent
 
 type FileSource = str | Path | File | IO[bytes]
 
@@ -334,3 +341,85 @@ class AnyDocFileProcessor(BaseFileProcessor):
             logger.info("anydoc could not convert %s, passing on", name, exc_info=True)
             return None
         return text if text.strip() else None
+
+
+def get_vision_agent() -> Agent | None:
+    """An instance of `AI_SDK_VISION_AGENT` (dotted path to an Agent subclass), or None.
+
+    The agent answers every image question: captions for uploads and `ask_image`.
+    Make it `hidden = True` so it isn't listed or chattable.
+    """
+    from django_ai_sdk.agents.base import Agent
+
+    path = resolve_setting("AI_SDK_VISION_AGENT", None)
+    if not path:
+        return None
+    agent_class = import_string(path)
+    if not (isinstance(agent_class, type) and issubclass(agent_class, Agent)):
+        raise ImproperlyConfigured(f"AI_SDK_VISION_AGENT must name an Agent subclass: {path!r}")
+    return agent_class()
+
+
+def has_vision_support() -> bool:
+    """Whether images can be described and asked about: a vision agent is set."""
+    return bool(resolve_setting("AI_SDK_VISION_AGENT", None))
+
+
+async def describe_image(data: bytes, mime_type: str, prompt: str) -> str | None:
+    """Ask the `AI_SDK_VISION_AGENT` about an image; its text reply, None without one.
+
+    The agent runs with the image attached to a user message whose text is
+    `prompt`; its model, instructions and generator are yours to choose.
+    """
+    from django_ai_sdk.common import Attachment, ChatMessage
+
+    agent = get_vision_agent()
+    if agent is None:
+        return None
+    image = Attachment(document_id="", media_type=mime_type, data=base64.b64encode(data).decode())
+    reply = await agent.run(
+        [ChatMessage(role="user", content=prompt, attachments=[image])],
+        response_format=None,
+    )
+    return reply if isinstance(reply, str) else None
+
+
+class ImageCaptionProcessor(BaseFileProcessor):
+    """Turn an uploaded image into searchable text via a vision model.
+
+    Returns a description plus a verbatim transcription of any visible text, so
+    a photo or screenshot becomes retrievable like any other document, and
+    agents whose model can't see images still know what it shows. Asks the
+    `AI_SDK_VISION_AGENT` (see `describe_image`); without one it takes no files.
+    """
+
+    ALLOWED_MIME_TYPES: ClassVar[tuple[str, ...]] = (
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    )
+    step: ClassVar[str | None] = "captioning"
+
+    # What the vision agent is asked for each uploaded image.
+    caption_prompt: ClassVar[str] = prompt("""\
+        Describe this image in detail for later search and retrieval: the main
+        subject, setting, notable objects, people, colours, and any diagrams or
+        charts. Then, under a line 'Transcription:', transcribe ALL visible text
+        in the image verbatim. If the image contains no text, write
+        'Transcription: (none)'.
+    """)
+
+    async def is_valid(self, file: FileSource) -> bool:
+        return has_vision_support() and await super().is_valid(file)
+
+    async def run(self, file: FileSource) -> str | None:
+        data = await read_aio_bytes(file)
+        if not data:
+            logger.warning("ImageCaptionProcessor: could not read image bytes")
+            return None
+        mime_type = await get_mime_type(file) or "image/jpeg"
+        caption = await describe_image(data, mime_type, self.caption_prompt)
+        if not caption:
+            logger.warning("ImageCaptionProcessor: vision model returned no reply")
+        return caption

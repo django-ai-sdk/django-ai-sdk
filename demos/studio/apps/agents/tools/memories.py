@@ -9,6 +9,7 @@ from haystack.tools import Tool
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
+    from django_ai_sdk.common import ChatMessage
 
 # Enough to show what a file is about; search the memory for the rest.
 PREVIEW_CHARS = 2000
@@ -174,3 +175,14 @@ def get_memory_file(thread_id: str = "", **kwargs: object) -> Tool:
         },
         function=lambda filename: list_memory_file(thread_id, filename),
     )
+
+
+class FileLookupMixin:
+    """A turn with an attached file looks it up with get_memory_file first."""
+
+    def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
+        # Images are covered by their pixels or caption; ask_image stays optional.
+        last = next((m for m in reversed(messages) if m.role == "user"), None)
+        if last and any(not a.media_type.startswith("image/") for a in last.attachments):
+            return ["get_memory_file"]
+        return []

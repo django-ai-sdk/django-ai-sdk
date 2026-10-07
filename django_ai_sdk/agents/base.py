@@ -13,10 +13,14 @@ from django_ai_sdk.adapters.citations import (
     CitationRegistry,
     DefaultCitationFormatter,
 )
+from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
-from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
+from django_ai_sdk.conversation.utils import (
+    generate_thread_title,
+    get_title_sanity_limit,
+)
 from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
@@ -79,7 +83,7 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
         return tool
 
 
-class Agent(ABC, AgentInfoMixin):
+class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     """
     Base class for AI agents in the Django AI SDK.
 
@@ -199,6 +203,9 @@ class Agent(ABC, AgentInfoMixin):
 
     # Enable file upload UI for this agent's threads.
     file_upload: bool = False
+
+    # Tools the agent must call before it may finish a run.
+    required_tools: list[str] = []
 
     # Declare one FilePipeline per supported file type.
     # First pipeline whose processor accepts the uploaded file is used.
@@ -427,7 +434,10 @@ class Agent(ABC, AgentInfoMixin):
         Uses the `llm` factory if set, otherwise OpenAI's Responses API. Keyword
         arguments override `llm_kwargs`, and the agent always supplies the model.
         """
-        from django_ai_sdk.generators import merge_generation_kwargs, openai_responses_chat
+        from django_ai_sdk.generators import (
+            merge_generation_kwargs,
+            openai_responses_chat,
+        )
 
         factory = self.llm or openai_responses_chat
         if not callable(factory):
@@ -447,6 +457,10 @@ class Agent(ABC, AgentInfoMixin):
         if not self.suggestion_generator:
             return None
         return self.suggestion_generator(agent=self)
+
+    def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
+        """Tools this run must call on top of `required_tools`, chosen per run"""
+        return []
 
     async def get_tools(
         self,
@@ -479,6 +493,9 @@ class Agent(ABC, AgentInfoMixin):
 
         # subagent tools
         result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
+
+        # info about uploaded files
+        result.extend(self.get_attachment_tools(thread_id))
 
         return result
 
@@ -916,7 +933,8 @@ class Agent(ABC, AgentInfoMixin):
 
         if not storage:
             raise AiSdkError(
-                f"No storage adapter found for thread: {thread_id}", ErrorCode.CONFIGURATION_ERROR
+                f"No storage adapter found for thread: {thread_id}",
+                ErrorCode.CONFIGURATION_ERROR,
             )
 
         # Get thread metadata
@@ -927,12 +945,21 @@ class Agent(ABC, AgentInfoMixin):
         # The agent chain gates the agent, not whose thread this is.
         await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread_info)
         await check_object_permissions(
-            user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
+            user,
+            Operation.VIEW_THREAD,
+            thread_info,
+            get_agent_permissions(self),
+            agent=self,
         )
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
         logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
+
+        if any(m.attachments for m in chat_messages):
+            from django_ai_sdk.memories.services import MemoryService
+
+            await MemoryService.resolve_attachments(thread_id, chat_messages, user=user, agent=self)
 
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
@@ -999,6 +1026,23 @@ class Agent(ABC, AgentInfoMixin):
                 f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
             )
 
+        # Attachments are client-supplied: validate them against the thread's
+        # files before they are stored or reach the model.
+        if any(m.attachments for m in messages):
+            if thread:
+                from django_ai_sdk.memories.services import MemoryService
+
+                await MemoryService.resolve_attachments(
+                    str(thread.id),
+                    messages,
+                    user=user,
+                    agent=self,
+                    inline_images=self.has_vision(),
+                )
+            else:
+                for message in messages:
+                    message.attachments = []
+
         # Get storage adapter for thread
         storage_adapter = await self.get_storage_adapter(thread_id)
 
@@ -1039,10 +1083,15 @@ class Agent(ABC, AgentInfoMixin):
             suggestion_generator = self.get_suggestion_generator()
             if suggestion_generator:
                 adapter.suggestion_generator = suggestion_generator
+            if required_tools := self.get_run_required_tools(messages):
+                adapter.hook_context = {"required_tools": required_tools}
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 
         logger.debug("Initiating stream response")
         return await stream_response(
-            build_adapter, messages, self.protocol_handler, storage_adapter=storage_adapter
+            build_adapter,
+            messages,
+            self.protocol_handler,
+            storage_adapter=storage_adapter,
         )

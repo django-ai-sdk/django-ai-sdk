@@ -29,11 +29,13 @@ from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.storage import services as thread_services
 from django_ai_sdk.tracing import services as trace_services
 from django_ai_sdk.views import permissions as object_permissions
+from django_ai_sdk.views.files import thread_file_response
 from django_ai_sdk.views.schemas import Message
 from django_ai_sdk.workflows import services as workflow_services
 from django_ai_sdk.workflows.services import WorkflowService
 
 if TYPE_CHECKING:
+    from django.http import FileResponse
     from rest_framework.request import Request
 
 logger = get_logger(__name__)
@@ -224,6 +226,11 @@ class ThreadViewSet(ApiViewSet):
     def delete_file(self, request: Request, thread_id: str, doc_id: str) -> Response:
         memory_services.delete_thread_file(thread_id, doc_id, user=request.user)
         return Response(status=NO_CONTENT)
+
+    @action(detail=True, methods=["get"], url_path=rf"files/(?P<doc_id>{ID})/download")
+    def download_file(self, request: Request, thread_id: str, doc_id: str) -> FileResponse:
+        """The file's bytes. Only raster images render inline; everything else downloads."""
+        return thread_file_response(thread_id, doc_id, user=request.user)
 
     @action(detail=True, methods=["get"], url_path=rf"files/(?P<doc_id>{ID})/status")
     def file_status(self, request: Request, thread_id: str, doc_id: str) -> Response:
