@@ -13,7 +13,7 @@ from django.utils import timezone
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.errors import ErrorCode, NotFound, UserError, get_error_spec
-from django_ai_sdk.files.common import compute_file_hash
+from django_ai_sdk.files.common import compute_file_hash, get_upload_settings
 from django_ai_sdk.memories.models import (
     Entry,
     EntryDocument,
@@ -129,6 +129,12 @@ def _document_status_out(
         processing_step=entry_doc.processing_step,
         task=task_status,
     )
+
+
+def _check_upload_size(file: File) -> None:
+    max_size = get_upload_settings().max_upload_size
+    if (file.size or 0) > max_size:
+        raise UserError(f"File too large. Maximum size is {max_size // (1024 * 1024)} MB.")
 
 
 class MemoryService(PermissionsMixin):
@@ -488,6 +494,7 @@ class MemoryService(PermissionsMixin):
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
+        _check_upload_size(file)
         return await cls._create_document(memory_id, file, user=user)
 
     @classmethod
@@ -821,6 +828,7 @@ class MemoryService(PermissionsMixin):
         )
         if not agent.file_upload:
             raise PermissionDenied("Not permitted to upload files")
+        _check_upload_size(file)
         memory = await cls.get_or_create_thread_file_memory(thread_id)
 
         file_name = file.name or ""

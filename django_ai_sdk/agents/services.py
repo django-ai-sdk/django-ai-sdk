@@ -7,7 +7,7 @@ from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 
 from django_ai_sdk.agents.registry import registry
-from django_ai_sdk.errors import NotFound
+from django_ai_sdk.errors import NotFound, UserError
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     Operation,
@@ -563,6 +563,8 @@ class AgentService(PermissionsMixin):
 
         update_fields: list[str] = []
         for field, value in data.items():
+            if value is None and not AgentSettings._meta.get_field(field).null:
+                raise UserError(f"{field} cannot be empty")
             setattr(config, field, value)
             update_fields.append(field)
 

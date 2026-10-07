@@ -118,7 +118,7 @@ async def get_runtime_agent(request: HttpRequest, runtime_id: UUID) -> Any:
 async def update_runtime_agent(
     request: HttpRequest, runtime_id: UUID, payload: AgentSettingsUpdateIn
 ) -> Any:
-    data = cast("AgentUpdateData", payload.model_dump(exclude_none=True))
+    data = cast("AgentUpdateData", payload.model_dump(exclude_unset=True))
     return await AgentService.update_runtime_agent(str(runtime_id), data, user=request.user)
 
 
@@ -246,6 +246,7 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
 async def run_agent(request: HttpRequest, agent_id: str, payload: ChatRequest) -> Any:
     """Stateless run: no thread, the whole reply at once."""
     agent = await AgentService.get(agent_id)
+    await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
     result = await agent.run(chat_messages, user=request.user)
     return RunResponse(result=result, thread_id="")

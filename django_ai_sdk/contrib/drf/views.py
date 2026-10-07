@@ -127,6 +127,7 @@ class ThreadViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_thread_agent(thread_id, user=request.user)
+        check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         result = async_to_sync(agent.run)(messages, thread_id=thread_id, user=request.user)
         return Response({"result": result, "thread_id": thread_id})
@@ -308,6 +309,7 @@ class AgentViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_agent(agent_id)
+        check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         return Response({"result": async_to_sync(agent.run)(messages, user=request.user)})
 

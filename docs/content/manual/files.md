@@ -70,7 +70,7 @@ The default pipeline is resolved by `get_default_file_pipeline()`:
 1. `AI_SDK_MEMORY_FILE_PIPELINE`: dotted path or list of paths to a zero-argument callable returning a `FilePipeline`; the first whose `accepts(file)` is true wins.
 2. Otherwise `FilePipeline(TextFileProcessor())`: text files only, no transforms.
 
-Upload limits are surfaced to the frontend by `get_upload_settings()` (`UploadSettings(max_upload_size, allowed_mime_types)`, derived from `AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, and each configured pipeline's processor MIME types).
+Upload limits are surfaced to the frontend by `get_upload_settings()` (`UploadSettings(max_upload_size, allowed_mime_types)`, derived from `AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, and each configured pipeline's processor MIME types). `MemoryService.upload_document` and `upload_thread_file` reject a file over `AI_SDK_MAX_UPLOAD_SIZE` with a `UserError` (400).
 
 ## Upload and Processing Lifecycle
 
