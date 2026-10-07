@@ -302,12 +302,15 @@ class TestQdrantFileLockRetry:
     @pytest.fixture(autouse=True)
     def no_retry_wait(self):
         """Disable retry backoff sleeps so exhaustion tests run instantly."""
-        with patch(
-            "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
-            return_value=wait_none(),
-        ), patch(
-            "django_ai_sdk.rags.qdrant_hybrid.stop_after_delay",
-            return_value=tenacity_stop_after_delay(0.1),
+        with (
+            patch(
+                "django_ai_sdk.rags.qdrant_hybrid.wait_exponential",
+                return_value=wait_none(),
+            ),
+            patch(
+                "django_ai_sdk.rags.qdrant_hybrid.stop_after_delay",
+                return_value=tenacity_stop_after_delay(0.1),
+            ),
         ):
             yield
 
@@ -351,6 +354,7 @@ class TestQdrantFileLockRetry:
     @pytest.mark.asyncio
     async def test_exhausts_retries(self, rag):
         """Verify retry raises after exhausting attempts."""
+
         def always_fail(*args, **kwargs):
             raise RuntimeError(
                 f"Storage folder {rag.config.storage.persist_path} is already accessed by "
@@ -423,3 +427,88 @@ class TestQdrantRealFileLock:
             holder.close()
 
         assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE
+
+
+class TestQdrantMissingEmbeddings:
+    """Chunks the embedding API failed on are stored sparse only; embed just those."""
+
+    @staticmethod
+    def _store():
+        from haystack.dataclasses import Document, SparseEmbedding
+        from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+
+        store = QdrantDocumentStore(
+            ":memory:", use_sparse_embeddings=True, embedding_dim=3, return_embedding=True
+        )
+        sparse = SparseEmbedding(indices=[1], values=[0.5])
+        store.write_documents(
+            [
+                Document(id="a", content="ok", embedding=[0.0, 1.0, 0.0], sparse_embedding=sparse),
+                Document(id="b", content="failed", meta={"title": "T"}, sparse_embedding=sparse),
+            ]
+        )
+        return store
+
+    @staticmethod
+    def _embed_missing(store, vector):
+        """Run with an embedder that gives every document `vector` (None: it fails)."""
+        from dataclasses import replace
+
+        seen = []
+
+        def run(documents):
+            seen.extend((d.id, d.meta.get("title")) for d in documents)
+            return {"documents": [replace(d, embedding=vector) for d in documents]}
+
+        rag = QdrantBM25HybridRAG(documents=[], config=QdrantBM25HybridRAGConfig(embedding_dim=3))
+        embedder = MagicMock(run=run)
+        with patch(
+            "django_ai_sdk.rags.qdrant_hybrid.dense_document_embedder", return_value=embedder
+        ):
+            return rag._embed_missing(store), seen
+
+    def test_only_the_chunk_without_a_dense_vector_is_embedded(self):
+        store = self._store()
+
+        result, seen = self._embed_missing(store, [1.0, 0.0, 0.0])
+
+        assert (result, seen) == ((1, 0), [("b", "T")])
+        docs = {d.id: d for d in store.filter_documents()}
+        assert docs["a"].embedding == pytest.approx([0.0, 1.0, 0.0])
+        assert docs["b"].embedding == pytest.approx([1.0, 0.0, 0.0])
+        assert docs["b"].sparse_embedding is not None  # kept
+
+    def test_a_failing_embedder_leaves_the_chunk_for_the_next_run(self):
+        store = self._store()
+
+        result, _ = self._embed_missing(store, None)
+
+        assert result == (0, 1)
+        assert {d.id: d.embedding for d in store.filter_documents()}["b"] is None
+
+    def test_nothing_missing_embeds_nothing(self):
+        store = self._store()
+        self._embed_missing(store, [1.0, 0.0, 0.0])
+
+        assert self._embed_missing(store, [1.0, 0.0, 0.0]) == ((0, 0), [])
+
+    def test_an_index_of_another_dimension_is_refused(self, tmp_path):
+        from haystack.dataclasses import Document, SparseEmbedding
+        from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+
+        def store(dim):
+            return QdrantDocumentStore(
+                path=str(tmp_path), use_sparse_embeddings=True, embedding_dim=dim
+            )
+
+        old = store(3)
+        sparse = SparseEmbedding(indices=[1], values=[0.5])
+        old.write_documents([Document(id="b", content="failed", sparse_embedding=sparse)])
+        old.close()
+
+        new = store(4)
+        try:
+            with pytest.raises(ValueError):
+                self._embed_missing(new, [1.0, 0.0, 0.0, 0.0])
+        finally:
+            new.close()

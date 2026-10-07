@@ -180,6 +180,33 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 embedding_dim=self.config.embedding_dim,
             )
 
+    async def embed_missing(self) -> tuple[int, int]:
+        """Embed the chunks stored without a dense vector"""
+        store = self._cached_document_store or await asyncio.to_thread(self._create_document_store)
+        try:
+            return await asyncio.to_thread(self._embed_missing, store)
+        finally:
+            if store is not self._cached_document_store:
+                store.close()  # releases a local store's lock
+
+    def _embed_missing(self, store: QdrantDocumentStore) -> tuple[int, int]:
+        # reads every chunk to find the few without a vector.
+        missing = [doc for doc in store.filter_documents() if doc.embedding is None]
+        if not missing:
+            return 0, 0
+        embedder = dense_document_embedder(
+            self.config.dense_embedder_model,
+            self.config.remote_embeddings,
+            self.config.meta_fields_to_embed,
+        )
+        embedder.warm_up()
+        embedded = [
+            doc for doc in embedder.run(documents=missing)["documents"] if doc.embedding is not None
+        ]
+        # Same ids, sparse vectors kept, fills in just the dense vector.
+        store.write_documents(embedded, policy=DuplicatePolicy.OVERWRITE)
+        return len(embedded), len(missing) - len(embedded)
+
     def _has_existing_index(self, document_store: QdrantDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
         try:
