@@ -37,7 +37,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_ALLOWED_FILES` | `{}` | Extra file-extension → MIME mapping used as a fallback when magic-byte detection fails (`files/processors.py`). |
-| `AI_SDK_MAX_UPLOAD_SIZE` | `10 MB` | Upload size ceiling surfaced to the frontend by `get_upload_settings()`. |
+| `AI_SDK_MAX_UPLOAD_SIZE` | `10 MB` | Largest file a document or thread upload accepts (larger ones get a 400); surfaced to the frontend by `get_upload_settings()`. |
 | `AI_SDK_MEMORY_FILE_PIPELINE` | `None` | Dotted path (or list of paths) to a zero-argument callable returning a `FilePipeline`: the default pipeline for uploads without agent context. The first pipeline whose `accepts(file)` matches is used. See [Files](/manual/files/). |
 | `AI_SDK_FILE_PIPELINE_TIMEOUT` | `900` | Seconds before a background document pipeline is failed. `django_tasks` has no native timeout, so this guards hung or wedged upload processing. |
 | `STORAGES["django_ai_sdk"]` | unset | A reserved `STORAGES` alias used for `EntryDocument.file` only. Define it like any other `STORAGES` entry (`BACKEND` + `OPTIONS`). Unset falls back to `STORAGES["default"]` See [Files](/manual/files/). |

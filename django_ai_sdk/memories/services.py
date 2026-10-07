@@ -13,7 +13,7 @@ from django.utils import timezone
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.errors import ErrorCode, NotFound, UserError, get_error_spec
-from django_ai_sdk.files.common import compute_file_hash
+from django_ai_sdk.files.common import compute_file_hash, get_upload_settings
 from django_ai_sdk.memories.models import (
     Entry,
     EntryDocument,
@@ -131,6 +131,23 @@ def _document_status_out(
     )
 
 
+def _memory_user_out(share: MemoryUser) -> MemoryUserOut:
+    return MemoryUserOut(
+        user_id=str(share.user_id),
+        email=getattr(share.user, "email", "") or "",
+        first_name=getattr(share.user, "first_name", "") or "",
+        last_name=getattr(share.user, "last_name", "") or "",
+        can_manage=share.can_manage,
+        created_at=share.created_at.isoformat(),
+    )
+
+
+def _check_upload_size(file: File) -> None:
+    max_size = get_upload_settings().max_upload_size
+    if (file.size or 0) > max_size:
+        raise UserError(f"File too large. Maximum size is {max_size // (1024 * 1024)} MB.")
+
+
 class MemoryService(PermissionsMixin):
     """
     Service for memory operations.
@@ -200,14 +217,7 @@ class MemoryService(PermissionsMixin):
         qs = memory.memory_users.all().select_related("user")[
             offset : offset + limit if limit is not None else None
         ]
-        return [
-            MemoryUserOut(
-                user_id=str(o.user_id),
-                can_manage=o.can_manage,
-                created_at=o.created_at.isoformat(),
-            )
-            async for o in qs
-        ]
+        return [_memory_user_out(o) async for o in qs]
 
     @classmethod
     async def add_memory_user(
@@ -228,11 +238,7 @@ class MemoryService(PermissionsMixin):
             user=target_user,
             defaults={"can_manage": can_manage},
         )
-        return MemoryUserOut(
-            user_id=str(ownership.user_id),
-            can_manage=ownership.can_manage,
-            created_at=ownership.created_at.isoformat(),
-        )
+        return _memory_user_out(ownership)
 
     @classmethod
     async def update_memory_user(
@@ -251,11 +257,7 @@ class MemoryService(PermissionsMixin):
         )
         ownership.can_manage = can_manage
         await ownership.asave(update_fields=["can_manage"])
-        return MemoryUserOut(
-            user_id=str(ownership.user_id),
-            can_manage=ownership.can_manage,
-            created_at=ownership.created_at.isoformat(),
-        )
+        return _memory_user_out(ownership)
 
     @classmethod
     async def remove_memory_user(cls, memory_id: str, user_id: str, *, user: UserType) -> None:
@@ -488,6 +490,7 @@ class MemoryService(PermissionsMixin):
         """Save file and enqueue pipeline processing. Returns immediately with doc_id."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
         await cls.has_perms(user, Operation.UPLOAD_DOCUMENT, memory)
+        _check_upload_size(file)
         return await cls._create_document(memory_id, file, user=user)
 
     @classmethod
@@ -821,6 +824,7 @@ class MemoryService(PermissionsMixin):
         )
         if not agent.file_upload:
             raise PermissionDenied("Not permitted to upload files")
+        _check_upload_size(file)
         memory = await cls.get_or_create_thread_file_memory(thread_id)
 
         file_name = file.name or ""

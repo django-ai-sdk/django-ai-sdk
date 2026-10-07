@@ -63,7 +63,7 @@ class ThreadViewSet(ApiViewSet):
     lookup_value_regex = ID
     serializer_classes = {
         "create": s.ChatRequestSerializer,
-        "partial_update": s.AgentSwitchSerializer,
+        "partial_update": s.ThreadUpdateSerializer,
         "run": s.ChatRequestSerializer,
         "rate_message": s.RateMessageSerializer,
         "connect_memories": s.BulkConnectSerializer,
@@ -96,18 +96,25 @@ class ThreadViewSet(ApiViewSet):
         return Response(s.ThreadDetailSerializer(data).data)
 
     def partial_update(self, request: Request, thread_id: str) -> Response:
-        """Switch the thread to another agent, moving the linked memories along."""
+        """Rename the thread and/or switch it to another agent, moving the memories along."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        agent_id = serializer.validated_data["agent_id"]
-        get_agent(agent_id)
+        agent_id = serializer.validated_data.get("agent_id")
+        title = serializer.validated_data.get("title")
+        if agent_id:
+            get_agent(agent_id)
         thread = thread_services.get_thread(thread_id, user=request.user)
         if thread is None:
             raise NotFound("Thread not found")
-        if thread.agent_id:
-            memory_services.unlink_memories(thread.agent_id, thread_id, user=request.user)
-        thread_services.update_thread(thread_id, metadata={"agent_id": agent_id}, user=request.user)
-        memory_services.link_memories(agent_id, thread_id, user=request.user)
+        if agent_id:
+            if thread.agent_id:
+                memory_services.unlink_memories(thread.agent_id, thread_id, user=request.user)
+            thread_services.update_thread(
+                thread_id, metadata={"agent_id": agent_id}, user=request.user
+            )
+            memory_services.link_memories(agent_id, thread_id, user=request.user)
+        if title:
+            thread_services.update_thread(thread_id, title=title, user=request.user)
         thread = thread_services.get_thread(thread_id, user=request.user)
         return Response(s.ThreadSerializer(thread).data)
 
@@ -127,6 +134,7 @@ class ThreadViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_thread_agent(thread_id, user=request.user)
+        check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         result = async_to_sync(agent.run)(messages, thread_id=thread_id, user=request.user)
         return Response({"result": result, "thread_id": thread_id})
@@ -284,6 +292,13 @@ class AgentViewSet(ApiViewSet):
         agent = get_agent(agent_id)
         self._check(request, agent, Operation.VIEW_AGENT)
         # A broken tool or integration must not hide the rest: log and show what loaded.
+        integrations: list[Any] = []
+        try:
+            integrations = agent_services.get_integration_status(agent, user=request.user)
+        except Exception:
+            logger.exception("Failed to load integration status for agent %s", agent_id)
+        # get_tools() includes the integrations' tools; they are listed under integrations.
+        integration_tools = {name for s in integrations for name in s.tool_names}
         tools: list[dict[str, str]] = []
         try:
             tools = [
@@ -292,14 +307,10 @@ class AgentViewSet(ApiViewSet):
                     "description": t.description or "",
                 }
                 for t in async_to_sync(agent.get_tools)()
+                if getattr(t, "name", None) not in integration_tools
             ]
         except Exception:
             logger.exception("Failed to build tools for agent %s", agent_id)
-        integrations: list[Any] = []
-        try:
-            integrations = agent_services.get_integration_status(agent, user=request.user)
-        except Exception:
-            logger.exception("Failed to load integration status for agent %s", agent_id)
         return Response(s.AgentToolsSerializer({"tools": tools, "integrations": integrations}).data)
 
     @action(detail=True, methods=["post"])
@@ -308,6 +319,7 @@ class AgentViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_agent(agent_id)
+        check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         return Response({"result": async_to_sync(agent.run)(messages, user=request.user)})
 
@@ -347,7 +359,7 @@ class RuntimeAgentViewSet(ApiViewSet):
 
     def list(self, request: Request) -> Response:
         configs = agent_services.list_runtime_agents(user=request.user)
-        return Response(s.AgentSettingsSerializer(configs, many=True).data)
+        return Response([self._with_permissions(request, config) for config in configs])
 
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
@@ -368,18 +380,18 @@ class RuntimeAgentViewSet(ApiViewSet):
                 agent_services.add_agent_group(
                     str(config.id), group["group_id"], group["can_manage"], user=request.user
                 )
-        return Response(s.AgentSettingsSerializer(config).data, status=201)
+        return Response(self._with_permissions(request, config), status=201)
 
     def retrieve(self, request: Request, runtime_id: str) -> Response:
         config = agent_services.get_runtime_agent(runtime_id, user=request.user)
-        return Response(s.AgentSettingsSerializer(config).data)
+        return Response(self._with_permissions(request, config))
 
     def partial_update(self, request: Request, runtime_id: str) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = cast("AgentUpdateData", dict(serializer.validated_data))
         config = agent_services.update_runtime_agent(runtime_id, data, user=request.user)
-        return Response(s.AgentSettingsSerializer(config).data)
+        return Response(self._with_permissions(request, config))
 
     def destroy(self, request: Request, runtime_id: str) -> Response:
         agent_services.delete_runtime_agent(runtime_id, user=request.user)
@@ -389,7 +401,11 @@ class RuntimeAgentViewSet(ApiViewSet):
     def bases(self, request: Request) -> Response:
         return Response(
             [
-                {"path": f"{cls.__module__}.{cls.__qualname__}", "name": cls.__name__}
+                {
+                    "path": f"{cls.__module__}.{cls.__qualname__}",
+                    "name": cls.__name__,
+                    "base_system_prompt": getattr(cls, "base_system_prompt", None),
+                }
                 for cls in get_runtime_agent_bases()
             ]
         )
@@ -450,6 +466,13 @@ class RuntimeAgentViewSet(ApiViewSet):
     def remove_group(self, request: Request, runtime_id: str, group_id: str) -> Response:
         agent_services.remove_agent_group(runtime_id, int(group_id), user=request.user)
         return Response(status=NO_CONTENT)
+
+    def _with_permissions(self, request: Request, config: Any) -> dict[str, Any]:
+        perms = async_to_sync(AgentService.get_object_permissions)(request.user, config)
+        return {
+            **s.AgentSettingsSerializer(config).data,
+            "permissions": s.ObjectPermissionsSerializer(perms).data,
+        }
 
 
 class MemoryViewSet(ApiViewSet):
@@ -541,6 +564,16 @@ class MemoryViewSet(ApiViewSet):
     @action(detail=True, methods=["get"], url_path=rf"documents/(?P<doc_id>{ID})/status")
     def document_status(self, request: Request, memory_id: str, doc_id: str) -> Response:
         status = memory_services.get_document_status(doc_id, user=request.user)
+        return Response(s.DocumentStatusSerializer(status).data)
+
+    @action(detail=True, methods=["post"], url_path=rf"documents/(?P<doc_id>{ID})/cancel")
+    def cancel_document(self, request: Request, memory_id: str, doc_id: str) -> Response:
+        status = memory_services.cancel_document(doc_id, user=request.user)
+        return Response(s.DocumentStatusSerializer(status).data)
+
+    @action(detail=False, methods=["get"], url_path=rf"tasks/(?P<task_id>{ID})/status")
+    def task_status(self, request: Request, task_id: str) -> Response:
+        status = memory_services.get_task_status(task_id, user=request.user)
         return Response(s.DocumentStatusSerializer(status).data)
 
     @action(detail=True, methods=["post"], url_path=rf"threads/(?P<thread_id>{ID})")

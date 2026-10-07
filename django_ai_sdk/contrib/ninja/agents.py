@@ -72,7 +72,11 @@ def list_runtime_agent_bases(request: HttpRequest) -> Any:
     from django_ai_sdk.agents.config import get_runtime_agent_bases
 
     return [
-        RuntimeAgentBaseItem(path=f"{cls.__module__}.{cls.__qualname__}", name=cls.__name__)
+        RuntimeAgentBaseItem(
+            path=f"{cls.__module__}.{cls.__qualname__}",
+            name=cls.__name__,
+            base_system_prompt=getattr(cls, "base_system_prompt", None),
+        )
         for cls in get_runtime_agent_bases()
     ]
 
@@ -84,9 +88,16 @@ def list_runtime_agent_tools(request: HttpRequest) -> Any:
     return [RuntimeAgentToolItem(key=key, path=path) for key, path in get_tool_registry().items()]
 
 
+async def _runtime_out(request: HttpRequest, config: Any) -> AgentSettingsOut:
+    out = AgentSettingsOut.model_validate(config)
+    out.permissions = await AgentService.get_object_permissions(request.user, config)
+    return out
+
+
 @routes.get("/agents/runtimes/", response=list[AgentSettingsOut])
 async def list_runtime_agents(request: HttpRequest) -> Any:
-    return await AgentService.list_runtime_agents(user=request.user)
+    configs = await AgentService.list_runtime_agents(user=request.user)
+    return [await _runtime_out(request, config) for config in configs]
 
 
 @routes.post("/agents/runtimes/", response=AgentSettingsOut)
@@ -106,25 +117,28 @@ async def create_runtime_agent(request: HttpRequest, payload: AgentSettingsCreat
             await AgentService.add_agent_group(
                 str(config.id), group.group_id, group.can_manage, user=request.user
             )
-    return config
+    return await _runtime_out(request, config)
 
 
 @routes.get("/agents/runtimes/{runtime_id}/", response=AgentSettingsOut)
 async def get_runtime_agent(request: HttpRequest, runtime_id: UUID) -> Any:
-    return await AgentService.get_runtime_agent(str(runtime_id), user=request.user)
+    config = await AgentService.get_runtime_agent(str(runtime_id), user=request.user)
+    return await _runtime_out(request, config)
 
 
 @routes.patch("/agents/runtimes/{runtime_id}/", response=AgentSettingsOut)
 async def update_runtime_agent(
     request: HttpRequest, runtime_id: UUID, payload: AgentSettingsUpdateIn
 ) -> Any:
-    data = cast("AgentUpdateData", payload.model_dump(exclude_none=True))
-    return await AgentService.update_runtime_agent(str(runtime_id), data, user=request.user)
+    data = cast("AgentUpdateData", payload.model_dump(exclude_unset=True))
+    config = await AgentService.update_runtime_agent(str(runtime_id), data, user=request.user)
+    return await _runtime_out(request, config)
 
 
-@routes.delete("/agents/runtimes/{runtime_id}/", response=AgentSettingsOut)
+@routes.delete("/agents/runtimes/{runtime_id}/", response=Success)
 async def delete_runtime_agent(request: HttpRequest, runtime_id: UUID) -> Any:
-    return await AgentService.delete_runtime_agent(str(runtime_id), user=request.user)
+    await AgentService.delete_runtime_agent(str(runtime_id), user=request.user)
+    return Success(success=True, message="Agent deleted successfully")
 
 
 @routes.get("/agents/runtimes/{runtime_id}/users/", response=list[AgentUserOut])
@@ -214,17 +228,6 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
         agent=agent,
     )
     # A broken tool or integration must not hide the rest: log and show what loaded.
-    tools: list[Tool] = []
-    try:
-        tools = [
-            Tool(
-                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
-                description=t.description or "",
-            )
-            for t in await agent.get_tools()
-        ]
-    except Exception:
-        logger.exception("Failed to build tools for agent %s", agent_id)
     integrations: list[IntegrationStatusOut] = []
     try:
         integrations = [
@@ -239,6 +242,20 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
         ]
     except Exception:
         logger.exception("Failed to load integration status for agent %s", agent_id)
+    # get_tools() includes the integrations' tools; they are listed under integrations.
+    integration_tools = {name for s in integrations for name in s.tool_names}
+    tools: list[Tool] = []
+    try:
+        tools = [
+            Tool(
+                label=getattr(t, "label", None) or t.name.replace("_", " ").title(),
+                description=t.description or "",
+            )
+            for t in await agent.get_tools()
+            if getattr(t, "name", None) not in integration_tools
+        ]
+    except Exception:
+        logger.exception("Failed to build tools for agent %s", agent_id)
     return ToolsResponse(tools=tools, integrations=integrations)
 
 
@@ -246,6 +263,7 @@ async def get_agent_tools(request: HttpRequest, agent_id: str) -> Any:
 async def run_agent(request: HttpRequest, agent_id: str, payload: ChatRequest) -> Any:
     """Stateless run: no thread, the whole reply at once."""
     agent = await AgentService.get(agent_id)
+    await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
     result = await agent.run(chat_messages, user=request.user)
     return RunResponse(result=result, thread_id="")
