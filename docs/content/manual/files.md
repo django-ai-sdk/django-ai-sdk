@@ -152,6 +152,18 @@ class ImageAgent(Agent):
 
 The agent is called through `Agent.run()` with the image attached to a user message whose text is the question or the caption prompt. An agent whose own model can see images (`vision = True`) gets image attachments in a chat as pixels, up to `AI_SDK_MAX_INLINE_IMAGE_BYTES`; others get the caption, capped at `AI_SDK_IMAGE_CAPTION_LIMIT` characters.
 
+To show the user the image `ask_image` looked at, map the tool to an artifact:
+
+```python
+from django_ai_sdk.memories.tools import ASK_IMAGE_ARTIFACT, ASK_IMAGE_TOOL
+
+
+class MyAgent(Agent):
+    tool_artifacts = {ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT}
+```
+
+See [Artifacts after a tool](../../agents/#artifacts-after-a-tool).
+
 ## Thread File Memory
 
 Thread uploads are backed by a hidden memory created on demand per thread:

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
+    from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
@@ -169,6 +170,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     # ArtifactSchema subclasses to register as tools in stream pipelines.
     artifacts: list[type[BaseModel]] = []
+
+    # Artifacts shown after a tool runs, by tool name, without the model calling.
+    tool_artifacts: dict[str, ToolArtifact] = {}
 
     # Delegate-able subagent classes.
     agents: list[type[Agent]] = []
@@ -459,7 +463,11 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return self.suggestion_generator(agent=self)
 
     def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
-        """Tools this run must call on top of `required_tools`, chosen per run"""
+        """Names of tools the model must have called before it answers this turn.
+
+        On top of `required_tools`, decided from this turn's `messages`. Enforced on
+        exit by RequireToolsHook; the tools themselves come from `get_tools()`.
+        """
         return []
 
     async def get_tools(
@@ -1085,6 +1093,12 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 adapter.suggestion_generator = suggestion_generator
             if required_tools := self.get_run_required_tools(messages):
                 adapter.hook_context = {"required_tools": required_tools}
+            # The stream adds them after each mapped tool's result, for any tool of the run.
+            # An artifact is stored on the thread: none without one.
+            if self.tool_artifacts and thread_id:
+                adapter.tool_artifacts = self.tool_artifacts
+                adapter.thread_id = thread_id
+                adapter.user = user
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 
