@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from pydantic import BaseModel
 
 from django_ai_sdk.adapters.citations import (
-    CitationFormatter,
-    CitationRegistry,
-    DefaultCitationFormatter,
+    SourceFormatter,
+    SourceRegistry,
+    SourcesFormatter,
 )
+from django_ai_sdk.adapters.citations.grounding import get_citation_agent
 from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.adapters.citations import NumberedSource
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
@@ -222,8 +224,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories).
     rag_document_limit: int = 10_000
 
-    # Citation formatter used to render retrieved documents for the LLM.
-    citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
+    # Renders retrieved sources as the text the answering model reads
+    citation_formatter_class: type[SourceFormatter] = SourcesFormatter
 
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
@@ -420,17 +422,21 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         """Return the model identifier."""
         return self.model or ""
 
-    def get_citation_formatter(self) -> CitationFormatter:
-        """Return the formatter used to render retrieved docs for the LLM.
-
-        Override to inject formatter dependencies; otherwise swap formatters by
-        setting the citation_formatter_class class attribute.
-        """
+    def get_citation_formatter(self) -> SourceFormatter:
+        """Return the formatter used to render retrieved sources."""
         return self.citation_formatter_class()
 
-    def get_citation_registry(self) -> CitationRegistry:
-        """Return a fresh per-turn registry so citation indices reset between turns."""
-        return CitationRegistry()
+    def get_citation_registry(self) -> SourceRegistry:
+        """Return a fresh per-turn registry of the sources an answer may cite."""
+        return SourceRegistry()
+
+    async def get_citation_sources(
+        self,
+        thread_id: str,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[NumberedSource]:
+        """Sources every answer in the thread may cite, even when no tool found them."""
+        return []
 
     def get_llm(self, **kwargs: Any) -> Any:
         """Build this agent's chat generator.
@@ -619,8 +625,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         self,
         thread_id: str,
         *,
-        citation_registry: CitationRegistry | None = None,
-        citation_formatter: CitationFormatter | None = None,
+        citation_registry: SourceRegistry | None = None,
+        citation_formatter: SourceFormatter | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         """Build RAG tools from active ThreadMemory links for a thread.
@@ -1093,12 +1099,19 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 adapter.suggestion_generator = suggestion_generator
             if required_tools := self.get_run_required_tools(messages):
                 adapter.hook_context = {"required_tools": required_tools}
-            # The stream adds them after each mapped tool's result, for any tool of the run.
-            # An artifact is stored on the thread: none without one.
-            if self.tool_artifacts and thread_id:
-                adapter.tool_artifacts = self.tool_artifacts
+            # Artifacts are stored on the thread: none without one.
+            if thread_id:
                 adapter.thread_id = thread_id
                 adapter.user = user
+                # Shown after each mapped tool's result, for any tool of the run.
+                adapter.tool_artifacts = self.tool_artifacts
+
+                # Seed the citation registry with sources from current thread
+                registry = getattr(adapter, "citation_registry", None)
+                if registry is not None:
+                    await registry.seed_from_thread(thread_id)
+                    registry.seed(await self.get_citation_sources(thread_id, user))
+                    adapter.citation_agent = get_citation_agent(self)
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 

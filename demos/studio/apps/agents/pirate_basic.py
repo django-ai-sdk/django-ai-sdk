@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.adapters.citations import DefaultCitationFormatter
 from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 from django_ai_sdk.agents import ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.common import prompt
@@ -116,7 +115,6 @@ class PirateBasicAgent(FileLookupMixin, Agent):
     # Registry keys of installed integration apps.
     integrations: list[str] = ["linear", "weather"]
 
-    citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Entry]:

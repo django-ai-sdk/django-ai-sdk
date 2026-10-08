@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.adapters.citations import DefaultCitationFormatter
 from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 from django_ai_sdk.agents import LogToolCallsHook, ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.common import prompt
@@ -92,7 +91,6 @@ class DeepResearchAgent(Agent):
 
     agents = [ResearchPlannerAgent]
 
-    citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
 
     async def get_run_adapter(

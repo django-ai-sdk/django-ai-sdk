@@ -8,6 +8,7 @@ here when you replace an endpoint and want to keep its response shape.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from ninja import Schema
@@ -73,6 +74,10 @@ class ThreadDetailResponse(Schema):
 class ThreadFileMeta(Schema):
     file_count: int = 0
     file_memory_id: str | None = None
+
+
+class ThreadSourcesResponse(Schema):
+    sources: list[dict[str, Any]] = []
 
 
 class DeleteAllThreadsResponse(Schema):

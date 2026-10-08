@@ -20,15 +20,25 @@ from django_ai_sdk.contrib.ninja.schemas import (
     ThreadFileMeta,
     ThreadListItem,
     ThreadListResponse,
+    ThreadSourcesResponse,
     ThreadTracesResponse,
 )
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.storage.services import ThreadService, aget_thread_file_meta, aget_thread_history
+from django_ai_sdk.storage.services import (
+    ThreadService,
+    aget_thread_file_meta,
+    aget_thread_history,
+    aget_thread_sources,
+)
 from django_ai_sdk.tracing.schemas import TokenUsage
 from django_ai_sdk.tracing.services import TraceService
 from django_ai_sdk.views.permissions import athread_permissions
-from django_ai_sdk.views.schemas import ChatRequest, PatchThreadPayload, RateMessagePayload
+from django_ai_sdk.views.schemas import (
+    ChatRequest,
+    PatchThreadPayload,
+    RateMessagePayload,
+)
 
 routes = ApiRouter()
 
@@ -127,12 +137,22 @@ async def get_thread_file_meta(request: HttpRequest, thread_id: str) -> Any:
     return ThreadFileMeta(**await aget_thread_file_meta(thread_id, user=request.user))
 
 
+@routes.get("/threads/{thread_id}/sources/", response=ThreadSourcesResponse)
+async def get_thread_sources(request: HttpRequest, thread_id: str) -> Any:
+    """Every source found in the thread"""
+    return ThreadSourcesResponse(sources=await aget_thread_sources(thread_id, user=request.user))
+
+
 @routes.post("/threads/{thread_id}/messages/{message_id}/rate/", response=MessageResponse)
 async def rate_message(
     request: HttpRequest, thread_id: str, message_id: str, payload: RateMessagePayload
 ) -> Any:
     await ThreadService.rate_message(
-        thread_id, message_id, payload.rating, feedback=payload.feedback, user=request.user
+        thread_id,
+        message_id,
+        payload.rating,
+        feedback=payload.feedback,
+        user=request.user,
     )
     return MessageResponse(id=message_id, is_deleted=False)
 
@@ -183,7 +203,11 @@ async def get_message_traces(
     offset: Offset = 0,
 ) -> Any:
     traces = await TraceService.message_traces(
-        message_id, user=request.user, operation_name=operation_name, limit=limit, offset=offset
+        message_id,
+        user=request.user,
+        operation_name=operation_name,
+        limit=limit,
+        offset=offset,
     )
     return ThreadTracesResponse(traces=traces)
 

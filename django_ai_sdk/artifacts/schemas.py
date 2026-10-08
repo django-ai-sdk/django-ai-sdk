@@ -38,6 +38,7 @@ class ArtifactType(StrEnum):
     IMAGE = "image"
     TASK = "task"
     FILE = "file"
+    CITATIONS = "citations"
 
 
 class ArtifactModel(BaseModel):
@@ -658,3 +659,54 @@ class FileArtifact(ArtifactSchema):
         "answer as normal, without repeating file names or links."
     )
     data: FileData
+
+
+# ── Citations ─────────────────────────────────────────────────────────────────
+
+
+class CitedSource(ArtifactModel):
+    """A source an answer may cite; `key` is stable across a thread's turns."""
+
+    key: str
+    number: int = 0
+    title: str
+    kind: Literal["document", "web"] = "document"
+    content: str = ""
+    url: str | None = None
+    document_id: str | None = Field(default=None, alias="documentId")
+    chunk_id: str | None = Field(default=None, alias="chunkId")
+    cited: bool = False
+
+
+class Evidence(ArtifactModel):
+    """Where in one source a part of the answer is supported."""
+
+    key: str
+    start: int | None = None
+    end: int | None = None
+    text: str = ""
+    matcher: Literal["exact", "normalized", "fuzzy", "partial"] | None = None
+
+
+class Citation(ArtifactModel):
+    """A part of the answer and, per supporting source, the passage that supports it."""
+
+    start: int
+    end: int
+    quote: str
+    evidence: list[Evidence]
+
+
+class CitationsData(ArtifactModel):
+    citations: list[Citation] = Field(default_factory=list)
+    sources: list[CitedSource] = Field(default_factory=list)
+
+
+class CitationsArtifact(ArtifactSchema):
+    """Which parts of an answer which sources support.
+
+    Built after the answer by the citation agent and python basded grounding
+    """
+
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.CITATIONS
+    data: CitationsData

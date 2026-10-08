@@ -133,6 +133,13 @@ class ThreadViewSet(ApiViewSet):
         result = async_to_sync(agent.run)(messages, thread_id=thread_id, user=request.user)
         return Response({"result": result, "thread_id": thread_id})
 
+    @action(detail=True, methods=["get"])
+    def sources(self, request: Request, thread_id: str) -> Response:
+        """Every source found in the thread"""
+        return Response(
+            {"sources": thread_services.get_thread_sources(thread_id, user=request.user)}
+        )
+
     @action(detail=True, methods=["get"], url_path="file-meta")
     def file_meta(self, request: Request, thread_id: str) -> Response:
         meta = thread_services.get_thread_file_meta(thread_id, user=request.user)
@@ -144,7 +151,11 @@ class ThreadViewSet(ApiViewSet):
         query.is_valid(raise_exception=True)
         limit, offset = self.page(request)
         traces = trace_services.thread_traces(
-            thread_id, user=request.user, limit=limit, offset=offset, **query.validated_data
+            thread_id,
+            user=request.user,
+            limit=limit,
+            offset=offset,
+            **query.validated_data,
         )
         return Response(s.TraceSerializer(traces, many=True).data)
 
@@ -171,7 +182,11 @@ class ThreadViewSet(ApiViewSet):
         thread_services.delete_message(thread_id, message_id, user=request.user)
         return Response({"id": message_id, "is_deleted": True})
 
-    @action(detail=True, methods=["post"], url_path=rf"messages/(?P<message_id>{ID})/restore")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=rf"messages/(?P<message_id>{ID})/restore",
+    )
     def restore_message(self, request: Request, thread_id: str, message_id: str) -> Response:
         thread_services.restore_message(thread_id, message_id, user=request.user)
         return Response({"id": message_id, "is_deleted": False})
@@ -326,7 +341,9 @@ class AgentViewSet(ApiViewSet):
         # Rebuilding an index is administering the agent, not using it.
         self._check(request, agent, Operation.UPDATE_AGENT)
         result = async_to_sync(Agent.reindex)(
-            agent, query.validated_data["memory_id"], query.validated_data["force_rebuild"]
+            agent,
+            query.validated_data["memory_id"],
+            query.validated_data["force_rebuild"],
         )
         return Response({"success": bool(result)})
 
@@ -368,12 +385,18 @@ class RuntimeAgentViewSet(ApiViewSet):
         for entry in users:
             with contextlib.suppress(PermissionDenied, ValueError):
                 agent_services.add_agent_user(
-                    str(config.id), entry["user_id"], entry["can_manage"], user=request.user
+                    str(config.id),
+                    entry["user_id"],
+                    entry["can_manage"],
+                    user=request.user,
                 )
         for group in groups:
             with contextlib.suppress(PermissionDenied, ValueError):
                 agent_services.add_agent_group(
-                    str(config.id), group["group_id"], group["can_manage"], user=request.user
+                    str(config.id),
+                    group["group_id"],
+                    group["can_manage"],
+                    user=request.user,
                 )
         return Response(s.AgentSettingsSerializer(config).data, status=201)
 
@@ -427,7 +450,10 @@ class RuntimeAgentViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         entry = agent_services.update_agent_user(
-            runtime_id, user_id, serializer.validated_data["can_manage"], user=request.user
+            runtime_id,
+            user_id,
+            serializer.validated_data["can_manage"],
+            user=request.user,
         )
         return Response(s.AgentMemberSerializer(entry).data)
 
@@ -512,7 +538,9 @@ class MemoryViewSet(ApiViewSet):
         return Response(s.UploadSettingsSerializer(files.get_upload_settings()).data)
 
     @action(
-        detail=False, methods=["get"], url_path=rf"source/(?P<entry_id>{ID})/(?P<chunk_id>{ID})"
+        detail=False,
+        methods=["get"],
+        url_path=rf"source/(?P<entry_id>{ID})/(?P<chunk_id>{ID})",
     )
     def source(self, request: Request, entry_id: str, chunk_id: str) -> Response:
         content = memory_services.get_chunk_content(entry_id, chunk_id, user=request.user)
@@ -585,7 +613,10 @@ class MemoryViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         entry = memory_services.update_memory_user(
-            memory_id, user_id, serializer.validated_data["can_manage"], user=request.user
+            memory_id,
+            user_id,
+            serializer.validated_data["can_manage"],
+            user=request.user,
         )
         return Response(s.MemoryMemberSerializer(entry).data)
 

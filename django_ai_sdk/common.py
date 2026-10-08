@@ -187,6 +187,11 @@ class StreamWriter:
 
         return self.message
 
+    @property
+    def text(self) -> str:
+        """The answer text"""
+        return "".join(self._content_chunks)
+
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""
         logger.debug(f"Finalizing message with reason: {finish_reason}")

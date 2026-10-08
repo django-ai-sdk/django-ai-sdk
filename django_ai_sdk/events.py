@@ -78,24 +78,6 @@ class ToolOutputEvent(StreamEvent):
     tool_output: dict[str, Any]
 
 
-class SourceEvent(StreamEvent):
-    """A retrieved document, numbered for inline [N] citation by the LLM.
-
-    Emitted by adapters after a retrieval tool runs, in cumulative-index order
-    across the agent turn. Protocol handlers translate this into whatever
-    citation format their frontend understands (OWUI source pills, OpenAI
-    annotations, etc.).
-    """
-
-    event_type: Literal["source"] = "source"
-    index: int
-    title: str
-    content: str
-    tool_call_id: str | None = None
-    source_id: str = ""  # Stable identifier for the source
-    media_type: str = "file"  # MIME type or document type (e.g., "file" for local documents)
-
-
 class SuggestionEvent(StreamEvent):
     """Follow-up suggestions generated after a response."""
 
