@@ -6,7 +6,7 @@ import asyncio
 import json
 
 import pytest
-from django_ai_sdk.adapters.base import _SENTINEL, Stream
+from django_ai_sdk.adapters.base import _CITED, _SENTINEL, Stream
 from django_ai_sdk.adapters.citations import (
     NumberedSource,
     SourceRegistry,
@@ -14,9 +14,10 @@ from django_ai_sdk.adapters.citations import (
     collect_sources,
     from_document,
     from_web_result,
+    grounding,
     source_key,
 )
-from django_ai_sdk.adapters.citations.grounding import ground, locate, parse_pairs
+from django_ai_sdk.adapters.citations.grounding import Grounder, ground, locate, parse_pairs
 from django_ai_sdk.common import StreamWriter
 from haystack.dataclasses import Document
 from haystack.tools import Tool
@@ -232,6 +233,55 @@ class TestGround:
         assert [s.key for s in data.sources] == ["doc:d1:c1"]
 
 
+class TestGrounder:
+    @pytest.fixture(autouse=True)
+    def small_blocks(self, monkeypatch):
+        monkeypatch.setattr(grounding, "BLOCK_CHARS", 10)
+
+    def _registry(self) -> SourceRegistry:
+        registry = SourceRegistry()
+        registry.add([from_document(CHUNK)])
+        return registry
+
+    async def test_a_block_is_grounded_while_the_rest_streams(self):
+        agent = CitationAgent(citations(("element is optional", [(1, "POSTAL ADDRESS")])))
+        grounder = Grounder(self._registry(), agent)
+        intro = "Here is what the standard says.\n\n"
+
+        grounder.feed(intro)
+        assert len(grounder.tasks) == 1  # before the answer is done
+        grounder.feed(ANSWER)
+        data = await grounder.finish(intro + ANSWER)
+
+        assert [call.rsplit("Answer:\n", 1)[1] for call in agent.calls] == [intro, ANSWER]
+        (citation,) = data.citations  # the intro's call found nothing to place
+        assert (intro + ANSWER)[citation.start : citation.end] == "element is optional"
+
+    async def test_a_code_block_is_not_split(self):
+        grounder = Grounder(self._registry(), CitationAgent(citations()))
+        grounder.feed("```\nprint('a long line')\n\nprint('b')\n")
+        assert grounder.tasks == []
+        await grounder.finish(grounder.text)
+
+    async def test_blocks_done_in_time_keep_their_citations(self):
+        agent = CitationAgent(citations(("element is optional", [(1, "POSTAL ADDRESS")])))
+        replied = agent.run
+
+        async def slow_after_the_first(*args, **kwargs):
+            if agent.calls:
+                await asyncio.sleep(10)
+            return await replied(*args, **kwargs)
+
+        agent.run = slow_after_the_first
+        grounder = Grounder(self._registry(), agent)
+        answer = ANSWER + "\n\nAnd that is all."
+        grounder.feed(answer)
+
+        data = await grounder.finish(answer, timeout=0.1)
+
+        assert [answer[c.start : c.end] for c in data.citations] == ["element is optional"]
+
+
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestStream:
@@ -277,6 +327,79 @@ class TestStream:
         later = SourceRegistry()
         await later.seed_from_thread(thread_id)
         assert [(s.key, s.content) for s in later.all] == [("doc:d1:c1", CHUNK.content)]
+
+    async def test_a_grounded_block_is_shown_before_the_answer_ends(self, monkeypatch):
+        from haystack.dataclasses import StreamingChunk
+
+        monkeypatch.setattr(grounding, "BLOCK_CHARS", 10)
+        registry = SourceRegistry()
+        registry.add([from_document(CHUNK)])
+        stream = self._stream(
+            registry,
+            await self._thread(),
+            citations(("element is optional", [(1, "POSTAL ADDRESS")])),
+        )
+        queue: asyncio.Queue = asyncio.Queue()
+        stream._grounder = Grounder(
+            registry, stream.citation_agent, on_block=lambda: queue.put_nowait(_CITED)
+        )
+        writer = StreamWriter(message_id="m1")
+        await queue.put(StreamingChunk(content=ANSWER + "\n\n"))
+
+        live = []
+        async for event in stream.get_events(queue, writer):
+            live.append(event)
+            if event.event_type == "tool_output":
+                await queue.put(_SENTINEL)  # the answer ends after its block is cited
+        stored = [e async for e in stream.get_citations_artifact(writer)]
+
+        assert [e.event_type for e in live] == [
+            "text_chunk",
+            "tool_call_start",
+            "tool_input_complete",
+            "tool_output",
+        ]
+        assert "artifact_id" not in live[-1].tool_output  # shown, not stored
+        # The stored citations replace the shown ones in the same tool call.
+        assert [e.event_type for e in stored] == ["tool_output"]
+        assert stored[0].tool_call_id == live[-1].tool_call_id
+        assert stored[0].tool_output["citations"] == live[-1].tool_output["citations"]
+        assert writer.message.tool_calls[0]["name"] == "artifact_citations_artifact"
+
+    async def test_after_the_answer_each_block_is_shown_as_it_is_grounded(self, monkeypatch):
+        monkeypatch.setattr(grounding, "BLOCK_CHARS", 10)
+        registry = SourceRegistry()
+        registry.add([from_document(CHUNK)])
+        stream = self._stream(
+            registry,
+            await self._thread(),
+            citations(("element is optional", [(1, "POSTAL ADDRESS")])),
+        )
+        replied = stream.citation_agent.run
+
+        async def slow_after_the_first(*args, **kwargs):
+            if stream.citation_agent.calls:
+                await asyncio.sleep(0.1)
+            return await replied(*args, **kwargs)
+
+        stream.citation_agent.run = slow_after_the_first
+        stream._grounder = Grounder(registry, stream.citation_agent)
+        answer = ANSWER + "\n\nAnd that is all."
+        stream._grounder.feed(answer)  # the first block is cited as the answer ends
+        writer = StreamWriter(message_id="m1")
+        writer.add_chunk(stream.get_text_chunk(answer))
+
+        events = [e async for e in stream.get_citations_artifact(writer)]
+
+        assert [e.event_type for e in events] == [
+            "tool_call_start",
+            "tool_input_complete",
+            "tool_output",  # the first block's, while the last one is grounded
+            "tool_output",  # stored
+        ]
+        assert "artifact_id" not in events[2].tool_output
+        assert "artifact_id" in events[3].tool_output
+        assert events[2].tool_call_id == events[3].tool_call_id
 
     async def test_no_sources_or_no_thread_means_no_artifact(self):
         thread_id = await self._thread()
