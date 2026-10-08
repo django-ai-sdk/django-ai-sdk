@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
 import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
 
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
@@ -16,7 +20,7 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from django_ai_sdk.adapters.base import Run
     from django_ai_sdk.agents.base import Agent
-    from django_ai_sdk.artifacts.schemas import CitationsData
+    from django_ai_sdk.artifacts.schemas import Citation, CitationsData
 
     from .registry import SourceRegistry
 
@@ -30,9 +34,11 @@ MIN_PIECE = 20
 SOURCE_CHARS = 6000
 # below this similarity a quote counts as not found in the answer.
 FUZZY_RATIO = 0.85
+# least characters of answer per citation call
+BLOCK_CHARS = 300
 
 CITATION_PROMPT = prompt("""\
-    You get an answer and the numbered sources it was written from.
+    You get numbered sources and an answer, or a part of one, written from them.
     List the parts of the answer that a source supports. For each part, copy it from the
     answer exactly (a clause or a sentence, as written). For each source that supports it,
     give the source's number and copy the passage of that source that supports it, exactly
@@ -59,11 +65,14 @@ def get_citation_agent(agent: Agent) -> Agent | Run:
 
 
 def render(answer: str, registry: SourceRegistry) -> str:
-    """The citation agent's input: the answer, then the numbered sources."""
+    """The citation agent's input: the numbered sources, then the answer.
+
+    Sources first: a turn's calls then share a prefix the provider can cache.
+    """
     sources = "\n\n".join(
         f"[{s.index}] {s.title}\n{s.content[:SOURCE_CHARS]}" for s in registry.all
     )
-    return f"Answer:\n{answer}\n\nSources:\n{sources}"
+    return f"Sources:\n{sources}\n\nAnswer:\n{answer}"
 
 
 def parse_pairs(reply: str) -> list[tuple[str, list[tuple[int, str]]]]:
@@ -176,15 +185,106 @@ def match(text: str, quote: str, start: int = 0) -> tuple[int, int, Match] | Non
 
 async def ground(answer: str, registry: SourceRegistry, agent: Agent | Run) -> CitationsData | None:
     """The answer's citations and the sources to store"""
-    from django_ai_sdk.artifacts.schemas import (  # noqa: PLC0415
-        Citation,
-        CitationsData,
-        Evidence,
-    )
-    from django_ai_sdk.common import ChatMessage  # noqa: PLC0415
-
     if not registry.all or not answer.strip():
         return None
+    return await Grounder(registry, agent).finish(answer)
+
+
+class Grounder:
+    """Grounds an answer block by block while it streams"""
+
+    def __init__(
+        self,
+        registry: SourceRegistry,
+        agent: Agent | Run,
+        on_block: Callable[[], None] | None = None,
+    ) -> None:
+        self.registry, self.agent, self.on_block = registry, agent, on_block
+        self.text = ""  # the answer so far
+        self.cursor = 0  # where the next block starts
+        self.tasks: list[asyncio.Task[list[Citation]]] = []
+
+    def feed(self, delta: str) -> None:
+        """Add streamed answer text; ground each block once it is complete."""
+        self.text += delta
+        if "\n" in delta and self.registry.all:  # a block ends at a blank line
+            self._start(self._block_end())
+
+    async def finish(self, answer: str, timeout: float | None = None) -> CitationsData:
+        """The whole answer's citations"""
+
+        async for _ in self.wait(answer, timeout):
+            pass
+        return self.citations()
+
+    async def wait(self, answer: str, timeout: float | None = None) -> AsyncIterator[None]:
+        """Ground the rest of `answer`"""
+        self.text = answer
+        self._start(len(answer))
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        pending = {t for t in self.tasks if not t.done()}
+        while pending:
+            left = None if deadline is None else max(0.0, deadline - loop.time())
+            done, pending = await asyncio.wait(
+                pending, timeout=left, return_when=asyncio.FIRST_COMPLETED
+            )
+            if not done:
+                logger.warning(
+                    "Citations took longer than {}s; {} blocks have none",
+                    timeout,
+                    len(pending),
+                )
+                break
+            if pending:
+                yield
+        self.cancel()
+
+    def citations(self) -> CitationsData:
+        """The citations of the blocks grounded so far."""
+        from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
+
+        citations = sorted(
+            (c for t in self.tasks if t.done() and not t.cancelled() for c in t.result()),
+            key=lambda c: c.start,
+        )
+        return CitationsData(citations=citations, sources=_stored_sources(citations, self.registry))
+
+    def cancel(self) -> None:
+        for task in self.tasks:
+            task.cancel()
+
+    def _block_end(self) -> int:
+        """End of the complete blocks since the cursor"""
+        end = self.text.rfind("\n\n", self.cursor + BLOCK_CHARS)
+        if end == -1 or self.text.count("```", 0, end) % 2:
+            return self.cursor
+        return end + 2
+
+    def _start(self, end: int) -> None:
+        if not self.text[self.cursor : end].strip():
+            return
+        start, self.cursor = self.cursor, end
+        task = asyncio.create_task(self._cite(self.text, start, end))
+        if self.on_block:
+            task.add_done_callback(lambda _: self.on_block and self.on_block())
+        self.tasks.append(task)
+
+    async def _cite(self, answer: str, start: int, end: int) -> list[Citation]:
+        try:
+            cited = await cite(answer[start:end], self.registry, self.agent)
+        except Exception:
+            logger.exception("Placing citations failed for a block")
+            return []
+        return [
+            c.model_copy(update={"start": c.start + start, "end": c.end + start}) for c in cited
+        ]
+
+
+async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> list[Citation]:
+    """Citations of `answer`, offsets into it, from one citation agent call."""
+    from django_ai_sdk.artifacts.schemas import Citation, Evidence  # noqa: PLC0415
+    from django_ai_sdk.common import ChatMessage  # noqa: PLC0415
 
     reply = await agent.run(
         [ChatMessage(role="user", content=render(answer, registry))],
@@ -210,10 +310,8 @@ async def ground(answer: str, registry: SourceRegistry, agent: Agent | Run) -> C
             )
         )
         cursor = span[1]
-    citations.sort(key=lambda c: c.start)
-    # The citation agent's is doing.
     logger.info("Citations placed: {}, passages {}", len(citations), dict(outcomes))
-    return CitationsData(citations=citations, sources=_stored_sources(citations, registry))
+    return citations
 
 
 def uncited(registry: SourceRegistry) -> CitationsData:
@@ -239,7 +337,11 @@ def get_evidence(
         if source and located and source.key not in found:
             start, end, how = located
             found[source.key] = evidence_class(
-                key=source.key, start=start, end=end, text=content[start:end], matcher=how
+                key=source.key,
+                start=start,
+                end=end,
+                text=content[start:end],
+                matcher=how,
             )
     return list(found.values())
 

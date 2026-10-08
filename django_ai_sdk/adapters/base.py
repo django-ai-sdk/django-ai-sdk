@@ -11,7 +11,7 @@ from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ImageContent, ReasoningContent, StreamingChunk, ToolCall
 
-from django_ai_sdk.adapters.citations.grounding import ground, uncited
+from django_ai_sdk.adapters.citations.grounding import Grounder, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
@@ -55,6 +55,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _SENTINEL: object = object()
+# a block of the answer has its citations
+_CITED: object = object()
 
 
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
@@ -278,6 +280,10 @@ class Stream:
     user: Any = None
     # agent to use for citation grounding, if any; set per run
     citation_agent: Any = None
+    # grounds the answer while it streams; set per stream
+    _grounder: Grounder | None = None
+    # the citations tool call shown while the answer streams
+    _citations_call_id: str | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -495,14 +501,16 @@ class Stream:
         if not (registry and registry.all and self.thread_id and self.citation_agent):
             return
         answer = stream_writer.text if stream_writer else ""
+        # after the answer: how long to wait for the blocks still being grounded
         timeout = resolve_setting("AI_SDK_CITATION_TIMEOUT", 10.0)
+        grounder = self._grounder or Grounder(registry, self.citation_agent)
         try:
-            data = await asyncio.wait_for(
-                ground(answer, registry, self.citation_agent), timeout=timeout
-            )
-        except TimeoutError:
-            logger.warning("Citations took longer than {}s; the answer has none", timeout)
             data = None
+            if answer.strip():
+                async for _ in grounder.wait(answer, timeout):
+                    for event in self._partial_citations(grounder):
+                        yield event
+                data = grounder.citations()
         except Exception:
             logger.exception("Placing citations failed; the answer has none")
             data = None
@@ -518,7 +526,9 @@ class Stream:
             return
 
         name = CitationsArtifact.tool_name()
-        tool_call_id = f"{name}-{payload['artifact_id']}"
+        # the stored citations replace the partial ones shown in the same tool call
+        shown = self._citations_call_id
+        tool_call_id = shown or f"{name}-{payload['artifact_id']}"
         self._persist_tool(
             stream_writer,
             MessageChunk(
@@ -526,8 +536,10 @@ class Stream:
                 content={"tool_call_id": tool_call_id, "tool_name": name},
             ),
         )
-        yield ToolCallStartEvent(tool_call_id=tool_call_id, tool_name=name)
-        yield self._tool_input(stream_writer, tool_call_id, name, {}, {})
+        tool_input = self._tool_input(stream_writer, tool_call_id, name, {}, {})
+        if not shown:
+            yield ToolCallStartEvent(tool_call_id=tool_call_id, tool_name=name)
+            yield tool_input
         self._persist_tool(
             stream_writer,
             MessageChunk(
@@ -536,6 +548,30 @@ class Stream:
             ),
         )
         yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=payload)
+
+    def _partial_citations(self, grounder: Grounder | None) -> list[StreamEvent]:
+        """The citations of the blocks grounded so far, shown while the answer streams.
+
+        Not stored: get_citations_artifact stores the whole answer's into the same tool call.
+        """
+        from django_ai_sdk.artifacts.schemas import CitationsArtifact  # noqa: PLC0415
+
+        data = grounder.citations() if grounder else None
+        if not data or not data.citations:
+            return []
+        events: list[StreamEvent] = []
+        if not self._citations_call_id:
+            name = CitationsArtifact.tool_name()
+            self._citations_call_id = f"{name}-{uuid.uuid4()}"
+            events += [
+                ToolCallStartEvent(tool_call_id=self._citations_call_id, tool_name=name),
+                ToolInputCompleteEvent(
+                    tool_call_id=self._citations_call_id, tool_name=name, tool_input={}
+                ),
+            ]
+        output = data.model_dump(mode="json", by_alias=True)
+        events.append(ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=output))
+        return events
 
     def _tool_input(
         self,
@@ -594,12 +630,19 @@ class Stream:
             if item is _SENTINEL:
                 break
 
+            if item is _CITED:
+                for event in self._partial_citations(self._grounder):
+                    yield event
+                continue
+
             chunk = cast("StreamingChunk", item)
 
             text = chunk.content or ""
             if text:
                 if stream_writer:
                     stream_writer.add_chunk(self.get_text_chunk(text))
+                if self._grounder:
+                    self._grounder.feed(text)
                 yield TextChunkEvent(content=text)
 
             # Reasoning models stream their summary separately from the answer.
@@ -786,6 +829,12 @@ class Stream:
                 current_registry.reset(registry_token)
             pipeline_task.add_done_callback(lambda _: queue.put_nowait(_SENTINEL))
 
+            registry = self.citation_registry
+            if registry is not None and self.thread_id and self.citation_agent and stream_writer:
+                self._grounder = Grounder(
+                    registry, self.citation_agent, on_block=lambda: queue.put_nowait(_CITED)
+                )
+
             async for event in self.get_events(queue, stream_writer):
                 yield event
 
@@ -837,6 +886,10 @@ class Stream:
             yield get_error_event(info)
 
         finally:
+            if self._grounder:
+                self._grounder.cancel()
+                self._grounder = None
+            self._citations_call_id = None
             if pipeline_task is not None and not pipeline_task.done():
                 pipeline_task.cancel()
                 try:
