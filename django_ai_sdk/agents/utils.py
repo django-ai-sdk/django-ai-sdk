@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 
 EXTRACTION_MODEL_SETTING = "AI_SDK_EXTRACTION_MODEL"
+TASK_MODEL_SETTING = "AI_SDK_TASK_MODEL"
 
 
 def llm_generator() -> Any:
@@ -26,6 +27,12 @@ def llm_generator() -> Any:
         "AI_SDK_DEFAULT_MODEL", "gpt-4o-mini"
     )
     return openai_responses_chat(model=model)
+
+
+def task_runner() -> Run | None:
+    """A one-shot runner on AI_SDK_TASK_MODEL, a small fast model for side tasks"""
+    model = resolve_setting(TASK_MODEL_SETTING)
+    return Run(generator=openai_responses_chat(model=model)) if model else None
 
 
 async def extract_artifact(

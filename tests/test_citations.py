@@ -46,9 +46,13 @@ class CitationAgent:
 
 def citations(*pairs: tuple[str, list[tuple[int, str]]]) -> str:
     """A citation agent's reply; support as `[(n, "passage"), …]`."""
-    return json.dumps({"citations": [
-        {"quote": q, "support": [{"source": n, "text": t} for n, t in s]} for q, s in pairs
-    ]})
+    return json.dumps(
+        {
+            "citations": [
+                {"quote": q, "support": [{"source": n, "text": t} for n, t in s]} for q, s in pairs
+            ]
+        }
+    )
 
 
 class TestSources:
@@ -134,7 +138,9 @@ class TestParsePairs:
         assert parse_pairs(reply) == [("b", [(2, "y")])]
 
     def test_unusable_replies_give_nothing(self):
-        assert parse_pairs("no json") == parse_pairs('{"citations": "x"}') == parse_pairs("[1]") == []
+        assert (
+            parse_pairs("no json") == parse_pairs('{"citations": "x"}') == parse_pairs("[1]") == []
+        )
 
 
 @pytest.mark.asyncio
@@ -143,7 +149,9 @@ class TestGround:
         registry = SourceRegistry()
         registry.add([from_web_result({"url": "https://other.nl"}), from_document(CHUNK)])
         agent = CitationAgent(
-            citations(("Postal Address element is optional", [(2, "POSTAL ADDRESS 0..*, F"), (9, "x")]))
+            citations(
+                ("Postal Address element is optional", [(2, "POSTAL ADDRESS 0..*, F"), (9, "x")])
+            )
         )
 
         data = await ground(ANSWER, registry, agent)
@@ -154,11 +162,18 @@ class TestGround:
         (evidence,) = citation.evidence  # unknown number 9 dropped
         assert evidence.key == "doc:d1:c1"
         # The supporting passage, found in the source's own text.
-        assert CHUNK.content[evidence.start : evidence.end] == evidence.text == "POSTAL ADDRESS 0..*, F"
+        assert (
+            CHUNK.content[evidence.start : evidence.end]
+            == evidence.text
+            == "POSTAL ADDRESS 0..*, F"
+        )
         assert evidence.matcher == "exact"
         by_key = {s.key: s for s in data.sources}
         assert (by_key["doc:d1:c1"].number, by_key["doc:d1:c1"].cited) == (1, True)
-        assert (by_key["url:https://other.nl"].number, by_key["url:https://other.nl"].cited) == (0, False)
+        assert (by_key["url:https://other.nl"].number, by_key["url:https://other.nl"].cited) == (
+            0,
+            False,
+        )
         assert "[2] XAF_4.0.pdf · §4" in agent.calls[0]
 
     async def test_a_citation_whose_passage_is_not_in_the_source_is_rejected(self):
@@ -175,7 +190,9 @@ class TestGround:
         registry = SourceRegistry()
         other = NumberedSource(key="doc:d2:c9", title="Other", content="unrelated")
         registry.add([from_document(CHUNK), other])
-        reply = citations(("It is not required", [(1, "POSTAL ADDRESS 0..*"), (2, "POSTAL ADDRESS 0..*")]))
+        reply = citations(
+            ("It is not required", [(1, "POSTAL ADDRESS 0..*"), (2, "POSTAL ADDRESS 0..*")])
+        )
 
         (citation,) = (await ground(ANSWER, registry, CitationAgent(reply))).citations
 
@@ -204,10 +221,12 @@ class TestGround:
 
     async def test_an_earlier_turns_source_is_stored_only_when_cited(self):
         registry = SourceRegistry()
-        registry.seed([
-            NumberedSource(key="doc:d1:c1", title="XAF", content="POSTAL ADDRESS 0..*, F"),
-            NumberedSource(key="doc:d2:c9", title="Other", content="unrelated"),
-        ])
+        registry.seed(
+            [
+                NumberedSource(key="doc:d1:c1", title="XAF", content="POSTAL ADDRESS 0..*, F"),
+                NumberedSource(key="doc:d2:c9", title="Other", content="unrelated"),
+            ]
+        )
         reply = citations(("It is not required", [(1, "POSTAL ADDRESS")]))
         data = await ground(ANSWER, registry, CitationAgent(reply))
         assert [s.key for s in data.sources] == ["doc:d1:c1"]
@@ -234,13 +253,19 @@ class TestStream:
         thread_id = await self._thread()
         registry = SourceRegistry()
         registry.add([from_document(CHUNK)])
-        stream = self._stream(registry, thread_id, citations(("element is optional", [(1, "POSTAL ADDRESS")])))
+        stream = self._stream(
+            registry, thread_id, citations(("element is optional", [(1, "POSTAL ADDRESS")]))
+        )
         writer = StreamWriter(message_id="m1")
         writer.add_chunk(stream.get_text_chunk(ANSWER))
 
         events = [e async for e in stream.get_citations_artifact(writer)]
 
-        assert [e.event_type for e in events] == ["tool_call_start", "tool_input_complete", "tool_output"]
+        assert [e.event_type for e in events] == [
+            "tool_call_start",
+            "tool_input_complete",
+            "tool_output",
+        ]
         payload = events[-1].tool_output
         (citation,) = payload["citations"]
         assert ANSWER[citation["start"] : citation["end"]] == "element is optional"
@@ -333,3 +358,29 @@ def test_the_thread_lists_each_source_once(client, owner, stranger, url):
 
     client.force_login(stranger)
     assert client.get(url.format(t=thread.id)).status_code == 403
+
+
+class TestCitationAgent:
+    """AI_SDK_CITATION_AGENT, else AI_SDK_TASK_MODEL, else the chat agent places citations."""
+
+    def test_the_chat_agent_by_default(self):
+        from django_ai_sdk.adapters.citations.grounding import get_citation_agent
+
+        chat = object()
+        assert get_citation_agent(chat) is chat
+
+    def test_the_task_model_when_set(self, settings):
+        from django_ai_sdk.adapters.base import Run
+        from django_ai_sdk.adapters.citations.grounding import get_citation_agent
+
+        settings.AI_SDK_TASK_MODEL = "openai/gpt-oss-120b"
+        runner = get_citation_agent(object())
+        assert isinstance(runner, Run)
+        assert runner.generator.model == "openai/gpt-oss-120b"
+
+    def test_a_citation_agent_wins_over_the_task_model(self, settings):
+        from django_ai_sdk.adapters.citations.grounding import get_citation_agent
+
+        settings.AI_SDK_TASK_MODEL = "openai/gpt-oss-120b"
+        settings.AI_SDK_CITATION_AGENT = "tests.unit.test_workflow_steps.StubAgent"
+        assert type(get_citation_agent(object())).__name__ == "StubAgent"

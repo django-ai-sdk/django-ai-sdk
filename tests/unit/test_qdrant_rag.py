@@ -65,6 +65,12 @@ class TestQdrantRAGRemoteEmbeddings:
             FastembedTextEmbedder,
         )
 
+    def test_the_dimension_setting_only_applies_to_a_remote_model(self, settings):
+        # Model switched off, dimension left: local vectors are 384
+        settings.AI_SDK_EMBEDDINGS_DIM = 4096
+        assert QdrantBM25HybridRAGConfig().embedding_dim == 384
+        assert QdrantBM25HybridRAGConfig(embedding_dim=768).embedding_dim == 768
+
     def test_setting_switches_dense_embedders_to_the_api(self, settings):
         settings.OPENAI_API_KEY = "test"
         settings.OPENAI_API_URL = "https://example.test/v1"

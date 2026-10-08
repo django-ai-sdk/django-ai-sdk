@@ -87,8 +87,14 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     remote_embeddings: bool = Field(
         default_factory=lambda: bool(resolve_setting("AI_SDK_EMBEDDINGS_MODEL")),
     )
+    # The dimension setting belongs to the remote model; the local default model is 384.
     embedding_dim: int = Field(
-        default_factory=lambda: resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384), ge=1
+        default_factory=lambda: (
+            resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384)
+            if resolve_setting("AI_SDK_EMBEDDINGS_MODEL")
+            else 384
+        ),
+        ge=1,
     )
     # Prepended to queries only, for instruction-tuned models such as Qwen3-Embedding.
     query_prefix: str = ""

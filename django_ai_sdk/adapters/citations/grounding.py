@@ -14,6 +14,7 @@ from django_ai_sdk.logger import get_logger
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
+    from django_ai_sdk.adapters.base import Run
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.artifacts.schemas import CitationsData
 
@@ -43,13 +44,14 @@ CITATION_PROMPT = prompt("""\
 """)
 
 
-def get_citation_agent(agent: Agent) -> Agent:
-    """The agent that places citations"""
+def get_citation_agent(agent: Agent) -> Agent | Run:
+    """Get citation agent from settings, or the agent itself if none"""
     from django_ai_sdk.agents.base import Agent  # noqa: PLC0415
+    from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
 
     path = resolve_setting("AI_SDK_CITATION_AGENT", None)
     if not path:
-        return agent
+        return task_runner() or agent
     agent_class = import_string(path)
     if not (isinstance(agent_class, type) and issubclass(agent_class, Agent)):
         raise ImproperlyConfigured(f"AI_SDK_CITATION_AGENT must name an Agent subclass: {path!r}")
@@ -172,7 +174,7 @@ def match(text: str, quote: str, start: int = 0) -> tuple[int, int, Match] | Non
     return *_span(offsets, best[1], end, text), "fuzzy"
 
 
-async def ground(answer: str, registry: SourceRegistry, agent: Agent) -> CitationsData | None:
+async def ground(answer: str, registry: SourceRegistry, agent: Agent | Run) -> CitationsData | None:
     """The answer's citations and the sources to store"""
     from django_ai_sdk.artifacts.schemas import (  # noqa: PLC0415
         Citation,
