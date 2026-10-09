@@ -44,9 +44,7 @@ class TestBaseAgent:
         """Test that agent properly creates threads."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
-            title="Test Thread",
-            metadata={"agent_id": "test_agent"},
-            thread_id=thread_id
+            title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
         # Now get storage adapter for existing thread
@@ -61,9 +59,7 @@ class TestBaseAgent:
         """Test complete message storage flow."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
-            title="Test Thread",
-            metadata={"agent_id": "test_agent"},
-            thread_id=thread_id
+            title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
         # Now get storage adapter
@@ -85,9 +81,7 @@ class TestBaseAgent:
         """Test complete message rating workflow."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
-            title="Test Thread",
-            metadata={"agent_id": "test_agent"},
-            thread_id=thread_id
+            title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
         storage = await agent.get_storage_adapter(thread_id)
@@ -111,9 +105,7 @@ class TestBaseAgent:
         """Test conversation history retrieval."""
         # Create thread FIRST
         await MemoryStorageAdapter.create_thread(
-            title="Test Thread",
-            metadata={"agent_id": "test_agent"},
-            thread_id=thread_id
+            title="Test Thread", metadata={"agent_id": "test_agent"}, thread_id=thread_id
         )
 
         storage = await agent.get_storage_adapter(thread_id)
@@ -176,7 +168,6 @@ class TestBaseAgent:
         assert chat_messages[0].role == "user"
         assert chat_messages[1].role == "assistant"
 
-
     @pytest.mark.asyncio
     async def test_get_storage_adapter_falls_back_for_unknown_thread(self, agent):
         """get_storage_adapter() must return configured adapter for unknown threads."""
@@ -229,7 +220,7 @@ class TestStreamWriterIntegration:
 
         message_id = str(uuid.uuid4())
         stream_writer = StreamWriter(
-                        message_id=message_id,
+            message_id=message_id,
             model="test-model",
             role="assistant",
             storage_callback=None,
@@ -246,7 +237,7 @@ class TestStreamWriterIntegration:
 
         # Should work with valid ID
         stream_writer = StreamWriter(
-                        message_id=str(uuid.uuid4()),
+            message_id=str(uuid.uuid4()),
             model="test-model",
             role="assistant",
         )
@@ -296,6 +287,22 @@ class TestTitleGenerationPrompt:
         )
 
         assert agent.run.call_args.kwargs["system_prompt"] == custom_prompt
+
+    @pytest.mark.asyncio
+    async def test_the_task_model_writes_the_title_when_set(self, agent, settings):
+        from django_ai_sdk.adapters.base import Run
+        from django_ai_sdk.conversation.utils import generate_thread_title
+
+        settings.AI_SDK_TASK_MODEL = "openai/gpt-oss-120b"
+        agent.run = AsyncMock()
+        with patch.object(Run, "run", AsyncMock(return_value="Title")) as task_run:
+            title = await generate_thread_title(
+                agent=agent, messages=[ChatMessage(role="user", content="hi")]
+            )
+
+        assert title == "Title"
+        assert task_run.call_args.kwargs["system_prompt"] == agent.get_title_generation_prompt()
+        agent.run.assert_not_called()
 
 
 @pytest.mark.django_db
