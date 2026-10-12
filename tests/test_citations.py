@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pytest
 from django_ai_sdk.adapters.base import _CITED, _SENTINEL, Stream
@@ -231,6 +232,59 @@ class TestGround:
         reply = citations(("It is not required", [(1, "POSTAL ADDRESS")]))
         data = await ground(ANSWER, registry, CitationAgent(reply))
         assert [s.key for s in data.sources] == ["doc:d1:c1"]
+
+
+def filler(key: str) -> NumberedSource:
+    """A source that shares no words with ANSWER (no "0" in `key` either)."""
+    return NumberedSource(key=key, title=key, content=f"lorem ipsum {key.replace(':', ' ')}")
+
+
+class TestPick:
+    async def test_with_many_sources_a_block_reads_the_matching_ones_and_each_searchs_best(self):
+        registry = SourceRegistry()
+        for search in range(1, 5):  # four searches of ten hits, best first
+            registry.add([filler(f"doc:s{search}:{hit}") for hit in range(1, 11)])
+        registry.add([NumberedSource(key="doc:x", title="XAF", content=CHUNK.content)])
+        agent = CitationAgent(citations(("Postal Address element is optional", [(41, "0..*")])))
+
+        data = await ground(ANSWER, registry, agent)
+
+        sent = agent.calls[0]
+        assert len(re.findall(r"^\[\d+\] ", sent, re.MULTILINE)) <= grounding.MAX_SOURCES
+        assert "[41] XAF" in sent
+        # The best hit of every search, the rest left out.
+        for best in (1, 11, 21, 31):
+            assert f"[{best}] doc:s" in sent
+        assert "[2] doc:s" not in sent
+        (citation,) = data.citations
+        assert citation.evidence[0].key == "doc:x"
+
+    async def test_without_a_search_only_earlier_sources_sharing_words_are_read(self):
+        registry = SourceRegistry()
+        registry.seed([filler(f"doc:old:{n}") for n in range(1, 29)])
+        registry.seed(
+            [
+                NumberedSource(key="doc:a", title="Postal", content="POSTAL ADDRESS 0..*"),
+                NumberedSource(key="doc:b", title="Suppliers", content="customers or suppliers"),
+            ]
+        )
+        agent = CitationAgent(citations())
+
+        await ground(ANSWER, registry, agent)
+
+        assert "[29] Postal" in agent.calls[0]
+        assert "[30] Suppliers" in agent.calls[0]
+        assert "doc:old" not in agent.calls[0]
+
+    async def test_without_a_search_or_a_matching_source_the_agent_is_not_asked(self):
+        registry = SourceRegistry()
+        registry.seed([filler(f"doc:old:{n}") for n in range(1, 31)])
+        agent = CitationAgent(citations())
+
+        data = await ground(ANSWER, registry, agent)
+
+        assert agent.calls == []
+        assert data.citations == []
 
 
 class TestGrounder:

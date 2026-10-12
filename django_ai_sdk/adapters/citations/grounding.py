@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import math
 import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.artifacts.schemas import Citation, CitationsData
 
+    from .formatter import NumberedSource
     from .registry import SourceRegistry
 
 logger = get_logger(__name__)
@@ -36,6 +38,8 @@ SOURCE_CHARS = 6000
 FUZZY_RATIO = 0.85
 # least characters of answer per citation call
 BLOCK_CHARS = 300
+# most sources one citation call reads
+MAX_SOURCES = 15
 
 CITATION_PROMPT = prompt("""\
     You get numbered sources and an answer, or a part of one, written from them.
@@ -51,7 +55,7 @@ CITATION_PROMPT = prompt("""\
 
 
 def get_citation_agent(agent: Agent) -> Agent | Run:
-    """Get citation agent from settings, or the agent itself if none"""
+    """Get citation agent from settings"""
     from django_ai_sdk.agents.base import Agent  # noqa: PLC0415
     from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
 
@@ -64,15 +68,35 @@ def get_citation_agent(agent: Agent) -> Agent | Run:
     return agent_class()
 
 
-def render(answer: str, registry: SourceRegistry) -> str:
+def pick(answer: str, registry: SourceRegistry) -> list[NumberedSource]:
+    """The sources `answer` may cite, at most MAX_SOURCES, in number order."""
+    from django_ai_sdk.rags.components import _words  # noqa: PLC0415
+
+    sources = registry.all
+    if len(sources) <= MAX_SOURCES:
+        return sources
+
+    # words in each source, lowercased, for the first SOURCE_CHARS characters
+    words = {s.key: _words(f"{s.title} {s.content[:SOURCE_CHARS]}") for s in sources}
+
+    # words in most sources
+    terms = {t for t in _words(answer) if sum(t in w for w in words.values()) <= len(sources) / 2}
+    shared = {key: len(terms & w) for key, w in words.items()}
+    ranks = registry.ranks
+
+    # pick out the sources that share the most words with the answer
+    candidates = [s for s in sources if shared[s.key] or ranks.get(s.key) == 1]
+    candidates.sort(key=lambda s: (-shared[s.key], ranks.get(s.key, math.inf), s.index))
+    return sorted(candidates[:MAX_SOURCES], key=lambda s: s.index)
+
+
+def render(answer: str, sources: list[NumberedSource]) -> str:
     """The citation agent's input: the numbered sources, then the answer.
 
     Sources first: a turn's calls then share a prefix the provider can cache.
     """
-    sources = "\n\n".join(
-        f"[{s.index}] {s.title}\n{s.content[:SOURCE_CHARS]}" for s in registry.all
-    )
-    return f"Sources:\n{sources}\n\nAnswer:\n{answer}"
+    text = "\n\n".join(f"[{s.index}] {s.title}\n{s.content[:SOURCE_CHARS]}" for s in sources)
+    return f"Sources:\n{text}\n\nAnswer:\n{answer}"
 
 
 def parse_pairs(reply: str) -> list[tuple[str, list[tuple[int, str]]]]:
@@ -286,8 +310,12 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
     from django_ai_sdk.artifacts.schemas import Citation, Evidence  # noqa: PLC0415
     from django_ai_sdk.common import ChatMessage  # noqa: PLC0415
 
+    sources = pick(answer, registry)
+    logger.info("Citing a block with {} of {} sources", len(sources), len(registry))
+    if not sources:
+        return []
     reply = await agent.run(
-        [ChatMessage(role="user", content=render(answer, registry))],
+        [ChatMessage(role="user", content=render(answer, sources))],
         system_prompt=CITATION_PROMPT,
         response_format=None,
     )
