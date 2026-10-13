@@ -483,6 +483,35 @@ async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, 
     }
 
 
+async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[str, Any]]:
+    """Every source found in a thread's turns, each once by key.
+
+    Raises:
+        NotFound: If the thread doesn't exist
+        PermissionDenied: If user has no VIEW_THREAD permission
+    """
+    thread = await _get_thread(thread_id)
+    if thread is None:
+        raise NotFound("Thread not found")
+    await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
+
+    from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
+    from django_ai_sdk.artifacts.schemas import CitationsArtifact, CitedSource  # noqa: PLC0415
+
+    sources: dict[str, dict[str, Any]] = {}
+    rows = Artifact.objects.filter(
+        thread_id=thread_id, schema_name=CitationsArtifact.__name__
+    ).order_by("-created_at")
+    async for row in rows:
+        # only the sources
+        for source in map(CitedSource.model_validate, row.data.get("sources", [])):
+            known = sources.setdefault(
+                source.key, source.model_dump(mode="json", by_alias=True, exclude={"number"})
+            )
+            known["cited"] = known["cited"] or source.cited
+    return list(sources.values())
+
+
 # ============================================================================
 # Sync wrappers for use in sync contexts
 # ============================================================================
@@ -497,3 +526,4 @@ update_thread = async_to_sync(ThreadService.update_thread)
 delete_thread = async_to_sync(ThreadService.delete_thread)
 delete_all_threads = async_to_sync(ThreadService.delete_all_threads)
 get_thread_file_meta = async_to_sync(aget_thread_file_meta)
+get_thread_sources = async_to_sync(aget_thread_sources)

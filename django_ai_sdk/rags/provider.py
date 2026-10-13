@@ -8,7 +8,7 @@ from django_ai_sdk.errors import AiSdkError, ErrorCode
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
-    from django_ai_sdk.adapters.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.adapters.citations import SourceFormatter, SourceRegistry
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.rags.schemas import RagDocument
 
@@ -103,14 +103,18 @@ class RAGProvider:
         memory_id: str | None = None,
         *,
         spec: Any = None,
-        citation_registry: CitationRegistry | None = None,
-        citation_formatter: CitationFormatter | None = None,
+        citation_registry: SourceRegistry | None = None,
+        citation_formatter: SourceFormatter | None = None,
     ) -> Any:
-        """Get a ready-to-use ComponentTool for the given memory, with optional citations."""
+        """Get a ComponentTool for the given memory."""
+        from django_ai_sdk.adapters.citations import collect_sources  # noqa: PLC0415
+
         rag_instance = await self.get_rag_instance(agent, memory_id)
         tool = await self.build_tool(rag_instance, spec=spec)
-        if tool is not None and citation_registry is not None and citation_formatter is not None:
-            self._attach_citations(tool, citation_formatter, citation_registry)
+
+        # Seed the citation registry with sources from the RAG's tool
+        if tool is not None and citation_registry is not None:
+            collect_sources(tool, citation_registry, formatter=citation_formatter)
         return tool
 
     async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
@@ -136,17 +140,6 @@ class RAGProvider:
             "Cannot build ComponentTool: rag_instance has neither get_tool() nor as_tool()"
         )
         return None
-
-    def _attach_citations(
-        self,
-        tool: Any,
-        formatter: CitationFormatter,
-        registry: CitationRegistry,
-    ) -> None:
-        """Wire a ComponentTool via the citation bridge."""
-        from django_ai_sdk.adapters.citations.utils import attach_citations  # noqa: PLC0415
-
-        attach_citations(tool, formatter, registry)
 
     def clear_cache(self) -> None:
         """Clear the RAG cache."""

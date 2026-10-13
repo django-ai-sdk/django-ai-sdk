@@ -9,14 +9,19 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from pydantic import BaseModel
 
 from django_ai_sdk.adapters.citations import (
-    CitationFormatter,
-    CitationRegistry,
-    DefaultCitationFormatter,
+    SourceFormatter,
+    SourceRegistry,
+    SourcesFormatter,
 )
+from django_ai_sdk.adapters.citations.grounding import get_citation_agent
+from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.common import ChatMessage, Prompt, prompt
-from django_ai_sdk.conversation.utils import generate_thread_title, get_title_sanity_limit
+from django_ai_sdk.conversation.utils import (
+    generate_thread_title,
+    get_title_sanity_limit,
+)
 from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.logger import get_logger
@@ -41,9 +46,11 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.adapters.citations import NumberedSource
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
+    from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
     from django_ai_sdk.rags.schemas import RagDocument
@@ -79,7 +86,7 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
         return tool
 
 
-class Agent(ABC, AgentInfoMixin):
+class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     """
     Base class for AI agents in the Django AI SDK.
 
@@ -166,6 +173,9 @@ class Agent(ABC, AgentInfoMixin):
     # ArtifactSchema subclasses to register as tools in stream pipelines.
     artifacts: list[type[BaseModel]] = []
 
+    # Artifacts shown after a tool runs, by tool name, without the model calling.
+    tool_artifacts: dict[str, ToolArtifact] = {}
+
     # Delegate-able subagent classes.
     agents: list[type[Agent]] = []
 
@@ -200,6 +210,9 @@ class Agent(ABC, AgentInfoMixin):
     # Enable file upload UI for this agent's threads.
     file_upload: bool = False
 
+    # Tools the agent must call before it may finish a run.
+    required_tools: list[str] = []
+
     # Declare one FilePipeline per supported file type.
     # First pipeline whose processor accepts the uploaded file is used.
     # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
@@ -211,8 +224,8 @@ class Agent(ABC, AgentInfoMixin):
     # Hard cap on documents fetched for RAG indexing (prevents OOM on large memories).
     rag_document_limit: int = 10_000
 
-    # Citation formatter used to render retrieved documents for the LLM.
-    citation_formatter_class: type[CitationFormatter] = DefaultCitationFormatter
+    # Renders retrieved sources as the text the answering model reads
+    citation_formatter_class: type[SourceFormatter] = SourcesFormatter
 
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
@@ -409,17 +422,21 @@ class Agent(ABC, AgentInfoMixin):
         """Return the model identifier."""
         return self.model or ""
 
-    def get_citation_formatter(self) -> CitationFormatter:
-        """Return the formatter used to render retrieved docs for the LLM.
-
-        Override to inject formatter dependencies; otherwise swap formatters by
-        setting the citation_formatter_class class attribute.
-        """
+    def get_citation_formatter(self) -> SourceFormatter:
+        """Return the formatter used to render retrieved sources."""
         return self.citation_formatter_class()
 
-    def get_citation_registry(self) -> CitationRegistry:
-        """Return a fresh per-turn registry so citation indices reset between turns."""
-        return CitationRegistry()
+    def get_citation_registry(self) -> SourceRegistry:
+        """Return a fresh per-turn registry of the sources an answer may cite."""
+        return SourceRegistry()
+
+    async def get_citation_sources(
+        self,
+        thread_id: str,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[NumberedSource]:
+        """Sources every answer in the thread may cite, even when no tool found them."""
+        return []
 
     def get_llm(self, **kwargs: Any) -> Any:
         """Build this agent's chat generator.
@@ -427,7 +444,10 @@ class Agent(ABC, AgentInfoMixin):
         Uses the `llm` factory if set, otherwise OpenAI's Responses API. Keyword
         arguments override `llm_kwargs`, and the agent always supplies the model.
         """
-        from django_ai_sdk.generators import merge_generation_kwargs, openai_responses_chat
+        from django_ai_sdk.generators import (
+            merge_generation_kwargs,
+            openai_responses_chat,
+        )
 
         factory = self.llm or openai_responses_chat
         if not callable(factory):
@@ -447,6 +467,14 @@ class Agent(ABC, AgentInfoMixin):
         if not self.suggestion_generator:
             return None
         return self.suggestion_generator(agent=self)
+
+    def get_run_required_tools(self, messages: list[ChatMessage]) -> list[str]:
+        """Names of tools the model must have called before it answers this turn.
+
+        On top of `required_tools`, decided from this turn's `messages`. Enforced on
+        exit by RequireToolsHook; the tools themselves come from `get_tools()`.
+        """
+        return []
 
     async def get_tools(
         self,
@@ -479,6 +507,9 @@ class Agent(ABC, AgentInfoMixin):
 
         # subagent tools
         result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
+
+        # info about uploaded files
+        result.extend(self.get_attachment_tools(thread_id))
 
         return result
 
@@ -594,8 +625,8 @@ class Agent(ABC, AgentInfoMixin):
         self,
         thread_id: str,
         *,
-        citation_registry: CitationRegistry | None = None,
-        citation_formatter: CitationFormatter | None = None,
+        citation_registry: SourceRegistry | None = None,
+        citation_formatter: SourceFormatter | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
         """Build RAG tools from active ThreadMemory links for a thread.
@@ -916,7 +947,8 @@ class Agent(ABC, AgentInfoMixin):
 
         if not storage:
             raise AiSdkError(
-                f"No storage adapter found for thread: {thread_id}", ErrorCode.CONFIGURATION_ERROR
+                f"No storage adapter found for thread: {thread_id}",
+                ErrorCode.CONFIGURATION_ERROR,
             )
 
         # Get thread metadata
@@ -927,12 +959,21 @@ class Agent(ABC, AgentInfoMixin):
         # The agent chain gates the agent, not whose thread this is.
         await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread_info)
         await check_object_permissions(
-            user, Operation.VIEW_THREAD, thread_info, get_agent_permissions(self), agent=self
+            user,
+            Operation.VIEW_THREAD,
+            thread_info,
+            get_agent_permissions(self),
+            agent=self,
         )
 
         # Get messages using the instance method
         chat_messages = await storage.get_messages()
         logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
+
+        if any(m.attachments for m in chat_messages):
+            from django_ai_sdk.memories.services import MemoryService
+
+            await MemoryService.resolve_attachments(thread_id, chat_messages, user=user, agent=self)
 
         # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
@@ -999,6 +1040,23 @@ class Agent(ABC, AgentInfoMixin):
                 f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
             )
 
+        # Attachments are client-supplied: validate them against the thread's
+        # files before they are stored or reach the model.
+        if any(m.attachments for m in messages):
+            if thread:
+                from django_ai_sdk.memories.services import MemoryService
+
+                await MemoryService.resolve_attachments(
+                    str(thread.id),
+                    messages,
+                    user=user,
+                    agent=self,
+                    inline_images=self.has_vision(),
+                )
+            else:
+                for message in messages:
+                    message.attachments = []
+
         # Get storage adapter for thread
         storage_adapter = await self.get_storage_adapter(thread_id)
 
@@ -1039,10 +1097,28 @@ class Agent(ABC, AgentInfoMixin):
             suggestion_generator = self.get_suggestion_generator()
             if suggestion_generator:
                 adapter.suggestion_generator = suggestion_generator
+            if required_tools := self.get_run_required_tools(messages):
+                adapter.hook_context = {"required_tools": required_tools}
+            # Artifacts are stored on the thread: none without one.
+            if thread_id:
+                adapter.thread_id = thread_id
+                adapter.user = user
+                # Shown after each mapped tool's result, for any tool of the run.
+                adapter.tool_artifacts = self.tool_artifacts
+
+                # Seed the citation registry with sources from current thread
+                registry = getattr(adapter, "citation_registry", None)
+                if registry is not None:
+                    await registry.seed_from_thread(thread_id)
+                    registry.seed(await self.get_citation_sources(thread_id, user))
+                    adapter.citation_agent = get_citation_agent(self)
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 
         logger.debug("Initiating stream response")
         return await stream_response(
-            build_adapter, messages, self.protocol_handler, storage_adapter=storage_adapter
+            build_adapter,
+            messages,
+            self.protocol_handler,
+            storage_adapter=storage_adapter,
         )

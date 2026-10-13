@@ -83,6 +83,26 @@ AI_SDK_PERMISSIONS = {
     "thread": ["apps.agents.permissions.DemoThreadPermission"],
 }
 
+# Files and images
+
+# A vision-capable model for VisionAgent
+AI_SDK_VISION_MODEL = env("AI_SDK_VISION_MODEL", default=None)
+AI_SDK_VISION_AGENT = "apps.agents.vision.VisionAgent" if AI_SDK_VISION_MODEL else None
+
+# The thread-file download view
+AI_SDK_THREAD_FILE_URL = "api-1.0.0:download_thread_file"
+
+# The shared text types, plus what the studio's PDF and image pipelines read.
+AI_SDK_ALLOWED_FILES = {
+    **AI_SDK_ALLOWED_FILES,
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 # Integrations are Django apps (see INSTALLED_APPS) that register themselves on ready().
 # This dict configures them by name. A missing credential doesn't crash boot: the
 # integration reports that it needs setup instead. `weather` needs none at all.

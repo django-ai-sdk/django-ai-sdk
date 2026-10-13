@@ -8,6 +8,7 @@ here when you replace an endpoint and want to keep its response shape.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from ninja import Schema
@@ -75,6 +76,10 @@ class ThreadFileMeta(Schema):
     file_memory_id: str | None = None
 
 
+class ThreadSourcesResponse(Schema):
+    sources: list[dict[str, Any]] = []
+
+
 class DeleteAllThreadsResponse(Schema):
     success: bool
     deleted_count: int
@@ -104,6 +109,7 @@ class AgentItem(Schema):
     model: str | None = None
     file_upload: bool = False
     rag: bool = False
+    vision: bool = False
 
 
 class AgentsListResponse(Schema):
@@ -119,6 +125,7 @@ class AgentInfoResponse(Schema):
     instructions: str | None = None
     file_upload: bool = False
     rag: bool = False
+    vision: bool = False
     permissions: ObjectPermissions = ObjectPermissions()
 
 
@@ -155,6 +162,8 @@ class AgentSettingsOut(Schema):
     title_generation: bool
     max_history: int | None
     file_upload: bool
+    vision: bool
+    required_tools: list[str]
     active: bool
     created_at: datetime
     updated_at: datetime

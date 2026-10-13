@@ -5,11 +5,15 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django_ai_sdk import Agent
 from django_ai_sdk.adapters.base import Run, Stream
-from django_ai_sdk.adapters.citations import DefaultCitationFormatter
 from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 from django_ai_sdk.agents import ToolAgent, ToolAgentConfig, auto_register
 from django_ai_sdk.common import prompt
-from django_ai_sdk.files import FilePipeline, TextFileProcessor
+from django_ai_sdk.files import (
+    AnyDocFileProcessor,
+    FilePipeline,
+    ImageCaptionProcessor,
+    TextFileProcessor,
+)
 from django_ai_sdk.generators import openai_responses_chat
 from django_ai_sdk.memories.models import Entry
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
@@ -25,6 +29,7 @@ from django_ai_sdk.storage.db import DbStorageAdapter
 
 from .extraction import PirateExtractionAgent
 from .tools import get_memory_file, get_memory_files, get_today
+from .tools.memories import FileLookupMixin
 from .transforms import DocumentExtractionTransform
 
 if TYPE_CHECKING:
@@ -39,7 +44,7 @@ SEARCH_IS_NOT_A_LIST = (
 
 
 @auto_register
-class PirateBasicAgent(Agent):
+class PirateBasicAgent(FileLookupMixin, Agent):
     name = "Basic Pirate Agent"
     model = settings.AI_SDK_DEFAULT_MODEL
     llm = openai_responses_chat
@@ -86,6 +91,20 @@ class PirateBasicAgent(Agent):
                 DocumentExtractionTransform(PirateExtractionAgent()),
             ],
         ),
+        FilePipeline(
+            AnyDocFileProcessor(),
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAgent()),
+            ],
+        ),
+        # Images become a searchable caption, which is also what agents
+        # without vision get to see.
+        FilePipeline(
+            ImageCaptionProcessor(),
+            transforms=[
+                DocumentExtractionTransform(PirateExtractionAgent()),
+            ],
+        ),
     ]
 
     # Use the new RAG provider pattern for Haystack
@@ -96,7 +115,6 @@ class PirateBasicAgent(Agent):
     # Registry keys of installed integration apps.
     integrations: list[str] = ["linear", "weather"]
 
-    citation_formatter_class = DefaultCitationFormatter
     suggestion_generator = DefaultSuggestionGenerator
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> QuerySet[Entry]:

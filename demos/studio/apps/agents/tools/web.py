@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, cast
 
 import trafilatura
+from django_ai_sdk.adapters.citations import collect_sources, from_web_result
 from django_ai_sdk.logger import get_logger
 from haystack.tools import Tool
 from haystack_integrations.components.websearch.ddgs import DDGSWebSearch
@@ -64,7 +65,7 @@ def fetch_page(url: Annotated[str, "The full URL to fetch"]) -> str:
 
 def search_web_tool(**kwargs: object) -> Tool:
     """Web search tool factory."""
-    return Tool(
+    tool = Tool(
         name="search_web",
         description="Search the web for information on a topic. Returns summarized search results.",
         parameters={
@@ -79,6 +80,7 @@ def search_web_tool(**kwargs: object) -> Tool:
         },
         function=search_web,
     )
+    return collect_sources(tool, key=None, to_source=from_web_result)
 
 
 def fetch_page_tool(**kwargs: object) -> Tool:

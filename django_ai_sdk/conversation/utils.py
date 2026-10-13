@@ -35,14 +35,22 @@ async def generate_thread_title(
     if not user_messages:
         return None
 
+    from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
+
+    system_prompt = agent.get_title_generation_prompt()
     try:
-        title = await agent.run(
-            messages=user_messages,
-            system_prompt=agent.get_title_generation_prompt(),
-            thread_id=thread_id,
-            user=user,
-            response_format=None,
-        )
+        if runner := task_runner():
+            title = await runner.run(
+                messages=user_messages, system_prompt=system_prompt, response_format=None
+            )
+        else:
+            title = await agent.run(
+                messages=user_messages,
+                system_prompt=system_prompt,
+                thread_id=thread_id,
+                user=user,
+                response_format=None,
+            )
     except Exception:
         logger.warning("Thread title generation failed", exc_info=True)
         return None

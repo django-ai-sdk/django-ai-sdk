@@ -22,6 +22,19 @@ def prompt(text: str) -> Prompt:
     return Prompt(dedent(text))
 
 
+class Attachment(BaseModel):
+    """A thread file attached to a user message."""
+
+    document_id: str
+    media_type: str = ""
+    filename: str = ""
+    memory_id: str = ""
+
+    url: str = Field(default="", exclude=True)
+    context: str = Field(default="", exclude=True)
+    data: str = Field(default="", exclude=True)
+
+
 class ChatMessage(BaseModel):
     """Internal SDK representation of a chat message."""
 
@@ -30,6 +43,7 @@ class ChatMessage(BaseModel):
     content: str = ""
     reasoning: str | None = None
     id: str = ""
+    attachments: list[Attachment] = Field(default_factory=list)
 
     # Rich metadata
     tool_calls: list[dict] = Field(default_factory=list)
@@ -172,6 +186,11 @@ class StreamWriter:
             logger.debug(f"Unknown chunk type: {chunk.type}")
 
         return self.message
+
+    @property
+    def text(self) -> str:
+        """The answer text"""
+        return "".join(self._content_chunks)
 
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""

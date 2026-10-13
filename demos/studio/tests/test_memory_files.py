@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import pytest
+from asgiref.sync import async_to_sync
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.memories.models import Entry, Memory, ThreadMemory
 from django_ai_sdk.memories.schemas import Predicate
 
-from apps.agents.tools.memories import list_memory_files
+from apps.agents.tools import memories
+
+list_memory_files = async_to_sync(memories.list_memory_files)
 
 
 def _extraction(summary: str, keywords: list[str], facts: tuple[str, ...] = ()) -> dict:

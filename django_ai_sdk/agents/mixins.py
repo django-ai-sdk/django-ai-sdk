@@ -16,6 +16,7 @@ class AgentInfo(BaseModel):
         class_name: Python class name of the agent
         description: Optional description of the agent's purpose
         file_upload: Whether this agent supports file uploads in threads
+        vision: Whether this agent's model is sent image attachments as pixels
     """
 
     id: str
@@ -24,6 +25,7 @@ class AgentInfo(BaseModel):
     class_name: str
     description: str | None = None
     file_upload: bool = False
+    vision: bool = False
     rag: bool = True
 
 
@@ -52,6 +54,7 @@ class AgentInfoMixin:
             class_name=self.__class__.__name__,
             description=getattr(self, "description", None),
             file_upload=getattr(self, "file_upload", False),
+            vision=getattr(self, "vision", False),
             rag=True if getattr(self, "rag_provider", None) else False,
         )
 
