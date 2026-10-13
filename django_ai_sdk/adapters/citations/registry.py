@@ -30,14 +30,18 @@ class SourceRegistry:
     """The sources an answer may cite"""
 
     def __init__(self) -> None:
-        self._by_key: dict[str, NumberedSource] = {}
-        self.seeded: set[str] = set()  # keys from earlier turns, not found again this turn
 
-    def add(self, sources: list[NumberedSource]) -> list[NumberedSource]:
-        """Register sources found this turn; returns them as registered"""
+        self._by_key: dict[str, NumberedSource] = {}
+        self.seeded: set[str] = set()  # keys from earlier turns
+        self.ranks: dict[str, int] = {}
+
+    def add(self, sources: list[NumberedSource], *, ranked: bool = True) -> list[NumberedSource]:
+        """Register sources found this turn, best first."""
         registered = []
-        for source in sources:
+        for rank, source in enumerate(sources, 1):
             key = source.key or source_key(source)
+            if ranked:
+                self.ranks[key] = min(rank, self.ranks.get(key, rank))
             known = self._by_key.get(key)
             if known is not None:
                 known.content = source.content or known.content  # the latest text wins
@@ -54,7 +58,7 @@ class SourceRegistry:
         for source in sources:
             key = source.key or source_key(source)
             if key not in self._by_key:
-                self.add([source.model_copy(update={"key": key})])
+                self.add([source.model_copy(update={"key": key})], ranked=False)
                 self.seeded.add(key)
 
     async def seed_from_thread(self, thread_id: str, limit: int = SEED_LIMIT) -> None:
