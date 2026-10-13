@@ -52,6 +52,10 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
 - Pass the same `operation_id` and response schema (all of them live in `django_ai_sdk.contrib.ninja.schemas`) to keep a generated frontend client unchanged.
 - Need a different response shape? Skip the wrapper and call the service (`ThreadService.threads(...)`) with your own schema.
 
+{{< callout type="warning" >}}
+Register the replacement on the router that `get_*_router(exclude=...)` returned, not on a separate `Router`: Ninja resolves a path per router, so a second router on a shared path answers `405 Method Not Allowed` for the other methods.
+{{< /callout >}}
+
 ### Remove an endpoint
 
 Exclude it and don't add a replacement:

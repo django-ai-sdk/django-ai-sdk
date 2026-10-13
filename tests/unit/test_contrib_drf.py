@@ -206,7 +206,7 @@ def _pairs():
         (s.ChatRequestSerializer, v.ChatRequest),
         (s.MessagePartSerializer, v.MessagePart),
         (s.RateMessageSerializer, v.RateMessagePayload),
-        (s.AgentSwitchSerializer, v.PatchThreadPayload),
+        (s.ThreadUpdateSerializer, v.PatchThreadPayload),
         (s.MemorySerializer, v.MemoryIn),
         (s.BulkConnectSerializer, v.BulkConnectMemoriesIn),
         (s.ToggleActiveSerializer, v.ToggleMemoryActiveIn),

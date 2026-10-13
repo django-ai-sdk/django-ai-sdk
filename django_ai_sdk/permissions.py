@@ -609,6 +609,7 @@ class PermissionsMixin:
             can_read=flags.get("read", False),
             can_write=flags.get("write", False),
             can_manage=flags.get("manage", False),
+            can_delete=flags.get("delete", False),
         )
 
     @classmethod

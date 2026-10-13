@@ -143,6 +143,9 @@ class MemoryUserOut(BaseModel):
     """Schema for memory user output."""
 
     user_id: str
+    email: str = ""
+    first_name: str = ""
+    last_name: str = ""
     can_manage: bool
     created_at: str
 

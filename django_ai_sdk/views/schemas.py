@@ -109,7 +109,8 @@ class AddMemoryGroupIn(BaseModel):
 
 
 class PatchThreadPayload(BaseModel):
-    agent_id: str
+    agent_id: str | None = None
+    title: str | None = None
 
 
 # Runtime agents
