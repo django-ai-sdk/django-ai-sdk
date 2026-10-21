@@ -208,6 +208,17 @@ class SourceContentOut(Schema):
     content: str
 
 
+class SourceDocumentOut(Schema):
+    """The original file of a cited source; for a PDF, ``page_url`` opens it on the
+    cited page."""
+
+    id: str
+    name: str
+    url: str
+    page: int | None = None
+    page_url: str | None = None
+
+
 class UploadSettingsOut(Schema):
     max_upload_size: int
     allowed_mime_types: list[str]

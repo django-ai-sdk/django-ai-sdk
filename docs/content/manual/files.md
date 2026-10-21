@@ -176,3 +176,16 @@ await MemoryService.get_document_status(doc_id, user=request.user)           # D
 ```
 
 The demo wires this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`) so the frontend knows how many files a thread has and which memory holds them. See [Memories](/manual/memories/) for the full API.
+
+## Fonts
+
+Cited document pages are rendered by pdf-oxide with the system's fonts. A PDF that doesn't embed its fonts, and every converted Word, Excel or text file, needs them: on a server without any, pdf-oxide draws every letter as a box.
+
+On Linux and in Docker, install Liberation:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Liberation Sans, Serif and Mono have the same widths as Arial, Times New Roman and Courier New, so converted pages keep their spacing, and pdf-oxide falls back to them by name. macOS uses its own fonts.

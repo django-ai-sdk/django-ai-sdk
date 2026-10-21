@@ -8,11 +8,13 @@ from typing import Any
 from django.http import HttpRequest
 from ninja import File, Router
 from ninja.files import UploadedFile
+from ninja.params import functions as params
 
 from django_ai_sdk.contrib.ninja.routing import ERRORS, ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
     MemoryOutResponse,
     SourceContentOut,
+    SourceDocumentOut,
     UploadSettingsOut,
 )
 from django_ai_sdk.errors import NotFound
@@ -26,7 +28,11 @@ from django_ai_sdk.memories.schemas import (
     ThreadMemoryOut,
 )
 from django_ai_sdk.memories.services import MemoryService
-from django_ai_sdk.views.files import athread_file_response
+from django_ai_sdk.views.files import (
+    asource_file_response,
+    asource_page_response,
+    athread_file_response,
+)
 from django_ai_sdk.views.permissions import amemory_permissions
 from django_ai_sdk.views.schemas import (
     AddMemoryGroupIn,
@@ -296,6 +302,44 @@ async def get_source_content(request: HttpRequest, entry_id: str, chunk_id: str)
     if content is None:
         raise NotFound(f"Entry not found: {entry_id}")
     return SourceContentOut(content=content)
+
+
+# Cited passages, as a repeated query parameter (?quote=...&quote=...)
+QUOTES = params.Query([])
+
+
+@routes.get("/source/document", response=SourceDocumentOut)
+async def get_source_document(
+    request: HttpRequest, entry_id: str, quote: list[str] = QUOTES
+) -> Any:
+    """The original document behind a cited source, and the page of its quotes."""
+    document, page = await MemoryService.get_source_document(entry_id, quote, user=request.user)
+    url = f"{request.path.rstrip('/')}/{document.id}/file"
+    return SourceDocumentOut(
+        id=str(document.id),
+        name=document.file_name,
+        url=url,
+        page=page,
+        page_url=f"{url}#page={page}"
+        if page and document.file_extension.lower() == "pdf"
+        else None,
+    )
+
+
+@routes.get("/source/document/{doc_id}/file")
+async def get_source_document_file(request: HttpRequest, doc_id: str) -> Any:
+    """The original file: a PDF in the browser's own PDF viewer, anything else
+    downloads."""
+    return await asource_file_response(doc_id, user=request.user)
+
+
+@routes.get("/source/document/{doc_id}/page/{page}")
+async def get_source_document_page(
+    request: HttpRequest, doc_id: str, page: int, quote: list[str] = QUOTES
+) -> Any:
+    """One page of a knowledge-base document as a PNG, the cited passages ``quote``
+    marked; the ``X-Mark`` header says where."""
+    return await asource_page_response(doc_id, page, quote, user=request.user)
 
 
 def get_memories_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:
