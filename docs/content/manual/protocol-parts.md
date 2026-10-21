@@ -92,6 +92,7 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 | `SuggestionEvent` | `DataPart(type="data-suggestions")` |
 | `SourceEvent` | `SourceDocumentPart` with citation index |
 | `ErrorEvent` | `ErrorPart` |
+| `TextEndEvent` | close open reasoning/text blocks, so the text shows as done while citations are placed |
 | `MessageEndEvent` | close open reasoning/text blocks + `FinishPart` |
 | `StreamEndEvent` | `DonePart` |
 

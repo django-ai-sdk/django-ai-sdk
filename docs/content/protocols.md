@@ -74,10 +74,11 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 2. **`TextChunkEvent`**: one per chunk from the model
 3. **`ToolCallStartEvent`** / **`ToolInputCompleteEvent`** / **`ToolOutputEvent`**: tool calls as they happen
 4. **`SourceEvent`**: RAG sources, streamed with citation indices
-5. **`MessageEndEvent`**: after the message is finalized
-6. **`SuggestionEvent`**: optional follow-up suggestions
-7. **`StreamEndEvent`**: the run is done
-8. **`ErrorEvent`**: pipeline failures, instead of a hanging stream
+5. **`TextEndEvent`**: the answer's text is complete; citations are placed after it
+6. **`MessageEndEvent`**: after the message is finalized
+7. **`SuggestionEvent`**: optional follow-up suggestions
+8. **`StreamEndEvent`**: the run is done
+9. **`ErrorEvent`**: pipeline failures, instead of a hanging stream
 
 Events carry structured data, so protocol handlers render them into their own format.
 

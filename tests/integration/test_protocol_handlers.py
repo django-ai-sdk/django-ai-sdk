@@ -30,6 +30,7 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
     DataEvent,
     ErrorEvent,
+    TextEndEvent,
 )
 from tests.factories.schemas import ChatMessageFactory
 
@@ -181,6 +182,24 @@ class TestVercelProtocolHandler:
         assert text_deltas[0].delta == "Hello "
         assert text_deltas[1].delta == "world!"
         assert any(isinstance(c, TextEndPart) for c in chunks)
+
+    @pytest.mark.asyncio
+    async def test_text_ends_before_the_citations_that_follow_it(self, handler):
+        """A client shows the answer as done while its citations are placed."""
+
+        async def event_generator():
+            yield MessageStartEvent(message_id="msg_123")
+            yield TextChunkEvent(content="Hello")
+            yield TextEndEvent()
+            yield ToolCallStartEvent(tool_call_id="c1", tool_name="artifact_citations")
+            yield MessageEndEvent(finish_reason="stop")
+
+        chunks = [c async for c in handler.handle_stream(event_generator())]
+
+        ends = [i for i, c in enumerate(chunks) if isinstance(c, TextEndPart)]
+        assert len(ends) == 1
+        assert chunks[ends[0] + 1].type == "tool-input-start"
+        assert isinstance(chunks[-1], FinishPart)
 
     @pytest.mark.asyncio
     async def test_handle_stream_reasoning_events(self, handler):
