@@ -17,6 +17,7 @@ __all__ = [
     "IMAGE_EXTENSIONS",
     "PREVIEW_EXTENSIONS",
     "QUOTE_LETTERS",
+    "get_pdf_engine",
     "letters",
     "passage_areas",
     "quote_page",
