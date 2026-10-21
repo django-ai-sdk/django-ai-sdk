@@ -486,6 +486,33 @@ class TestStream:
         await later.seed_from_thread(thread_id)
         assert [s.key for s in later.all] == ["doc:d1:c1"]
 
+    async def _turn(self, thread_id: str, reply: str) -> dict:
+        """A turn that finds CHUNK (again) and stores its citations; their payload."""
+        registry = SourceRegistry()
+        await registry.seed_from_thread(thread_id)
+        registry.add([from_document(CHUNK)])
+        stream = self._stream(registry, thread_id, reply)
+        writer = StreamWriter(message_id="m")
+        writer.add_chunk(stream.get_text_chunk(ANSWER))
+        return [e async for e in stream.get_citations_artifact(writer)][-1].tool_output
+
+    async def test_the_thread_stores_an_uncited_sources_text_once(self):
+        thread_id = await self._thread()
+        uncited = citations()
+
+        first = await self._turn(thread_id, uncited)
+        again = await self._turn(thread_id, uncited)
+        cited = await self._turn(thread_id, citations(("element is optional", [(1, "POSTAL")])))
+
+        assert first["sources"][0]["content"] == CHUNK.content
+        # Found again, not cited: the first turn's copy has its text.
+        assert again["sources"][0]["content"] == ""
+        # Cited: its answer shows the passage, so it keeps its text.
+        assert cited["sources"][0]["content"] == CHUNK.content
+        later = SourceRegistry()
+        await later.seed_from_thread(thread_id)
+        assert [(s.key, s.content) for s in later.all] == [("doc:d1:c1", CHUNK.content)]
+
 
 @pytest.mark.asyncio
 async def test_the_stream_no_longer_rewrites_the_answer_text():
@@ -535,6 +562,26 @@ def test_the_thread_lists_each_source_once(client, owner, stranger, url):
 
     client.force_login(stranger)
     assert client.get(url.format(t=thread.id)).status_code == 403
+
+
+@pytest.mark.django_db
+def test_the_thread_lists_a_source_with_the_text_an_earlier_turn_stored(owner):
+    from django_ai_sdk.artifacts.models import Artifact
+    from django_ai_sdk.conversation.models import Thread
+    from django_ai_sdk.storage.services import get_thread_sources
+
+    thread = Thread.objects.create(user=owner)
+    source = {"key": "doc:d1:c1", "title": "XAF", "cited": False}
+    for content in ("POSTAL ADDRESS 0..*, F", ""):  # the later copy is stored without
+        Artifact.objects.create(
+            thread=thread,
+            schema_name="CitationsArtifact",
+            artifact_type="citations",
+            data={"citations": [], "sources": [source | {"content": content}]},
+        )
+
+    (listed,) = get_thread_sources(str(thread.id), user=owner)
+    assert listed["content"] == "POSTAL ADDRESS 0..*, F"
 
 
 class TestCitationAgent:
