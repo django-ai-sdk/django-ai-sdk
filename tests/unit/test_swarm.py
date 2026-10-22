@@ -413,6 +413,33 @@ class TestSubagentStreaming:
         assert len(received) == 1
         assert received[0].tool_calls[0].tool_name == "search_web"
 
+    @pytest.mark.asyncio
+    async def test_stream_filter_leaves_out_pending_calls_and_system_prompt(self):
+        inner = AsyncMock()
+        inner.run_async = AsyncMock(
+            return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
+        )
+        wrapper = SubagentStreamFilter(inner)
+
+        looked_up = ToolCall(tool_name="get_today", arguments={}, id="c1")
+        delegation = ToolCall(tool_name="research_planner", arguments={"task": "t"}, id="c2")
+        question = ChatMessage.from_user("Research Leukeleu")
+        answered = ChatMessage.from_assistant(tool_calls=[looked_up])
+        result = ChatMessage.from_tool(tool_result="Thursday", origin=looked_up)
+        conversation = [
+            ChatMessage.from_system("coordinator instructions"),
+            question,
+            answered,
+            result,
+            # the delegation being run: the API rejects a call without its output
+            ChatMessage.from_assistant(tool_calls=[delegation]),
+        ]
+
+        await wrapper.run_async(messages=conversation, task="t")
+
+        sent = inner.run_async.call_args.kwargs["messages"]
+        assert sent == [question, answered, result]
+
     def test_component_tool_over_filter_exposes_streaming_callback_socket(self):
         from haystack.tools.component_tool import ComponentTool
 

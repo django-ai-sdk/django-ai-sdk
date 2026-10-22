@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils.text import slugify
 from haystack import component
-from haystack.dataclasses import ChatMessage, ChatRole, StreamingCallbackT, StreamingChunk
+from haystack.dataclasses import (
+    ChatMessage,
+    ChatRole,
+    StreamingCallbackT,
+    StreamingChunk,
+)
 from haystack.tracing import tracer as haystack_tracer
 
 from django_ai_sdk.common import prompt
@@ -177,6 +182,17 @@ def _tool_chunks_only(
     return filtered
 
 
+def _handoff_context(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """The coordinator's conversation as the subagent's context"""
+    answered = {result.origin.id for m in messages for result in m.tool_call_results or []}
+    return [
+        message
+        for message in messages
+        if not message.is_from(ChatRole.SYSTEM)
+        and all(call.id in answered for call in message.tool_calls or [])
+    ]
+
+
 def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[StreamingChunk]:
     """Chunks for tool results the run produced without streaming them."""
     chunks = []
@@ -233,7 +249,7 @@ class SubagentStreamFilter:
         seen: set[str] = set()
         with self._span():
             result = self._agent.run(
-                messages=messages,
+                messages=_handoff_context(messages),
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
                 ),
@@ -278,7 +294,7 @@ class SubagentStreamFilter:
         seen: set[str] = set()
         with self._span():
             result = await self._agent.run_async(
-                messages=messages,
+                messages=_handoff_context(messages),
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,
