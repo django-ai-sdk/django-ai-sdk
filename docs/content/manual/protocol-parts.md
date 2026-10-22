@@ -109,6 +109,7 @@ Before the reply streams, the chat opens its knowledge bases and loads its integ
 | `SuggestionEvent` | `DataPart(type="data-suggestions")` |
 | `SourceEvent` | `SourceDocumentPart` with citation index |
 | `ErrorEvent` | `ErrorPart` |
+| `TextEndEvent` | close open reasoning/text blocks, so the text shows as done while citations are placed |
 | `MessageEndEvent` | close open reasoning/text blocks + `FinishPart` |
 | `StreamEndEvent` | `DonePart` |
 

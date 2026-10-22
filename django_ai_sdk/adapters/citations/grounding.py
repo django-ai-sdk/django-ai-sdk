@@ -395,7 +395,8 @@ def get_locate_passage(content: str, passage: str) -> tuple[int, int, Match] | N
 
 
 def _stored_sources(citations: list[Any], registry: SourceRegistry) -> list[Any]:
-    """The turn's own sources and every cited one"""
+    """The turn's own sources and every cited one. An uncited one whose text an
+    earlier turn stored goes without it (title, document and chunk only)."""
     from django_ai_sdk.artifacts.schemas import CitedSource  # noqa: PLC0415
 
     numbers: dict[str, int] = {}
@@ -408,7 +409,9 @@ def _stored_sources(citations: list[Any], registry: SourceRegistry) -> list[Any]
             number=numbers.get(s.key, 0),
             title=s.title,
             kind=s.kind,
-            content=s.content[:SOURCE_CHARS],
+            content=(
+                s.content[:SOURCE_CHARS] if s.key in numbers or s.key not in registry.stored else ""
+            ),
             url=s.url,
             document_id=s.doc_id,
             chunk_id=s.chunk_id,

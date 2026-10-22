@@ -85,6 +85,12 @@ class SuggestionEvent(StreamEvent):
     suggestions: list[str]
 
 
+class TextEndEvent(StreamEvent):
+    """The answer's text is complete; the message may still get citations before it ends."""
+
+    event_type: Literal["text_end"] = "text_end"
+
+
 class MessageEndEvent(StreamEvent):
     """End of message."""
 

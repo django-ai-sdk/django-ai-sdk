@@ -29,13 +29,17 @@ from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.storage import services as thread_services
 from django_ai_sdk.tracing import services as trace_services
 from django_ai_sdk.views import permissions as object_permissions
-from django_ai_sdk.views.files import thread_file_response
+from django_ai_sdk.views.files import (
+    source_file_response,
+    source_page_response,
+    thread_file_response,
+)
 from django_ai_sdk.views.schemas import Message
 from django_ai_sdk.workflows import services as workflow_services
 from django_ai_sdk.workflows.services import WorkflowService
 
 if TYPE_CHECKING:
-    from django.http import FileResponse
+    from django.http import FileResponse, HttpResponse
     from rest_framework.request import Request
 
 logger = get_logger(__name__)
@@ -570,6 +574,49 @@ class MemoryViewSet(ApiViewSet):
         if content is None:
             raise NotFound(f"Entry not found: {entry_id}")
         return Response({"content": content})
+
+    @action(detail=False, methods=["get"], url_path="source/document")
+    def source_document(self, request: Request) -> Response:
+        """The original document behind a cited source, and the page of its quotes."""
+        document, page = memory_services.get_source_document(
+            request.query_params.get("entry_id", ""),
+            request.query_params.getlist("quote"),
+            user=request.user,
+        )
+        url = f"{request.path.rstrip('/')}/{document.id}/file/"
+        return Response(
+            {
+                "id": str(document.id),
+                "name": document.file_name,
+                "url": url,
+                "page": page,
+                "page_url": f"{url}#page={page}"
+                if page and document.file_extension.lower() == "pdf"
+                else None,
+            }
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=rf"source/document/(?P<doc_id>{ID})/file",
+    )
+    def source_document_file(self, request: Request, doc_id: str) -> FileResponse:
+        """The original file: a PDF in the browser's own PDF viewer, anything else
+        downloads."""
+        return source_file_response(doc_id, user=request.user)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=rf"source/document/(?P<doc_id>{ID})/page/(?P<page>[0-9]+)",
+    )
+    def source_document_page(self, request: Request, doc_id: str, page: str) -> HttpResponse:
+        """One page as a PNG, the cited passages (``?quote=``) marked; the
+        ``X-Mark`` header says where."""
+        return source_page_response(
+            doc_id, int(page), request.query_params.getlist("quote"), user=request.user
+        )
 
     @action(detail=True, methods=["get"])
     def documents(self, request: Request, memory_id: str) -> Response:

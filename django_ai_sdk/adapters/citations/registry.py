@@ -33,6 +33,7 @@ class SourceRegistry:
 
         self._by_key: dict[str, NumberedSource] = {}
         self.seeded: set[str] = set()  # keys from earlier turns
+        self.stored: set[str] = set()  # keys a text an earlier turn stored.
         self.ranks: dict[str, int] = {}
 
     def add(self, sources: list[NumberedSource], *, ranked: bool = True) -> list[NumberedSource]:
@@ -57,6 +58,7 @@ class SourceRegistry:
         """Add sources the answer may cite without finding them this turn"""
         for source in sources:
             key = source.key or source_key(source)
+            self.stored.add(key)
             if key not in self._by_key:
                 self.add([source.model_copy(update={"key": key})], ranked=False)
                 self.seeded.add(key)
@@ -76,9 +78,9 @@ class SourceRegistry:
             thread_id=thread_id, schema_name=CitationsArtifact.__name__
         ).order_by("-created_at")
         async for row in rows:
-            # only the sources
+            # only the sources with their text: an uncited one is stored without
             for s in map(CitedSource.model_validate, row.data.get("sources", [])):
-                if s.key not in found and len(found) < limit:
+                if s.content and s.key not in found and len(found) < limit:
                     found[s.key] = NumberedSource(
                         key=s.key,
                         title=s.title,

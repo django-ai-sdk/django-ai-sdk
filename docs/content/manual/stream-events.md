@@ -22,6 +22,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `ToolOutputEvent` | Tool result | `tool_call_id`, `tool_output` |
 | `SourceEvent` | RAG citation | `index`, `title`, `content`, `source_id` |
 | `SuggestionEvent` | Follow-up questions | `suggestions` |
+| `TextEndEvent` | The answer's text is complete; citations may still follow | (none) |
 | `MessageEndEvent` | Message complete | `finish_reason` |
 | `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](/errors/)) |
 | `StreamEndEvent` | Stream terminated | (none) |

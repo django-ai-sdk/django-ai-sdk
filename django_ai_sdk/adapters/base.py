@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import ImageContent, ReasoningContent, StreamingChunk, ToolCall
+from haystack.dataclasses import (
+    ImageContent,
+    ReasoningContent,
+    StreamingChunk,
+    ToolCall,
+)
 
 from django_ai_sdk.adapters.citations.grounding import Grounder, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
@@ -31,6 +36,7 @@ from django_ai_sdk.events import (
     StreamEvent,
     SuggestionEvent,
     TextChunkEvent,
+    TextEndEvent,
     ToolCallStartEvent,
     ToolInputCompleteEvent,
     ToolOutputEvent,
@@ -241,7 +247,10 @@ class Run:
     ) -> T | str | None:
         user_messages = self.get_messages(messages)
         if system_prompt:
-            user_messages = [HaystackChatMessage.from_system(system_prompt), *user_messages]
+            user_messages = [
+                HaystackChatMessage.from_system(system_prompt),
+                *user_messages,
+            ]
 
         if response_format:
             response = await self.generator.run_async(
@@ -414,7 +423,10 @@ class Stream:
             chunks.append(
                 MessageChunk(
                     type="tool_call_start",
-                    content={"tool_call_id": tool_call.id, "tool_name": tool_call.tool_name},
+                    content={
+                        "tool_call_id": tool_call.id,
+                        "tool_name": tool_call.tool_name,
+                    },
                     metadata=self.get_attribution(tool_call.tool_name),
                 )
             )
@@ -434,7 +446,10 @@ class Stream:
             chunks.append(
                 MessageChunk(
                     type="tool_output",
-                    content={"tool_call_id": tool_result.origin.id, "tool_output": tool_output},
+                    content={
+                        "tool_call_id": tool_result.origin.id,
+                        "tool_output": tool_output,
+                    },
                 )
             )
 
@@ -664,7 +679,10 @@ class Stream:
                             stream_writer,
                             MessageChunk(
                                 type="tool_call_start",
-                                content={"tool_call_id": tc_id, "tool_name": tc.tool_name},
+                                content={
+                                    "tool_call_id": tc_id,
+                                    "tool_name": tc.tool_name,
+                                },
                                 metadata=attribution,
                             ),
                         )
@@ -697,7 +715,11 @@ class Stream:
                 if tool_call_id in pending:
                     name, attribution, _ = pending.pop(tool_call_id)
                     yield self._tool_input(
-                        stream_writer, tool_call_id, name, attribution, result.origin.arguments
+                        stream_writer,
+                        tool_call_id,
+                        name,
+                        attribution,
+                        result.origin.arguments,
                     )
                 if result.error:
                     logger.error(
@@ -708,7 +730,10 @@ class Stream:
                     stream_writer,
                     MessageChunk(
                         type="tool_output",
-                        content={"tool_call_id": tool_call_id, "tool_output": tool_output},
+                        content={
+                            "tool_call_id": tool_call_id,
+                            "tool_output": tool_output,
+                        },
                     ),
                 )
                 yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
@@ -832,7 +857,9 @@ class Stream:
             registry = self.citation_registry
             if registry is not None and self.thread_id and self.citation_agent and stream_writer:
                 self._grounder = Grounder(
-                    registry, self.citation_agent, on_block=lambda: queue.put_nowait(_CITED)
+                    registry,
+                    self.citation_agent,
+                    on_block=lambda: queue.put_nowait(_CITED),
                 )
 
             async for event in self.get_events(queue, stream_writer):
@@ -857,6 +884,8 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
+            # the text is done
+            yield TextEndEvent()
             async for event in self.get_citations_artifact(stream_writer):
                 yield event
             await self.get_final_message(stream_writer)

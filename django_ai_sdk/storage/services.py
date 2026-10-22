@@ -496,7 +496,10 @@ async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[st
     await ThreadService.has_perms(user, Operation.VIEW_THREAD, thread)
 
     from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
-    from django_ai_sdk.artifacts.schemas import CitationsArtifact, CitedSource  # noqa: PLC0415
+    from django_ai_sdk.artifacts.schemas import (  # noqa: PLC0415
+        CitationsArtifact,
+        CitedSource,
+    )
 
     sources: dict[str, dict[str, Any]] = {}
     rows = Artifact.objects.filter(
@@ -506,9 +509,12 @@ async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[st
         # only the sources
         for source in map(CitedSource.model_validate, row.data.get("sources", [])):
             known = sources.setdefault(
-                source.key, source.model_dump(mode="json", by_alias=True, exclude={"number"})
+                source.key,
+                source.model_dump(mode="json", by_alias=True, exclude={"number"}),
             )
             known["cited"] = known["cited"] or source.cited
+            # an uncited copy is stored without its text
+            known["content"] = known["content"] or source.content
     return list(sources.values())
 
 

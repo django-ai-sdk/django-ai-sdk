@@ -110,3 +110,30 @@ Ready-made memory endpoints ship in the contrib layers: `get_memories_router()` 
 | `GET/POST /memories/{id}/users/` · `PATCH/DELETE .../users/{user_id}/` | Manage memory users |
 | `GET/POST /memories/{id}/groups/` · `DELETE .../groups/{group_id}/` | Manage memory groups |
 | `GET /memories/source/{entry_id}/{chunk_id}/` | RAG source content for a citation |
+| `GET /memories/source/document/?entry_id=&quote=` | The document behind a cited source (its `documentId`), and the page of the quotes |
+| `GET /memories/source/document/{doc_id}/file/` | The original file: a PDF inline in the browser's PDF viewer, anything else downloads |
+| `GET /memories/source/document/{doc_id}/page/{page}/?quote=` | That page as a PNG, the quotes marked |
+
+### Cited document pages
+
+A cited source can be shown as the real page. Every supported file goes the same way: it is converted to a PDF, the page with the quotes is found, and that page is rendered with the quotes marked. The conversion is only for finding and showing the page; `file/` always serves the original file.
+
+| Files | Converted with |
+| --- | --- |
+| `pdf` | As is |
+| `docx`, `pptx`, `xlsx` | pdf-oxide's `OfficeConverter` |
+| `csv` | A one-sheet workbook, then as `xlsx`, so it shows as a table |
+| `md` · `txt`, `json` | `Pdf.from_markdown` · `Pdf.from_text` |
+
+Images (`png`, `jpg`, `jpeg`, `webp`, `gif`) have no text to mark, so they aren't converted: `source/document` returns them with `page: null`, `file/` shows the image itself (inline, sandboxed, like a thread file), and `page/` returns a 404. Other files get a 404 on all three. A scanned PDF without a text layer renders without marks. Known quirks: Word tables get an extra "Col 1, Col 2" header row, and Markdown tables show as plain text.
+
+Pass the citation's passages as repeated `quote` parameters (at most 8 count, each cut to 400 characters):
+
+- `source/document` finds the page by comparing letters only, so line breaks and hyphenation don't matter. A sentence repeated on many pages doesn't decide it alone; the page most quotes share wins, the first one on a tie. It returns `{id, name, url, page, page_url}`; `name` is the original file name. For a PDF, `page_url` is `url#page=N`, a link that opens it on that page; for other files it is `null` (only a PDF viewer knows `#page=`), so link to `url`, which downloads the original.
+- `source/document/{doc_id}/page/{page}` returns a PNG with the passages marked in yellow. Its `X-Mark` header says where: `top,left,bottom,right` as fractions of the page (`""` when nothing is marked), so a client can show that part of the page. Expose the header in CORS (`CORS_EXPOSE_HEADERS = ["X-Mark"]`) when the frontend runs on another origin.
+
+All three check `VIEW_DOCUMENT` on the document's memory. They need the `files` extra (`pdf-oxide`, `Pillow`, `openpyxl`). A file is converted on every request (about 0.1 s). The helpers work on bytes, not memories: `django_ai_sdk.files.previews` (`to_pdf`, `quote_page`, `render_page`, `passage_areas`) and `django_ai_sdk.views.files` (`asource_file_response`, `asource_page_response`) for your own views.
+
+{{< callout type="warning" >}}
+Calling pdf-oxide yourself? Call `pdf_oxide.disable_logging()` first, or use `files.previews`, which does. With its logging on, converting an Office file deadlocks.
+{{< /callout >}}

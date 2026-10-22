@@ -603,19 +603,30 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     yield DataPart(type="data-error", data=data)
                     yield ErrorPart(error_text=data["code"])
 
+                case "text_end":
+                    # Citations may follow; the text shows as done meanwhile
+                    for part in self._close_blocks():
+                        yield part
+
                 case "message_end":
+                    for part in self._close_blocks():
+                        yield part
                     end_event = cast("MessageEndEvent", event)
-                    # Close reasoning block if still open
-                    if self.reasoning_started and self.reasoning_id:
-                        yield ReasoningEndPart(id=self.reasoning_id)
-                        self.reasoning_started = False
-                        self.reasoning_id = None
-                    if self.text_started and self.text_id:
-                        yield TextEndPart(id=self.text_id)
-                        self.text_started = False
                     # Default to "stop" if no finish_reason provided
                     finish_reason = end_event.finish_reason or "stop"
                     yield FinishPart(finishReason=finish_reason)
 
                 case "stream_end":
                     yield DonePart()
+
+    def _close_blocks(self) -> list[StreamChunk]:
+        """End the open reasoning and text blocks, if any."""
+        parts: list[StreamChunk] = []
+        if self.reasoning_started and self.reasoning_id:
+            parts.append(ReasoningEndPart(id=self.reasoning_id))
+            self.reasoning_started = False
+            self.reasoning_id = None
+        if self.text_started and self.text_id:
+            parts.append(TextEndPart(id=self.text_id))
+            self.text_started = False
+        return parts
