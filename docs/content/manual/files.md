@@ -189,3 +189,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberatio
 ```
 
 Liberation Sans, Serif and Mono have the same widths as Arial, Times New Roman and Courier New, so converted pages keep their spacing, and pdf-oxide falls back to them by name. macOS uses its own fonts.
+
+## Making PDFs
+
+`markdown_to_pdf` turns Markdown into a PDF with pdf-oxide's `Pdf.from_markdown` and the system's fonts. pdf-oxide doesn't wrap lines, decode entities or draw tables and rules yet, so the SDK prepares the Markdown first: lines are wrapped at `width` characters (80), `&amp;` and the like are decoded, a table row becomes a line with its cells apart (`A1 · Eerste rij`), and a rule an empty line. Bold, italic and inline code show as plain text: pdf-oxide draws them over their neighbours. Pages are Letter. Cited Markdown sources are previewed with it too.
+
+```python
+from django_ai_sdk.files.documents import markdown_to_pdf
+
+pdf = markdown_to_pdf(text, title="Report")   # bytes
+```

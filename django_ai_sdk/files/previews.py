@@ -71,6 +71,12 @@ def get_office(kind: str) -> Any:
     return lambda data: getattr(get_pdf_engine().OfficeConverter, f"from_{kind}_bytes")(data)
 
 
+def get_markdown_pdf(text: str) -> bytes:
+    from django_ai_sdk.files.documents import markdown_to_pdf
+
+    return markdown_to_pdf(text)
+
+
 def get_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
@@ -82,7 +88,7 @@ CONVERTERS = {
     "pptx": get_office("pptx"),
     "xlsx": get_office("xlsx"),
     "csv": lambda data: get_office("xlsx")(csv_to_xlsx(data)),
-    "md": lambda data: get_pdf_engine().Pdf.from_markdown(get_text(data)),
+    "md": lambda data: get_markdown_pdf(get_text(data)),
     "txt": lambda data: get_pdf_engine().Pdf.from_text(get_text(data)),
     "json": lambda data: get_pdf_engine().Pdf.from_text(get_text(data)),
 }
