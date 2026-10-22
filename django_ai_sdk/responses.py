@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, cast
 
 from django.http import StreamingHttpResponse
@@ -13,7 +14,7 @@ from django_ai_sdk.protocols.utils import format_sse
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine
+    from collections.abc import AsyncGenerator, Callable, Coroutine
 
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
@@ -47,21 +48,15 @@ async def _ensure_adapter(
     messages: list[ChatMessage],
     protocol_handler: BaseProtocolHandler,
     storage_adapter: BaseStorageAdapter | None = None,
-    warmup: AsyncIterator[dict[str, Any]] | None = None,
+    warmup: AsyncGenerator[dict[str, Any], None] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     yield format_sse({"type": "data-warmup", "data": {"status": "start"}, "transient": True})
 
     try:
         if warmup is not None:
-            named = False
-            async for part in warmup:
-                named = True
-                yield format_sse(part)
-            if named:
-                # The step last named is done; the build that follows is not that step.
-                yield format_sse(
-                    {"type": "data-warmup", "data": {"status": "start"}, "transient": True}
-                )
+            async with aclosing(warmup) as parts:
+                async for part in parts:
+                    yield format_sse(part)
         if callable(adapter):
             factory = cast("Callable[[], Coroutine[None, None, Streamable]]", adapter)
             adapter = await factory()
@@ -103,7 +98,7 @@ async def stream_response(
     protocol_handler: BaseProtocolHandler,
     extra_headers: dict[str, str] | None = None,
     storage_adapter: BaseStorageAdapter | None = None,
-    warmup: AsyncIterator[dict[str, Any]] | None = None,
+    warmup: AsyncGenerator[dict[str, Any], None] | None = None,
 ) -> StreamingHttpResponse:
     """
     Generic streaming chat view that works with any pipeline adapter and protocol handler.
