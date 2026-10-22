@@ -47,6 +47,9 @@ async def streamed(build: Any, warmup: Any = None) -> list[dict[str, Any]]:
     ]
 
 
+PLAIN_START = {"type": "data-warmup", "data": {"status": "start"}, "transient": True}
+
+
 def warmup(stage: str, detail: str) -> dict[str, Any]:
     return {
         "type": "data-warmup",
@@ -75,16 +78,8 @@ class TestStreamedWarmup:
             "data-warmup",
             "data-unavailable",
             "data-warmup",
-            "data-warmup",
         ]
-        assert overall(found) == ["start", "start", "start", "ready"]
-
-    async def test_the_last_stage_named_is_dropped_before_the_build(self):
-        found = await streamed(_build, warmup_parts(warmup("knowledge", "Engineering Knowledge")))
-
-        # The build that follows is not loading that knowledge base any more.
-        assert found[-2]["data"] == {"status": "start"}
-        assert found[-1]["data"] == {"status": "ready"}
+        assert overall(found) == ["start", "start", "ready"]
 
     async def test_a_failing_warmup_ends_in_failed_and_never_ready(self):
         async def broken() -> AsyncGenerator[dict[str, Any], None]:
@@ -166,6 +161,7 @@ class TestAgentWarmupProgress:
             warmup("integrations", "Slow, Down"),
             unavailable("integrations", "Down"),
             warmup("integrations", "Slow"),
+            PLAIN_START,
         ]
 
     async def test_the_name_shrinks_to_what_is_still_being_waited_on(self):
@@ -179,7 +175,9 @@ class TestAgentWarmupProgress:
 
         parts = [p async for p in agent.warmup_progress()]
 
-        assert [p["data"]["detail"] for p in parts] == ["A, B, C", "B, C", "C"]
+        assert [p["data"]["detail"] for p in parts[:-1]] == ["A, B, C", "B, C", "C"]
+        # The build that follows is not loading the step last named any more.
+        assert parts[-1] == PLAIN_START
 
     async def test_an_integration_whose_check_raises_is_reported_and_the_rest_carry_on(self):
         agent = make_agent([_Integration("Broken", RuntimeError("boom")), _Integration("Fine")])
@@ -195,7 +193,7 @@ class TestAgentWarmupProgress:
 
         parts = [p async for p in agent.warmup_progress()]
 
-        assert parts == [warmup("integrations", "Unconfigured")]
+        assert parts == [warmup("integrations", "Unconfigured"), PLAIN_START]
 
     async def test_knowledge_bases_are_named_and_opened_one_after_another(self, monkeypatch):
         memories = [SimpleNamespace(id="a", name="HR"), SimpleNamespace(id="b", name="IT")]
@@ -212,7 +210,7 @@ class TestAgentWarmupProgress:
 
         parts = [p async for p in agent.warmup_progress(thread_id="t1")]
 
-        assert parts == [warmup("knowledge", "HR"), warmup("knowledge", "IT")]
+        assert parts == [warmup("knowledge", "HR"), warmup("knowledge", "IT"), PLAIN_START]
         assert provider.opened == ["a", "b"]
 
     async def test_knowledge_is_skipped_without_a_thread(self):
