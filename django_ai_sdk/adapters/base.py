@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING, Any, cast, overload
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import StreamingChunk, ToolCall
+from haystack.dataclasses import ImageContent, ReasoningContent, StreamingChunk, ToolCall
 
-from django_ai_sdk.adapters.citations.streaming import StreamingCitationBuffer
+from django_ai_sdk.adapters.citations.grounding import Grounder, uncited
+from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
+from django_ai_sdk.artifacts.tool_artifacts import build_artifact
 from django_ai_sdk.common import (
     ChatMessage,
     MessageChunk,
@@ -25,7 +27,6 @@ from django_ai_sdk.events import (
     MessageEndEvent,
     MessageStartEvent,
     ReasoningChunkEvent,
-    SourceEvent,
     StreamEndEvent,
     StreamEvent,
     SuggestionEvent,
@@ -42,15 +43,20 @@ from django_ai_sdk.utils import resolve_setting
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from django_ai_sdk.adapters.citations import CitationRegistry, NumberedSource
+    from haystack.dataclasses import ToolCallResult
+
+    from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
+    from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
 logger = get_logger(__name__)
 
 _SENTINEL: object = object()
+# a block of the answer has its citations
+_CITED: object = object()
 
 
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
@@ -133,6 +139,16 @@ def _get_message_pairs(
     return runs
 
 
+def get_reasoning_text(reasoning: ReasoningContent) -> str:
+    """
+    A chunk's reasoning text, also when the provider sends raw reasoning.
+    """
+    if reasoning.reasoning_text:
+        return reasoning.reasoning_text
+    parts = (reasoning.extra or {}).get("content") or []
+    return "".join(p.get("text", "") for p in parts if p.get("type") == "reasoning_text")
+
+
 def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
     """The stored error: raw text for admins, plus what a client sees."""
     return MessageChunk(
@@ -149,6 +165,25 @@ def get_error_chunk(e: Exception, info: ErrorInfo) -> MessageChunk:
 
 def get_error_event(info: ErrorInfo) -> ErrorEvent:
     return ErrorEvent(error_code=info.spec.code, ref=info.ref)
+
+
+def get_user_text(message: ChatMessage) -> str:
+    """User text followed by the context line of each attachment."""
+    hints = [a.context for a in message.attachments if a.context]
+    return "\n\n".join([message.content, *hints]) if hints else message.content
+
+
+def get_user_message(message: ChatMessage) -> HaystackChatMessage:
+    """Haystack user message, multimodal when images were inlined for a vision model."""
+    text = get_user_text(message)
+    images = [
+        ImageContent(base64_image=a.data, mime_type=a.media_type)
+        for a in message.attachments
+        if a.data
+    ]
+    if not images:
+        return HaystackChatMessage.from_user(text)
+    return HaystackChatMessage.from_user(content_parts=[text, *images] if text else images)
 
 
 class Run:
@@ -176,7 +211,7 @@ class Run:
         converted: list[HaystackChatMessage] = []
         for msg in conversation:
             if msg.role == "user":
-                converted.append(HaystackChatMessage.from_user(msg.content))  # type: ignore[arg-type]
+                converted.append(get_user_message(msg))
             elif msg.role == "assistant":
                 converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
         return converted
@@ -213,7 +248,16 @@ class Run:
                 messages=user_messages,
                 generation_kwargs=schema_kwargs(self.generator, response_format),
             )
-            return response_format.model_validate_json(response["replies"][0].text)
+            reply = response["replies"][0]
+            if not reply.text:
+                # no answer to validate
+                logger.warning(
+                    "No {} in the reply (finish_reason={})",
+                    response_format.__name__,
+                    reply.meta.get("finish_reason"),
+                )
+                return None
+            return response_format.model_validate_json(reply.text)
 
         response = await self.generator.run_async(messages=user_messages)
         return response["replies"][0].text
@@ -227,6 +271,19 @@ class Stream:
     model: str | None = None
     instructions: str | None = None
     suggestion_generator: SuggestionGenerator | None = None
+    # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
+    hook_context: dict[str, Any] | None = None
+    # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
+    # user they are stored for; set per run by Agent.stream.
+    tool_artifacts: dict[str, ToolArtifact] = {}  # noqa: RUF012
+    thread_id: str | None = None
+    user: Any = None
+    # agent to use for citation grounding, if any; set per run
+    citation_agent: Any = None
+    # grounds the answer while it streams; set per stream
+    _grounder: Grounder | None = None
+    # the citations tool call shown while the answer streams
+    _citations_call_id: str | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -237,7 +294,7 @@ class Stream:
         generator: Any,
         store: bool = True,
         storage_adapter: BaseStorageAdapter | None = None,
-        citation_registry: CitationRegistry | None = None,
+        citation_registry: SourceRegistry | None = None,
         suggestion_generator: SuggestionGenerator | None = None,
     ) -> None:
         self.pipeline = pipeline
@@ -251,9 +308,6 @@ class Stream:
         self.storage_adapter = storage_adapter
         self.citation_registry = citation_registry
         self.suggestion_generator = suggestion_generator
-        self._sources_emitted = 0
-        self.cited_ids: set[int] = set()
-        self.citations_missing = False
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
         self.message_result: ChatMessage | None = None
@@ -314,12 +368,16 @@ class Stream:
             if message is not None:
                 converted_messages.extend(self.replay_handoff(message))
                 continue
-            pairs = (
-                merge_messages(group)
-                if self.merge_messages
-                else [(msg.role, msg.content) for msg in group]
-            )
-            for role, content in pairs:
+            if not self.merge_messages:
+                for msg in group:
+                    if msg.role == "user":
+                        converted_messages.append(get_user_message(msg))
+                    elif msg.role == "assistant":
+                        converted_messages.append(HaystackChatMessage.from_assistant(msg.content))
+                continue
+            # merging is text-only, inlined images are dropped here
+            texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
+            for role, content in merge_messages(texts):
                 if role == "user":
                     converted_messages.append(HaystackChatMessage.from_user(content))
                 elif role == "assistant":
@@ -334,14 +392,6 @@ class Stream:
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))
 
         return converted_messages
-
-    @staticmethod
-    def get_source_id(source: NumberedSource) -> str | None:
-        if not source.doc_id:
-            return None
-        if source.chunk_id:
-            return f"{source.doc_id}:{source.chunk_id}"
-        return source.doc_id
 
     def get_attribution(self, tool_name: str, subagent: str | None = None) -> dict[str, str]:
         """Metadata naming attribution ran a tool call."""
@@ -402,6 +452,127 @@ class Stream:
         ids.add(chunk.content["tool_call_id"])
         stream_writer.add_chunk(chunk)
 
+    async def _tool_artifact(
+        self, stream_writer: StreamWriter | None, result: ToolCallResult
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """The artifact `tool_artifacts` maps to this tool, as its own tool call events."""
+        spec = self.tool_artifacts.get(result.origin.tool_name)
+        if spec is None or not self.thread_id:
+            return
+        tool_result = result.result
+        if isinstance(tool_result, str):
+            try:  # Haystack sends lists and dicts as JSON
+                tool_result = json.loads(tool_result)
+            except json.JSONDecodeError:
+                pass
+        built = await build_artifact(
+            spec, result.origin.arguments, tool_result, self.thread_id, self.user
+        )
+        if built is None:
+            return
+        data, payload = built
+        name = spec.artifact.tool_name()
+        tool_call_id = f"{name}-{payload['artifact_id']}"
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_call_start",
+                content={"tool_call_id": tool_call_id, "tool_name": name},
+            ),
+        )
+        yield ToolCallStartEvent(tool_call_id=tool_call_id, tool_name=name)
+        yield self._tool_input(stream_writer, tool_call_id, name, {}, data)
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_output",
+                content={"tool_call_id": tool_call_id, "tool_output": payload},
+            ),
+        )
+        yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=payload)
+
+    async def get_citations_artifact(
+        self, stream_writer: StreamWriter | None
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """The answer's citations as a citations artifact, before the message is stored"""
+        from django_ai_sdk.artifacts.schemas import CitationsArtifact  # noqa: PLC0415
+
+        registry = self.citation_registry
+        if not (registry and registry.all and self.thread_id and self.citation_agent):
+            return
+        answer = stream_writer.text if stream_writer else ""
+        # after the answer: how long to wait for the blocks still being grounded
+        timeout = resolve_setting("AI_SDK_CITATION_TIMEOUT", 10.0)
+        grounder = self._grounder or Grounder(registry, self.citation_agent)
+        try:
+            data = None
+            if answer.strip():
+                async for _ in grounder.wait(answer, timeout):
+                    for event in self._partial_citations(grounder):
+                        yield event
+                data = grounder.citations()
+        except Exception:
+            logger.exception("Placing citations failed; the answer has none")
+            data = None
+        data = data or uncited(registry)
+        if not data.sources:
+            return
+        try:
+            payload = await CitationsArtifact.store(
+                data.model_dump(mode="json", by_alias=True), self.thread_id, self.user
+            )
+        except Exception:
+            logger.exception("Storing citations failed")
+            return
+
+        name = CitationsArtifact.tool_name()
+        # the stored citations replace the partial ones shown in the same tool call
+        shown = self._citations_call_id
+        tool_call_id = shown or f"{name}-{payload['artifact_id']}"
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_call_start",
+                content={"tool_call_id": tool_call_id, "tool_name": name},
+            ),
+        )
+        tool_input = self._tool_input(stream_writer, tool_call_id, name, {}, {})
+        if not shown:
+            yield ToolCallStartEvent(tool_call_id=tool_call_id, tool_name=name)
+            yield tool_input
+        self._persist_tool(
+            stream_writer,
+            MessageChunk(
+                type="tool_output",
+                content={"tool_call_id": tool_call_id, "tool_output": payload},
+            ),
+        )
+        yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=payload)
+
+    def _partial_citations(self, grounder: Grounder | None) -> list[StreamEvent]:
+        """The citations of the blocks grounded so far, shown while the answer streams.
+
+        Not stored: get_citations_artifact stores the whole answer's into the same tool call.
+        """
+        from django_ai_sdk.artifacts.schemas import CitationsArtifact  # noqa: PLC0415
+
+        data = grounder.citations() if grounder else None
+        if not data or not data.citations:
+            return []
+        events: list[StreamEvent] = []
+        if not self._citations_call_id:
+            name = CitationsArtifact.tool_name()
+            self._citations_call_id = f"{name}-{uuid.uuid4()}"
+            events += [
+                ToolCallStartEvent(tool_call_id=self._citations_call_id, tool_name=name),
+                ToolInputCompleteEvent(
+                    tool_call_id=self._citations_call_id, tool_name=name, tool_input={}
+                ),
+            ]
+        output = data.model_dump(mode="json", by_alias=True)
+        events.append(ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=output))
+        return events
+
     def _tool_input(
         self,
         stream_writer: StreamWriter | None,
@@ -438,7 +609,9 @@ class Stream:
         """Create and schedule the pipeline or agent coroutine as a Task."""
         if self.agent_component:
             coro = self.agent_component.run_async(
-                messages=haystack_messages, streaming_callback=streaming_callback
+                messages=haystack_messages,
+                streaming_callback=streaming_callback,
+                hook_context=self.hook_context,
             )
         else:
             coro = self.pipeline.run_async({"messages": haystack_messages})
@@ -450,42 +623,33 @@ class Stream:
         stream_writer: StreamWriter | None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Consume queue and yield stream events."""
-        citations = (
-            StreamingCitationBuffer(self.citation_registry)
-            if self.citation_registry is not None
-            else None
-        )
         pending: dict[str, tuple[str, dict[str, str], str]] = {}  # id -> name, attribution, args
         at_index: dict[int, str] = {}  # delta index -> tool call id
         while True:
             item = await queue.get()
             if item is _SENTINEL:
-                if citations is not None and (tail := citations.flush()):
-                    if stream_writer:
-                        stream_writer.add_chunk(self.get_text_chunk(tail))
-                    yield TextChunkEvent(content=tail)
                 break
+
+            if item is _CITED:
+                for event in self._partial_citations(self._grounder):
+                    yield event
+                continue
 
             chunk = cast("StreamingChunk", item)
 
             text = chunk.content or ""
-            if citations is not None:
-                text = citations.feed(text)
-                # Release held text before tool events
-                if chunk.tool_calls or chunk.tool_call_result:
-                    text += citations.flush()
             if text:
                 if stream_writer:
                     stream_writer.add_chunk(self.get_text_chunk(text))
+                if self._grounder:
+                    self._grounder.feed(text)
                 yield TextChunkEvent(content=text)
 
             # Reasoning models stream their summary separately from the answer.
-            if chunk.reasoning and chunk.reasoning.reasoning_text:
+            if chunk.reasoning and (reasoning := get_reasoning_text(chunk.reasoning)):
                 if stream_writer:
-                    stream_writer.add_chunk(
-                        MessageChunk(type="reasoning", content=chunk.reasoning.reasoning_text)
-                    )
-                yield ReasoningChunkEvent(content=chunk.reasoning.reasoning_text)
+                    stream_writer.add_chunk(MessageChunk(type="reasoning", content=reasoning))
+                yield ReasoningChunkEvent(content=reasoning)
 
             if chunk.tool_calls:
                 subagent = chunk.meta.get(SUBAGENT_META_KEY)
@@ -548,27 +712,9 @@ class Stream:
                     ),
                 )
                 yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
-
-                if self.citation_registry is not None:
-                    all_sources = self.citation_registry.all_sources
-                    for source in all_sources[self._sources_emitted :]:
-                        source_id = self.get_source_id(source)
-                        if source_id is not None:
-                            yield SourceEvent(
-                                index=source.index,
-                                title=source.title,
-                                content=source.content,
-                                tool_call_id=tool_call_id,
-                                source_id=source_id,
-                                media_type="file",
-                            )
-                    self._sources_emitted = len(all_sources)
-
-        if citations is not None:
-            self.cited_ids = citations.cited
-            if citations.registry.all_sources and not self.cited_ids:
-                self.citations_missing = True
-                logger.warning("Sources were retrieved but the response cites none of them")
+                if not result.error:
+                    async for event in self._tool_artifact(stream_writer, result):
+                        yield event
 
     async def get_pipeline_result(
         self,
@@ -599,29 +745,9 @@ class Stream:
         self,
         stream_writer: StreamWriter | None,
     ) -> ChatMessage | None:
-        """Persist citation sources and finalize the stream writer."""
+        """Finalize the stream writer: the message is stored."""
         if not stream_writer:
             return None
-
-        if self.citation_registry and self.citation_registry.all_sources:
-            sources_list = []
-            for src in self.citation_registry.all_sources:
-                source_id = self.get_source_id(src)
-                if source_id is None:
-                    continue
-                # Reference fields only - deliberately no chunk `content`:
-                # readers resolve it fresh by source_id, so inlining it just
-                # duplicated multi-KB chunks into every message row.
-                sources_list.append(
-                    {
-                        "index": src.index,
-                        "title": src.title,
-                        "source_id": source_id,
-                        "memory_id": src.memory_id,
-                        "page_number": src.page_number,
-                    }
-                )
-            stream_writer.message.sources = sources_list
 
         result = await stream_writer.finalize("stop")
         self.message_result = result
@@ -691,11 +817,23 @@ class Stream:
             yield MessageStartEvent(message_id=message_id)
 
             # take snapshots of current contextvars
-            with bind_trace(
-                thread_id=getattr(self.storage_adapter, "thread_id", None), message_id=message_id
-            ):
-                pipeline_task = self.get_task(haystack_messages, streaming_callback)
+            # The task copies the context: tools register sources in this turn's registry.
+            registry_token = current_registry.set(self.citation_registry)
+            try:
+                with bind_trace(
+                    thread_id=getattr(self.storage_adapter, "thread_id", None),
+                    message_id=message_id,
+                ):
+                    pipeline_task = self.get_task(haystack_messages, streaming_callback)
+            finally:
+                current_registry.reset(registry_token)
             pipeline_task.add_done_callback(lambda _: queue.put_nowait(_SENTINEL))
+
+            registry = self.citation_registry
+            if registry is not None and self.thread_id and self.citation_agent and stream_writer:
+                self._grounder = Grounder(
+                    registry, self.citation_agent, on_block=lambda: queue.put_nowait(_CITED)
+                )
 
             async for event in self.get_events(queue, stream_writer):
                 yield event
@@ -719,6 +857,8 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
+            async for event in self.get_citations_artifact(stream_writer):
+                yield event
             await self.get_final_message(stream_writer)
             _finalize_called = True
 
@@ -746,6 +886,10 @@ class Stream:
             yield get_error_event(info)
 
         finally:
+            if self._grounder:
+                self._grounder.cancel()
+                self._grounder = None
+            self._citations_call_id = None
             if pipeline_task is not None and not pipeline_task.done():
                 pipeline_task.cancel()
                 try:

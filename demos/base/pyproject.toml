@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-sdk-demo-base"
+version = "0.0.0"
+description = "Settings shared by the django-ai-sdk demo projects."
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = ["demo_base"]

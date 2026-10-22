@@ -215,6 +215,14 @@ class TestThreadServicePagination:
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestMemoryServiceListMemoriesPagination:
+    @pytest.fixture(autouse=True)
+    def _anonymous_can_read_memories(self):
+        # These tests run as user=None; permissions are not what they test.
+        from tests.mocks.permissions import memory_permissions
+
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
+            yield
+
     async def _create_memories(self, n: int):
         from django_ai_sdk.memories.models import Memory
 

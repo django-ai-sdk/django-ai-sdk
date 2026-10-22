@@ -1,5 +1,5 @@
 prune .github
-prune demo
+prune demos
 prune docs
 prune public
 prune tests

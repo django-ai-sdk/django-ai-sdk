@@ -49,15 +49,19 @@ SDK either.
 
 The `haystack` extra pulls in Haystack and the components agents run on. That's all you need to start.
 
-Want the full set of extras (MCP, DRF views, document parsing)?
+Want the full set of extras (MCP, vector stores, document parsing, providers)?
 
 ```bash
 pip install "django-ai-sdk[all]"
 ```
 
-{{< callout type="warning" >}}
-**DRF views are experimental.** The `all` extra includes DRF routers and serializers, but the DRF path is still in active development: use the [Ninja views](/views-and-routing/#ninja-or-drf) for production.
-{{< /callout >}}
+Ready-made HTTP endpoints are separate, so you only pull in the framework you use:
+
+```bash
+pip install "django-ai-sdk[ninja]"  # or: django-ai-sdk[drf]
+```
+
+See [Views and Routing](/views-and-routing/#pick-a-starting-point).
 
 ## Configure Django
 

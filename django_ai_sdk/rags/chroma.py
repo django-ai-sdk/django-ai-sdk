@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 from haystack import Pipeline, component
 from haystack.components.preprocessors import RecursiveDocumentSplitter
-from haystack.components.query import QueryExpander
 from haystack.components.writers import DocumentWriter
 from haystack.core.super_component import SuperComponent
 from haystack.document_stores.types import DuplicatePolicy
@@ -15,7 +14,6 @@ from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRe
 from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 from pydantic import Field
 
-from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import BaseMultiQueryRetriever
@@ -226,13 +224,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
-        expander_generator = openai_chat(model=self.config.expander_model)
-
-        query_expander = QueryExpander(
-            chat_generator=expander_generator,
-            n_expansions=self.config.n_expansions,
-            prompt_template=self.config.expander_prompt,
-        )
+        query_expander = self.get_query_expander()
 
         retriever = MultiQueryChromaRetriever(
             document_store=document_store,
@@ -288,7 +280,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
 
         rag_super = SuperComponent(
             pipeline=pipeline,
-            input_mapping={"query": ["expander.query"]},
+            input_mapping={"query": ["expander.query", "retriever.query"]},
             output_mapping={"retriever.documents": "documents"},
         )
 

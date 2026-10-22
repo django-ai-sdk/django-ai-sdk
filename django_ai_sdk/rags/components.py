@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from collections import Counter
 from typing import Any
 
 from haystack import component
@@ -10,6 +12,24 @@ from haystack.dataclasses import Document as HaystackDocument
 from django_ai_sdk.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: Candidates each query fetches per document kept: fusion and exact words can then
+#: lift a document a single query ranks below the cut (an acronym at rank 7 of 5).
+CANDIDATES_PER_QUERY = 4
+#: Reciprocal rank fusion's constant (the usual 60): rank 1 adds 1/61, rank 10 1/70.
+RRF_K = 60
+
+
+def _words(text: str) -> set[str]:
+    """The words of `text`, plus each identifier whole ("inc-2025-03-002", a file name):
+    matching only its parts, every "...-002" would match as well as the one asked for."""
+    text = text.lower()
+    return set(re.findall(r"\w+", text)) | set(re.findall(r"\w+(?:[-./]\w+)+", text))
+
+
+def _name(doc: HaystackDocument) -> str:
+    meta = doc.meta or {}
+    return str(meta.get("name") or meta.get("file_name") or meta.get("title") or "")
 
 
 class MultiQueryDeduplicationMixin:
@@ -73,6 +93,79 @@ class MultiQueryDeduplicationMixin:
 
         return docs[:top_k]
 
+    @staticmethod
+    def fuse_and_rank(
+        results: list[dict[str, list[HaystackDocument]]],
+        queries: list[str],
+        top_k: int,
+        min_score: float | None = None,
+        query: str | None = None,
+    ) -> list[HaystackDocument]:
+        """
+        The documents of all queries' results by reciprocal rank fusion.
+
+        What several queries find ranks high, however each query scored it: scores
+        of different queries don't compare. One more ranking counts the words of the
+        user's own query (`query`, else the first) found verbatim, weighing as much as
+        all queries together: an exact term such as "SABRE", which embeddings don't
+        know, then lifts a document only one query found low. Identifiers count whole
+        as well as by their parts, and a chunk's file name counts as its text, so a
+        search for "INC-2025-03-002" or a file name finds that file first. Words in
+        most candidates ("the", "is") don't count.
+
+        Args:
+            results: Per query (in `queries` order), its retrieval result
+            queries: The queries that were run
+            top_k: Maximum number of documents to return
+            min_score: Hits below this score are left out before fusing
+            query: The user's query, before expansion
+
+        Returns:
+            Unique documents, best first, at most top_k (scores unchanged)
+        """
+        rankings = [
+            [
+                d
+                for d in r.get("documents", [])
+                if min_score is None or (d.score or 0.0) >= min_score
+            ]
+            for r in results
+        ]
+        found = {doc.id: doc for ranking in rankings for doc in ranking}
+        # The file name counts as the chunk's text: asked by name, every chunk of it matches.
+        words = {
+            doc_id: _words(f"{_name(doc)} {doc.content or ''}") for doc_id, doc in found.items()
+        }
+        terms = _words(query or (queries[0] if queries else ""))
+        terms = {t for t in terms if sum(t in w for w in words.values()) <= len(found) / 2}
+        matched = {doc_id: len(terms & w) for doc_id, w in words.items()}
+        exact = sorted(
+            (doc for doc in found.values() if matched[doc.id]),
+            key=lambda doc: matched[doc.id],
+            reverse=True,
+        )
+        fused: Counter[str] = Counter()
+        for ranking in rankings:
+            for rank, doc in enumerate(ranking, 1):
+                fused[doc.id] += 1 / (RRF_K + rank)
+        # As much as all queries together, for a document matching every term; one
+        # matching a single part of an identifier ("002") gets a fraction of that.
+        most = max(matched.values(), default=0) or 1
+        for rank, doc in enumerate(exact, 1):
+            fused[doc.id] += len(rankings) * (matched[doc.id] / most) / (RRF_K + rank)
+        docs = sorted(found.values(), key=lambda doc: fused[doc.id], reverse=True)[:top_k]
+        # One line per search: one query means the expander fell back to the original.
+        logger.info(
+            "RAG search: {} queries {}, hits per query {}, exact terms {} in {} -> {} kept",
+            len(queries),
+            queries,
+            [len(r) for r in rankings],
+            sorted(terms),
+            len(exact),
+            len(docs),
+        )
+        return docs
+
 
 @component
 class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
@@ -128,7 +221,7 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
 
     @component.output_types(documents=list[HaystackDocument])
     def run(
-        self, queries: list[str], top_k: int | None = None
+        self, queries: list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         """
         Run multiple queries and return deduplicated results.
@@ -136,6 +229,7 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
         Args:
             queries: List of query strings to execute
             top_k: Maximum documents to return (uses self.top_k if None)
+            query: The user's query before expansion (its words count verbatim)
 
         Returns:
             Dict with "documents" key containing unique documents sorted by score
@@ -144,23 +238,21 @@ class BaseMultiQueryRetriever(MultiQueryDeduplicationMixin):
 
         # Run all queries
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            result = self.retrieve(query, k)
-            results.append(result)
+        for q in queries:
+            results.append(self.retrieve(q, k * CANDIDATES_PER_QUERY))
 
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}
 
     @component.output_types(documents=list[HaystackDocument])
     async def run_async(
-        self, queries: list[str], top_k: int | None = None
+        self, queries: list[str], top_k: int | None = None, query: str | None = None
     ) -> dict[str, list[HaystackDocument]]:
         k = top_k if top_k is not None else self.top_k
         results: list[dict[str, list[HaystackDocument]]] = []
-        for query in queries:
-            result = await asyncio.to_thread(self.retrieve, query, k)
-            results.append(result)
-        docs = self.deduplicate_and_rank(results, k, self.min_score)
+        for q in queries:
+            results.append(await asyncio.to_thread(self.retrieve, q, k * CANDIDATES_PER_QUERY))
+        docs = self.fuse_and_rank(results, queries, k, self.min_score, query=query)
         return {"documents": docs}
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import async_to_sync
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.errors import UserError
@@ -266,5 +267,16 @@ class WorkflowService(PermissionsMixin):
             return None
         return run
 
+
+# Sync wrappers, for sync views (e.g. Django REST framework).
+run_workflow = async_to_sync(WorkflowService.run)
+run_workflow_by_id = async_to_sync(WorkflowService.run_by_id)
+create_workflow = async_to_sync(WorkflowService.create)
+update_workflow = async_to_sync(WorkflowService.update)
+delete_workflow = async_to_sync(WorkflowService.delete)
+get_workflow = async_to_sync(WorkflowService.get)
+list_workflows = async_to_sync(WorkflowService.list_workflows)
+list_workflow_runs = async_to_sync(WorkflowService.list_runs)
+get_workflow_run = async_to_sync(WorkflowService.get_run)
 
 __all__ = ["WorkflowService"]

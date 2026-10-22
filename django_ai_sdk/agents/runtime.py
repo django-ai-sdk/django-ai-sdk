@@ -42,6 +42,8 @@ class RuntimeAgent(Agent):
         self.title_generation = config.title_generation
         self.max_history = config.max_history
         self.file_upload = config.file_upload
+        self.vision = config.vision
+        self.required_tools = list(config.required_tools or [])
         if config.suggestion_enabled:
             self.suggestion_generator = DefaultSuggestionGenerator
 

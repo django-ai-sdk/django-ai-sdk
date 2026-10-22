@@ -1,7 +1,7 @@
 ---
 title: How It Works
 type: docs
-weight: 6
+weight: 8
 ---
 
 This page explains what happens under the hood when a request flows through the SDK. You don't need to know this to use it, but it helps when extending or debugging things.

@@ -9,6 +9,7 @@ from django_ai_sdk.memories.models import Entry, ThreadMemory
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from tests.factories.db import MemoryFactory
+from tests.mocks.permissions import memory_permissions
 
 
 class RagToolsAgent(Agent):
@@ -26,6 +27,12 @@ class RagToolsAgent(Agent):
 @pytest.mark.asyncio
 class TestAgentGetRagTools:
     """Tests for Agent.get_rag_tools()."""
+
+    @pytest.fixture(autouse=True)
+    def _anonymous_can_read_memories(self):
+        # These tests run as user=None; permissions are not what they test.
+        with memory_permissions("django_ai_sdk.permissions.AllowAll"):
+            yield
 
     async def test_returns_empty_when_no_rag_provider(self):
         agent = RagToolsAgent()
@@ -238,3 +245,32 @@ class TestAgentGetRagTools:
         spec = call_args.kwargs["spec"]
         assert spec.name == "search_special_knowledge"
         assert spec.doc_count == 1
+
+    async def test_the_uploaded_files_tool_says_to_search_it_first_and_on_follow_ups(self):
+        from django_ai_sdk.conversation.models import Thread
+
+        files = await MemoryFactory.acreate(name="thread_files", is_hidden=True)
+        knowledge = await MemoryFactory.acreate(name="Test Knowledge")
+        await Entry.objects.acreate(memory=files, content="remote work policy")
+        await Entry.objects.acreate(memory=knowledge, content="other")
+
+        thread = await Thread.objects.acreate(file_memory=files)
+        await ThreadMemory.objects.acreate(thread=thread, memory=files, active=True)
+        await ThreadMemory.objects.acreate(thread=thread, memory=knowledge, active=True)
+
+        agent = RagToolsAgent()
+        mock_provider = MagicMock()
+        mock_provider.get_tool = AsyncMock(return_value=MagicMock())
+        agent.rag_provider = mock_provider
+
+        await agent.get_rag_tools(thread_id=str(thread.id))
+
+        specs = {
+            call.kwargs["spec"].name: call.kwargs["spec"]
+            for call in mock_provider.get_tool.await_args_list
+        }
+        uploaded = specs["search_uploaded_documents"]
+        assert "first" in uploaded.description
+        assert "follow-up" in uploaded.description
+        assert "1 available" in uploaded.description
+        assert "first" not in specs["search_test_knowledge"].description

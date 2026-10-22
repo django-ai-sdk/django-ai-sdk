@@ -37,6 +37,8 @@ class ArtifactType(StrEnum):
     TEST_RESULTS = "test_results"
     IMAGE = "image"
     TASK = "task"
+    FILE = "file"
+    CITATIONS = "citations"
 
 
 class ArtifactModel(BaseModel):
@@ -54,7 +56,49 @@ class ArtifactSchema(ArtifactModel):
 
     artifact_type: ClassVar[ArtifactType]
     system_prompt_hint: ClassVar[str] = ""
+    #: What the model should do once the artifact is stored.
+    reply_hint: ClassVar[str] = (
+        "Once it returns artifact_id, respond with exactly one sentence that briefly "
+        "describes what the data shows, do NOT repeat the data as text or markdown."
+    )
     data: Any
+
+    @classmethod
+    async def resolve(cls, data: dict[str, Any], thread_id: str) -> dict[str, Any]:
+        """Server-side fill-in of validated tool input before it is stored.
+
+        Raise ValueError to hand the model an error to fix and retry.
+        """
+        return data
+
+    @classmethod
+    def tool_name(cls) -> str:
+        """The name of this artifact's tool, e.g. ``artifact_file_artifact``."""
+        return f"artifact_{_to_snake(cls.__name__)}"
+
+    @classmethod
+    async def store(
+        cls,
+        data: dict[str, Any],
+        thread_id: str,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> dict[str, Any]:
+        """Validate, resolve and save `data`; returns the tool result payload.
+
+        Raises ValidationError or ValueError for data the model must fix.
+        """
+        from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
+
+        cls.model_fields["data"].annotation.model_validate(data)
+        data = await cls.resolve(data, thread_id)
+        artifact = await Artifact.objects.acreate(
+            thread_id=thread_id,
+            schema_name=cls.__name__,
+            artifact_type=str(cls.artifact_type),
+            data=data,
+            created_by=user if (user and not getattr(user, "is_anonymous", True)) else None,
+        )
+        return {"artifact_id": str(artifact.id), **data}
 
     @classmethod
     def as_tool(
@@ -63,39 +107,24 @@ class ArtifactSchema(ArtifactModel):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Tool:
 
-        data_annotation = cls.model_fields["data"].annotation
-        schema = data_annotation.model_json_schema()
-        artifact_type = str(cls.artifact_type)
-        resolved_user = user if (user and not getattr(user, "is_anonymous", True)) else None
+        schema = cls.model_fields["data"].annotation.model_json_schema()
 
         async def submit(**kwargs: Any) -> str:
-            from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
-
             try:
-                data_annotation.model_validate(kwargs)
-            except ValidationError as e:
+                return json.dumps(await cls.store(kwargs, thread_id, user))
+            except (ValidationError, ValueError) as e:
                 return json.dumps({"error": str(e)})
-
-            artifact = await Artifact.objects.acreate(
-                thread_id=thread_id,
-                schema_name=cls.__name__,
-                artifact_type=artifact_type,
-                data=kwargs,
-                created_by=resolved_user,
-            )
-            return json.dumps({"artifact_id": str(artifact.id), **kwargs})
 
         hint = f" {cls.system_prompt_hint}" if cls.system_prompt_hint else ""
         return Tool(
-            name=f"artifact_{_to_snake(cls.__name__)}",
+            name=cls.tool_name(),
             description=(
                 "# Information"
                 f"{hint}"
                 f"Submit a structured {cls.__name__} when you have gathered "
                 "enough information to fill all fields. "
                 "If the tool returns an error, fix the data and retry. "
-                "Once it returns artifact_id, respond with exactly one sentence that briefly "
-                "describes what the data shows, do NOT repeat the data as text or markdown."
+                f"{cls.reply_hint}"
             ),
             parameters=schema,
             async_function=submit,
@@ -598,3 +627,86 @@ class ImageArtifact(ArtifactSchema):
         Call it when presenting an image result to the user.
     """)
     data: ImageData
+
+
+# ── File ──────────────────────────────────────────────────────────────────────
+
+
+class FileItem(ArtifactModel):
+    document_id: str = Field(alias="documentId")
+    filename: str | None = None
+    media_type: str | None = Field(default=None, alias="mediaType")
+    url: str | None = None
+
+
+class FileData(ArtifactModel):
+    files: list[FileItem] = Field(min_length=1)
+
+
+class FileArtifact(ArtifactSchema):
+    """Files (images or documents) uploaded to this thread, shown to the user."""
+
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.FILE
+
+    system_prompt_hint: ClassVar[str] = prompt("""
+        Use artifact_file_artifact() to show the user the uploaded files or images
+        your answer is about, e.g. when you refer to a file.
+        Call it at most once per answer, with all files in that one call.
+    """)
+
+    reply_hint: ClassVar[str] = (
+        "Once it returns artifact_id, the files are shown to the user: continue your "
+        "answer as normal, without repeating file names or links."
+    )
+    data: FileData
+
+
+# ── Citations ─────────────────────────────────────────────────────────────────
+
+
+class CitedSource(ArtifactModel):
+    """A source an answer may cite; `key` is stable across a thread's turns."""
+
+    key: str
+    number: int = 0
+    title: str
+    kind: Literal["document", "web"] = "document"
+    content: str = ""
+    url: str | None = None
+    document_id: str | None = Field(default=None, alias="documentId")
+    chunk_id: str | None = Field(default=None, alias="chunkId")
+    cited: bool = False
+
+
+class Evidence(ArtifactModel):
+    """Where in one source a part of the answer is supported."""
+
+    key: str
+    start: int | None = None
+    end: int | None = None
+    text: str = ""
+    matcher: Literal["exact", "normalized", "fuzzy", "partial"] | None = None
+
+
+class Citation(ArtifactModel):
+    """A part of the answer and, per supporting source, the passage that supports it."""
+
+    start: int
+    end: int
+    quote: str
+    evidence: list[Evidence]
+
+
+class CitationsData(ArtifactModel):
+    citations: list[Citation] = Field(default_factory=list)
+    sources: list[CitedSource] = Field(default_factory=list)
+
+
+class CitationsArtifact(ArtifactSchema):
+    """Which parts of an answer which sources support.
+
+    Built after the answer by the citation agent and python basded grounding
+    """
+
+    artifact_type: ClassVar[ArtifactType] = ArtifactType.CITATIONS
+    data: CitationsData

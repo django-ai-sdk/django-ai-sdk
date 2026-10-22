@@ -8,7 +8,7 @@ from django_ai_sdk.errors import AiSdkError, ErrorCode
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
-    from django_ai_sdk.adapters.citations import CitationFormatter, CitationRegistry
+    from django_ai_sdk.adapters.citations import SourceFormatter, SourceRegistry
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.rags.schemas import RagDocument
 
@@ -103,14 +103,18 @@ class RAGProvider:
         memory_id: str | None = None,
         *,
         spec: Any = None,
-        citation_registry: CitationRegistry | None = None,
-        citation_formatter: CitationFormatter | None = None,
+        citation_registry: SourceRegistry | None = None,
+        citation_formatter: SourceFormatter | None = None,
     ) -> Any:
-        """Get a ready-to-use ComponentTool for the given memory, with optional citations."""
+        """Get a ComponentTool for the given memory."""
+        from django_ai_sdk.adapters.citations import collect_sources  # noqa: PLC0415
+
         rag_instance = await self.get_rag_instance(agent, memory_id)
         tool = await self.build_tool(rag_instance, spec=spec)
-        if tool is not None and citation_registry is not None and citation_formatter is not None:
-            self._attach_citations(tool, citation_formatter, citation_registry)
+
+        # Seed the citation registry with sources from the RAG's tool
+        if tool is not None and citation_registry is not None:
+            collect_sources(tool, citation_registry, formatter=citation_formatter)
         return tool
 
     async def build_tool(self, rag_instance: Any, *, spec: Any = None) -> Any:
@@ -137,17 +141,6 @@ class RAGProvider:
         )
         return None
 
-    def _attach_citations(
-        self,
-        tool: Any,
-        formatter: CitationFormatter,
-        registry: CitationRegistry,
-    ) -> None:
-        """Wire a ComponentTool via the citation bridge."""
-        from django_ai_sdk.adapters.citations.utils import attach_citations  # noqa: PLC0415
-
-        attach_citations(tool, formatter, registry)
-
     def clear_cache(self) -> None:
         """Clear the RAG cache."""
         self._cache.clear()
@@ -155,31 +148,55 @@ class RAGProvider:
 
     async def add_documents(
         self, agent: Agent, memory_id: str | None, documents: list[RagDocument]
-    ) -> None:
-        """Add documents to existing RAG instance."""
-        cache_key = self._get_cache_key(agent, memory_id)
-        rag = self._cache.get(cache_key)
+    ) -> bool:
+        """Add documents to this memory's index; True when something was written.
 
-        if rag is not None and hasattr(rag, "add_documents"):
-            try:
-                await rag.add_documents(documents)
-            except Exception as exc:
-                raise _knowledge_unavailable(cache_key, exc) from exc
-            logger.info(f"Added {len(documents)} documents to {cache_key}")
+        Writes to the RAG cached in this process, or else to the memory's index when it
+        lives on a server (see `_shared_rag`), so a task worker's upload reaches chat.
+        """
+        cache_key = self._get_cache_key(agent, memory_id)
+        try:
+            rag = self._cache.get(cache_key) or await self._shared_rag(agent, memory_id)
+            if rag is None or not hasattr(rag, "add_documents"):
+                return False
+            await rag.add_documents(documents)
+        except Exception as exc:
+            raise _knowledge_unavailable(cache_key, exc) from exc
+        logger.info(f"Added {len(documents)} documents to {cache_key}")
+        return True
 
     async def remove_documents(
         self, agent: Agent, memory_id: str | None, document_ids: list[str]
-    ) -> None:
-        """Remove documents from existing RAG instance."""
-        cache_key = self._get_cache_key(agent, memory_id)
-        rag = self._cache.get(cache_key)
+    ) -> bool:
+        """Remove documents from this memory's index; True when something was removed.
 
-        if rag is not None and hasattr(rag, "remove_documents"):
-            try:
-                await rag.remove_documents(document_ids)
-            except Exception as exc:
-                raise _knowledge_unavailable(cache_key, exc) from exc
-            logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
+        Same index as `add_documents`: the cached RAG, or else a server index.
+        """
+        cache_key = self._get_cache_key(agent, memory_id)
+        try:
+            rag = self._cache.get(cache_key) or await self._shared_rag(agent, memory_id)
+            if rag is None or not hasattr(rag, "remove_documents"):
+                return False
+            await rag.remove_documents(document_ids)
+        except Exception as exc:
+            raise _knowledge_unavailable(cache_key, exc) from exc
+        logger.info(f"Removed {len(document_ids)} documents from {cache_key}")
+        return True
+
+    async def _shared_rag(self, agent: Agent, memory_id: str | None) -> Any:
+        """This memory's RAG when its index lives on a server, else None.
+
+        A server index is shared by every process, so writing it from the process that
+        saved the document (e.g. a task worker) reaches the RAG cached by the web
+        process. Local and in-memory indexes belong to one process. Not cached here:
+        the writing process doesn't need to keep a warm index.
+        """
+        rag = await agent.get_rag_pipeline(memory_id)
+        storage = getattr(getattr(rag, "config", None), "storage", None)
+        if not getattr(storage, "is_server", False):
+            return None
+        await rag.warmup()  # reuses the server collection, or creates it for a first document
+        return rag
 
     async def reindex(
         self, agent: Agent, memory_id: str | None = None, force_rebuild: bool = False
@@ -269,6 +286,10 @@ class RAGProvider:
                         await rag.warmup(force_rebuild)
             except Exception as exc:
                 raise _knowledge_unavailable(cache_key, exc) from exc
+            if rag is None:
+                # A memory without documents has no index yet. Not cached, so its first
+                # document gets one on the next use.
+                return None
             self._cache[cache_key] = rag
 
             # Evict LRU entries when over the cap; clean up their locks too

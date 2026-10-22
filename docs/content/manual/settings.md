@@ -28,15 +28,21 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_VECTOR_STORE_PATH` | `None` | Base directory for persistent vector stores. Storage configs build per-backend, per-memory paths as `{path}/{backend}/{memory_id}`; unset means in-memory stores. See [RAG Variants](/manual/rag-variants/). |
-| `AI_SDK_VECTOR_STORE_URL` | `None` | Qdrant server URL. When set, Qdrant storage uses `backend="server"` with collection index `memory_{memory_id}` (or `default`). |
+| `AI_SDK_VECTOR_STORE_URL` | `None` | Qdrant server URL. When set, Qdrant storage uses `backend="server"` with collection index `memory_{memory_id}` (or `default`). Needed when uploads are processed by a task worker: the worker writes new documents into the shared server index, so chat finds them. A local or in-memory index belongs to one process. |
+| `AI_SDK_EMBEDDINGS_MODEL` | `None` | Qdrant hybrid RAG: when set, dense embeddings come from this model through the OpenAI-compatible API (`OPENAI_API_KEY`, `OPENAI_API_URL`) instead of local FastEmbed. Sparse (BM42) embeddings stay local. Changing it needs `reindex_memories`. |
+| `AI_SDK_EMBEDDINGS_DIM` | `384` | Vector size of the Qdrant collection; must match the dense model (`Qwen/Qwen3-Embedding-8B`: `4096`). |
 
 ## Files and Uploads
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_ALLOWED_FILES` | `{}` | Extra file-extension → MIME mapping used as a fallback when magic-byte detection fails (`files/processors.py`). |
-| `AI_SDK_MAX_UPLOAD_SIZE` | `10 MB` | Upload size ceiling surfaced to the frontend by `get_upload_settings()`. |
+| `AI_SDK_MAX_UPLOAD_SIZE` | `10 MB` | Largest file a document or thread upload accepts (larger ones get a 400); surfaced to the frontend by `get_upload_settings()`. |
 | `AI_SDK_MEMORY_FILE_PIPELINE` | `None` | Dotted path (or list of paths) to a zero-argument callable returning a `FilePipeline`: the default pipeline for uploads without agent context. The first pipeline whose `accepts(file)` matches is used. See [Files](/manual/files/). |
+| `AI_SDK_VISION_AGENT` | `None` | Dotted path to your own `Agent` subclass that answers every image question: captions for uploaded images and the `ask_image` tool. Choose its model, instructions and generator; make it `hidden = True`. Unset means images are not captioned and there is no `ask_image`. An agent sees images as pixels with `vision = True`. See [Images and vision](/manual/files/#images-and-vision). |
+| `AI_SDK_MAX_INLINE_IMAGE_BYTES` | `5 MB` | Largest image sent as pixels to a vision-capable agent; bigger ones get their description instead. `None` disables the cap. |
+| `AI_SDK_IMAGE_CAPTION_LIMIT` | `1500` | Character cap on the auto-generated description an agent without vision gets for an attached image; a cut caption ends in `…`. `None`, `0` or below disables it. Override `Agent.format_image_attachment()` to change the whole hint. |
+| `AI_SDK_THREAD_FILE_URL` | `None` | URL name (as for `reverse()`) of your permission-checked thread-file download view, taking `thread_id` and `doc_id`; file parts and file artifacts link to it. Unset uses the storage url, fine for public storage only. The contrib Ninja and DRF routers ship such a view (`athread_file_response` / `thread_file_response`). |
 | `AI_SDK_FILE_PIPELINE_TIMEOUT` | `900` | Seconds before a background document pipeline is failed. `django_tasks` has no native timeout, so this guards hung or wedged upload processing. |
 | `STORAGES["django_ai_sdk"]` | unset | A reserved `STORAGES` alias used for `EntryDocument.file` only. Define it like any other `STORAGES` entry (`BACKEND` + `OPTIONS`). Unset falls back to `STORAGES["default"]` See [Files](/manual/files/). |
 | `AI_SDK_FILE_UPLOAD_TO` | `"memories/documents/"` | `upload_to` path for `EntryDocument.file`. Unset keeps the default (no migration needed); changing it requires running `makemigrations` in the host project, same as customizing any other third-party model field. See [Files](/manual/files/). |

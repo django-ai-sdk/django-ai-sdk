@@ -1,112 +1,79 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 
 class NumberedSource(BaseModel):
-    """A retrieved document assigned a citation index for a single LLM turn."""
+    """A source found during a turn"""
 
-    index: int
+    index: int = 0
+    key: str = ""
     title: str
     content: str
+    kind: Literal["document", "web"] = "document"
+    url: str | None = None
     chunk_id: str | None = None
     doc_id: str | None = None
     memory_id: str | None = None
     page_number: int | None = None
-    metadata: dict[str, Any] = Field(
-        default_factory=dict
-    )  # Display fields for UI (file_name, split_id)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class CitationFormatter(Protocol):
-    """Formats retrieved documents into LLM-visible text with inline citation markers.
+def from_document(doc: Any) -> NumberedSource:
+    """A source from a retrieved Haystack Document"""
+    if hasattr(doc, "meta"):
+        found: dict[str, Any] = {
+            "chunk_id": doc.id,
+            "content": doc.content or "",
+            "meta": dict(doc.meta or {}),
+        }
+    else:
+        found = dict(doc)
 
-    Implementations must produce a string containing [N] markers matching the
-    index of each returned NumberedSource. The LLM is instructed (via the
-    formatter's preamble) to reuse those exact numbers when citing.
-    """
-
-    def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
-        """Return (llm_visible_string, ordered_sources).
-
-        start_index is the first citation number to assign - callers pass the
-        registry's next_index so numbering stays cumulative across multiple
-        retrievals within the same turn.
-        """
-        ...
-
-
-class DefaultCitationFormatter:
-    """XML-tagged numbered citation format. Works with any chat LLM.
-
-    Override RAG_TEMPLATE in a subclass to customize citation instructions.
-    Default includes strict rules to prevent common citation errors (fullwidth
-    brackets, bundled citations, trailing 'Sources:' sections).
-    """
-
-    # Documents are wrapped in <source id="N">, so models reach for that same tag
-    # when citing; the self-closing <source id="N" /> is the one citation format.
-    RAG_TEMPLATE = (
-        'Retrieved documents below are each wrapped in a <source id="N">...</source> tag. '
-        'To reference one, cite it inline with a self-closing <source id="N" /> tag, '
-        "using the exact id from the source wrapper. Do not renumber.\n\n"
-        "Citation rules:\n"
-        '- Use exactly this self-closing format: <source id="N" />, one tag per source.\n'
-        "- Place the citation tag immediately after the clause it supports, not bundled at "
-        "the end of a paragraph.\n"
-        '- Multiple sources: use separate tags, e.g. <source id="1" /> <source id="2" />. '
-        "Never combine ids in one tag.\n"
-        "- Do not add a 'Sources:' or 'References:' section - citations are inline only.\n"
-        "- Do not explain or reason about citations, only add them.\n"
-        "- Only state what the sources below say. If none of them are about what the user "
-        "asked (e.g. a different file than the one named), say you could not find it; never "
-        "fill in from general knowledge."
+    meta: dict[str, Any] = dict(found.get("meta") or {})
+    base = (
+        meta.get("file_name")
+        or meta.get("filename")
+        or meta.get("name")
+        or meta.get("title")
+        or meta.get("topic")
+        or "Document"
     )
 
-    # Repeated after the sources
-    CITATION_REMINDER = (
-        'Reminder: cite inline with <source id="N" />, one tag per source id. '
-        "If no source is about what the user asked, say you could not find it."
+    split_id = meta.get("split_id")
+    return NumberedSource(
+        title=f"{base} · §{split_id + 1}" if split_id is not None else base,
+        content=str(found.get("content") or ""),
+        chunk_id=found.get("chunk_id"),
+        doc_id=meta.get("doc_id"),
+        memory_id=meta.get("memory_id"),
+        page_number=meta.get("page_number"),
+        metadata={k: v for k, v in meta.items() if k in ("file_name", "page_number", "split_id")},
     )
 
-    def format(self, documents: list[dict], start_index: int) -> tuple[str, list[NumberedSource]]:
-        if not documents:
-            return "", []
-        sources: list[NumberedSource] = []
-        lines: list[str] = [self.RAG_TEMPLATE]
 
-        for offset, doc in enumerate(documents):
-            idx = start_index + offset
-            meta: dict[str, Any] = doc.get("meta") or {}
-            base = (
-                meta.get("file_name")
-                or meta.get("filename")
-                or meta.get("name")
-                or meta.get("title")
-                or meta.get("topic")
-                or f"Document {idx}"
-            )
-            split_id = meta.get("split_id")
-            page_number = meta.get("page_number")
-            title = f"{base} · §{split_id + 1}" if split_id is not None else base
-            content = doc.get("content", "")
-            metadata_dict = {
-                k: v for k, v in meta.items() if k in ("file_name", "page_number", "split_id")
-            }
-            sources.append(
-                NumberedSource(
-                    index=idx,
-                    title=title,
-                    content=content,
-                    chunk_id=doc.get("chunk_id"),
-                    doc_id=meta.get("doc_id"),
-                    memory_id=meta.get("memory_id"),
-                    page_number=page_number,
-                    metadata=metadata_dict,
-                )
-            )
-            lines.append(f'<source id="{idx}">\nTitle: {title}\n{content}\n</source>')
-        lines.append(self.CITATION_REMINDER)
-        return "\n".join(lines), sources
+def from_web_result(result: dict[str, Any]) -> NumberedSource:
+    """A source from a web search`."""
+    return NumberedSource(
+        title=result.get("title") or result.get("url") or "Web result",
+        content=result.get("content") or result.get("snippet") or "",
+        url=result.get("url"),
+        kind="web",
+    )
+
+
+class SourceFormatter(Protocol):
+    """Renders a tool's sources as the text the answering model reads."""
+
+    def render(self, sources: list[NumberedSource]) -> str: ...
+
+
+class SourcesFormatter:
+    """Sources as plain blocks."""
+
+    def render(self, sources: list[NumberedSource]) -> str:
+        return "\n\n".join(
+            f"### {s.title}" + (f" ({s.url})" if s.url else "") + f"\n{s.content}" for s in sources
+        )

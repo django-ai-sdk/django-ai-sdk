@@ -131,9 +131,52 @@ def tool_output_limit(max_chars: int | None = None) -> int | None:
     return limit if limit > 0 else None
 
 
+# message meta flag on the nudge the require-tools hook adds
+REQUIRE_TOOLS_META_KEY = "django_ai_sdk.require_tools"
+
+
+class RequireToolsHook:
+    """Keep the agent running until every required tool has been called.
+
+    Required = `required_tools` plus `hook_context["required_tools"]` of the
+    run. Tools not in the current toolset are ignored, and the model is nudged
+    at most `max_nudges` times per run, so a stubborn model can't loop.
+    """
+
+    allowed_hook_points = ["on_exit"]
+
+    def __init__(self, required_tools: list[str] | None = None, max_nudges: int = 2) -> None:
+        self.required_tools = list(required_tools or [])
+        self.max_nudges = max_nudges
+
+    def run(self, state: State) -> None:
+        context = state.data.get("hook_context") or {}
+        required = {*self.required_tools, *(context.get("required_tools") or [])}
+        if not required:
+            return
+        available = {getattr(t, "name", None) for t in state.data.get("tools") or []}
+        counts = state.data.get("tool_call_counts") or {}
+        missing = sorted(n for n in required if n in available and not counts.get(n))
+        if not missing:
+            return
+        messages = state.data.get("messages") or []
+        if sum(1 for m in messages if m.meta.get(REQUIRE_TOOLS_META_KEY)) >= self.max_nudges:
+            logger.warning(f"Required tools never called: {missing}")
+            return
+        nudge = ChatMessage.from_system(
+            f"Before answering you must call: {', '.join(missing)}. Call it now, then answer.",
+            meta={REQUIRE_TOOLS_META_KEY: True},
+        )
+        state.set("messages", [nudge])
+        state.set("continue_run", True)
+
+
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
     """Standard hooks for a tool-capable agent."""
-    hooks: dict[str, list[Any]] = {"before_tool": [LogToolCallsHook()]}
+    hooks: dict[str, list[Any]] = {
+        "before_tool": [LogToolCallsHook()],
+        "on_exit": [RequireToolsHook(getattr(agent, "required_tools", None))],
+    }
     if agent.max_tool_calls is not None:
         hooks["before_tool"].append(ToolCallBudgetHook(agent.max_tool_calls))
     if (limit := tool_output_limit()) is not None:
@@ -170,6 +213,9 @@ class ToolAgentConfig(BaseModel):
 
     # Optional hooks passed through to the Haystack Agent, keyed by hook point.
     hooks: dict[str, list[Any]] | None = None
+
+    # Tools the agent must call before it may finish (see RequireToolsHook).
+    required_tools: list[str] = []
 
     # Forward the agent's streaming callback into tools that accept one
     # subagent wrappers, so sub-agent tool calls stream to the client through
@@ -245,7 +291,10 @@ class ToolAgent:
             )
         if (limit := tool_output_limit(self.config.max_tool_output_chars)) is not None:
             hooks.setdefault("after_tool", []).append(ToolOutputLimitHook(limit))
-        return hooks or None
+        on_exit = hooks.setdefault("on_exit", [])
+        if not any(isinstance(h, RequireToolsHook) for h in on_exit):
+            on_exit.append(RequireToolsHook(self.config.required_tools))
+        return hooks
 
     def pipeline(self) -> Pipeline:
         """Build and return the fully connected pipeline."""

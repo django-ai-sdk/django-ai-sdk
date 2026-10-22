@@ -53,7 +53,7 @@ Binary Office formats use `BaseBinaryFileProcessor`, which also requires a match
 | `JSONTransform` | JSON string → `dict` / `list` |
 | `TextTransform` | Any input → `{"data": ...}` dict |
 
-`BaseTransform` has a single `async run(data, **kwargs)` hook; transforms receive `agent=` when a pipeline runs with one. Write your own by subclassing it. For LLM extraction, the demo's `DocumentExtractionTransform` (`demo/apps/agents/transforms.py`) shows the pattern: run the extracted text through an agent with a `response_format`, e.g. the SDK's `DocumentExtraction` schema (summary, keywords, entities, facts, sections, events).
+`BaseTransform` has a single `async run(data, **kwargs)` hook; transforms receive `agent=` when a pipeline runs with one. Write your own by subclassing it. For LLM extraction, the demo's `DocumentExtractionTransform` (`demos/studio/apps/agents/transforms.py`) shows the pattern: run the extracted text through an agent with a `response_format`, e.g. the SDK's `DocumentExtraction` schema (summary, keywords, entities, facts, sections, events).
 
 ## Default Pipeline and FileService
 
@@ -70,7 +70,7 @@ The default pipeline is resolved by `get_default_file_pipeline()`:
 1. `AI_SDK_MEMORY_FILE_PIPELINE`: dotted path or list of paths to a zero-argument callable returning a `FilePipeline`; the first whose `accepts(file)` is true wins.
 2. Otherwise `FilePipeline(TextFileProcessor())`: text files only, no transforms.
 
-Upload limits are surfaced to the frontend by `get_upload_settings()` (`UploadSettings(max_upload_size, allowed_mime_types)`, derived from `AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, and each configured pipeline's processor MIME types).
+Upload limits are surfaced to the frontend by `get_upload_settings()` (`UploadSettings(max_upload_size, allowed_mime_types)`, derived from `AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, and each configured pipeline's processor MIME types). `MemoryService.upload_document` and `upload_thread_file` reject a file over `AI_SDK_MAX_UPLOAD_SIZE` with a `UserError` (400).
 
 ## Upload and Processing Lifecycle
 
@@ -125,6 +125,44 @@ STORAGES = {
 ```python
 AI_SDK_FILE_UPLOAD_TO = "my/custom/path/"
 ```
+
+## Images and vision
+
+An uploaded image goes through `ImageCaptionProcessor`, which asks your vision agent for a description plus a transcription of any visible text. That caption makes the image searchable, and it is what an agent without vision gets to see. Agents also get the `ask_image` tool for questions the caption doesn't answer.
+
+Both need `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`: your own agent answers every image question, so you choose the model, the instructions and the generator (provider, reasoning settings, ...). Without it, images are not captioned and there is no `ask_image`.
+
+```python
+# myapp/agents.py
+from django_ai_sdk import Agent
+from django_ai_sdk.adapters.base import Run
+from django_ai_sdk.generators import openai_chat
+
+
+class ImageAgent(Agent):
+    name = "Image describer"
+    model = "gpt-4o"
+    hidden = True  # never listed or chattable; only used for images
+    instructions = ["Describe images precisely. Transcribe text exactly as written."]
+    llm = openai_chat
+
+    async def get_run_adapter(self, thread_id=None, user=None):
+        return Run(generator=self.get_llm(), model=self.model)
+```
+
+The agent is called through `Agent.run()` with the image attached to a user message whose text is the question or the caption prompt. An agent whose own model can see images (`vision = True`) gets image attachments in a chat as pixels, up to `AI_SDK_MAX_INLINE_IMAGE_BYTES`; others get the caption, capped at `AI_SDK_IMAGE_CAPTION_LIMIT` characters.
+
+To show the user the image `ask_image` looked at, map the tool to an artifact:
+
+```python
+from django_ai_sdk.memories.tools import ASK_IMAGE_ARTIFACT, ASK_IMAGE_TOOL
+
+
+class MyAgent(Agent):
+    tool_artifacts = {ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT}
+```
+
+See [Artifacts after a tool](../../agents/#artifacts-after-a-tool).
 
 ## Thread File Memory
 

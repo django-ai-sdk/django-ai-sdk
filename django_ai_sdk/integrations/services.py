@@ -4,6 +4,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import async_to_sync
+
 from django_ai_sdk.integrations.base import IntegrationNotConnectable, IntegrationStatus
 from django_ai_sdk.integrations.registry import get_all_integrations, get_integrations
 from django_ai_sdk.integrations.schemas import IntegrationOut
@@ -129,5 +131,11 @@ class IntegrationService:
             raise PermissionDenied(f"Not permitted to use {name!r}")
         return await integration.test(user)
 
+
+# Sync wrappers, for sync views (e.g. Django REST framework).
+list_integrations_for_user = async_to_sync(IntegrationService.list_for_user)
+connect_integration = async_to_sync(IntegrationService.connect)
+disconnect_integration = async_to_sync(IntegrationService.disconnect)
+reconnect_integration = async_to_sync(IntegrationService.reconnect)
 
 __all__ = ["IntegrationService", "IntegrationNotConnectable"]

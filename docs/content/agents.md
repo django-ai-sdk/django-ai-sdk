@@ -220,7 +220,7 @@ class MySubagent(Agent):
     instructions = prompt("You are a subagent. Complete delegated tasks concisely.")
 ```
 
-Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
 
 ### Observability
 
@@ -232,7 +232,7 @@ config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
 
 The two swarm demos wire it into both the coordinator and (via `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls **and** for the subagent's calls: the coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default), and `SubagentStreamFilter` passes only tool-related chunks through — the subagent's raw text tokens are dropped so the report isn't streamed twice. Those forwarded chunks are persisted into the conversation history as they happen — in the order the calls actually start, so the stored history matches the streamed one and subagent tool activity survives a page reload.
 
-Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demo/apps/agents/agent_swarm.py` (pirate crew) and `demo/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
 
 ### Overriding `get_tools()`
 
@@ -250,6 +250,40 @@ class MyAgent(Agent):
         tools.append(await self.get_custom_tool(thread_id))
         return tools
 ```
+
+### Tools for uploaded files, and required tools
+
+Two hooks, two questions:
+
+| | `get_attachment_tools(thread_id)` | `get_run_required_tools(messages)` |
+| --- | --- | --- |
+| Answers | Which tools *can* the model use? | Which of those *must* it have called before it answers this turn? |
+| Returns | `Tool` objects, added to the toolset by `get_tools()` | Tool names |
+| Decided | Per thread: a file uploaded three turns ago is still reachable | Per turn, from this turn's messages |
+| Default | `ask_image`, when the agent takes uploads and a vision agent is set | `[]` |
+
+`required_tools` (a class attribute) lists names that are required on every run; `get_run_required_tools()` adds names for one turn.
+
+A required tool is not run for you: the model supplies the arguments, so the model calls it. When it tries to answer without having called a required tool, it is told to call it now and gets another turn; that happens at most twice per run. A required name the run has no tool for is ignored, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
+
+For example, always read an attached PDF with your own tool:
+
+```python
+class MyAgent(Agent):
+    required_tools = ["get_today"]
+
+    def get_attachment_tools(self, thread_id):
+        # Keep ask_image, add a PDF reader for this thread's files.
+        return [*super().get_attachment_tools(thread_id), read_pdf_tool(thread_id)]
+
+    def get_run_required_tools(self, messages):
+        last = next((m for m in reversed(messages) if m.role == "user"), None)
+        if last and any(a.media_type == "application/pdf" for a in last.attachments):
+            return ["read_pdf"]
+        return []
+```
+
+To give the model a file's content without any tool call, override `format_attachment()` instead: its text goes straight into the context line of the attachment.
 
 ### Integration tools
 
@@ -270,6 +304,30 @@ class MyArtifact(ArtifactSchema):
 class MyAgent(Agent):
     artifacts = [MyArtifact]
 ```
+
+### Artifacts after a tool
+
+`tool_artifacts` shows an artifact every time a tool runs, without the model calling the artifact tool. It is keyed by tool name, so it also works for tools you didn't write (package or hidden tools):
+
+```python
+from django_ai_sdk.artifacts import FileArtifact, ToolArtifact
+from django_ai_sdk.memories.models import EntryDocument
+from django_ai_sdk.memories.tools import get_thread_file
+
+
+async def looked_up_file(arguments, result, thread_id):
+    # Artifact data from the tool call, or None for no artifact this time.
+    doc = await EntryDocument.objects.filter(
+        id=arguments["document_id"], memory__thread_files__id=thread_id
+    ).afirst()
+    return {"files": [get_thread_file(doc, thread_id)]} if doc else None
+
+
+class MyAgent(Agent):
+    tool_artifacts = {"lookup_file": ToolArtifact(FileArtifact, looked_up_file)}
+```
+
+When the stream sees the tool's result, the builder gets the tool's arguments and its result (a returned list or dict comes back as one). The artifact is then stored and streamed right after it as its own `artifact_*` tool part: the frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It works for any tool of the run: your own, package, MCP or RAG tools, also ones your `get_pipeline_adapter` adds after `get_tools()`.
 
 ---
 
@@ -447,7 +505,7 @@ class MyAgent(Agent):
 
 ## Reference Agents
 
-The demo project ships seven agents in `demo/apps/agents/`, each showcasing a different pattern:
+The demo project ships seven agents in `demos/studio/apps/agents/`, each showcasing a different pattern:
 
 | Agent | Pattern |
 | --- | --- |

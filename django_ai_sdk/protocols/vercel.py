@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.errors import ErrorCode, get_error_spec
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.protocols.base import BaseProtocolHandler
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
         MessageEndEvent,
         MessageStartEvent,
         ReasoningChunkEvent,
-        SourceEvent,
         StreamEvent,
         SuggestionEvent,
         TextChunkEvent,
@@ -44,6 +43,25 @@ def agent_provider_metadata(
     """Wrap call attribution in provider metadata."""
     marks = {key: value for key, value in (("agent", agent), ("handoff", handoff)) if value}
     return {AGENT_METADATA_NAMESPACE: marks} if marks else None
+
+
+def get_attachment(part: Any) -> Attachment | None:
+    """Read the thread document reference from a file part.
+
+    The part's url is never used: it is client-supplied, the document id is
+    validated against the thread's files before use.
+    """
+    if part.type != "file":
+        return None
+    meta = (getattr(part, "provider_metadata", None) or {}).get(AGENT_METADATA_NAMESPACE) or {}
+    document_id = meta.get("documentId")
+    if not document_id:
+        return None
+    return Attachment(
+        document_id=str(document_id),
+        media_type=getattr(part, "media_type", None) or "",
+        filename=getattr(part, "filename", None) or "",
+    )
 
 
 # === Base Schema Classes ===
@@ -350,9 +368,12 @@ class VercelProtocolHandler(BaseProtocolHandler):
         for msg in protocol_messages:
             # Extract text content from parts using list comprehension
             content = " ".join(part.text for part in msg.parts if part.type == "text" and part.text)
+            attachments = [a for a in map(get_attachment, msg.parts) if a]
 
-            if content:
-                messages.append(ChatMessage(role=msg.role, content=content))
+            if content or attachments:
+                messages.append(
+                    ChatMessage(role=msg.role, content=content, attachments=attachments)
+                )
 
         return messages
 
@@ -364,6 +385,19 @@ class VercelProtocolHandler(BaseProtocolHandler):
 
             if chat_message.reasoning:
                 parts.append({"type": "reasoning", "text": chat_message.reasoning, "state": "done"})
+
+            for attachment in chat_message.attachments:
+                parts.append(
+                    {
+                        "type": "file",
+                        "mediaType": attachment.media_type,
+                        "filename": attachment.filename,
+                        "url": attachment.url,
+                        "providerMetadata": {
+                            AGENT_METADATA_NAMESPACE: {"documentId": attachment.document_id}
+                        },
+                    }
+                )
 
             if chat_message.content:
                 parts.append({"type": "text", "text": chat_message.content})
@@ -560,15 +594,6 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     suggestion_event = cast("SuggestionEvent", event)
                     yield DataPart(
                         type="data-suggestions", data={"suggestions": suggestion_event.suggestions}
-                    )
-
-                case "source":
-                    src = cast("SourceEvent", event)
-                    yield SourceDocumentPart(
-                        source_id=src.source_id,
-                        media_type=src.media_type,
-                        title=src.title,
-                        provider_metadata={"citation": {"index": src.index}},
                     )
 
                 case "error":
