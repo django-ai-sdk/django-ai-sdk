@@ -1,5 +1,5 @@
 # Release: push a tag v<version>; the version comes from the tag (setuptools-scm),
-# nothing to bump. Builds the wheel and sdist and tests the installed wheel. The
+# nothing to bump. Builds the wheel and sdist and runs the repo's own CI. The
 # publish job then waits for a required reviewer to approve the `pypi` environment
 # (Settings > Environments); once approved it publishes to PyPI and creates the
 # GitHub release with the files attached (or publishes the drafted one).
@@ -27,43 +27,12 @@ jobs:
           name: dist
           path: dist
 
-  # install the built wheel (not the source tree) and run the test suite
-  test-wheel:
-    needs: build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v7 # for tests/
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install fonts
-        run: sudo apt-get update && sudo apt-get install -y fonts-liberation
-      - name: Install the wheel with the test extras
-        run: |
-          uv venv
-          uv pip install "$(ls dist/*.whl)[qdrant,mcp,files,chroma,providers,ninja,drf]" \
-            pytest pytest-asyncio pytest-django pytest-mock factory-boy httpx polyfactory
-      - name: Run tests against the installed wheel
-        run: |
-          # Run from a copy so the source tree can't shadow the installed package.
-          work="$RUNNER_TEMP/wheel-tests"
-          mkdir "$work"
-          cp -r tests pyproject.toml "$work"
-          cd "$work"
-          pkg=$("$GITHUB_WORKSPACE/.venv/bin/python" -c "import django_ai_sdk; print(django_ai_sdk.__file__)")
-          case "$pkg" in */site-packages/*) ;; *) echo "not the installed wheel: $pkg"; exit 1 ;; esac
-          "$GITHUB_WORKSPACE/.venv/bin/python" -m pytest -q tests
+  # the same tests and lint as every PR
+  ci:
+    uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: test-wheel
+    needs: [build, ci]
     runs-on: ubuntu-latest
     environment: pypi # required reviewers on this environment = the approval gate
     permissions:
