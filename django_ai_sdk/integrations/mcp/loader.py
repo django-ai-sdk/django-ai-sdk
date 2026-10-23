@@ -6,8 +6,6 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from authlib.integrations.base_client.errors import OAuthError
-from authlib.integrations.httpx_client import AsyncOAuth2Client
 from pydantic import SecretStr, ValidationError
 
 from django_ai_sdk.integrations.base import (
@@ -24,6 +22,7 @@ from django_ai_sdk.integrations.mcp.schemas import (
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
+    from authlib.integrations.httpx_client import AsyncOAuth2Client
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
     from django.http import HttpRequest
@@ -580,6 +579,8 @@ def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> Asy
     Confidential clients (a client_secret is configured) authenticate with HTTP
     Basic; public clients send client_id in the request body instead.
     """
+    from authlib.integrations.httpx_client import AsyncOAuth2Client
+
     return AsyncOAuth2Client(
         client_id=client_id,
         client_secret=client_secret or None,
@@ -601,6 +602,8 @@ async def refresh_oauth_token(
     if not refresh_token:
         logger.warning("No refresh token available for server %r", token_obj.server_name)
         return None
+
+    from authlib.integrations.base_client.errors import OAuthError
 
     from django_ai_sdk.integrations.mcp.discovery import discover
 
