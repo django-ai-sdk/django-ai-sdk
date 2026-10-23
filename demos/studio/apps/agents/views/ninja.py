@@ -83,7 +83,7 @@ async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
         thread_id=thread_id,
         steps=[
             DigestStepOut(name=row.step_name, status=row.status, detail=row.detail)
-            async for row in run.steps.order_by("sequence")
+            async for row in run.steps.order_by("sequence")  # ty: ignore[invalid-attribute-access]
         ],
     )
 

@@ -81,13 +81,13 @@ class UserManager(BaseUserManager["User"]):
 class User(AbstractUser):
     """Custom user whose unique identifier is the email address."""
 
-    username = None  # type: ignore[assignment]  # remove the username column
+    username = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]  # remove the username column
     email = models.EmailField("email address", unique=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []
 
-    objects = UserManager()
+    objects = UserManager()  # ty: ignore[invalid-assignment]
 
     def __str__(self) -> str:
         return self.email

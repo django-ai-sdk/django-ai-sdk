@@ -165,7 +165,8 @@ async def exchange_token(
     """Exchange an authorization code for an access token.
 
     Raises:
-        httpx.HTTPError: token endpoint transport/status error
+        httpx.HTTPError (or httpx2.HTTPError, see loader.HTTP_ERRORS): token endpoint
+            transport/status error
         ValueError: token endpoint returned an error or unparseable/incomplete response
     """
     from django_ai_sdk.integrations.mcp.loader import build_oauth_client

@@ -103,7 +103,7 @@ async def list_runtime_agents(request: HttpRequest) -> Any:
 @routes.post("/agents/runtimes/", response=AgentSettingsOut)
 async def create_runtime_agent(request: HttpRequest, payload: AgentSettingsCreateIn) -> Any:
     config = await AgentService.create_runtime_agent(
-        payload.model_dump(exclude={"users", "groups"}),  # type: ignore[arg-type]
+        payload.model_dump(exclude={"users", "groups"}),  # ty: ignore[invalid-argument-type]
         user=request.user,
     )
     # Sharing is best effort: the agent exists either way, and the owner can retry.

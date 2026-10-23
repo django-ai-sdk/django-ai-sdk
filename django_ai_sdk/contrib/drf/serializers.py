@@ -505,5 +505,5 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
 class WorkflowRunDetailSerializer(WorkflowRunSerializer):
     steps = WorkflowRunStepSerializer(many=True, read_only=True)
 
-    class Meta(WorkflowRunSerializer.Meta):
+    class Meta(WorkflowRunSerializer.Meta):  # ty: ignore[invalid-attribute-override]
         fields = [*WorkflowRunSerializer.Meta.fields, "steps"]

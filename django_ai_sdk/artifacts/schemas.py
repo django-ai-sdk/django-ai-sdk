@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from uuid import uuid4
 
 from haystack.tools import Tool
@@ -89,7 +89,7 @@ class ArtifactSchema(ArtifactModel):
         """
         from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
 
-        cls.model_fields["data"].annotation.model_validate(data)
+        cast("type[BaseModel]", cls.model_fields["data"].annotation).model_validate(data)
         data = await cls.resolve(data, thread_id)
         artifact = await Artifact.objects.acreate(
             thread_id=thread_id,
@@ -107,7 +107,7 @@ class ArtifactSchema(ArtifactModel):
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Tool:
 
-        schema = cls.model_fields["data"].annotation.model_json_schema()
+        schema = cast("type[BaseModel]", cls.model_fields["data"].annotation).model_json_schema()
 
         async def submit(**kwargs: Any) -> str:
             try:

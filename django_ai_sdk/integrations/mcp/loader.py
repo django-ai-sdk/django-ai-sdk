@@ -32,6 +32,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Authlib's httpx client runs on httpx2 when it is installed and falls back to httpx
+# otherwise, so a failed token request can raise either library's error.
+try:
+    import httpx2
+
+    HTTP_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, httpx2.HTTPError)
+except ImportError:
+    HTTP_ERRORS = (httpx.HTTPError,)
+
 #: How an MCP server authenticates. "static" is no auth at all, "token" is one shared
 #: deployment secret, "oauth" is a per-user OAuth 2.1 + PKCE connection.
 AUTH_KINDS = frozenset({"static", "token", "oauth"})
@@ -98,13 +107,13 @@ class DynamicMCPIntegration(Integration):
         return self.config.type
 
     @property
-    def connect_kind(self) -> str | None:
+    def connect_kind(self) -> str | None:  # ty: ignore[invalid-property-type-override]
         if isinstance(self.config, OAuthMCPIntegrationConfig):
             return "oauth"
         return None
 
     @property
-    def detail(self) -> str | None:
+    def detail(self) -> str | None:  # ty: ignore[invalid-property-type-override]
         return self._needs_setup
 
     async def get_tool_names(
@@ -644,7 +653,7 @@ async def refresh_oauth_token(
     try:
         async with client:
             await client.refresh_token(discovery.token_endpoint, refresh_token=refresh_token)
-    except (httpx.HTTPError, OAuthError) as e:
+    except (*HTTP_ERRORS, OAuthError) as e:
         # Our own exchange may have failed *because* a concurrent refresh already
         # rotated this refresh_token (e.g. the IDP rejected our now-stale one with
         # invalid_grant). Check whether another writer already landed a good token
