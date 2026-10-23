@@ -36,7 +36,7 @@ class LineRegex(Func):
         operator = "~*" if self.ignore_case else "~"
         return f"{text} {operator} %s", [*params, f"(?n){self.pattern}"]
 
-    def as_sqlite(self, compiler: Any, connection: Any, **extra: Any) -> tuple[str, list]:
+    def as_sqlite(self, compiler: Any, connection: Any, **extra: Any) -> tuple[str, list]:  # ty: ignore[invalid-method-override]
         text, params = compiler.compile(self.source_expressions[0])
         flags = "(?mi)" if self.ignore_case else "(?m)"
         return f"{text} REGEXP %s", [*params, f"{flags}{self.pattern}"]

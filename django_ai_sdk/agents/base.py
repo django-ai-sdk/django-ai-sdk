@@ -269,7 +269,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # receive `self` as its first argument, so keep `llm` unbound.
         llm = cls.__dict__.get("llm")
         if callable(llm) and not isinstance(llm, staticmethod):
-            cls.llm = staticmethod(llm)
+            cls.llm = staticmethod(llm)  # ty: ignore[invalid-assignment]
         # Don't register the base Agent class itself, or classes that
         # manage their own registration (e.g. RuntimeAgent).
         if cls.__name__ != "Agent" and not getattr(cls, "_skip_auto_register", False):

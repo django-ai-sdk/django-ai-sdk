@@ -62,11 +62,11 @@ class Thread(models.Model):
 
     @property
     def message_count(self) -> int:
-        return self.messages.count()
+        return self.messages.count()  # ty: ignore[invalid-attribute-access]
 
     @property
     def last_message(self) -> Message | None:
-        return self.messages.order_by("-created_at").first()
+        return self.messages.order_by("-created_at").first()  # ty: ignore[invalid-attribute-access]
 
     def add_user_message(self, chat_message: ChatMessage) -> Message:
         """Add user ChatMessage to this thread."""

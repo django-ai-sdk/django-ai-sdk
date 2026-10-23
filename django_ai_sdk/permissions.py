@@ -316,11 +316,11 @@ class MemoryDefaultPermission(BasePermission):
 
         restricted = self.MANAGE | self.DELETE
 
-        ownership = await obj.memory_users.filter(user=user).afirst()
+        ownership = await obj.memory_users.filter(user=user).afirst()  # ty: ignore[invalid-attribute-access]
         if ownership is not None and (operation not in restricted or ownership.can_manage):
             return True
 
-        group_ownership = await obj.memory_groups.filter(group__user=user).afirst()
+        group_ownership = await obj.memory_groups.filter(group__user=user).afirst()  # ty: ignore[invalid-attribute-access]
         if group_ownership is not None and (
             operation not in restricted or group_ownership.can_manage
         ):

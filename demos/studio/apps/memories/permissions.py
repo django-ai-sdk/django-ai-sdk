@@ -68,7 +68,7 @@ class AllowAnonymousMemoryPermission(BasePermission):
             return operation in self.READ and obj.is_public
 
         # Check memory user permissions for authenticated users
-        ownership = await obj.memory_users.filter(user=user).afirst()
+        ownership = await obj.memory_users.filter(user=user).afirst()  # ty: ignore[invalid-attribute-access]
         if ownership is None:
             # Not a memory user — only allow read on public memories
             if operation in self.READ and obj.is_public:

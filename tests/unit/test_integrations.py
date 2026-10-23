@@ -54,16 +54,22 @@ def _clean_registry():
     reset_registry()
 
 
+try:  # the library Authlib's httpx client runs on
+    import httpx2 as _http
+except ImportError:
+    _http = httpx
+
+
 def _mock_transport(
     token_response: dict, status_code: int = 200
-) -> httpx.MockTransport:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status_code, json=token_response)
+) -> _http.MockTransport:
+    def handler(request: _http.Request) -> _http.Response:
+        return _http.Response(status_code, json=token_response)
 
-    return httpx.MockTransport(handler)
+    return _http.MockTransport(handler)
 
 
-def _patch_oauth_transport(monkeypatch, transport: httpx.MockTransport) -> None:
+def _patch_oauth_transport(monkeypatch, transport: _http.MockTransport) -> None:
     """Inject a fake token-endpoint transport into every AsyncOAuth2Client this package
     builds, whether called from loader.refresh_oauth_token directly or from
     services.exchange_token (which imports build_oauth_client locally, so patching the
@@ -1133,7 +1139,7 @@ class TestOAuthTokenRefresh:
             )
 
         _patch_discovery(monkeypatch)
-        _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
+        _patch_oauth_transport(monkeypatch, _http.MockTransport(explodes))
 
         config = OAuthMCPIntegrationConfig(url="https://mcp.example.com", client_id="c")
         assert await refresh_oauth_token(token_obj, config) is None
@@ -1495,7 +1501,7 @@ class TestOAuthRedirectFlow:
                 "must not reach the token endpoint on a state mismatch"
             )
 
-        _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
+        _patch_oauth_transport(monkeypatch, _http.MockTransport(explodes))
 
         user = await UserFactory.acreate()
         request = self._request(
@@ -1526,7 +1532,7 @@ class TestOAuthRedirectFlow:
                 "must not reach the token endpoint after a provider error"
             )
 
-        _patch_oauth_transport(monkeypatch, httpx.MockTransport(explodes))
+        _patch_oauth_transport(monkeypatch, _http.MockTransport(explodes))
 
         user = await UserFactory.acreate()
         request = self._request(

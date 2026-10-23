@@ -155,7 +155,7 @@ async def _already_completed(run: WorkflowRun) -> dict[str, Any]:
     """Stored output of every step of this run that already finished."""
     return {
         row.step_name: row.output
-        async for row in run.steps.filter(status=WorkflowRunStep.Status.COMPLETED)
+        async for row in run.steps.filter(status=WorkflowRunStep.Status.COMPLETED)  # ty: ignore[invalid-attribute-access]
     }
 
 

@@ -12,6 +12,7 @@ from django_ai_sdk.integrations.mcp import services as mcp_service
 from django_ai_sdk.integrations.mcp.discovery import discover
 from django_ai_sdk.integrations.mcp.loader import (
     _K_FLOW,
+    HTTP_ERRORS,
     DynamicMCPIntegration,
     resolve_client_credentials,
 )
@@ -128,7 +129,7 @@ async def oauth_callback(
             await mcp_service.store_token(
                 user=user, server_name=server_name, token_response=token_response
             )
-        except (httpx.HTTPError, ValueError):
+        except (*HTTP_ERRORS, ValueError):
             logger.exception("Token exchange/store failed for %r", server_name)
             return JsonResponse({"error": "Token exchange failed"}, status=500)
 

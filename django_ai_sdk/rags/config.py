@@ -54,7 +54,7 @@ class BaseStorageConfig(BaseModel):
 class QdrantStorageConfig(BaseStorageConfig):
     """Configuration for Qdrant vector store persistence."""
 
-    backend: Literal[":memory:", "persistent", "server"] = Field(default=":memory:")
+    backend: Literal[":memory:", "persistent", "server"] = Field(default=":memory:")  # ty: ignore[invalid-attribute-override]
     location: str | None = Field(default=None)
     similarity: Literal["cosine", "dot", "euclidean"] = Field(default="cosine")
     # Seconds to wait for another process to release a "persistent" store's lock.

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class StreamEvent(BaseModel):
     """Base class for all normalized streaming events."""
 
-    event_type: str  # Subclasses override with specific Literal types
+    event_type: Any  # Subclasses override with specific Literal types
 
 
 class MessageStartEvent(StreamEvent):

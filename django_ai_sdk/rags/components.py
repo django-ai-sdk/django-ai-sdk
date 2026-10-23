@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections import Counter
+from collections import defaultdict
 from typing import Any
 
 from haystack import component
@@ -144,7 +144,7 @@ class MultiQueryDeduplicationMixin:
             key=lambda doc: matched[doc.id],
             reverse=True,
         )
-        fused: Counter[str] = Counter()
+        fused: defaultdict[str, float] = defaultdict(float)
         for ranking in rankings:
             for rank, doc in enumerate(ranking, 1):
                 fused[doc.id] += 1 / (RRF_K + rank)
