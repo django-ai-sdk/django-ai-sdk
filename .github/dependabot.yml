@@ -9,6 +9,9 @@ updates:
       python-dependencies:
         patterns:
           - "*"
+    # a Django range is set by hand and tested in matrix
+    ignore:
+      - dependency-name: "django"
 
   # Keep GitHub Actions up to date
   - package-ecosystem: "github-actions"
