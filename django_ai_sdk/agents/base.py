@@ -937,11 +937,15 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         """Open the slow parts of the chat build, yielding what is being waited on.
 
         What is opened here is cached, so `get_pipeline_adapter()` finds it ready.
+        Ends with a plain `start` if anything was named, so the build that follows
+        is not shown under the name of a step that is done.
         """
+        named = False
         if self.rag_provider and thread_id:
             from django_ai_sdk.memories.services import MemoryService
 
             for memory in await MemoryService.get_thread_memories(thread_id, user=user):
+                named = True
                 yield _warmup_part("knowledge", memory.name)
                 await self.rag_provider.get_rag_instance(self, str(memory.id))
 
@@ -959,6 +963,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         waiting = await self._allowed_integrations(user)
         loads = [asyncio.ensure_future(load(i)) for i in waiting]
         if waiting:
+            named = True
             yield _warmup_part("integrations", ", ".join(i.label for i in waiting))
         try:
             for finished in asyncio.as_completed(loads):
@@ -968,6 +973,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     yield part
                 if waiting:
                     yield _warmup_part("integrations", ", ".join(i.label for i in waiting))
+            if named:
+                yield {"type": "data-warmup", "data": {"status": "start"}, "transient": True}
         finally:
             for task in loads:
                 task.cancel()

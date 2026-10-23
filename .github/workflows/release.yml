@@ -1,0 +1,84 @@
+# Release: push a tag v<version>; the version comes from the tag (setuptools-scm),
+# nothing to bump. Builds the wheel and sdist and runs the repo's own CI. The
+# publish job then waits for a required reviewer to approve the `pypi` environment
+# (Settings > Environments); once approved it publishes to PyPI and creates the
+# GitHub release with the files attached (or publishes the drafted one).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # setuptools-scm reads the version from the tag
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --out-dir dist
+      - name: version matches the tag
+        run: |
+          ls dist
+          ls dist/django_ai_sdk-"${GITHUB_REF_NAME#v}"-py3-none-any.whl
+      - name: wheel imports on its own
+        run: |
+          # No extras, outside the checkout: what `pip install django-ai-sdk` gets.
+          uv venv "$RUNNER_TEMP/venv"
+          uv pip install --python "$RUNNER_TEMP/venv/bin/python" dist/*.whl
+          cd "$RUNNER_TEMP"
+          venv/bin/python -c "
+          import django
+          from django.conf import settings
+          settings.configure()
+          django.setup()
+          import django_ai_sdk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist
+
+  # the same tests and lint as every PR
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [build, ci]
+    runs-on: ubuntu-latest
+    environment: pypi # required reviewers on this environment = the approval gate
+    permissions:
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # only after PyPI accepted it, so a failed publish never leaves a GitHub release
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # a1 / b2 / rc1 / .dev versions are marked as pre-release
+          pre=$([[ "$TAG" =~ (a|b|rc|dev)[0-9]*$ ]] && echo --prerelease || true)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # A drafted release (release-drafter) gets the files and is published.
+            gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft=false $pre
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --generate-notes --title "$TAG" $pre
+          fi

@@ -624,7 +624,11 @@ class TestWarmupProgress:
 
         parts = [p async for p in self._agent(fails).warmup_progress()]
 
-        assert [p["type"] for p in parts] == ["data-warmup", "data-unavailable"]
+        assert [p["type"] for p in parts] == [
+            "data-warmup",
+            "data-unavailable",
+            "data-warmup",
+        ]
         assert parts[1]["data"] == {"stage": "integrations", "detail": "Checked"}
 
     async def test_a_healthy_integration_is_named_but_not_reported(self):
@@ -633,7 +637,7 @@ class TestWarmupProgress:
 
         parts = [p async for p in self._agent(succeeds).warmup_progress()]
 
-        assert [p["type"] for p in parts] == ["data-warmup"]
+        assert [p["type"] for p in parts] == ["data-warmup", "data-warmup"]
 
 
 class TestAPIIntegrationGetStatus:
