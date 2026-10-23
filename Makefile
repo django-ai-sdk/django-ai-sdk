@@ -2,6 +2,8 @@ PHONY: setup setup-all format test test-demos typecheck tag build publish releas
 
 DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
 TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf
+# example: make test UV_RUN_ARGS='--with "django==5.2.*"'
+UV_RUN_ARGS ?=
 
 setup:
 	uv sync $(DEMO_EXTRAS)
@@ -22,7 +24,7 @@ format:
 	uv run ruff format .
 
 test:
-	uv run $(TEST_EXTRAS) pytest tests -v
+	uv run $(TEST_EXTRAS) $(UV_RUN_ARGS) pytest tests -v
 
 test-demos:
 	for d in demos/*/; do [ -f $$d/manage.py ] || continue; (cd $$d && make test) || exit 1; done

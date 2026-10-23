@@ -8,12 +8,25 @@ on:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }}, Django ${{ matrix.django }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.12", "3.13"]
+        django: ["5.2", "6.0", "6.1"]
+        include:
+          - os: macos-latest
+            python-version: "3.13"
+            django: "6.1"
+          - os: windows-latest
+            python-version: "3.13"
+            django: "6.1"
 
     steps:
       - uses: actions/checkout@v7
@@ -29,12 +42,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install fonts
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fonts-liberation
 
       - name: Run tests
-        run: make test
+        run: |
+          args="--with django==${{ matrix.django }}.*"
+
+          # fix: django 6.1 removed `cc_delim_re`, need specific drf
+          if [ "${{ matrix.django }}" = "6.1" ]; then
+            args="$args --with djangorestframework~=3.18.3"
+          fi
+          make test UV_RUN_ARGS="$args"
 
       - name: Run demo tests
+        if: runner.os == 'Linux'
         run: make test-demos
 
   lint:

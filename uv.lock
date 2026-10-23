@@ -1038,7 +1038,7 @@ requires-dist = [
     { name = "authlib", marker = "extra == 'mcp'", specifier = ">=1.7.2" },
     { name = "cashews", specifier = ">=7.5.0,<9" },
     { name = "chroma-haystack", marker = "extra == 'chroma'", specifier = ">=4.4.0" },
-    { name = "django", specifier = ">=5.2.6,<6.1" },
+    { name = "django", specifier = ">=5.2.6,<6.2" },
     { name = "django-ai-sdk", extras = ["anthropic", "huggingface", "mistral", "ollama", "openrouter"], marker = "extra == 'providers'" },
     { name = "django-ai-sdk", extras = ["chroma", "qdrant"], marker = "extra == 'rag'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'chroma'" },
