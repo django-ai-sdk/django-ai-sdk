@@ -207,6 +207,7 @@ When the coordinator builds its tools, each subagent becomes a **native Haystack
 - Subagents the user lacks `VIEW_AGENT` permission on are skipped automatically.
 - Cyclic crews (A delegates to B, B back to A) are detected at build time and the back-edge is skipped.
 - The coordinator's `get_system_prompt()` automatically appends an `Available subagents:` roster.
+- An entry can also be an **agent id**, so DB-configured runtime agents work as subagents: `agents = [ResearchPlanner, str(sales_agent_settings.id)]`. A subagent searches **its own** knowledge bases (`memories`), and what it finds is cited in the coordinator's answer. See [Subagent Delegation](../manual/agent/#subagent-delegation).
 
 Subagents are ordinary `Agent` subclasses with `hidden = True` — they keep the `name`/`description`/`model`/`tools`/`instructions` attributes, so they only need a `tools` list and an instructions prompt:
 

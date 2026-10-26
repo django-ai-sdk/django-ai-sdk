@@ -12,6 +12,7 @@ from django_ai_sdk.adapters.citations import (
     SourceFormatter,
     SourceRegistry,
     SourcesFormatter,
+    collect_sources,
 )
 from django_ai_sdk.adapters.citations.grounding import get_citation_agent
 from django_ai_sdk.agents.attachments import InlineFileCapability
@@ -61,6 +62,12 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 logger = get_logger(__name__)
+
+
+def _roster_line(subagent: Agent | type[Agent]) -> str:
+    """A subagent as the coordinator's prompt lists it: name, and what it does."""
+    about = subagent.description or (subagent.__doc__ if isinstance(subagent, type) else None)
+    return f"- {subagent.name}: {about}" if about else f"- {subagent.name}"
 
 
 def _warmup_part(stage: str, detail: str) -> dict[str, Any]:
@@ -195,8 +202,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Artifacts shown after a tool runs, by tool name, without the model calling.
     tool_artifacts: dict[str, ToolArtifact] = {}
 
-    # Delegate-able subagent classes.
-    agents: list[type[Agent]] = []
+    # Delegate-able subagents: Agent classes, or agent ids (a registered agent or
+    # a runtime one, AgentSettings). Resolved per request by get_subagents().
+    agents: list[type[Agent] | str] = []
 
     # Loop limits when this agent runs as a subagent.
     max_agent_steps: int = 6
@@ -408,22 +416,23 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         """Return formatted system instructions as a single string."""
         return self.instructions
 
-    def get_system_prompt(self) -> str:
-        """
-        Alias for get_instructions()
+    def get_system_prompt(self, subagents: list[Agent] | None = None) -> str:
+        """The instructions, and the subagents this agent may delegate to.
+
+        ``subagents`` are the ones resolved for this request (get_subagents());
+        without them, the classes in ``agents`` are listed (agent ids need a
+        lookup, so only a resolved list includes them).
         """
         base = self.get_instructions()
-        if not self.agents:
-            return base
-
-        delgators = "\n".join(
-            f"- {subagent.name}: {subagent.description or subagent.__doc__ or 'no description'}"
-            for subagent in self.agents
-            if subagent is not self.__class__
+        listed = (
+            subagents
+            if subagents is not None
+            else [a for a in self.agents if isinstance(a, type) and a is not self.__class__]
         )
-        if not delgators:
+        roster = "\n".join(_roster_line(subagent) for subagent in listed)
+        if not roster:
             return base
-        return f"{base}\n\nAvailable subagents:\n{delgators}"
+        return f"{base}\n\nAvailable subagents:\n{roster}"
 
     def get_title_generation_prompt(self) -> Prompt:
         """Return the system prompt used to generate a thread title.
@@ -532,19 +541,31 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         return result
 
+    async def get_subagents(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Agent]:
+        """The subagents ``user`` may delegate to here: those in ``agents``.
+
+        Override to choose them per request, e.g. every runtime agent the user may
+        use: ``resolve_subagents(self, [*self.agents, *agent_ids], user)``.
+        """
+        from django_ai_sdk.agents.subagent import resolve_subagents
+
+        return await resolve_subagents(self, self.agents, user)
+
     async def get_agent_tools(
         self,
         thread_id: str = "",
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
-        """Build one ComponentTool per subagent declared in ``self.agents``.
+        """Build one ComponentTool per subagent (see get_subagents()).
 
         Each subagent becomes a native Haystack tool the coordinator can call
-        to delegate a sub-task. Guards:
-
-        - The agent itself and duplicate classes are skipped.
-        - Subagents the user lacks ``VIEW_AGENT`` permission on are skipped.
-        - Tool names are derived from the subagent display name and deduped.
+        to delegate a sub-task. The agent itself, repeats and subagents the user
+        lacks ``VIEW_AGENT`` permission on are left out (resolve_subagents()); tool
+        names are derived from the subagent display name and deduped.
 
         The conversation is mapped into the subagent via ``inputs_from_state``,
         so it receives the same thread context as the coordinator; its final
@@ -552,56 +573,39 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         """
         from haystack.tools.component_tool import ComponentTool
 
-        from django_ai_sdk.agents.services import AgentService
         from django_ai_sdk.agents.subagent import (
             SubagentStreamFilter,
             build_subagent,
             subagent_response,
             subagent_tool_name,
         )
-        from django_ai_sdk.permissions import PermissionDenied
 
         tools: list[Any] = []
-        seen_classes: set[str] = set()
         used_names: set[str] = set()
 
-        for subagent_cls in self.agents:
-            path = f"{subagent_cls.__module__}.{subagent_cls.__qualname__}"
-            if path in seen_classes or subagent_cls is self.__class__:
-                continue
-            seen_classes.add(path)
-
-            try:
-                await AgentService.has_perms(user, Operation.VIEW_AGENT, agent=subagent_cls)
-            except PermissionDenied:
-                logger.info(
-                    f"Skipping subagent {subagent_cls.__name__!r}: user lacks VIEW_AGENT permission"
-                )
-                continue
-
-            built = await build_subagent(subagent_cls, thread_id=thread_id, user=user)
+        for subagent in await self.get_subagents(thread_id=thread_id, user=user):
+            built = await build_subagent(subagent, thread_id=thread_id, user=user)
             if built is None:
                 continue
             sub_agent, agent_id = built
 
-            name = subagent_tool_name(subagent_cls)
+            name = subagent_tool_name(subagent)
             if name in used_names:
                 original, name = name, f"{name}_{agent_id.replace('-', '')[:6]}"
                 logger.warning(f"Subagent tool name {original!r} collided, renamed to {name!r}")
             used_names.add(name)
             logger.info(
-                f"Enabled subagent tool {name!r} ({subagent_cls.__name__}) on coordinator {self.__class__.__name__}"
+                f"Enabled subagent tool {name!r} ({subagent.name}) on coordinator {self.__class__.__name__}"
             )
 
             tools.append(
                 ComponentTool(
                     component=SubagentStreamFilter(
-                        sub_agent, name=subagent_cls.name or name, agent_id=agent_id
+                        sub_agent, name=subagent.name or name, agent_id=agent_id
                     ),
                     name=name,
                     description=(
-                        subagent_cls.description
-                        or f"Delegate this task to {subagent_cls.__name__}."
+                        subagent.description or f"Delegate this task to the {subagent.name}."
                     ),
                     parameters={
                         "type": "object",
@@ -717,6 +721,45 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 continue
             tools.append(tool)
 
+        return tools
+
+    async def get_delegated_tools(
+        self,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[Any]:
+        """Tools for a task a coordinator hands to this agent (see build_subagent).
+
+        Its own tools, and a search tool per knowledge base of its own (``memories``)
+        the user may view: a delegation runs in the coordinator's thread, whose
+        linked knowledge is not this agent's (get_rag_tools() reads the thread's
+        links). What it finds are sources of the coordinator's turn, so the
+        answer can cite them.
+        """
+        tools = await self.get_tools(thread_id=thread_id, user=user)
+        if not self.rag_provider or not self.memories:
+            return tools
+
+        from django_ai_sdk.memories.models import Memory
+        from django_ai_sdk.memories.services import MemoryService
+
+        memories = MemoryService.has_queryset_perms(
+            user,
+            Operation.VIEW_MEMORY,
+            queryset=Memory.objects.filter(slug__in=self.memories).distinct(),
+        )
+        used_names = {getattr(tool, "name", "") for tool in tools}
+        async for memory in memories:
+            spec = await memory.get_tool_spec()
+            if spec.name in used_names:
+                spec.name = f"{spec.name}_{str(memory.id).replace('-', '')[:6]}"
+            used_names.add(spec.name)
+            tool = await self.rag_provider.get_tool(self, str(memory.id), spec=spec)
+            if tool is None:
+                logger.warning("Memory '{}' has 0 documents — no RAG tool created", memory.name)
+                continue
+            # No registry yet: the coordinator's turn's, when the search runs
+            tools.append(collect_sources(tool, formatter=self.get_citation_formatter()))
         return tools
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:

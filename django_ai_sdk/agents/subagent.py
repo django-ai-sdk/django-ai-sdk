@@ -17,6 +17,7 @@ from haystack.dataclasses import (
 from haystack.tracing import tracer as haystack_tracer
 
 from django_ai_sdk.common import prompt
+from django_ai_sdk.errors import NotFound
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.utils import resolve_setting
 
@@ -27,6 +28,8 @@ from .tool_agent import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
     from haystack.components.agents import Agent as HaystackAgent
@@ -47,13 +50,53 @@ _build_chain: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
 )
 
 
-def subagent_tool_name(subagent_cls: type[Agent]) -> str:
+def subagent_tool_name(subagent: Agent | type[Agent]) -> str:
     """Return the tool name for a subagent, derived from its display name."""
-    base = getattr(subagent_cls, "name", "") or ""
+    base = getattr(subagent, "name", "") or ""
     slug = slugify(base).replace("-", "_")
     if slug:
         return slug
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", subagent_cls.__name__).lower()
+    cls = subagent if isinstance(subagent, type) else type(subagent)
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", cls.__name__).lower()
+
+
+async def resolve_subagents(
+    coordinator: Agent,
+    refs: Iterable[type[Agent] | str],
+    user: AbstractBaseUser | AnonymousUser | None = None,
+) -> list[Agent]:
+    """The subagents ``refs`` name, as the instances ``user`` may use.
+
+    A ref is an Agent class, or an agent id: a registered agent or a runtime one
+    (AgentSettings), loaded the way the API loads it. The coordinator itself,
+    repeats, unknown ids and agents the user may not VIEW_AGENT are left out.
+    """
+    from django_ai_sdk.agents.services import AgentService
+    from django_ai_sdk.permissions import Operation, PermissionDenied
+
+    subagents: list[Agent] = []
+    seen = {coordinator.agent_id}
+    for ref in refs:
+        try:
+            agent = ref() if isinstance(ref, type) else await AgentService.get(str(ref))
+        except NotFound:
+            logger.warning(f"Skipping subagent {ref!r}: no such agent")
+            continue
+        if agent.agent_id in seen:
+            continue
+        seen.add(agent.agent_id)
+        try:
+            await AgentService.has_perms(
+                user,
+                Operation.VIEW_AGENT,
+                obj=agent.config if agent.is_runtime else None,
+                agent=agent,
+            )
+        except PermissionDenied:
+            logger.info(f"Skipping subagent {agent.name!r}: user lacks VIEW_AGENT permission")
+            continue
+        subagents.append(agent)
+    return subagents
 
 
 # final prompt for the subagent when its loop ended
@@ -330,24 +373,26 @@ class SubagentStreamFilter:
 
 
 async def build_subagent(
-    subagent_cls: type[Agent],
+    subagent: Agent | type[Agent],
     thread_id: str = "",
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> tuple[HaystackAgent, str] | None:
-    """Build a bare Haystack Agent from an SDK Agent subclass."""
-    path = f"{subagent_cls.__module__}.{subagent_cls.__qualname__}"
+    """Build a bare Haystack Agent from an SDK Agent (an instance, or a class)."""
+    if isinstance(subagent, type):
+        subagent = subagent()
+    # By agent id: runtime agents share a class, each is an agent of its own
+    key = subagent.agent_id
     chain = _build_chain.get()
-    if path in chain:
+    if key in chain:
         logger.error(
-            f"Cyclic subagent delegation detected: {' -> '.join(chain)} -> {path}. "
-            f"Skipping {subagent_cls.__name__!r}."
+            f"Cyclic subagent delegation detected: {' -> '.join(chain)} -> {key}. "
+            f"Skipping {subagent.name!r}."
         )
         return None
 
-    token = _build_chain.set((*chain, path))
+    token = _build_chain.set((*chain, key))
     try:
-        subagent = subagent_cls()
-        tools = await subagent.get_tools(thread_id=thread_id, user=user)
+        tools = await subagent.get_delegated_tools(thread_id=thread_id, user=user)
         agent = ToolAgent.build_agent(
             subagent.get_llm(),
             tools,
