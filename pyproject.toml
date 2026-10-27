@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=84.2.0", "setuptools-scm>=10.3.4"]
+requires = ["setuptools>=84.2.1", "setuptools-scm>=10.3.4"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -52,7 +52,7 @@ rag = ["django-ai-sdk[chroma,qdrant]"]
 # Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
 # dependency now.
 haystack = ["haystack-ai>=3.4.0"]
-mcp = ["mcp-haystack>=2.1.0", "authlib>=1.9.1"]
+mcp = ["mcp-haystack>=2.1.1", "authlib>=1.9.1"]
 # Ready-made HTTP layers (django_ai_sdk.contrib.*); bring the framework you use.
 ninja = ["django-ninja>=1.7.1"]
 drf = ["djangorestframework>=3.18.3"]
@@ -62,7 +62,7 @@ files = [
   "openpyxl>=3.1.5",
   "pdf-inspector>=1.25.2",
   "pdf-oxide==0.3.78",
-  "pillow>=10.3.0,<13",
+  "pillow>=13.0.0,<14",
   "python-docx>=1.2.0",
   "python-pptx>=1.0.2",
 ]
@@ -86,7 +86,7 @@ studio = [
   "ai-sdk-demo-base",
   "daphne>=4.2.3",
   "ddgs-haystack>=2.0.0",
-  "django-allauth[headless]>=65.20.0",
+  "django-allauth[headless]>=65.20.1",
   "django-cors-headers>=4.9.0",
   "django-environ>=0.14.0",
   "django-ninja>=1.7.1",
@@ -106,7 +106,7 @@ dev = [
   "pytest-mock>=3.17.0",
   "ruff>=0.17.1",
   "lefthook>=2.2.2",
-  "polyfactory>=3.3.0",
+  "polyfactory>=3.5.0",
   "ty>=0.0.89",
 ]
 
