@@ -33,6 +33,19 @@ def process_document_upload(
     return async_to_sync(run_file_pipeline)(entry_doc_id, memory_id, agent_id)
 
 
+def thread_file_task() -> Any:
+    """``process_document_upload`` at ``AI_SDK_THREAD_FILE_PRIORITY``.
+
+    A user waits on a thread upload in chat, so a higher priority lets it jump
+    bulk memory imports queued at the default 0. Only reorders the queue: a
+    worker already busy with a memory document finishes it first.
+    """
+    # priority only; a separate queue + worker if running jobs still block
+    return process_document_upload.using(
+        priority=resolve_setting("AI_SDK_THREAD_FILE_PRIORITY", 10)
+    )
+
+
 async def run_file_pipeline(
     entry_doc_id: str,
     memory_id: str,

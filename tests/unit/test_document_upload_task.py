@@ -926,3 +926,11 @@ class TestSelfHealStaleProcessing:
         assert result.status == "processing"
         await entry_doc.arefresh_from_db()
         assert entry_doc.processing_status == EntryDocument.ProcessingStatus.PROCESSING
+
+
+def test_thread_file_task_uses_priority_setting(settings):
+    from django_ai_sdk.memories.tasks import process_document_upload, thread_file_task
+
+    settings.AI_SDK_THREAD_FILE_PRIORITY = 10
+    assert thread_file_task().priority == 10
+    assert process_document_upload.priority == 0  # memory documents stay at default

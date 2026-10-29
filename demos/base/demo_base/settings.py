@@ -92,6 +92,8 @@ TASKS = {
         ),
     }
 }
+# Chat uploads jump bulk memory imports waiting in the queue.
+AI_SDK_THREAD_FILE_PRIORITY = 10
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
