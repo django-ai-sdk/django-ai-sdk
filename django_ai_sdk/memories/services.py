@@ -38,6 +38,7 @@ from django_ai_sdk.memories.schemas import (
 from django_ai_sdk.memories.tasks import (
     PIPELINE_TIMEOUT_SECONDS,
     process_document_upload,
+    thread_file_task,
 )
 from django_ai_sdk.permissions import (
     ConflictError,
@@ -904,9 +905,7 @@ class MemoryService(PermissionsMixin):
             processing_status=EntryDocument.ProcessingStatus.PENDING,
         )
 
-        task_result = await process_document_upload.aenqueue(
-            str(entry_doc.id), str(memory.id), agent_id
-        )
+        task_result = await thread_file_task().aenqueue(str(entry_doc.id), str(memory.id), agent_id)
         await EntryDocument.objects.filter(
             id=entry_doc.id,
             processing_status=EntryDocument.ProcessingStatus.PENDING,
@@ -1129,9 +1128,8 @@ class MemoryService(PermissionsMixin):
             ]
         )
 
-        task_result = await process_document_upload.aenqueue(
-            str(entry_doc.id), str(memory.id), agent_id
-        )
+        task = thread_file_task() if thread is not None else process_document_upload
+        task_result = await task.aenqueue(str(entry_doc.id), str(memory.id), agent_id)
         await EntryDocument.objects.filter(
             id=entry_doc.id,
             processing_status=EntryDocument.ProcessingStatus.PENDING,
