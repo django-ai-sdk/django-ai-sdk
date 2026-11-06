@@ -47,7 +47,7 @@ Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
 # Leaves out typesafe: it is a paid hosted service, so a host opts in on purpose.
-all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers,local]"]
+all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers,local,ledger]"]
 providers = ["django-ai-sdk[anthropic,huggingface,mistral,ollama,openrouter]"]
 rag = ["django-ai-sdk[chroma,qdrant]"]
 # Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
@@ -84,6 +84,10 @@ transformers = ["transformers-haystack>=2.0.0"]
 typesafe = ["typesafe-sdk>=0.5.7"]
 # LocalClassifier: an ONNX model in this process for oversight lenses, without torch.
 local = ["onnxruntime>=1.18", "tokenizers>=0.19", "huggingface-hub>=0.23", "numpy>=1.26"]
+# The vault app (django_ai_sdk.vault): AES-GCM per scope, so forgetting one destroys its key.
+vault = ["cryptography>=44"]
+# The oversight ledger app (django_ai_sdk.oversight.ledger): a hash chain over the record, on the vault.
+ledger = ["django-ai-sdk[vault]"]
 
 [dependency-groups]
 # Stack for the demo projects in demos/ (demos/base holds their shared settings).

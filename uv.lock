@@ -989,6 +989,7 @@ all = [
     { name = "anthropic-haystack" },
     { name = "authlib" },
     { name = "chroma-haystack" },
+    { name = "cryptography" },
     { name = "fastembed-haystack" },
     { name = "firecrawl-anydoc" },
     { name = "haystack-ai" },
@@ -1040,6 +1041,9 @@ haystack = [
 huggingface = [
     { name = "huggingface-api-haystack" },
 ]
+ledger = [
+    { name = "cryptography" },
+]
 local = [
     { name = "huggingface-hub" },
     { name = "numpy" },
@@ -1086,6 +1090,9 @@ transformers = [
 typesafe = [
     { name = "typesafe-sdk" },
 ]
+vault = [
+    { name = "cryptography" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1123,13 +1130,15 @@ requires-dist = [
     { name = "authlib", marker = "extra == 'mcp'", specifier = ">=1.9.1" },
     { name = "cashews", specifier = ">=7.6.0,<9" },
     { name = "chroma-haystack", marker = "extra == 'chroma'", specifier = ">=5.0.0" },
+    { name = "cryptography", marker = "extra == 'vault'", specifier = ">=44" },
     { name = "django", specifier = ">=5.2.6,<6.2" },
     { name = "django-ai-sdk", extras = ["anthropic", "huggingface", "mistral", "ollama", "openrouter"], marker = "extra == 'providers'" },
     { name = "django-ai-sdk", extras = ["chroma", "qdrant"], marker = "extra == 'rag'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'chroma'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'qdrant'" },
-    { name = "django-ai-sdk", extras = ["files", "haystack", "local", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
+    { name = "django-ai-sdk", extras = ["files", "haystack", "ledger", "local", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
+    { name = "django-ai-sdk", extras = ["vault"], marker = "extra == 'ledger'" },
     { name = "django-ninja", marker = "extra == 'ninja'", specifier = ">=1.7.1" },
     { name = "django-tasks", specifier = ">=0.12.0" },
     { name = "djangorestframework", marker = "extra == 'drf'", specifier = ">=3.18.3" },
@@ -1160,7 +1169,7 @@ requires-dist = [
     { name = "transformers-haystack", marker = "extra == 'transformers'", specifier = ">=2.0.0" },
     { name = "typesafe-sdk", marker = "extra == 'typesafe'", specifier = ">=0.5.7" },
 ]
-provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers", "typesafe", "local"]
+provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers", "typesafe", "local", "vault", "ledger"]
 
 [package.metadata.requires-dev]
 dev = [

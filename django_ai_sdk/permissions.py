@@ -84,6 +84,12 @@ class Operation(StrEnum):
     VIEW_OVERSIGHT_SWITCHES = "view_oversight_switches"
     # Switch a rule's mode or an agent's policy at runtime.
     SWITCH_OVERSIGHT = "switch_oversight"
+    # See ledger checkpoints and verify the chain.
+    VIEW_OVERSIGHT_LEDGER = "view_oversight_ledger"
+    # Write a ledger checkpoint.
+    CHECKPOINT_OVERSIGHT = "checkpoint_oversight"
+    # Reveal the user behind a turn's pseudonym, with a recorded reason.
+    REVEAL_OVERSIGHT_ACTOR = "reveal_oversight_actor"
 
 
 class PermissionDomain(StrEnum):

@@ -1,8 +1,9 @@
 """How the SDK and oversight's layers may import each other.
 
-Core oversight is the bottom layer. The review layer and the runtime switches sit on it as
-opt-in parts, and each can be removed without touching the layers below. The rest of the SDK
-reaches oversight only through the seams below.
+Core oversight is the bottom layer. The review layer, the runtime switches and the ledger
+sit on it as opt-in parts, and each can be removed without touching the layers below.
+The vault is SDK level and knows nothing of oversight. The rest of the SDK reaches oversight
+only through the seams below.
 
 Every import is read from the source, including lazy imports inside functions and imports
 under `TYPE_CHECKING`, so a layer cannot lean on another one without it showing here.
@@ -76,6 +77,21 @@ LAYERS = {
         may_import=("seams", "switches"),
         why="The HTTP routes that serve the switches.",
     ),
+    "ledger": Layer(
+        modules=(f"{OVERSIGHT}.ledger",),
+        may_import=("core", "review", "vault"),
+        why="The tamper-evident record: the top layer, and the only user of the vault.",
+    ),
+    "ledger routes": Layer(
+        modules=("django_ai_sdk.contrib.ninja.oversight_ledger",),
+        may_import=("core", "review", "ledger", "vault"),
+        why="The HTTP routes that serve the ledger, over the review layer.",
+    ),
+    "vault": Layer(
+        modules=("django_ai_sdk.vault",),
+        may_import=(),
+        why="Encryption keys at SDK level; it knows nothing of oversight.",
+    ),
     "core": Layer(
         modules=(OVERSIGHT,),
         may_import=(),
@@ -88,6 +104,7 @@ LAYERS = {
             "seams",
             "review routes",
             "switches routes",
+            "ledger routes",
         ),
         why="The rest of the SDK: it uses oversight through its seams and mounts the routes.",
     ),

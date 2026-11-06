@@ -29,6 +29,9 @@ class Recording:
         self.chained_kinds: list[str] = []
         self.forgot: list[str] = []
 
+    def actor(self, user_pk: str) -> str:
+        return user_pk
+
     def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
         if self.forgotten:
             raise custody.Forgotten(scope)
@@ -45,7 +48,10 @@ class Recording:
             raise RuntimeError("chain refused")
         self.chained_kinds.extend(kind for kind, _ in items)
 
-    def pruning(self, turn_ids: Any) -> None:
+    def pruning(self, turn_ids: Any, *, access_ids: Any = ()) -> None:
+        return None
+
+    def expiring(self, content_ids: Any) -> None:
         return None
 
 
@@ -132,6 +138,40 @@ class TestAnotherCustody:
             await close_a_turn(thread_id=thread_id)
             await thread.adelete()
         assert keeper.forgot == [f"thread:{thread_id}"]
+
+
+class TestInstall:
+    def test_a_custody_missing_a_method_is_refused(self):
+        class Behind(Recording):
+            load_many = None
+            expiring = None
+
+        with pytest.raises(TypeError, match="lacks load_many, expiring"):
+            custody.install(Behind())
+        assert custody.is_plain()
+
+    def test_the_check_names_every_protocol_method(self):
+        assert set(custody.METHODS) == {
+            "actor",
+            "store",
+            "load_many",
+            "forget",
+            "chained",
+            "pruning",
+            "expiring",
+        }
+        assert set(custody.METHODS) <= set(vars(custody.PlainCustody))
+
+    def test_actor_names_are_custodys_name_and_the_primary_key(self):
+        class Renaming(Recording):
+            def actor(self, user_pk: str) -> str:
+                return f"u-{user_pk}" if user_pk else ""
+
+        assert custody.actor_names("7") == {"7"}
+        assert custody.actor_names("") == set()
+        with installed(Renaming()):
+            assert custody.actor_names("7") == {"7", "u-7"}
+            assert custody.actor_names("") == set()
 
 
 class TestDeployCheck:

@@ -190,7 +190,9 @@ def _notify_matched(turn: Turn, matched: list[Matched]) -> None:
 
 def _refuse_own(turn: Turn, user: UserType) -> None:
     """Raise PermissionDenied when `user` asked this turn. Nobody reviews their own turn."""
-    if turn.actor_id and turn.actor_id == reader_id(user):
+    from django_ai_sdk.oversight import custody
+
+    if turn.actor_id and turn.actor_id in custody.actor_names(reader_id(user)):
         raise PermissionDenied("Nobody reviews a turn of their own.")
 
 

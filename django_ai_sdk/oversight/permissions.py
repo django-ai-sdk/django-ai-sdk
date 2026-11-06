@@ -27,6 +27,9 @@ class OversightDefaultPermission(BasePermission):
         Operation.REVIEW_OVERSIGHT: "django_ai_sdk_oversight.change_reviewitem",
         Operation.VIEW_OVERSIGHT_SWITCHES: "django_ai_sdk_oversight_switches.view_override",
         Operation.SWITCH_OVERSIGHT: "django_ai_sdk_oversight_switches.change_override",
+        Operation.VIEW_OVERSIGHT_LEDGER: "django_ai_sdk_oversight_ledger.view_checkpoint",
+        Operation.CHECKPOINT_OVERSIGHT: "django_ai_sdk_oversight_ledger.add_checkpoint",
+        Operation.REVEAL_OVERSIGHT_ACTOR: "django_ai_sdk_oversight_ledger.reveal_actor",
     }
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
