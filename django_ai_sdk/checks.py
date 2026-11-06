@@ -2,7 +2,7 @@
 
 These catch misconfigurations that would not fail any request. Ids are
 `ai_sdk.E001` and up. Each opt-in app has its own `PREFIX`, such as
-`ai_sdk.workflows` or `ai_sdk.oversight.switches`, and reports a bad settings dict as
+`ai_sdk.workflows` or `ai_sdk.oversight.ledger`, and reports a bad settings dict as
 `<PREFIX>.E012`.
 """
 

@@ -69,8 +69,10 @@ def _in_batches(qs: QuerySet, size: int, delete: Callable[[list[Any]], int]) -> 
 
 
 def _delete_content(ids: list[Any]) -> int:
+    from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import TurnContent
 
+    custody.get().expiring(ids)
     # The turns stay. Their content link is set to NULL.
     return _delete_rows(TurnContent, ids)
 
@@ -90,8 +92,10 @@ def _delete_turns(ids: list[Any]) -> int:
 
 
 def _delete_access(ids: list[Any]) -> int:
+    from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import AccessRecord
 
+    custody.get().pruning((), access_ids=ids)
     return _delete_rows(AccessRecord, ids)
 
 

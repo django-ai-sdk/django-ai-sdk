@@ -260,7 +260,7 @@ class AccessRecord(models.Model):
     Written by `oversight.services`, one per read of turns or review items, with
     the id of every turn shown. The same read by the same reader within a minute
     (a polling page) is one record. Counts (metrics, queues) are not recorded.
-    The opt-in switches app adds its changes.
+    The opt-in apps add their changes (switches, ledger checkpoints).
     Holds no content.
     """
 
@@ -270,6 +270,9 @@ class AccessRecord(models.Model):
         REVIEWS = "reviews"
         # A review item resolved.
         REVIEW = "review"
+        VERIFY = "verify"
+        REVEAL = "reveal"
+        CHECKPOINT = "checkpoint"
         SWITCH = "switch"
         # A run of oversight_prune, with its counts in `query`.
         PRUNE = "prune"
@@ -322,7 +325,7 @@ class OperatorChangeQuerySet(models.QuerySet):
 
 
 class OperatorChange(models.Model):
-    """An operator's change (a switch, an authored policy), appended with `append_change`.
+    """An operator's change, such as a switch, appended with `append_change`.
 
     Each change of a key adds a row with the next `version`. The newest is in force.
     Older rows are the history.

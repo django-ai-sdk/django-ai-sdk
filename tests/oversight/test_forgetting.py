@@ -319,6 +319,9 @@ class Remembering:
     def __init__(self) -> None:
         self.forgot: list[str] = []
 
+    def actor(self, user_pk: str) -> str:
+        return user_pk
+
     def store(self, scope, content):
         return content
 
@@ -331,7 +334,10 @@ class Remembering:
     def chained(self, items) -> None:
         return None
 
-    def pruning(self, turn_ids) -> None:
+    def pruning(self, turn_ids, *, access_ids=()) -> None:
+        return None
+
+    def expiring(self, content_ids) -> None:
         return None
 
 

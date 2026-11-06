@@ -700,7 +700,7 @@ What deleting does not reach:
 - **A delete whose forgetting failed**: when custody cannot forget (its store is down), the user is still deleted, the error is logged, and their turns stay as they were. `manage.py oversight_forget_actor <user id>` does it again.
 - **A thread deleted where signals do not fire** (a queryset `.update()`, raw SQL, another database) keeps its content until `manage.py oversight_forget_thread <thread id>` runs.
 
-Oversight keeps content in the clear, masked as `CAPTURE` says. An app that encrypts it, or chains the record, installs its own custody (`django_ai_sdk.oversight.custody`) in its `AppConfig.ready()`: it is handed every content row to store and read back, every scope to forget and every row written.
+Oversight keeps content in the clear, masked as `CAPTURE` says. [Audit-grade oversight](/oversight-ledger/), two opt-in apps, encrypts it under a key per thread, forgets a thread by destroying its key and hash-chains the record. Any app may do the same by installing its own custody (`django_ai_sdk.oversight.custody`) in its `AppConfig.ready()`: it is handed every content row to store and read back, every scope to forget and every row written.
 
 ## Limitations
 
@@ -721,3 +721,4 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. An app that encr
 - The [Oversight manual](/manual/oversight/): every class, setting, model and check.
 - The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
 - [Runtime switches](/oversight-switches/): flip a rule's mode or an agent's policy without a deploy, with a reason, a notification and an access record, an opt-in app.
+- [Audit-grade oversight](/oversight-ledger/): content encrypted in the vault, forgetting by destroying keys, a hash-chained record with signed checkpoints and pseudonyms for who asked, two opt-in apps.

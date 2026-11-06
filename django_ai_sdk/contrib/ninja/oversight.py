@@ -83,6 +83,7 @@ async def get_oversight_metrics(
 # Opt-in app -> its routes module.
 _OPT_IN = {
     "django_ai_sdk.oversight.switches": "django_ai_sdk.contrib.ninja.oversight_switches",
+    "django_ai_sdk.oversight.ledger": "django_ai_sdk.contrib.ninja.oversight_ledger",
 }
 
 

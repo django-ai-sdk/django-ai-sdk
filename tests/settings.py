@@ -23,6 +23,8 @@ INSTALLED_APPS = [
     "django_ai_sdk.workflows",
     "django_ai_sdk.oversight",
     "django_ai_sdk.oversight.switches",
+    "django_ai_sdk.vault",
+    "django_ai_sdk.oversight.ledger",
     "django_ai_sdk.integrations.mcp",
     "django_ai_sdk.integrations.weather",
     "tests.testapp",
@@ -66,5 +68,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
 }
+
+# A fixed test key: what the vault keeps here is no secret.
+AI_SDK_VAULT = {"MASTER_KEYS": ["dGVzdHMtb25seS12YXVsdC1tYXN0ZXIta2V5LTMyYnk="]}
 
 TASKS = {"default": {"BACKEND": "django_tasks.backends.immediate.ImmediateBackend"}}

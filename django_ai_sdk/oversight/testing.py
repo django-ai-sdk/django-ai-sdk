@@ -25,8 +25,6 @@ from django_ai_sdk.oversight.guard.asking import Answered, Matched, should_retry
 from django_ai_sdk.oversight.types import Answer, Outcome, Stage, ToolCall
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
@@ -89,13 +87,13 @@ async def dry_run(
     *,
     input: str,
     output: str = "",
-    tool_calls: Sequence[ToolCall | dict[str, Any]] | None = None,
+    tool_calls: list[ToolCall | dict[str, Any]] | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> TurnResult:
     """Run `policy` over one exchange as a turn would, without recording it.
 
-    `tool_calls` ({"name", "arguments"} or ToolCall) are checked in order before the
-    answer. Raises LookupError when the policy does not load.
+    `tool_calls` ({"name", "arguments"} or ToolCall) are checked as the model's
+    calls, in order, before the answer. LookupError when the policy does not load.
     """
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.resolve import aget_policy, broken_reason
@@ -122,7 +120,7 @@ async def _run(
     resolved: ResolvedPolicy,
     *,
     output: str,
-    tool_calls: Sequence[ToolCall | dict[str, Any]],
+    tool_calls: list[ToolCall | dict[str, Any]],
 ) -> TurnResult:
     result = TurnResult(policy=resolved.name)
 
