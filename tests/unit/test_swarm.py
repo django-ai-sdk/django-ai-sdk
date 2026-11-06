@@ -142,7 +142,9 @@ class TestToolAgentBuild:
         gen = MockChatGenerator(responses=["hi"])
         config = ToolAgentConfig(model=MOCK_MODEL, system_prompt="s", tools=[])
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
-        assert not pipeline.get_component("agent").hooks.get("before_tool")
+        before = pipeline.get_component("agent").hooks.get("before_tool") or []
+        # Only oversight's, which is always there and inert without a guard.
+        assert [type(h).__name__ for h in before] == ["OversightToolHook"]
 
     def test_custom_hooks_are_merged_with_budget_hook(self):
         gen = MockChatGenerator(responses=["hi"])
@@ -155,7 +157,8 @@ class TestToolAgentBuild:
         )
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
         hooks = pipeline.get_component("agent").hooks["before_tool"]
-        assert len(hooks) == 2
+        assert len(hooks) == 3
+        assert type(hooks[0]).__name__ == "OversightToolHook"
         assert any(isinstance(h, LogToolCallsHook) for h in hooks)
         assert any(type(h).__name__ == "ToolCallBudgetHook" for h in hooks)
 
@@ -260,10 +263,10 @@ class TestSubagentBuilders:
         ):
             built = await build_subagent(SubAgent, thread_id="t1", user=None)
         assert built is not None
-        agent, agent_id = built
+        agent, subagent = built
         assert agent.required_variables == ["task"]
         assert "{{task}}" in agent.user_prompt
-        assert agent_id == SubAgent().agent_id
+        assert subagent.agent_id == SubAgent().agent_id
 
     @pytest.mark.asyncio
     async def test_build_subagent_defaults_budgets(self):

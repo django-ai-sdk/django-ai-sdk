@@ -1,0 +1,344 @@
+"""Policies: an app's lenses and rules, layered over the built-in packs.
+
+    @register_policy
+    class Support(Policy):
+        name = "support"
+        extends = ["security", "quality"]
+        lenses = [Topic()]
+        rules = [Rule("hr_to_people", when=L("topic") == "hr", then=Queue("hr"))]
+
+Values are layered in this order, later winning: the extended packs, the
+policy class, then the runtime overlay. Every value records where it came from.
+
+Core has no overlay. An app that lets operators switch rule modes at runtime
+installs an `OverlaySource` with `set_overlay_source` (see `oversight.resolve`).
+The overlay only switches modes; anything else needs a deploy or a new policy.
+"""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from django.core.exceptions import ImproperlyConfigured
+
+from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.conf import (
+    FAIL_MODES,
+    STREAM_MODES,
+    setting,
+    validate_retention,
+)
+from django_ai_sdk.oversight.lenses import Lens
+from django_ai_sdk.oversight.registry import get_policy_class, validate_rule
+from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.types import Capture, Mode, Stage, Subject, rank
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+logger = get_logger(__name__)
+
+CAPTURE_ORDER = (Capture.NONE, Capture.METADATA, Capture.MASKED, Capture.FULL)
+
+# Fields whose source `ResolvedPolicy.sources` records, per kind.
+LENS_FIELDS = {"enabled", "sample", "judges", "min_confidence", "stages"}
+RULE_FIELDS = {"mode", "when", "then", "message", "notice"}
+
+
+class Policy:
+    """A named bundle of lenses and rules. Subclass it in an app's `oversight.py`."""
+
+    name: str = ""
+    label: str = ""
+    description: str = ""
+    # Packs or policies to inherit lenses and rules from. A lens or rule declared
+    # here replaces an inherited one with the same name.
+    extends: list[str] = []  # noqa: RUF012
+    lenses: list[Lens | type[Lens]] = []  # noqa: RUF012
+    rules: list[Rule] = []  # noqa: RUF012
+    # None inherits. The CAPTURE setting is always the ceiling.
+    capture: Capture | None = None
+    # "auto" or "live". None inherits.
+    stream_mode: str | None = None
+    # "closed" or "open". None inherits the FAIL_MODE setting. Use "open" for a
+    # policy that only observes, so a failed lens never stops a turn.
+    fail_mode: str | None = None
+    # Days to keep this policy's turns, e.g. {"content": 90, "metadata": 730}.
+    # Missing keys come from the RETENTION setting.
+    retention: dict[str, int] = {}  # noqa: RUF012
+    # Source label shown for this policy's values on the policy screen.
+    origin: str = "code"
+
+
+def policy_lenses(cls: type[Policy]) -> list[Lens]:
+    """The lenses `cls` declares, a lens class instantiated."""
+    return [lens() if isinstance(lens, type) else lens for lens in cls.lenses]
+
+
+def pick[T: (Lens | type[Lens], Rule)](
+    items: Iterable[T],
+    *names: str,
+    mode: Mode | str | None = None,
+    notice: str | None = None,
+) -> list[T]:
+    """Pick lenses or rules by name from a pack's `lenses` or `rules`, in that order.
+
+    Use this to take only what you need instead of extending a whole pack::
+
+        lenses = pick(SecurityPack.lenses, "prompt_injection", "pii_input")
+        rules = pick(SecurityPack.rules, "block_injection", "mask_pii_in_question")
+
+    Items are copies, so setting `mode` or `notice` does not change the pack.
+    """
+    by_name = {item.name: item for item in items}
+    missing = [name for name in names if name not in by_name]
+    if missing:
+        raise ImproperlyConfigured(f"Cannot pick {missing}: the choices are {sorted(by_name)}")
+    picked = [copy.copy(by_name[name]) for name in names]
+    if mode is not None or notice is not None:
+        for item in picked:
+            if not isinstance(item, Rule):
+                raise TypeError("pick(mode=..., notice=...) applies to rules only")
+            if mode is not None:
+                item.mode = Mode(mode)
+            if notice is not None:
+                item.notice = notice
+    return picked
+
+
+@dataclass
+class ResolvedPolicy:
+    """A policy with packs, settings and overlay applied. This is what runs."""
+
+    name: str
+    label: str = ""
+    description: str = ""
+    lenses: dict[str, Lens] = field(default_factory=dict)
+    rules: dict[str, Rule] = field(default_factory=dict)
+    capture: Capture = Capture.FULL
+    stream_mode: str = "auto"
+    fail_mode: str = "closed"
+    retention: dict[str, int] = field(default_factory=dict)
+    # Where each value came from, e.g. "lens:pii.sample" -> "pack:security", "code",
+    # "overlay", or "settings" when the CAPTURE setting capped the policy's capture.
+    sources: dict[str, str] = field(default_factory=dict)
+    # Overlay modes that could not be applied ({"rule", "mode", "reason"}). Never raised.
+    rejected: list[dict[str, Any]] = field(default_factory=list)
+    # "code" or "pack:<name>".
+    origin: str = "code"
+    extends: list[str] = field(default_factory=list)
+
+    def changes_answer_at_finish(self) -> list[str]:
+        """Names of enforced rules that may mask or withhold the answer at finish."""
+        finished = {
+            lens.name
+            for lens in self.active_lenses(Stage.FINISH)
+            if lens.subject in {Subject.OUTPUT, Subject.EXCHANGE}
+        }
+        return sorted(
+            rule.name
+            for rule in self.rules.values()
+            if rule.mode is Mode.ENFORCE
+            and any(action.kind in {"mask", "block"} for action in rule.then)
+            and rule.lenses() & finished
+        )
+
+    @property
+    def fails_closed(self) -> bool:
+        """Whether a lens that failed counts as matching this policy's protective rules."""
+        return self.fail_mode != "open"
+
+    def holds_answer(self) -> bool:
+        """Whether to hold the answer until finish. Only in "auto" mode, and only when needed."""
+        return self.stream_mode == "auto" and bool(self.changes_answer_at_finish())
+
+    def active_lenses(self, stage: Stage, subject: Subject | None = None) -> list[Lens]:
+        return [
+            lens
+            for lens in self.lenses.values()
+            if lens.enabled
+            and stage in lens.stages
+            and (subject is None or lens.subject is subject)
+        ]
+
+    def active_rules(self) -> list[Rule]:
+        return [rule for rule in self.rules.values() if rule.mode is not Mode.OFF]
+
+    def has_stage(self, stage: Stage) -> bool:
+        return any(stage in lens.stages for lens in self.lenses.values() if lens.enabled)
+
+
+def build(
+    name: str,
+    *,
+    modes: Mapping[str, str] | None = None,
+    ancestors: Mapping[str, Mapping[str, str]] | None = None,
+) -> ResolvedPolicy:
+    """Resolve `name` from code, then switch rule `modes` ({rule: mode}).
+
+    `ancestors` maps each extended policy's name to its modes, so switching a
+    parent's rule affects every child.
+    Raises LookupError for an unknown policy and ImproperlyConfigured for a cycle.
+    """
+    ancestors = ancestors or {}
+    resolved = _from_code(name, (), ancestors)
+    apply_modes(resolved, modes or {})
+    ceiling = Capture(setting("CAPTURE"))
+    if rank(CAPTURE_ORDER, resolved.capture) > rank(CAPTURE_ORDER, ceiling):
+        resolved.capture = ceiling
+        resolved.sources["policy.capture"] = "settings"
+    return resolved
+
+
+def _parent(
+    name: str, chain: tuple[str, ...], ancestors: Mapping[str, Mapping[str, str]]
+) -> ResolvedPolicy:
+    """Resolve parent `name` with its overlay, as children inherit it."""
+    parent = _from_code(name, chain, ancestors)
+    apply_modes(parent, ancestors.get(name, {}))
+    return parent
+
+
+def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy, parent_name: str) -> None:
+    resolved.lenses.update(parent.lenses)
+    resolved.rules.update(parent.rules)
+    for key, value in parent.sources.items():
+        if value == "overlay":
+            value = f"overlay:{parent_name}"
+        elif not value.startswith(("pack:", "overlay:")):
+            value = f"pack:{parent_name}"
+        resolved.sources[key] = value
+    # Only carry over values the parent set itself. Values from settings already match.
+    for key in ("capture", "stream_mode", "fail_mode"):
+        if parent.sources.get(f"policy.{key}"):
+            setattr(resolved, key, getattr(parent, key))
+    if parent.sources.get("policy.retention"):
+        resolved.retention = {**resolved.retention, **parent.retention}
+
+
+def _from_code(
+    name: str,
+    chain: tuple[str, ...],
+    ancestors: Mapping[str, Mapping[str, str]],
+) -> ResolvedPolicy:
+    if name in chain:
+        raise ImproperlyConfigured(f"Policy {name!r} extends itself: {' -> '.join((*chain, name))}")
+    cls = get_policy_class(name)
+    if cls is None:
+        raise LookupError(f"No oversight policy {name!r}")
+    policy = cls()
+    resolved = ResolvedPolicy(
+        name=policy.name,
+        label=policy.label,
+        description=policy.description,
+        capture=Capture(setting("CAPTURE")),
+        stream_mode=default_stream_mode(),
+        fail_mode=default_fail_mode(),
+        retention=validate_retention(setting("RETENTION")),
+        origin=cls.origin,
+        extends=list(policy.extends),
+    )
+    for parent_name in policy.extends:
+        _inherit(resolved, _parent(parent_name, (*chain, name), ancestors), parent_name)
+    origin = cls.origin
+    for lens in policy_lenses(cls):
+        resolved.lenses[lens.name] = copy.copy(lens)
+        _mark(resolved, f"lens:{lens.name}", _tunable(lens), origin)
+    for rule in cls.rules:
+        resolved.rules[rule.name] = copy.copy(rule)
+        _mark(resolved, f"rule:{rule.name}", RULE_FIELDS, origin)
+    for rule in resolved.rules.values():
+        # Check again with inherited lenses, which registration could not see.
+        try:
+            validate_rule(rule, resolved.lenses)
+        except ImproperlyConfigured as exc:
+            raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
+    if policy.capture is not None:
+        resolved.capture = Capture(policy.capture)
+        resolved.sources["policy.capture"] = origin
+    try:
+        if policy.stream_mode is not None:
+            resolved.stream_mode = _choice("stream_mode", policy.stream_mode, STREAM_MODES)
+            resolved.sources["policy.stream_mode"] = origin
+        if policy.fail_mode is not None:
+            resolved.fail_mode = _choice("fail_mode", policy.fail_mode, FAIL_MODES)
+            resolved.sources["policy.fail_mode"] = origin
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
+    if policy.retention:
+        resolved.retention = {**resolved.retention, **validate_retention(policy.retention)}
+        resolved.sources["policy.retention"] = origin
+    return resolved
+
+
+def _mark(resolved: ResolvedPolicy, target: str, fields: Iterable[str], source: str) -> None:
+    """Record `source` for every recorded field of a lens or rule, keyed "lens:<name>"."""
+    for name in fields:
+        resolved.sources[f"{target}.{name}"] = source
+
+
+def _tunable(lens: Lens) -> set[str]:
+    """The recorded fields `lens` has: only a judge lens has judges and min_confidence."""
+    return {name for name in LENS_FIELDS if hasattr(lens, name)}
+
+
+# The system check reports bad settings (conf.problems), but does not stop a turn.
+# So every value that reaches a built policy is checked again here: the settings
+# it inherits, and a code or authored policy's own.
+
+
+def _choice(key: str, value: Any, choices: tuple[str, ...]) -> str:
+    """Validate a policy option, so a typo such as "atuo" does not silently stream live."""
+    if value not in choices:
+        raise ValueError(f"{key} {value!r} is not one of {list(choices)}")
+    return str(value)
+
+
+def default_stream_mode() -> str:
+    """The STREAM_MODE setting. Unlike FAIL_MODE, a typo is a configuration error."""
+    try:
+        return _choice("stream_mode", setting("STREAM_MODE"), STREAM_MODES)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f'AI_SDK_OVERSIGHT["STREAM_MODE"]: {exc}') from None
+
+
+def default_fail_mode() -> str:
+    """The FAIL_MODE setting. Anything but "open", typos included, means "closed"."""
+    return "open" if setting("FAIL_MODE") == "open" else "closed"
+
+
+def apply_modes(resolved: ResolvedPolicy, modes: Mapping[str, str]) -> None:
+    """Switch rule modes from the overlay. A mode that cannot apply goes to `rejected`."""
+    for name, value in modes.items():
+        rule = resolved.rules.get(name)
+        try:
+            mode = Mode(value)
+        except ValueError:
+            mode = None
+        if rule is None:
+            reason = f"no rule {name!r}"
+        elif mode is None:
+            reason = f"{value!r} is not a mode"
+        else:
+            rule = copy.copy(rule)
+            rule.mode = mode
+            resolved.rules[name] = rule
+            # `_inherit` later names the parent ("overlay:<parent>") for what a child inherits.
+            resolved.sources[f"rule:{name}.mode"] = "overlay"
+            continue
+        resolved.rejected.append({"rule": name, "mode": value, "reason": reason})
+
+
+__all__ = [
+    "CAPTURE_ORDER",
+    "Policy",
+    "ResolvedPolicy",
+    "apply_modes",
+    "build",
+    "default_fail_mode",
+    "default_stream_mode",
+    "pick",
+    "policy_lenses",
+]

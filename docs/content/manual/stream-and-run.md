@@ -135,6 +135,17 @@ example to copy from; a workflow step that needs tool access is the obvious
 first real caller.
 {{< /callout >}}
 
+Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
+turn: the gate judges the history and the question before the work above starts,
+every tool call is checked before it runs (`OversightToolHook`, in
+`django_ai_sdk.agents.tool_agent.default_hooks(agent)`), every result is masked
+before the model reads it (`OversightToolResultHook`), and finish judges what the
+loop did before the answer is returned. A refusal raises
+`django_ai_sdk.errors.Blocked`.
+
+What oversight does not guard (`stream_response()` from your own view, an adapter
+other than `Stream`) is listed under [Limitations](/oversight/#limitations).
+
 ## Stream
 
 `Stream` wraps a Haystack pipeline and normalizes its streaming output into `StreamEvent`s.

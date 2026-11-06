@@ -86,6 +86,8 @@ outcomes = await run_steps(
 
 It sends the inputs named in `history` as the transcript, then one turn. Override the async `user_message(ctx)` to write that turn, or `messages(ctx)` to write the whole conversation; both may query. By default the turn is what the steps in `requires` produced, each under a `[name]` heading. A `None` result is reported as `failed`, not stored.
 
+A step's call is a turn under the agent's [oversight](/oversight/) policy, recorded on the channel `workflow:<workflow>:<step>`; a definition a client submitted (not a stored workflow) runs on `workflow:adhoc:<step>`, so it cannot pick the channel a policy chooses by. The `history` inputs are not what the server stored: the gate judges them on every run. A question the policy refuses or an answer it withholds fails the step (`refused by oversight: ...` or `withheld by oversight: ...`), so `on_error` decides what that costs; a masked structured result is rebuilt from its masked JSON. A step that overrides `run()` and calls the agent itself passes `channel=self.channel(ctx)` and handles `django_ai_sdk.errors.Blocked`.
+
 The transcript is **named, not guessed**. An input is data until a step names it as `history`, so a list of role-shaped rows that happens to be data is never mistaken for a prompt, and a workflow with two agent steps can give each a different conversation. What a history field holds is the author's choice: a `str` arrives as one user turn, a message dict as one message, a list item-by-item.
 
 ## Failure
