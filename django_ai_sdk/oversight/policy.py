@@ -284,7 +284,7 @@ def _tunable(lens: Lens) -> set[str]:
 
 # The system check reports bad settings (conf.problems), but does not stop a turn.
 # So every value that reaches a built policy is checked again here: the settings
-# it inherits, and a code or authored policy's own.
+# it inherits, and a policy's own.
 
 
 def _choice(key: str, value: Any, choices: tuple[str, ...]) -> str:

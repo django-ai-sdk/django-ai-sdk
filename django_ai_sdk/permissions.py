@@ -74,6 +74,12 @@ class Operation(StrEnum):
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
+    # Oversight records without content: turn fields, rule matches, counts.
+    VIEW_OVERSIGHT_METRICS = "view_oversight_metrics"
+    # Turn content: question, answer, sources, reasons, notes and who asked.
+    VIEW_OVERSIGHT_CONTENT = "view_oversight_content"
+    # Work review queues, resolving an item with an answer.
+    REVIEW_OVERSIGHT = "review_oversight"
 
 
 class PermissionDomain(StrEnum):
@@ -82,6 +88,7 @@ class PermissionDomain(StrEnum):
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
     WORKFLOW = "workflow"
+    OVERSIGHT = "oversight"
 
 
 class BasePermission(ABC):
@@ -559,6 +566,8 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
     PermissionDomain.WORKFLOW: ["django_ai_sdk.permissions.WorkflowDefaultPermission"],
+    # Only the oversight service resolves this domain.
+    PermissionDomain.OVERSIGHT: ["django_ai_sdk.oversight.permissions.OversightDefaultPermission"],
 }
 
 

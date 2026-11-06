@@ -49,8 +49,9 @@ class Custody(Protocol):
     def chained(self, items: list[tuple[str, Model]]) -> None:
         """Rows just written, as (kind, row): "turn", "answer", "match".
 
-        A turn arrives again on each update: once when its gate ends and again
-        when it closes.
+        Kinds are "turn", "answer", "match" and "access" (an `AccessRecord`). A
+        turn arrives again on each update: once when its gate ends and again when
+        it closes.
         """
         ...
 
@@ -99,4 +100,12 @@ def is_plain() -> bool:
     return isinstance(_custody, PlainCustody)
 
 
-__all__ = ["Custody", "Forgotten", "PlainCustody", "get", "install", "is_plain", "scope_for"]
+__all__ = [
+    "Custody",
+    "Forgotten",
+    "PlainCustody",
+    "get",
+    "install",
+    "is_plain",
+    "scope_for",
+]

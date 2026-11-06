@@ -268,6 +268,12 @@ def load_content(turn: Turn) -> dict[str, Any] | None:
     return _load([turn.content], f"turn {turn.id}")[0]
 
 
+def load_contents(turns: list[Turn]) -> dict[Any, dict[str, Any] | None]:
+    """Like `load_content` for many turns, keyed by turn id, in a fixed number of queries."""
+    loaded = _load([t.content for t in turns], f"{len(turns)} turns")
+    return dict(zip((t.id for t in turns), loaded, strict=True))
+
+
 def _load(rows: list[TurnContent | None], what: str) -> list[dict[str, Any] | None]:
     """Load `rows` through custody. None for a row that is missing or cannot be read here."""
     from django_ai_sdk.oversight import custody
@@ -353,6 +359,7 @@ __all__ = [
     "context_from_turn",
     "found_literals",
     "load_content",
+    "load_contents",
     "masker_for_capture",
     "stored_value",
     "turn_found",
