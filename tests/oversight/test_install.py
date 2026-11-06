@@ -19,15 +19,16 @@ from django_ai_sdk.permissions import AllowAll
 from tests.oversight.helpers import chat, make_agent, text_of
 from tests.removable import run_without
 
-OVERSIGHT_APPS = ["django_ai_sdk.oversight"]
+OVERSIGHT_APPS = [
+    "django_ai_sdk.oversight.switches",
+    "django_ai_sdk.oversight",
+]
 
 
 @pytest.fixture
 def without_oversight():
     with modify_settings(
-        INSTALLED_APPS={
-            "remove": OVERSIGHT_APPS,
-        }
+        INSTALLED_APPS={"remove": ["django_ai_sdk.oversight.switches", "django_ai_sdk.oversight"]}
     ):
         yield
 

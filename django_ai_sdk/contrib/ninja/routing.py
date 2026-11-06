@@ -48,8 +48,11 @@ class ApiRouter:
     (``get``, ``post``, ...) so every build starts from the full set.
     """
 
-    def __init__(self) -> None:
-        self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = []
+    def __init__(self, *tables: ApiRouter) -> None:
+        """Start empty, or with the endpoints of `tables`."""
+        self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = [
+            op for table in tables for op in table._ops
+        ]
 
     def _add(self, method: str, path: str, **opts: Any) -> Callable[[FunctionType], FunctionType]:
         def register(func: FunctionType) -> FunctionType:

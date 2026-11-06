@@ -206,6 +206,23 @@ class TestRuntimeAgents:
         assert guard.active and guard.policy is not None
         assert guard.policy.name == "test-guard"
 
+    async def test_an_overlay_cannot_switch_off_an_agent_that_requires_oversight(self):
+        required = make_agent([], None)
+        type(required).oversight_required = True
+        type(required)._agent_id = "needs-oversight"
+        source = Overlay({})
+        source.agent_policies = _assigns({"needs-oversight": ""})  # type: ignore[method-assign]
+        with overlay(source), log_lines("WARNING") as lines:
+            guard = await TurnGuard.start(required, channel="api", input="x")
+        assert guard.active and guard.policy.name == "test-guard"
+        assert any("requires oversight" in line for line in lines)
+
+        free = make_agent([], None)
+        type(free)._agent_id = "may-go"
+        source.agent_policies = _assigns({"may-go": ""})  # type: ignore[method-assign]
+        with overlay(source):
+            assert not (await TurnGuard.start(free, channel="api", input="x")).active
+
     async def test_then_the_default_policy(self):
         from django_ai_sdk.agents.models import AgentSettings
         from django_ai_sdk.agents.runtime import RuntimeAgent
@@ -214,3 +231,10 @@ class TestRuntimeAgents:
         with override_settings(AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-guard"}):
             guard = await TurnGuard.start(RuntimeAgent(row), channel="chat", input="x")
         assert guard.active
+
+
+def _assigns(choices: dict[str, str]) -> Any:
+    async def agent_policies() -> dict[str, str]:
+        return dict(choices)
+
+    return agent_policies

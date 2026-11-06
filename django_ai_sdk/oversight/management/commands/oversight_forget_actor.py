@@ -21,7 +21,7 @@ class Command(BaseCommand):
     help = "Forget deleted users on the oversight record: who asked, and threadless content."
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        parser.add_argument("actor_ids", nargs="+", help="User primary keys, as Turn.actor_id.")
+        parser.add_argument("actor_ids", nargs="+", help="User primary keys.")
 
     def handle(self, *args: Any, **options: Any) -> None:
         for actor_id in options["actor_ids"]:

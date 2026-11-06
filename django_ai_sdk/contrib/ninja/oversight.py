@@ -1,4 +1,4 @@
-"""Oversight routes: turns, review queues and metrics.
+"""Oversight routes: turns, review queues and metrics, plus the installed opt-in apps' routes.
 
 The router signs readers in with ``django_auth`` (session, CSRF on POST) unless you pass
 ``auth=``; it does not inherit the API's auth. Permissions and the access record are in
@@ -10,8 +10,10 @@ the oversight manual's Review API::
 from __future__ import annotations
 
 from collections.abc import Collection
+from importlib import import_module
 from typing import Any
 
+from django.apps import apps
 from django.http import HttpRequest
 from ninja import Query, Router
 from ninja.security import django_auth
@@ -78,12 +80,22 @@ async def get_oversight_metrics(
     )
 
 
+# Opt-in app -> its routes module.
+_OPT_IN = {
+    "django_ai_sdk.oversight.switches": "django_ai_sdk.contrib.ninja.oversight_switches",
+}
+
+
 def get_oversight_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:
     """Build the oversight router. Mount it with ``api.add_router("/", ...)``.
 
     Uses ``django_auth`` unless ``auth=`` is passed.
     """
-    return routes.build(exclude=exclude, default_auth=django_auth, **router_kwargs)
+    extra = [
+        import_module(module).routes for app, module in _OPT_IN.items() if apps.is_installed(app)
+    ]
+    table = ApiRouter(routes, *extra)
+    return table.build(exclude=exclude, default_auth=django_auth, **router_kwargs)
 
 
 __all__ = ["get_oversight_router"]

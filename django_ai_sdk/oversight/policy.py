@@ -32,7 +32,7 @@ from django_ai_sdk.oversight.conf import (
 )
 from django_ai_sdk.oversight.lenses import Lens
 from django_ai_sdk.oversight.registry import get_policy_class, validate_rule
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Rule, below
 from django_ai_sdk.oversight.types import Capture, Mode, Stage, Subject, rank
 
 if TYPE_CHECKING:
@@ -102,6 +102,11 @@ def pick[T: (Lens | type[Lens], Rule)](
             if not isinstance(item, Rule):
                 raise TypeError("pick(mode=..., notice=...) applies to rules only")
             if mode is not None:
+                if below(mode, item.min_mode):
+                    raise ImproperlyConfigured(
+                        f"Cannot pick rule {item.name!r} in mode {mode}: its min_mode is "
+                        f"{item.min_mode}"
+                    )
                 item.mode = Mode(mode)
             if notice is not None:
                 item.notice = notice
@@ -284,7 +289,7 @@ def _tunable(lens: Lens) -> set[str]:
 
 # The system check reports bad settings (conf.problems), but does not stop a turn.
 # So every value that reaches a built policy is checked again here: the settings
-# it inherits, and a policy's own.
+# it inherits, and a code or authored policy's own.
 
 
 def _choice(key: str, value: Any, choices: tuple[str, ...]) -> str:
@@ -319,6 +324,8 @@ def apply_modes(resolved: ResolvedPolicy, modes: Mapping[str, str]) -> None:
             reason = f"no rule {name!r}"
         elif mode is None:
             reason = f"{value!r} is not a mode"
+        elif below(mode, rule.min_mode):
+            reason = f"rule {name!r} may not go below {rule.min_mode} (its min_mode)"
         else:
             rule = copy.copy(rule)
             rule.mode = mode

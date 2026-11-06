@@ -80,6 +80,10 @@ class Operation(StrEnum):
     VIEW_OVERSIGHT_CONTENT = "view_oversight_content"
     # Work review queues, resolving an item with an answer.
     REVIEW_OVERSIGHT = "review_oversight"
+    # See runtime switches (rule modes and agent policies).
+    VIEW_OVERSIGHT_SWITCHES = "view_oversight_switches"
+    # Switch a rule's mode or an agent's policy at runtime.
+    SWITCH_OVERSIGHT = "switch_oversight"
 
 
 class PermissionDomain(StrEnum):
