@@ -1,9 +1,13 @@
 """The oversight app. On start it loads the packs, each app's `oversight.py`, the
-system checks and the deletion signals."""
+system checks and the deletion signals.
+
+`require_apps` is for the opt-in apps on top of it.
+"""
 
 from __future__ import annotations
 
 from django.apps import AppConfig
+from django.core.checks import Tags
 from django.core.checks import register as register_check
 from django.utils.module_loading import autodiscover_modules
 
@@ -23,9 +27,24 @@ class OversightConfig(AppConfig):
         autodiscover_modules("oversight")
 
         from django_ai_sdk.oversight import signals
-        from django_ai_sdk.oversight.checks import check_oversight, check_oversight_deploy
+        from django_ai_sdk.oversight.checks import (
+            check_oversight,
+            check_oversight_deploy,
+            check_oversight_retention,
+        )
 
         register_check(check_oversight)
         register_check(check_oversight_deploy, deploy=True)
-        # Deleting a thread forgets what oversight holds about it.
+        register_check(check_oversight_retention, Tags.database, deploy=True)
+        # Deleting a thread or a user forgets what oversight holds about it.
         signals.connect()
+
+
+def require_apps(app_name: str, *needed: str) -> None:
+    """Refuse to start `app_name` without each app in `needed`."""
+    from django.apps import apps
+    from django.core.exceptions import ImproperlyConfigured
+
+    for name in needed:
+        if not apps.is_installed(name):
+            raise ImproperlyConfigured(f"{app_name} needs {name} in INSTALLED_APPS")
