@@ -47,10 +47,10 @@ class Custody(Protocol):
         ...
 
     def chained(self, items: list[tuple[str, Model]]) -> None:
-        """Receive rows just written as (kind, row) pairs.
+        """Rows just written, as (kind, row): "turn", "answer", "match".
 
-        Kinds are "turn", "answer" and "match". A turn arrives again on each
-        update: once when its gate ends and again when it closes.
+        A turn arrives again on each update: once when its gate ends and again
+        when it closes.
         """
         ...
 

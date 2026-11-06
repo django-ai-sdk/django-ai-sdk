@@ -80,14 +80,14 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Actions a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.actions.ConsoleLogAction"}`. Every action is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host’s own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
 ## Oversight
 
 One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings).
 
-`AI_SDK_OVERSIGHT` is checked on start: an unknown key or a value of the wrong kind is `ai_sdk.oversight.E012`, with the fix in its hint. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
+Every settings dict of the SDK (`AI_SDK_OVERSIGHT` and `AI_SDK_WORKFLOWS`) is checked on start: an unknown key or a value of the wrong kind is `<app>.E012`, with the fix in its hint. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |

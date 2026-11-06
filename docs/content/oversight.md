@@ -222,7 +222,7 @@ A hook that raises, like a policy that cannot load, refuses the turn with a gene
 Which policy a turn runs under, first match wins:
 
 1. `run(oversight=...)` for that one call (trusted code; see below).
-2. An overlay's assignment for the agent, including "off", when an app installs one (`resolve.OverlaySource`). An operator's choice wins over what the code says.
+2. An overlay's assignment for the agent, including "off", when an app installs one (`policy.OverlaySource`). An operator's choice wins over what the code says.
 3. `get_oversight(channel=..., user=...)`, which returns `oversight` unless you override it.
 4. `DEFAULT_POLICY`, when the steps above gave `None`.
 
@@ -237,8 +237,8 @@ A policy is a promise about an agent, not about one endpoint. If chat checked th
 | Chat, `Agent.as_view()` | `chat` | The policy's message streams as the reply, ending with finish reason `content-filter`. A refused question is not stored. |
 | `Agent.run()` | `run`, or what you pass as `channel` | Raises `Blocked`. |
 | HTTP run endpoints (`POST /agents/{id}/run/`, `POST /threads/{id}/run/`, Ninja and DRF) | `api` | `{"result": <the policy's message>, "thread_id": ..., "blocked": true}`. Raised elsewhere, `Blocked` is an HTTP 400. |
-| Workflow `AgentStep` | `workflow:<workflow>:<step>`; `workflow:adhoc:<step>` for a definition a client submitted | The step fails: `refused by oversight: ...` or `withheld by oversight: ...`. |
-| `turn()` | What you pass | Raises `Blocked`. |
+| Workflow `AgentStep` | `workflow:<key>:<step>`: the stored workflow's slug or the registered workflow's name, set by the server; `workflow:adhoc:<step>` for any other definition | The step fails: `refused by oversight: ...` or `withheld by oversight: ...`. |
+| `turn()`, `Step.turn()` | What you pass; a step's own channel | Raises `Blocked`. |
 
 ### `Agent.run()` and `Blocked`
 
@@ -292,6 +292,12 @@ async with turn(agent, channel="api", user=request.user, input=text) as t:
 
 Pass `messages` (history, then the question) instead of `input` to have the history judged as `run()` judges it; `t.messages` is then what to send. `finish()` takes a string or a Pydantic model and gives back the same kind. Inside the block, tool hooks see the turn and `t.guard` takes what the run found (`set_sources`, `add_usage`); an exception other than `Blocked` is recorded as the run's error. Without a policy `gate()` and `finish()` hand back what they are given. `oversight` takes what `run(oversight=...)` takes. `run()` itself is built on it.
 
+A workflow step uses `self.turn(ctx, agent_or_policy, input=...)`: the same, on the step's channel and as the run's user. In the SDK, `AgentStep` reaches the turn through `agent.run()`, and `Step.turn()` (`workflows/steps.py`) through `turn()`.
+
+### Model calls outside a turn
+
+Every workflow step runs where a turn is required. A model called there through a generator the SDK built (`django_ai_sdk.generators`, which `Agent` and its tools use too) must come from a turn: `Agent.run()`, `turn()`, or a run that chose no oversight on purpose (`run(oversight=False)`, an agent without a policy). Anything else follows [`UNGUARDED_MODEL_CALLS`](/manual/oversight/#settings), which by default logs it once per step. A generator built some other way (Haystack's classes, a vendor client) is not watched. In the SDK, each generator factory is decorated with `oversight.calls.watched_factory`, which wraps what it builds in `watched()` (`generators/*.py`), and the workflow runner runs each step under `requires_turn()` (`workflows/runner.py`). Your own code can require a turn the same way: `with oversight.calls.requires_turn("nightly-digest"): ...`.
+
 The other paths oversight does not watch for you are listed under [Limitations](#limitations).
 
 A run without `tools=True` records no token usage, so its turn has no cost.
@@ -310,7 +316,7 @@ For whoever works on the SDK itself: these are the places the SDK calls into cor
 | `conversation/utils.py` (title), `adapters/base.py`, `run_side_task()` (suggestions, citations) | Nothing, on purpose: side calls over a turn already judged run with `oversight=False`. | — |
 | `contrib/ninja/agents.py`, `contrib/ninja/threads.py`, `contrib/drf/views.py` | The HTTP run endpoints: they call `Agent.run(channel="api")` and answer `Blocked` as `"blocked": true`. | `Agent.run()`, above |
 
-Workflow steps and `turn()` reach oversight through their own seams, described under [Model calls of your own](#model-calls-of-your-own-turn).
+Workflow steps, `turn()` and the watch on generators reach oversight through their own seams, described under [Model calls of your own](#model-calls-of-your-own-turn) and [Model calls outside a turn](#model-calls-outside-a-turn).
 
 ## Your own policy
 
@@ -670,7 +676,7 @@ A stretch a lens found in a tool call is masked only where the built-in patterns
 
 Under `masked`, reflect does not judge the masked content where a chat thread stores the turn: it reads the question and answer as the thread stores them, so a mask it asks for reaches the stored answer. A turn with no stored messages (a run endpoint) is judged as its content keeps it, masked.
 
-Retention is per policy: `{"content": 90, "metadata": 730}` days by default, stamped on each row as `expires_at`.
+Retention is per policy (`RETENTION`), stamped on each row as `expires_at`.
 
 ## Forgetting
 
@@ -689,7 +695,7 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. An app that encr
 
 - **Masked capture keeps some text in the clear.** Under `masked`, the record masks what the built-in patterns find and what a lens of the turn pointed at. Personal data no pattern knows and no lens pointed at (a name, an address) is kept as it was said. Use `metadata` or `none` where that matters.
 - **Some paths are not guarded.** These are the doors oversight does not watch for you:
-  - a model called outside a turn;
+  - a model called outside a turn and outside a workflow step (only warned about inside one, and only through the SDK's generators: [Model calls outside a turn](#model-calls-outside-a-turn));
   - `stream_response()` called from your own view: only `as_view()` opens a turn;
   - a `get_pipeline_adapter()` that returns an adapter other than the SDK's `Stream`: it gets the gate only, and its answer is never finished (`ai_sdk.oversight.W013` warns when its return annotation says so);
   - `run(oversight=False)`, and an agent with no policy and no `DEFAULT_POLICY`;

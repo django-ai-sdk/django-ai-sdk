@@ -175,7 +175,9 @@ class TestNinjaRecipes:
         assert client.get("/api/agents/").status_code == 401
 
     def test_a_throttled_mount_still_serves(self, client, user):
-        client.force_login(user)
+        from tests.factories.db import MANAGE_WORKFLOWS, grant
+
+        client.force_login(grant(user, MANAGE_WORKFLOWS))
         assert client.get("/api/workflows/").status_code == 200
 
     def test_your_own_handler_wins_for_its_exception(self, client, user):
@@ -227,7 +229,9 @@ class TestDrfRecipes:
             assert listed.call_args.kwargs["limit"] == 50
 
     def test_other_viewsets_are_registered_unchanged(self, client, user):
-        client.force_login(user)
+        from tests.factories.db import MANAGE_WORKFLOWS, grant
+
+        client.force_login(grant(user, MANAGE_WORKFLOWS))
         assert client.get("/drf/workflows/").status_code == 200
 
 

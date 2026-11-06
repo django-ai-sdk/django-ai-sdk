@@ -1,6 +1,7 @@
 """Read-only admin for the oversight record.
 
-It never shows content (turn text, reasons, notes) or who asked in which thread.
+It never shows content (turn text, reasons, notes) or who asked in which
+thread.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 class TurnAdmin(ReadOnlyAdmin):
     list_display = ("created_at", "channel", "agent_name", "outcome", "report_outcome", "severity")
     list_filter = ("outcome", "report_outcome", "severity", "channel", "policy")
-    # Who asked, and in which thread, is kept out like the content.
+    # Who asked, and in which thread, counts as content here.
     exclude = ("content", "actor_id", "thread_id", "user_message_id", "message_id")
 
 

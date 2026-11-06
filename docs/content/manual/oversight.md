@@ -26,6 +26,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `DEFAULT_POLICY` | `""` | The policy of agents whose `oversight` is `None`, and of runtime agents whose base class names none. Empty: they are unguarded. |
 | `CAPTURE` | `"masked"` | The most content the record keeps (`none`, `metadata`, `masked`, `full`); a policy may keep less, never more. |
 | `STREAM_MODE` | `"auto"` | `live` streams the answer as it is written; `auto` holds it until finish passed it only while an enforced rule may mask or withhold it there, decided per turn. A policy may set its own. |
+| `UNGUARDED_MODEL_CALLS` | `"warn"` | A model called through the SDK's generators where a turn is required (every workflow step) but outside one: `warn` logs it once per place, `refuse` raises `UnguardedModelCall` before the call, `allow` lets it be ([Model calls outside a turn](/oversight/#model-calls-outside-a-turn)). |
 | `JUDGES` | `{}` | Named judges: `{"alias": {"class": ..., **kwargs}}`, or the name of another alias. A class without a dot is one of `django_ai_sdk.oversight.judges`. |
 | `DEADLINE_MS` | `{"gate": 1000, "tool": 1000, "finish": 2000}` | Milliseconds each inline stage may add: the gate before the model starts, the tool stage before each tool call (and masking each tool result), finish once the answer is complete. `None`: no limit. Room for patterns, checks and a fast classifier; a model judge (`LLMJudge`) usually needs longer. A judge still running at the deadline is abandoned: the lens fails (`FAIL_MODE`), keeps the answer it has for the record, and reflect asks again later. |
 | `MAX_INPUT_CHARS` | `100000` | A longer question is refused at the gate, unread. With history the server did not store (`gate_history`), the question and the history judged with it count together. `None`: no limit. |
@@ -47,7 +48,7 @@ Outside the dict:
 | On `Agent` | Meaning |
 | --- | --- |
 | `oversight` | A `Policy` subclass (registered when the agent class is defined), a registered policy's name, `None` (the default: `DEFAULT_POLICY`) or `False` (no oversight). Anything else (an instance, `True`, `""`) raises `ImproperlyConfigured` when the class is defined. |
-| `async get_oversight(*, channel, user, **kwargs)` | The policy for this turn; returns `oversight` unless overridden. It may read the database; keep `**kwargs`, as more about the turn may be passed later. Channels: `chat`, `run`, `api`, `workflow:<workflow>:<step>`, `workflow:adhoc:<step>` (a submitted definition), or what a caller passes. A policy only this returns is registered when a turn first uses it: `@register_policy` it, so the checks see it. |
+| `async get_oversight(*, channel, user, **kwargs)` | The policy for this turn; returns `oversight` unless overridden. It may read the database; keep `**kwargs`, as more about the turn may be passed later. Channels: `chat`, `run`, `api`, `workflow:<key>:<step>` (a stored workflow's slug or a registered workflow's name), `workflow:adhoc:<step>` (any other definition), or what a caller passes. A policy only this returns is registered when a turn first uses it: `@register_policy` it, so the checks see it. |
 | `run(messages, ..., *, channel="run", oversight=None)` | One turn under the policy. `None` is the agent's own; a class or a name replaces it for this call; `False` runs unguarded (trusted code only). Raises `Blocked`. |
 | `as_view(...)` | Chat: one turn on channel `chat`. A refusal streams the policy's message. |
 
@@ -249,10 +250,10 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 | `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out. |
 | `TurnContent` | The content at the policy's capture level, as custody stored it (`stored`), with its scope (`thread:<id>`, or `turn:<id>` without a thread) and an expiry. Beside it: `texts`, by answer id, what each answer said in words (its reason, the names a judge gave for an `Entities` lens, its per-item scores by key, the same of the answers on its trail); and `notes`, by review item id, what reviewers wrote. Both are added as reflect's and reviewers' answers arrive, and go when the content goes. |
 | `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency, reviewer. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
-| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. |
+| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once: reflect locks the turn before it looks. |
 | `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. It has room for a resolution (who closed it, as a user id; the value as the record keeps it; whether they agreed) and the content keeps room for a note, but core has no way to resolve an item yet. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` read-only, without the content. Reasons and notes are not in those rows, so the admin never shows them.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` read-only, without the content. A turn also leaves out who asked and its thread and message ids. Reasons and notes are not in those rows, so the admin never shows them.
 
 ## Custody
 
@@ -274,7 +275,7 @@ The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` re
 
 `oversight_forget_thread <thread id> [...]` forgets threads as their delete does, through the installed custody: for threads deleted without signals (a queryset `.update()`, raw SQL, another database). Safe to run again.
 
-`oversight_sweep` builds on `django_ai_sdk.management.sweep.SweepCommand`: subclass it, return the stale rows from `stale(cutoff)` and set `marked` (or override `act`).
+`oversight_sweep` and `workflows_sweep` share `django_ai_sdk.management.sweep.SweepCommand`: subclass it, return the stale rows from `stale(cutoff)` and set `marked` (or override `act`).
 
 ## Notifiers
 
@@ -326,5 +327,4 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 `W001` and `W014` are checked only while oversight is enabled; `W001`, `E013` and `W014` only by `manage.py check --deploy`.
 
-The ids missing from this table (`E008`, `W002`, `W007`, `W009`, `W010` and `W012`) are reserved: `W007` for an opt-in layer on top of core, the rest because earlier builds raised them. An id is never reused for another meaning.
-
+The ids missing from this table (`E008`, `W002`, `W007`, `W009`, `W010` and `W012`) are reserved for the opt-in layers on top of core, so that no core id changes when they ship. An id is never reused for another meaning.

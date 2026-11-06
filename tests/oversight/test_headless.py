@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -326,30 +325,3 @@ class TestWorkflowStep:
         outcome = await self.step(Contact(email="x"), policy="test-withhold").run(WorkflowContext())
         assert outcome.status == "failed"
         assert outcome.detail.startswith("withheld by oversight")
-
-
-@pytest.mark.usefixtures("no_reflect_queue")
-@pytest.mark.django_db(transaction=True)
-class TestAdhocWorkflows:
-    async def run_with(self, **opened: Any) -> str:
-        from django_ai_sdk.workflows.executor import WorkflowExecutor, open_run
-        from django_ai_sdk.workflows.schemas import StepDefinition, WorkflowDefinition
-
-        workflow = WorkflowDefinition(
-            name="payroll", steps=[StepDefinition(name="pay", agent_id="a")]
-        )
-        run = await open_run(workflow, **opened)
-        steps = AsyncMock(return_value={})
-        with patch("django_ai_sdk.workflows.executor.run_steps", steps):
-            await WorkflowExecutor().run(workflow, workflow_run=run)
-        return steps.call_args.kwargs["workflow"]
-
-    async def test_a_submitted_definition_runs_as_adhoc(self):
-        assert await self.run_with() == ""
-
-    def test_the_adhoc_channel(self):
-        from django_ai_sdk.workflows.steps import AgentStep, WorkflowContext
-
-        step = AgentStep()
-        step.name = "pay"
-        assert step.channel(WorkflowContext(workflow="")) == "workflow:adhoc:pay"

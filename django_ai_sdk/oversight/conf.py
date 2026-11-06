@@ -88,6 +88,12 @@ setting = AppSettings(
             'Use "masked" (the default).',
         ),
         "STREAM_MODE": ("auto", one_of(*STREAM_MODES), 'Use "auto" (the default) or "live".'),
+        # A model call outside a required turn (see `oversight.calls`).
+        "UNGUARDED_MODEL_CALLS": (
+            "warn",
+            one_of("warn", "refuse", "allow"),
+            'Use "warn" (the default), "refuse" or "allow".',
+        ),
         "JUDGES": ({}, _judges, 'Name judges by alias: {"judge": {"class": "LLMJudge"}}.'),
         # Milliseconds per inline stage; a lens still running at the deadline fails.
         "DEADLINE_MS": (

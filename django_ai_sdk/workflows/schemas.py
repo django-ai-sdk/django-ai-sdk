@@ -20,17 +20,28 @@ FieldType = Literal["str", "int", "float", "bool", "list", "dict", "object"]
 MAX_DEPTH = 8
 MAX_FIELDS = 32
 MAX_ENUM = 64
+# A run walks every step in one worker, so definitions stay small.
+MAX_STEPS = 50
+# The workflow's listeners plus every step's.
+MAX_LISTENERS = 20
+# The definition as stored JSON, in bytes.
+MAX_DEFINITION_BYTES = 256 * 1024
 
 _SCALARS = ("str", "int", "float", "bool")
 
-_TYPE_OF_ANNOTATION: dict[Any, FieldType] = {
-    str: "str",
-    int: "int",
-    float: "float",
-    bool: "bool",
-    list: "list",
-    dict: "dict",
+# The Python type of each field type. `object` compiles to a model of its own.
+PY_TYPES: dict[FieldType, type] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
 }
+_TYPE_OF_ANNOTATION: dict[Any, FieldType] = {py: name for name, py in PY_TYPES.items()}
+
+# The step type built in for agent calls. AI_SDK_WORKFLOWS['STEPS'] may not reuse it.
+AGENT_STEP = "agent"
 
 
 class FieldDefinition(BaseModel):
@@ -81,7 +92,7 @@ def _check_default_matches_type(where: str, value: Any, field: FieldDefinition) 
     into a run's inputs silently.
     """
     if field.type in _SCALARS:
-        expected = {"str": str, "int": int, "float": float, "bool": bool}[field.type]
+        expected = PY_TYPES[field.type]
         # bool is an int in Python, so an explicit type check keeps a bool default
         # from passing for int/float, and a 0/1 from passing for bool.
         if field.type == "bool":
@@ -126,11 +137,11 @@ def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
         _check_bounds(f"{where}'s items", field.items, depth + 1)
 
 
-class ActionDefinition(BaseModel):
-    """An action named by key in `AI_SDK_WORKFLOW_ACTIONS`.
+class ListenerDefinition(BaseModel):
+    """A listener named by key in `AI_SDK_WORKFLOWS['LISTENERS']`.
 
-    `config` is handed to the action as it is built, so one registered class serves
-    every definition that names it — which recipient, which step's output.
+    `config` is passed to the listener's constructor, so one registered class can
+    serve many definitions (a different recipient, a different step's output).
     """
 
     type: str
@@ -140,31 +151,51 @@ class ActionDefinition(BaseModel):
 class StepDefinition(BaseModel):
     """One step of a definition: an agent call, or a registered Step class."""
 
-    # "agent", or a key of AI_SDK_WORKFLOW_STEPS.
-    type: str = "agent"
+    # AGENT_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
+    type: str = AGENT_STEP
     # The step's key: its outcome is recorded under it, and later steps require it.
     name: str
     # Names of earlier steps this one reads. A run's inputs are always available,
     # so they are not listed here.
     requires: list[str] = []
-    on_error: Literal["fail", "continue"] = "fail"
+    on_error: Literal["stop", "continue"] = "stop"
     agent_id: str = ""
-    system_prompt_override: str | None = None
     # Structured output for an agent step. A registered step returns what it returns.
     output_fields: dict[str, FieldDefinition] = {}
     # The inputs this step sends as its conversation, in order. The author names
     # them; the engine never infers a transcript from the shape of a value.
     history: list[str] = []
-    # Actions that fire for this step alone.
-    actions: list[ActionDefinition] = []
+    # Listeners that fire for this step alone.
+    listeners: list[ListenerDefinition] = []
+    # Settings for a registered step, passed as `Step.config`. The class's
+    # `validate_config` checks them when the definition is stored.
+    config: dict[str, Any] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_a_system_prompt(cls, data: Any) -> Any:
+        """Refuse `system_prompt_override`. A definition cannot replace an agent's prompt.
+
+        Whoever writes a definition does not own the agent, and their prompt would
+        outrank the agent's own. Code steps can still set `AgentStep.instructions`. An
+        old stored definition that carries one is refused, not run without it.
+        """
+        if isinstance(data, dict) and data.get("system_prompt_override"):
+            raise ValueError(
+                "system_prompt_override is not accepted: a definition cannot replace an "
+                "agent's system prompt. Change the agent, or write the step in code."
+            )
+        return data
 
     @model_validator(mode="after")
     def _check_the_type_and_its_fields_agree(self) -> StepDefinition:
         if not self.name:
             raise ValueError("A step needs a name; its outcome is recorded under it.")
-        if self.type == "agent":
+        if self.type == AGENT_STEP:
             if not self.agent_id:
                 raise ValueError("An agent step needs an agent_id.")
+            if self.config:
+                raise ValueError("An agent step takes no config; configure the agent.")
         elif self.agent_id or self.output_fields or self.history:
             raise ValueError(
                 f"Step type {self.type!r} is a registered step, not an agent, so it "
@@ -181,8 +212,23 @@ class WorkflowDefinition(BaseModel):
     # What the caller must supply. Validated once, before the first step runs.
     input_fields: dict[str, FieldDefinition] = {}
     steps: list[StepDefinition]
-    # Actions that fire for the run and for every step in it.
-    actions: list[ActionDefinition] = []
+    # Listeners that fire for the run and for every step in it.
+    listeners: list[ListenerDefinition] = []
+
+    @model_validator(mode="after")
+    def _check_the_size(self) -> WorkflowDefinition:
+        if len(self.steps) > MAX_STEPS:
+            raise ValueError(f"a workflow has at most {MAX_STEPS} steps, not {len(self.steps)}.")
+        listeners = len(self.listeners) + sum(len(step.listeners) for step in self.steps)
+        if listeners > MAX_LISTENERS:
+            raise ValueError(f"a workflow has at most {MAX_LISTENERS} listeners, not {listeners}.")
+        size = len(self.model_dump_json())
+        if size > MAX_DEFINITION_BYTES:
+            raise ValueError(
+                f"a workflow definition is at most {MAX_DEFINITION_BYTES} bytes as JSON, "
+                f"not {size}."
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -293,11 +339,32 @@ def _type_kwargs(annotation: Any, where: str) -> dict[str, Any]:
     return {"type": field_type}
 
 
+# HTTP request payloads for the contrib Ninja layer. DRF's serializers mirror them.
+
+
+class WorkflowCreateRequest(BaseModel):
+    name: str
+    workflow: WorkflowDefinition
+
+
+class WorkflowUpdateRequest(BaseModel):
+    name: str | None = None
+    workflow: WorkflowDefinition | None = None
+    active: bool | None = None
+
+
+class WorkflowStartRequest(BaseModel):
+    inputs: dict[str, Any] = {}
+
+
 __all__ = [
-    "ActionDefinition",
+    "MAX_STEPS",
     "FieldDefinition",
     "FieldType",
+    "ListenerDefinition",
     "StepDefinition",
+    "WorkflowCreateRequest",
     "WorkflowDefinition",
-    "fields_from_model",
+    "WorkflowStartRequest",
+    "WorkflowUpdateRequest",
 ]

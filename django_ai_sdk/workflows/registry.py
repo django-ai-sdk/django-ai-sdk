@@ -6,30 +6,33 @@ from typing import TYPE_CHECKING
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.text import slugify
 
+from django_ai_sdk.workflows.schemas import AGENT_STEP
+
 if TYPE_CHECKING:
-    from django_ai_sdk.workflows.actions import WorkflowAction
+    from django_ai_sdk.workflows.listeners import RunListener
+    from django_ai_sdk.workflows.models import Workflow
     from django_ai_sdk.workflows.schemas import (
-        ActionDefinition,
         FieldDefinition,
+        ListenerDefinition,
         WorkflowDefinition,
     )
 
 logger = logging.getLogger(__name__)
 
-# Matches WorkflowSettings.slug, so a declared and a stored name are one key space.
+# Matches Workflow.slug, so a declared and a stored name are one key space.
 NAME_MAX_LENGTH = 100
+
+# The key for runs of a definition that is neither stored nor registered. It is
+# reserved, so a policy that picks by channel can tell those runs apart.
+ADHOC = "adhoc"
 
 _registry: dict[str, WorkflowDefinition] = {}
 
 # Rejected declarations, name -> reason. Read by the system check.
 _invalid: dict[str, str] = {}
 
-# Warned once per process; rows are re-read on every dispatch.
-_warned_shadowed: set[str] = set()
-_warned_invalid: set[str] = set()
 
-
-def register(definition: WorkflowDefinition) -> WorkflowDefinition:
+def register_workflow(definition: WorkflowDefinition) -> WorkflowDefinition:
     """Add a WorkflowDefinition to the registry unless it cannot run.
 
     Returns it unchanged either way, so a declaration stays importable on its own.
@@ -56,15 +59,20 @@ def register(definition: WorkflowDefinition) -> WorkflowDefinition:
 
 
 def validate_name(name: str) -> None:
-    """Raise ImproperlyConfigured unless `name` is slug form, like WorkflowSettings.slug."""
+    """Raise ImproperlyConfigured unless `name` is slug form, like Workflow.slug."""
     if not name:
         raise ImproperlyConfigured(
             "A workflow must have a non-empty `name` — it is the registry key."
         )
+    if name == ADHOC:
+        raise ImproperlyConfigured(
+            f"Workflow name {ADHOC!r} is reserved for runs of a definition that is "
+            f"neither stored nor registered. Pick another name."
+        )
     expected = slugify(name)[:NAME_MAX_LENGTH]
     if name != expected:
         raise ImproperlyConfigured(
-            f"Workflow name {name!r} is not a slug, so a WorkflowSettings row could never "
+            f"Workflow name {name!r} is not a slug, so a Workflow row could never "
             f"collide with it. Use {expected!r}."
         )
 
@@ -73,14 +81,14 @@ def validate_definition(definition: WorkflowDefinition) -> None:
     """Raise ImproperlyConfigured unless the definition is legal to store and compile.
 
     The step graph is the runner's rule. What is left is the two registries: a step
-    type or an action the deployment did not expose cannot be composed.
+    type or a listener the deployment did not expose cannot be composed.
     """
-    from django_ai_sdk.workflows.actions import get_action_registry
     from django_ai_sdk.workflows.definitions import get_step_registry
-    from django_ai_sdk.workflows.runner import check_pipeline
+    from django_ai_sdk.workflows.listeners import get_listener_registry
+    from django_ai_sdk.workflows.runner import validate_steps
 
     label = f"Workflow {definition.name!r}"
-    check_pipeline(definition.steps, label=label)
+    validate_steps(definition.steps, label=label)
     _compiles(
         f"Inputs_{definition.name or 'workflow'}",
         definition.input_fields,
@@ -88,16 +96,23 @@ def validate_definition(definition: WorkflowDefinition) -> None:
     )
 
     step_types = get_step_registry()
-    action_types = get_action_registry()
+    listener_types = get_listener_registry()
     declared_inputs = set(definition.input_fields)
 
     for index, step in enumerate(definition.steps):
         where = f"{label} step {index} ({step.name!r})"
-        if step.type != "agent" and step.type not in step_types:
-            raise ImproperlyConfigured(
-                f"{where} has type {step.type!r}, which is not in AI_SDK_WORKFLOW_STEPS. "
-                f"Registered: {sorted(step_types) or 'none'}."
-            )
+        if step.type != AGENT_STEP:
+            if step.type not in step_types:
+                raise ImproperlyConfigured(
+                    f"{where} has type {step.type!r}, which is not in "
+                    f"AI_SDK_WORKFLOWS['STEPS']. Registered: {sorted(step_types) or 'none'}."
+                )
+            try:
+                step_types[step.type].validate_config(step.config)
+            except (TypeError, ValueError) as exc:
+                raise ImproperlyConfigured(
+                    f"{where} has a config its step type refuses: {exc}"
+                ) from exc
         history = sorted(name for name in step.history if name not in declared_inputs)
         if history:
             raise ImproperlyConfigured(
@@ -105,9 +120,9 @@ def validate_definition(definition: WorkflowDefinition) -> None:
                 f"declare. Declared: {sorted(declared_inputs) or 'none'}."
             )
         _compiles(f"Output_{step.name}", step.output_fields, f"{where} output_fields")
-        _validate_actions(step.actions, where, action_types)
+        _validate_listeners(step.listeners, where, listener_types)
 
-    _validate_actions(definition.actions, label, action_types)
+    _validate_listeners(definition.listeners, label, listener_types)
 
 
 def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:
@@ -126,21 +141,21 @@ def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None
         raise ImproperlyConfigured(f"{where} cannot compile: {exc}") from exc
 
 
-def _validate_actions(
-    actions: list[ActionDefinition], where: str, action_types: dict[str, type[WorkflowAction]]
+def _validate_listeners(
+    listeners: list[ListenerDefinition], where: str, listener_types: dict[str, type[RunListener]]
 ) -> None:
-    """Every action a definition names must be one the deployment exposed."""
-    for action in actions:
-        if action.type not in action_types:
+    """Every listener a definition names must be one the deployment exposed."""
+    for listener in listeners:
+        if listener.type not in listener_types:
             raise ImproperlyConfigured(
-                f"{where} names action {action.type!r}, which is not in "
-                f"AI_SDK_WORKFLOW_ACTIONS. Registered: {sorted(action_types) or 'none'}."
+                f"{where} names listener {listener.type!r}, which is not in "
+                f"AI_SDK_WORKFLOWS['LISTENERS']. Registered: {sorted(listener_types) or 'none'}."
             )
 
 
-def get_declared_workflows() -> dict[str, WorkflowDefinition]:
-    """Workflows declared in code, keyed by name. Use aget_workflows() to include rows."""
-    return dict(_registry)
+def is_registered(definition: WorkflowDefinition) -> bool:
+    """Whether `definition` is the workflow registered under its name, unchanged."""
+    return bool(definition.name) and _registry.get(definition.name) == definition
 
 
 def get_invalid_workflows() -> dict[str, str]:
@@ -148,90 +163,56 @@ def get_invalid_workflows() -> dict[str, str]:
     return dict(_invalid)
 
 
-async def aget_workflows() -> dict[str, WorkflowDefinition]:
-    """Code-declared workflows merged with active WorkflowSettings rows."""
-    merged = await _db_workflows()
-    merged.update(_registry)
-    return merged
-
-
 async def aget_workflow(name: str) -> WorkflowDefinition | None:
-    """One workflow by name, from code or the database."""
+    """One workflow by name. A registered one wins over an active stored one.
+
+    A stored one that cannot run raises, like definition_of().
+    """
+    declared, row = await afind(name)
+    return declared if row is None else definition_of(row)
+
+
+async def afind(name: str) -> tuple[WorkflowDefinition | None, Workflow | None]:
+    """The workflow named `name`: (registered definition, None) or (None, active row).
+
+    A registered workflow wins over a stored one. (None, None) when neither exists.
+    The row is not parsed, so a caller can check permissions on it first.
+    """
+    from django_ai_sdk.workflows.models import Workflow
+
     declared = _registry.get(name)
     if declared is not None:
-        return declared
-    return (await _db_workflows()).get(name)
+        return declared, None
+    return None, await Workflow.objects.filter(slug=name, active=True).afirst()
 
 
-async def _db_workflows() -> dict[str, WorkflowDefinition]:
-    """Active WorkflowSettings rows, keyed by slug. A code declaration wins a collision."""
-    workflows: dict[str, WorkflowDefinition] = {}
-    for slug, raw in await _db_rows():
-        if slug in _registry:
-            _warn_shadowed(slug)
-            continue
-        definition = _definition_from_row(slug, raw)
-        if definition is not None:
-            workflows[slug] = definition
-    return workflows
+def definition_of(row: Workflow) -> WorkflowDefinition:
+    """Parse and validate a stored workflow, named by its slug.
 
-
-async def _db_rows() -> list[tuple[str, dict[str, object]]]:
-    """(slug, definition) for every active row, read fresh so an edit takes effect now.
-
-    A database error propagates: swallowing it would read as "no such workflow".
+    Raises pydantic's ValidationError or ImproperlyConfigured when it cannot run.
     """
-    from django_ai_sdk.workflows.models import WorkflowSettings
-
-    return [
-        (row.slug, row.definition) async for row in WorkflowSettings.objects.filter(active=True)
-    ]
-
-
-def _definition_from_row(slug: str, raw: dict[str, object]) -> WorkflowDefinition | None:
-    """Parse and validate one stored definition, or None if it cannot run."""
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
-    try:
-        definition = WorkflowDefinition.model_validate(raw)
-        validate_definition(definition)
-    except Exception as exc:
-        if slug not in _warned_invalid:
-            _warned_invalid.add(slug)
-            logger.warning(
-                "Workflow %r is stored in the database but cannot run (%s); skipping it.",
-                slug,
-                exc,
-            )
-        return None
+    definition = WorkflowDefinition.model_validate({**row.definition, "name": row.slug})
+    validate_definition(definition)
     return definition
-
-
-def _warn_shadowed(slug: str) -> None:
-    if slug in _warned_shadowed:
-        return
-    _warned_shadowed.add(slug)
-    logger.warning(
-        "WorkflowSettings row %r is shadowed by a workflow declared in code, which "
-        "wins. Rename the row, or remove the declaration.",
-        slug,
-    )
 
 
 def reset_registry() -> None:
     """Clear the registry — for tests."""
     _registry.clear()
     _invalid.clear()
-    _warned_shadowed.clear()
-    _warned_invalid.clear()
 
 
 __all__ = [
+    "ADHOC",
+    "NAME_MAX_LENGTH",
+    "afind",
     "aget_workflow",
-    "aget_workflows",
-    "get_declared_workflows",
+    "definition_of",
     "get_invalid_workflows",
-    "register",
+    "is_registered",
+    "register_workflow",
     "reset_registry",
     "validate_definition",
     "validate_name",
