@@ -21,6 +21,7 @@ from tests.removable import run_without
 
 OVERSIGHT_APPS = [
     "django_ai_sdk.oversight.ledger",
+    "django_ai_sdk.oversight.authoring",
     "django_ai_sdk.oversight.switches",
     "django_ai_sdk.oversight",
 ]
@@ -30,11 +31,7 @@ OVERSIGHT_APPS = [
 def without_oversight():
     with modify_settings(
         INSTALLED_APPS={
-            "remove": [
-                "django_ai_sdk.oversight.ledger",
-                "django_ai_sdk.oversight.switches",
-                "django_ai_sdk.oversight",
-            ]
+            "remove": OVERSIGHT_APPS,
         }
     ):
         yield

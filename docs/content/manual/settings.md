@@ -85,7 +85,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 ## Oversight
 
-One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings). The opt-in oversight apps read a dict of their own: `AI_SDK_OVERSIGHT_LEDGER` and `AI_SDK_VAULT` ([Audit-grade oversight](/oversight-ledger/)).
+One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings). The opt-in oversight apps read a dict of their own: `AI_SDK_OVERSIGHT_LEDGER` and `AI_SDK_VAULT` ([Audit-grade oversight](/oversight-ledger/)), and `AI_SDK_OVERSIGHT_AUTHORING` ([Authoring](/oversight-authoring/)).
 
 Every settings dict of the SDK (`AI_SDK_OVERSIGHT`, `AI_SDK_WORKFLOWS`, `AI_SDK_VAULT` and the oversight apps' own) is checked on start: an unknown key or a value of the wrong kind is `<app>.E012`, with the fix in its hint. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
 

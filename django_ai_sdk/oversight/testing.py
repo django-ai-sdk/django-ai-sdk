@@ -25,6 +25,8 @@ from django_ai_sdk.oversight.guard.asking import Answered, Matched, should_retry
 from django_ai_sdk.oversight.types import Answer, Outcome, Stage, ToolCall
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
@@ -83,24 +85,30 @@ class TurnResult:
 
 
 async def dry_run(
-    policy: str,
+    policy: str | ResolvedPolicy,
     *,
     input: str,
     output: str = "",
-    tool_calls: list[ToolCall | dict[str, Any]] | None = None,
+    tool_calls: Sequence[ToolCall | dict[str, Any]] | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> TurnResult:
     """Run `policy` over one exchange as a turn would, without recording it.
 
-    `tool_calls` ({"name", "arguments"} or ToolCall) are checked as the model's
-    calls, in order, before the answer. LookupError when the policy does not load.
+    `policy` is a registered policy name or a `ResolvedPolicy` from `policy.build`,
+    so a draft can run before it is registered. `tool_calls` ({"name", "arguments"}
+    or ToolCall) are checked in order before the answer. Raises LookupError when a
+    named policy does not load.
     """
     from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.policy import ResolvedPolicy
     from django_ai_sdk.oversight.resolve import aget_policy, broken_reason
 
-    resolved = await aget_policy(policy)
-    if resolved is None:
-        raise LookupError(broken_reason(policy) or f"No oversight policy {policy!r}")
+    if isinstance(policy, ResolvedPolicy):
+        resolved = policy
+    else:
+        resolved = await aget_policy(policy)
+        if resolved is None:
+            raise LookupError(broken_reason(policy) or f"No oversight policy {policy!r}")
     # Opened directly, so a dry run checks even when oversight is switched off.
     guard = TurnGuard._opened(
         resolved,
@@ -120,7 +128,7 @@ async def _run(
     resolved: ResolvedPolicy,
     *,
     output: str,
-    tool_calls: list[ToolCall | dict[str, Any]],
+    tool_calls: Sequence[ToolCall | dict[str, Any]],
 ) -> TurnResult:
     result = TurnResult(policy=resolved.name)
 

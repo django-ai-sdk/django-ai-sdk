@@ -53,10 +53,10 @@ class Custody(Protocol):
     def chained(self, items: list[tuple[str, Model]]) -> None:
         """Receive rows just written as (kind, row) pairs.
 
-        Kinds are "turn", "answer", "match", "access" (an `AccessRecord`) and
-        "override" (a runtime switch), as named in `ledger.chain.KINDS`. A turn
-        arrives again on each update: once when its gate ends and again when it
-        closes.
+        Kinds are "turn", "answer", "match", "access" (an `AccessRecord`),
+        "override" (a runtime switch) and "authored" (an authored policy), as
+        named in `ledger.chain.KINDS`. A turn arrives again on each update: once
+        when its gate ends and again when it closes.
         """
         ...
 

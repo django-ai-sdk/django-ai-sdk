@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators are an opt-in app on the `OverlaySource` seam below ([Runtime switches](/oversight-switches/)); an encrypted, chained record is two opt-in apps on the `custody` seam, the vault and the ledger ([Audit-grade oversight](/oversight-ledger/)).
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators are an opt-in app on the `OverlaySource` seam below ([Runtime switches](/oversight-switches/)), and defining whole policies at runtime another one on the policy loader seam ([Runtime authoring](/oversight-authoring/)); an encrypted, chained record is two opt-in apps on the `custody` seam, the vault and the ledger ([Audit-grade oversight](/oversight-ledger/)).
 
 ## Installing
 
@@ -34,7 +34,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `FAIL_MODE` | `"closed"` | What a failed lens means: its check or judge raised, timed out, missed the deadline or was handed more than it reads (too long). `closed` treats an enforced rule that blocks, masks or takes tools away as matched when a lens it reads failed, withholds a tool result it cannot check, and refuses a turn whose policy cannot be chosen or loaded. Rules that only alert, queue or notify never fire on a failure; rules in report mode only record it. `open` lets the turn through and records the failure, and runs a turn whose policy cannot load unguarded. A policy may set its own (`fail_mode`); anything but `"open"` is closed. |
 | `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons and notes kept in it) and its metadata (the turn, its answers and matches) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)); access records are kept for the `metadata` days set here. |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, dotted paths, or `{"class": "<dotted path>", **kwargs}` (unlike `JUDGES`, always the full path: `"django_ai_sdk.oversight.notifiers.WebhookNotifier"`). One that cannot be built is logged and left out. |
-| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches what operators change at runtime ([switches](/oversight-switches/)); `0` reads them every turn. |
+| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches what operators change at runtime ([switches](/oversight-switches/), [authored policies](/oversight-authoring/)); `0` reads them every turn. |
 
 Outside the dict:
 
@@ -151,7 +151,7 @@ Rule(name, *, when=Condition, then=Action | [Action], mode=Mode.REPORT,
 
 `min_mode` is a floor in code: an overlay mode (a [runtime switch](/oversight-switches/)) below it (`off` < `report` < `enforce`) is rejected, and so is `pick(..., mode=)` below it, and a `mode` below it when the rule is declared (both raise `ImproperlyConfigured`). `Rule(..., mode="enforce", min_mode="enforce")` stays enforced whatever an operator switches.
 
-Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= value`, `> < >= <=`, `.in_(values)`, `.contains(label)`, `.missing`, `.present`, `.confident(x)`, `.unsure(x)`, combined with `&`, `|` and `~`. Each serializes to JSON (`{"all": [...]}`, `{"any": [...]}`, `{"not": ...}`, `{"lens", "op", "value"}`). Every comparison on a lens without a usable answer is false; use `.missing` to test for that. A failed lens (its check or judge raised or timed out) is unknown, not false: a comparison on it is neither true nor false, so `~L("grounded").is_true` does not match just because "grounded" failed.
+Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= value`, `> < >= <=`, `.in_(values)`, `.contains(label)`, `.missing`, `.present`, `.confident(x)`, `.unsure(x)`, combined with `&`, `|` and `~`. Each serializes to JSON (`{"all": [...]}`, `{"any": [...]}`, `{"not": ...}`, `{"lens", "op", "value"}`), which is what an authored policy stores. Every comparison on a lens without a usable answer is false; use `.missing` to test for that. A failed lens (its check or judge raised or timed out) is unknown, not false: a comparison on it is neither true nor false, so `~L("grounded").is_true` does not match just because "grounded" failed.
 
 A rule is evaluated once every lens it reads has had its chance, so it can combine a gate lens and a reflect lens. A rule fires once per turn. `message` replaces the action's message when the rule blocks.
 
@@ -191,6 +191,8 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 Every effective value has a source, in this order: the extended packs (`pack:<name>`), the class (`code`), then the overlay (`overlay`); a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. The overlay only switches rule modes. A parent's switched modes reach the policies that extend it, with the source `overlay:<parent>`. A mode that cannot apply (an unknown rule or mode, or one below `min_mode`) is listed under `rejected` (`{"rule", "mode", "reason"}`), logged and ignored.
 
 The overlay comes from an `OverlaySource` (`django_ai_sdk.oversight.resolve`). Core's is empty; an app that lets operators switch modes at runtime subclasses it and calls `set_overlay_source(source)`: `async rule_modes(names)` returns `{policy: {rule: mode}}` for the policy names asked, `async agent_policies()` every agent it assigns (agent id to a policy name, or `""` for off; an agent left out is up to code), and `ttl` is how long a resolution built with it, and its agent assignments, are reused (core: until settings change or a policy registers). When `rule_modes` or `agent_policies` raises, turns run the last good read, else the policy as code declares it. The [switches app](/oversight-switches/) installs one that reads its `Override` rows, with `ttl` = `RUNTIME_CACHE_SECONDS`.
+
+An app can also register whole policies at runtime. It adds a loader with `resolve.add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `resolve.invalidate()`), that registers policies (`registry.register_policy`) and withdraws them (`registry.unregister_policy(name)`). A loader that raises is logged, and what it registered stays. `policy.build(name, policy_class=cls)` builds a class that is not registered yet, so a draft can be checked first. The [authoring app](/oversight-authoring/) is such a loader.
 
 A policy that fails to load (a missing parent, a cycle) refuses its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`resolve.broken_reason(name)`).
 
@@ -258,7 +260,7 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 | `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. Its resolution holds who closed it (a user id), the value as the record keeps it and whether they agreed; the reviewer's note is in the content's `notes`. Core creates items; the [review API](#review-api) resolves them. |
 | `AccessRecord` | A read of the record, or an operator's change of it: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews`, `review`, `verify` and `reveal`; the changes `checkpoint`, `switch` and `author`; or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. The access records list both reads and changes (switches, checkpoints and prune runs); filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. The access records list both reads and changes (switches, authored versions, checkpoints and prune runs); filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
 
 ## Review API
 
@@ -299,6 +301,8 @@ Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `dj
 | `VIEW_OVERSIGHT_LEDGER` | `django_ai_sdk_oversight_ledger.view_checkpoint` | The [ledger's](/oversight-ledger/) checkpoints, and verifying the chain (the opt-in ledger app). |
 | `CHECKPOINT_OVERSIGHT` | `django_ai_sdk_oversight_ledger.add_checkpoint` | Writing a checkpoint. |
 | `REVEAL_OVERSIGHT_ACTOR` | `django_ai_sdk_oversight_ledger.reveal_actor` | Who asked a turn, for a recorded reason. |
+| `VIEW_OVERSIGHT_AUTHORING` | `django_ai_sdk_oversight_authoring.view_authoredpolicy` | The [policies defined at runtime](/oversight-authoring/), their versions and what a definition may use (the opt-in authoring app). |
+| `AUTHOR_OVERSIGHT` | `django_ai_sdk_oversight_authoring.change_authoredpolicy` | Saving, trying and withdrawing a policy defined at runtime. |
 
 A reviewer may hold review alone: they then work the queue from each item's queue, lens and rule, without the turn's row, and resolve it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
 
@@ -357,7 +361,7 @@ Deleting a thread calls `forget("thread:<id>")`. Deleting a user forgets the con
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy (a registered name, or a draft built with `policy.build(name, policy_class=...)`) over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
@@ -426,6 +430,6 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 
-The opt-in apps raise their own, under `ai_sdk.vault.*` and `ai_sdk.oversight.ledger.*` ([Audit-grade oversight](/oversight-ledger/#checks)), and `ai_sdk.oversight.switches.*` ([Switches](/oversight-switches/)).
+The opt-in apps raise their own, under `ai_sdk.vault.*` and `ai_sdk.oversight.ledger.*` ([Audit-grade oversight](/oversight-ledger/#checks)), `ai_sdk.oversight.switches.*` ([Switches](/oversight-switches/)) and `ai_sdk.oversight.authoring.*` ([Authoring](/oversight-authoring/)).
 
 In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.

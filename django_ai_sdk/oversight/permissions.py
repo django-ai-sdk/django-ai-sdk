@@ -30,6 +30,8 @@ class OversightDefaultPermission(BasePermission):
         Operation.VIEW_OVERSIGHT_LEDGER: "django_ai_sdk_oversight_ledger.view_checkpoint",
         Operation.CHECKPOINT_OVERSIGHT: "django_ai_sdk_oversight_ledger.add_checkpoint",
         Operation.REVEAL_OVERSIGHT_ACTOR: "django_ai_sdk_oversight_ledger.reveal_actor",
+        Operation.VIEW_OVERSIGHT_AUTHORING: "django_ai_sdk_oversight_authoring.view_authoredpolicy",
+        Operation.AUTHOR_OVERSIGHT: "django_ai_sdk_oversight_authoring.change_authoredpolicy",
     }
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:

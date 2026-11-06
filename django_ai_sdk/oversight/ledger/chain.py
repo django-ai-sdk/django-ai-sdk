@@ -91,6 +91,7 @@ MATCH = "match"
 CONTENT = "content"
 ACCESS = "access"
 OVERRIDE = "override"
+AUTHORED = "authored"
 FORGET = "forget"
 
 _CHANGE = ("id", "version", "reason", "changed_by_id", "changed_at")
@@ -100,8 +101,8 @@ _CHANGE = ("id", "version", "reason", "changed_by_id", "changed_at")
 # every row written before it. Fields that change on purpose are left out (see the
 # module docstring), and so is an access record's `reader_label`, which is cut to
 # the id when the reader is deleted.
-# The switches app sits on top of the ledger and may be missing, so its label is
-# not imported.
+# The switches and authoring apps sit on top of the ledger and may be missing, so
+# their labels are not imported.
 KINDS: dict[str, Kind] = {
     TURN: Kind(
         OVERSIGHT,
@@ -162,6 +163,12 @@ KINDS: dict[str, Kind] = {
         "django_ai_sdk_oversight_switches",
         "Override",
         (*_CHANGE, "kind", "policy", "target", "value"),
+    ),
+    AUTHORED: Kind(
+        "django_ai_sdk_oversight_authoring",
+        "AuthoredPolicy",
+        (*_CHANGE, "name", "withdrawn"),
+        extra=lambda row: {"definition": row.definition()},
     ),
     FORGET: Kind(
         VAULT,
@@ -595,6 +602,7 @@ def _span_hash(ref: str) -> str:
 __all__ = [
     "ACCESS",
     "ANSWER",
+    "AUTHORED",
     "CONTENT",
     "ERASE",
     "FORGET",

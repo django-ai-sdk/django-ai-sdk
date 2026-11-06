@@ -721,4 +721,5 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. [Audit-grade ove
 - The [Oversight manual](/manual/oversight/): every class, setting, model and check.
 - The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
 - [Runtime switches](/oversight-switches/): flip a rule's mode or an agent's policy without a deploy, with a reason, a notification and an access record, an opt-in app.
+- [Runtime authoring](/oversight-authoring/): define whole policies without a deploy, checked like code's and kept as versions, an opt-in app.
 - [Audit-grade oversight](/oversight-ledger/): content encrypted in the vault, forgetting by destroying keys, a hash-chained record with signed checkpoints and pseudonyms for who asked, two opt-in apps.

@@ -133,6 +133,18 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
                 )
 
 
+def unregister_policy(name: str) -> None:
+    """Remove a policy registered at runtime.
+
+    Later turns naming it find no policy and are refused, unless FAIL_MODE is "open".
+    """
+    _registry.pop(name, None)
+    _invalid.pop(name, None)
+    from django_ai_sdk.oversight.resolve import invalidate
+
+    invalidate(name)
+
+
 def get_policy_class(name: str) -> type[Policy] | None:
     return _registry.get(name)
 
@@ -227,6 +239,7 @@ __all__ = [
     "register_policy",
     "register_validator",
     "reset_registry",
+    "unregister_policy",
     "validate_policy",
     "validate_rule",
 ]
