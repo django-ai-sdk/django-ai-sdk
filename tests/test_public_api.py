@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Each package, and the pages that import it and describe every export.
 PAGES = {
     "django_ai_sdk.oversight": ["oversight.md", "manual/oversight.md"],
+    "django_ai_sdk.workflows": ["workflow-steps.md", "manual/workflows.md", "views-and-routing.md"],
 }
 IMPORT = re.compile(r"^[ \t]*from (django_ai_sdk[\w.]*) import (\([^)]*\)|[^\n]+)", re.MULTILINE)
 

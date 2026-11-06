@@ -144,7 +144,7 @@ See the [Oversight guide](docs/content/oversight.md) for the rest, and its limit
 
 - **Agents**: A Django `Agent` class you can run from a view, a task, or the API,
   streaming or not, with tool calling built in.
-- **Workflows**: Multi-step, definition-driven runs with persisted steps and actions,
+- **Workflows**: Multi-step, definition-driven runs with persisted steps and run listeners,
   so a process can span multiple agent calls with a record of what happened.
 - **Subagents**: Agents can delegate to other agents as tools, so one agent can
   orchestrate specialists instead of doing everything itself.

@@ -5,9 +5,11 @@ from typing import Any
 from haystack_integrations.components.generators.mistral import MistralChatGenerator
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 from django_ai_sdk.utils import resolve_setting
 
 
+@watched_factory
 def mistral_chat(**kwargs: Any) -> MistralChatGenerator:
     """Mistral chat generator wired to Django settings."""
     return MistralChatGenerator(

@@ -368,26 +368,30 @@ See the [Agents guide](/agents/#permissions) for declaring permissions on agents
 The SDK ships a workflow engine for orchestrating multi-step agent tasks. A `WorkflowDefinition` describes steps; `WorkflowService` runs and tracks them.
 
 ```python
-from django_ai_sdk.workflows import WorkflowDefinition, WorkflowService
+from django_ai_sdk.workflows import WorkflowDefinition
+from django_ai_sdk.workflows.services import WorkflowService
 
-# Run an ad-hoc workflow
+# Run a definition your code built (never one a client sent)
 run = await WorkflowService.run(workflow, inputs={"document": doc}, user=request.user)
 
-# Persisted workflows (WorkflowSettings)
+# Persisted workflows (Workflow)
 record = await WorkflowService.create(name, workflow, user=request.user)
-await WorkflowService.update(workflow_id, name=..., workflow=..., active=...)
-await WorkflowService.run_by_id(workflow_id, inputs={"document": doc}, user=request.user)
-await WorkflowService.get_run(run_id)
+await WorkflowService.update(workflow_id, user=request.user, name=..., workflow=..., active=...)
 
-# Available actions (declared in AI_SDK_WORKFLOW_ACTIONS)
-await WorkflowService.list_actions()
+# Start a registered or stored workflow by its key; resume a failed or interrupted run
+run = await WorkflowService.start(record.slug, inputs={"document": doc}, user=request.user)
+await WorkflowService.resume(run_id, user=request.user)
+run = await WorkflowService.get_run(run_id, user=request.user)  # None when absent or not yours
+
+# Available listeners (declared in AI_SDK_WORKFLOWS["LISTENERS"]); takes MANAGE_WORKFLOW
+await WorkflowService.list_listeners(user=request.user)
 ```
 
-Action implementations are wired in settings:
+Listener implementations are wired in settings:
 
 ```python
-AI_SDK_WORKFLOW_ACTIONS = {
-    "console_log": "apps.agents.actions.ConsoleLogAction",
+AI_SDK_WORKFLOWS = {
+    "LISTENERS": {"console_log": "apps.agents.listeners.ConsoleLogListener"},
 }
 ```
 

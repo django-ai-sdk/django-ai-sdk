@@ -24,9 +24,6 @@ from .memories.models import (
     ThreadMemory,
 )
 
-# Workflows
-from .workflows.models import WorkflowSettings
-
 __all__ = [
     # Conversation models
     "Artifact",
@@ -43,6 +40,4 @@ __all__ = [
     "AgentGroup",
     "AgentSettings",
     "AgentUser",
-    # Workflows
-    "WorkflowSettings",
 ]

@@ -1,4 +1,5 @@
-"""Fixtures for the oversight tests: the test policies, a fresh resolution cache."""
+"""Fixtures for the oversight tests: the test policies, fresh resolution and permission
+caches."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import pytest
 
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy
 from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.permissions import get_domain_permissions
 from tests.oversight.helpers import TEST_POLICIES
 
 
@@ -22,8 +24,10 @@ def test_policies():
 @pytest.fixture(autouse=True)
 def _fresh_resolutions():
     invalidate()
+    get_domain_permissions.cache_clear()
     yield
     invalidate()
+    get_domain_permissions.cache_clear()
 
 
 @pytest.fixture
@@ -31,6 +35,13 @@ def no_reflect_queue():
     """Close turns without queueing reflection."""
     with patch("django_ai_sdk.oversight.persist.enqueue_reflect"):
         yield
+
+
+@pytest.fixture
+def sent():
+    """The notifications a test queues, instead of queueing them."""
+    with patch("django_ai_sdk.oversight.persist.enqueue_notifications") as enqueue:
+        yield enqueue
 
 
 @pytest.fixture
