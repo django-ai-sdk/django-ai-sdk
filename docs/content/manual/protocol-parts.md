@@ -76,6 +76,18 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 
 `DataPart.type` is dynamic and must start with `data-`. Suggestions are emitted as `data-suggestions`.
 
+## Oversight parts
+
+When an [oversight](/oversight/) rule acts on a turn, the stream says so, and the notices are stored with the message:
+
+```
+{"type":"data-oversight","data":{"turn_id":"...","stage":"gate","outcome":"masked","input":"Mail me at [EMAIL]"}}
+{"type":"data-oversight","data":{"turn_id":"...","stage":"finish","outcome":"blocked","message":"...","replace":"..."}}
+{"type":"finish","finishReason":"content-filter"}
+```
+
+`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A refused question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](../oversight/#client-notices).
+
 ## Warmup parts
 
 Before the reply streams, the chat opens its knowledge bases and loads its integrations. `Agent.warmup_progress()` names each one as it is opened, so a client can show what the wait is on. All warmup parts are transient (never stored with the message):

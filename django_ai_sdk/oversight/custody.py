@@ -1,0 +1,102 @@
+"""How a turn's content is stored, read back and forgotten.
+
+Core's `PlainCustody` stores content as is (masked per CAPTURE) and deletes it to
+forget. An app installs its own with `install()` in `AppConfig.ready()`; every method
+runs in the caller's transaction (the oversight manual's Custody section).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from django.db.models import Model
+
+
+# Prefixes of the scopes `scope_for` returns.
+THREAD_SCOPE = "thread:"
+TURN_SCOPE = "turn:"
+
+
+class Forgotten(Exception):
+    """The scope was forgotten, so nothing new may be stored for it."""
+
+
+def scope_for(thread_id: Any = "", turn_id: Any = "") -> str:
+    """Return the scope a turn's content is kept and forgotten under.
+
+    The thread's, or the turn's own when it has no thread.
+    """
+    return f"{THREAD_SCOPE}{thread_id}" if thread_id else f"{TURN_SCOPE}{turn_id}"
+
+
+class Custody(Protocol):
+    def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
+        """Return the value to store for `content`. May raise Forgotten."""
+        ...
+
+    def load_many(self, items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any] | None]:
+        """Return the content behind each (scope, stored) pair, in order and in a fixed
+        number of queries. None for an item that can no longer be read."""
+        ...
+
+    def forget(self, scope: str) -> None:
+        """Forget everything kept for `scope` ("thread:<id>", "turn:<id>")."""
+        ...
+
+    def chained(self, items: list[tuple[str, Model]]) -> None:
+        """Receive rows just written as (kind, row) pairs.
+
+        Kinds are "turn", "answer" and "match". A turn arrives again on each
+        update: once when its gate ends and again when it closes.
+        """
+        ...
+
+    def pruning(self, turn_ids: Iterable[Any]) -> None:
+        """Turns about to be deleted by retention."""
+        ...
+
+
+class PlainCustody:
+    """Content kept as it is; forgetting deletes it; nothing is chained."""
+
+    def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
+        return content
+
+    def load_many(self, items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any] | None]:
+        return [stored for _scope, stored in items]
+
+    def forget(self, scope: str) -> None:
+        from django_ai_sdk.oversight.models import TurnContent
+
+        # The turns stay. Their content link is cleared by SET_NULL.
+        TurnContent.objects.filter(scope=scope).delete()
+
+    def chained(self, items: list[tuple[str, Model]]) -> None:
+        return None
+
+    def pruning(self, turn_ids: Iterable[Any]) -> None:
+        return None
+
+
+_custody: Custody = PlainCustody()
+
+
+def install(custody: Custody | None) -> None:
+    """Make `custody` the one every turn uses; None puts PlainCustody back."""
+    global _custody
+    _custody = custody or PlainCustody()
+
+
+def get() -> Custody:
+    return _custody
+
+
+def is_plain() -> bool:
+    """Whether content is kept as it is (no custody app installed)."""
+    return isinstance(_custody, PlainCustody)
+
+
+__all__ = ["Custody", "Forgotten", "PlainCustody", "get", "install", "is_plain", "scope_for"]

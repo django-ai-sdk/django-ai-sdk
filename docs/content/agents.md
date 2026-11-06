@@ -97,6 +97,7 @@ These class attributes configure an agent's behavior:
 | `file_pipelines` | `[]` | Per-file-type processing pipelines |
 | `citation_formatter_class` | `DefaultCitationFormatter` | How RAG sources are rendered to the model |
 | `suggestion_generator` | `None` | Generates follow-up suggestions after a reply |
+| `oversight` | `None` | The [oversight](/oversight/) policy every turn runs under: a `Policy` subclass, a policy's name, `None` (the `DEFAULT_POLICY`) or `False` (none) |
 | `hidden` | `False` | Hide from registry listings |
 | `abstract` | `False` | Shared base, not registered |
 | `warmup_on_init` | `False` | Warm up RAG on agent initialization |
@@ -120,7 +121,7 @@ instructions = prompt("""\
 An agent exposes two adapter hooks. You implement them; the SDK uses them.
 
 - **`get_pipeline_adapter(thread_id, user)`**: returns a `Stream` for streaming chat. `Agent.as_view()` calls this.
-- **`get_run_adapter(thread_id, user)`**: returns a `Run` for non-streaming calls. `Agent.run()` calls this (title generation, structured extraction, background jobs).
+- **`get_run_adapter(thread_id, user)`**: returns a `Run` for non-streaming calls. `Agent.run()` calls this (title generation, structured extraction, background jobs). The default wraps the agent's own generator (`get_llm()`); override it only for something else.
 
 {{< callout type="info" >}}
 A worker-only agent (`hidden = True`, never used in chat) can leave `get_pipeline_adapter()` unimplemented.
@@ -452,6 +453,33 @@ it. See [Headless tool runs](/manual/stream-and-run/#headless-tool-runs) for the
 call chain and the diagram: it's governed by *this* agent's own `max_agent_steps` and
 `max_tool_calls`, via the same assembly a streamed subagent delegation uses - never a
 generic default.
+
+---
+
+## Oversight
+
+With the [oversight](/oversight/) app installed, every turn an agent with a policy runs through the SDK's entry points is checked and recorded under that policy: chat, `run()`, the HTTP run endpoints and workflow steps alike ([the paths it does not guard](/oversight/#limitations)).
+
+```python
+from django_ai_sdk.errors import Blocked
+
+
+class SupportAgent(Agent):
+    oversight = SupportPolicy          # a Policy subclass, or a registered policy's name
+
+    async def get_oversight(self, *, channel, user, **kwargs):
+        # Optional: choose per channel or per user. Returns `oversight` by default.
+        signed_in = getattr(user, "is_authenticated", False)
+        return self.oversight if signed_in else PublicSupportPolicy
+
+
+try:
+    answer = await agent.run(messages, user=request.user, channel="api")
+except Blocked as refused:
+    answer = refused.message           # the policy's text for the person asking
+```
+
+`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](/manual/oversight/#agents-and-runs); what a turn checks, how nested runs and subagents join it, and why an override of `run()` cannot skip it, in [the guide](/oversight/#every-sdk-entry-point-is-a-turn).
 
 ---
 

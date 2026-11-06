@@ -10,7 +10,7 @@ from ninja import File, Router
 from ninja.files import UploadedFile
 from ninja.params import functions as params
 
-from django_ai_sdk.contrib.ninja.routing import ERRORS, ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
     MemoryOutResponse,
     SourceContentOut,
@@ -45,8 +45,8 @@ from django_ai_sdk.views.schemas import (
 
 routes = ApiRouter()
 
-NO_CONTENT = {204: None, **ERRORS}
-ACCEPTED = {202: DocumentUploadResponse, **ERRORS, 409: ERRORS[400]}
+NO_CONTENT = {204: None}
+ACCEPTED = {202: DocumentUploadResponse}
 
 
 @routes.get("/settings", response=UploadSettingsOut)

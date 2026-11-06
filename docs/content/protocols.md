@@ -71,14 +71,16 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 `await stream.stream(messages)` is an async generator of `StreamEvent`s:
 
 1. **`MessageStartEvent`**: carries the `message_id`, generated **once** here as a UUID
-2. **`TextChunkEvent`**: one per chunk from the model
-3. **`ToolCallStartEvent`** / **`ToolInputCompleteEvent`** / **`ToolOutputEvent`**: tool calls as they happen
-4. **`SourceEvent`**: RAG sources, streamed with citation indices
-5. **`TextEndEvent`**: the answer's text is complete; citations are placed after it
-6. **`MessageEndEvent`**: after the message is finalized
-7. **`SuggestionEvent`**: optional follow-up suggestions
-8. **`StreamEndEvent`**: the run is done
-9. **`ErrorEvent`**: pipeline failures, instead of a hanging stream
+2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](/oversight/) rule acted
+3. **`TextChunkEvent`**: one per chunk from the model
+4. **`ToolCallStartEvent`** / **`ToolInputCompleteEvent`** / **`ToolOutputEvent`**: tool calls as they happen
+5. **`SourceEvent`**: RAG sources, streamed with citation indices
+6. **`DataEvent` (`oversight`)**: what oversight's finish did to the answer, such as text to show instead
+7. **`TextEndEvent`**: the answer's text is complete; citations are placed after it
+8. **`MessageEndEvent`**: after the message is finalized; `finish_reason` is `content-filter` when oversight refused the question or withheld the answer
+9. **`SuggestionEvent`**: optional follow-up suggestions
+10. **`StreamEndEvent`**: the run is done
+11. **`ErrorEvent`**: pipeline failures, instead of a hanging stream
 
 Events carry structured data, so protocol handlers render them into their own format.
 
@@ -173,7 +175,7 @@ class MyAgent(Agent):
 
 ### OpenAIProtocolHandler
 
-`OpenAIProtocolHandler` implements the OpenAI Chat Completions streaming format, useful when your frontend is built around OpenAI's protocol instead of Vercel's.
+`OpenAIProtocolHandler` implements the OpenAI Chat Completions streaming format, useful when your frontend is built around OpenAI's protocol instead of Vercel's. It sends no `data-*` parts (so no `data-oversight`), and reports an answer oversight withheld with OpenAI's finish reason `content_filter`.
 
 ```python
 from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
@@ -218,4 +220,4 @@ response = await stream_response(
 )
 ```
 
-`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request.
+`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request. It opens no [oversight](/oversight/#limitations) turn.

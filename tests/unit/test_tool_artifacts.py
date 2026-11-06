@@ -35,6 +35,7 @@ def _stream(tool_artifacts: dict, thread_id: str | None = "t") -> Stream:
     stream = Stream.__new__(Stream)
     stream.citation_registry = None
     stream._persisted_tool_ids, stream._persisted_tool_output_ids = set(), set()
+    stream._artifact_ids = []
     stream._handoff_tools = {}
     stream.tool_artifacts, stream.thread_id, stream.user = tool_artifacts, thread_id, None
     return stream

@@ -98,13 +98,16 @@ class DefaultSuggestionGenerator:
                 Based on this conversation, write the user's possible next messages.
             """)
 
+            from django_ai_sdk.adapters.base import run_side_task  # noqa: PLC0415
             from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
 
-            result = await (task_runner() or self.agent).run(
-                # The conversation is in the system prompt. Passed as chat messages
-                # too, the model carries on as the assistant and suggests what *it*
-                # would ask the user ("...the projects you'd like me to analyze?").
-                messages=[ChatMessage(role="user", content="Suggest the follow-up questions.")],
+            # The conversation is in the system prompt. Passed as chat messages
+            # too, the model carries on as the assistant and suggests what *it*
+            # would ask the user ("...the projects you'd like me to analyze?").
+            asked = [ChatMessage(role="user", content="Suggest the follow-up questions.")]
+            result = await run_side_task(
+                task_runner() or self.agent,
+                asked,
                 system_prompt=system_prompt,
                 response_format=FollowUpSuggestions,
             )
