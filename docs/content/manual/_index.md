@@ -50,6 +50,7 @@ django_ai_sdk/
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
 ├── workflows/            # definitions, runs, listeners
+├── automations/          # cron schedules over workflows (opt-in app)
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
@@ -108,4 +109,5 @@ django_ai_sdk/
   {{< card link="memories/" title="Memories" icon="folder" subtitle="MemoryService, documents, thread linking" >}}
   {{< card link="files/" title="Files" icon="document" subtitle="Processors, transforms, upload lifecycle" >}}
   {{< card link="workflows/" title="Workflows" icon="server" subtitle="Definition schema, models, runs" >}}
+  {{< card link="automations/" title="Automations" icon="clock" subtitle="Cron schedules over workflows" >}}
 {{< /cards >}}

@@ -71,6 +71,8 @@ class Operation(StrEnum):
     DELETE_AGENT = "delete_agent"
     USE_INTEGRATION = "use_integration"
     MANAGE_INTEGRATION = "manage_integration"
+    VIEW_AUTOMATION = "view_automation"
+    MANAGE_AUTOMATION = "manage_automation"
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
@@ -101,6 +103,7 @@ class PermissionDomain(StrEnum):
     THREAD = "thread"
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
+    AUTOMATIONS = "automations"
     WORKFLOW = "workflow"
     OVERSIGHT = "oversight"
 
@@ -579,6 +582,9 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.THREAD: ["django_ai_sdk.permissions.ThreadDefaultPermission"],
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
+    PermissionDomain.AUTOMATIONS: [
+        "django_ai_sdk.automations.permissions.AutomationDefaultPermission"
+    ],
     PermissionDomain.WORKFLOW: ["django_ai_sdk.permissions.WorkflowDefaultPermission"],
     # Only the oversight service resolves this domain.
     PermissionDomain.OVERSIGHT: ["django_ai_sdk.oversight.permissions.OversightDefaultPermission"],

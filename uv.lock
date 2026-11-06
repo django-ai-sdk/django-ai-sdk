@@ -229,6 +229,18 @@ wheels = [
 ]
 
 [[package]]
+name = "apscheduler"
+version = "3.11.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8c/6b/eeff360196bb20b312c9e762a820fd1b2c6d809466c755ef57863478e454/apscheduler-3.11.3.tar.gz", hash = "sha256:cd2fcc9330039a81a5893472ad49facf23a6d5604cbe1d918c835c6de7834d5a", size = 110312, upload-time = "2026-06-28T19:39:22.493Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/c9/8638db32514dbb9157b3d82680c6faea89283523edf9ed2415ea3884f2ae/apscheduler-3.11.3-py3-none-any.whl", hash = "sha256:bbeb2ec02d23d3c06a6c07ed7f0f3939ada6680eb121fae809a69bb42c537a30", size = 66024, upload-time = "2026-06-28T19:39:20.982Z" },
+]
+
+[[package]]
 name = "asgiref"
 version = "3.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -987,6 +999,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "anthropic-haystack" },
+    { name = "apscheduler" },
     { name = "authlib" },
     { name = "chroma-haystack" },
     { name = "cryptography" },
@@ -1013,6 +1026,9 @@ all = [
 ]
 anthropic = [
     { name = "anthropic-haystack" },
+]
+automations = [
+    { name = "apscheduler" },
 ]
 chroma = [
     { name = "chroma-haystack" },
@@ -1127,16 +1143,17 @@ studio = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "anthropic-haystack", marker = "extra == 'anthropic'", specifier = ">=8.0.0" },
+    { name = "apscheduler", marker = "extra == 'automations'", specifier = ">=3.11" },
     { name = "authlib", marker = "extra == 'mcp'", specifier = ">=1.9.1" },
     { name = "cashews", specifier = ">=7.6.0,<9" },
     { name = "chroma-haystack", marker = "extra == 'chroma'", specifier = ">=5.0.0" },
     { name = "cryptography", marker = "extra == 'vault'", specifier = ">=44" },
     { name = "django", specifier = ">=5.2.6,<6.2" },
     { name = "django-ai-sdk", extras = ["anthropic", "huggingface", "mistral", "ollama", "openrouter"], marker = "extra == 'providers'" },
+    { name = "django-ai-sdk", extras = ["automations", "files", "haystack", "ledger", "local", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["chroma", "qdrant"], marker = "extra == 'rag'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'chroma'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'qdrant'" },
-    { name = "django-ai-sdk", extras = ["files", "haystack", "ledger", "local", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
     { name = "django-ai-sdk", extras = ["vault"], marker = "extra == 'ledger'" },
     { name = "django-ninja", marker = "extra == 'ninja'", specifier = ">=1.7.1" },
@@ -1169,7 +1186,7 @@ requires-dist = [
     { name = "transformers-haystack", marker = "extra == 'transformers'", specifier = ">=2.0.0" },
     { name = "typesafe-sdk", marker = "extra == 'typesafe'", specifier = ">=0.5.7" },
 ]
-provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers", "typesafe", "local", "vault", "ledger"]
+provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers", "typesafe", "local", "vault", "ledger", "automations"]
 
 [package.metadata.requires-dev]
 dev = [

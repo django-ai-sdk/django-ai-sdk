@@ -74,7 +74,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`, `workflow`. See [Permissions](/manual/permissions/). |
+| `AI_SDK_PERMISSIONS` | `{}` | Per-domain overrides: `{"memory": ["path.to.PermissionClass"], ...}`. Domains: `agent`, `thread`, `memory`, `integrations`, `automations`, `workflow`. See [Permissions](/manual/permissions/). |
 
 ## Workflows
 
@@ -93,6 +93,23 @@ Every settings dict of the SDK (`AI_SDK_OVERSIGHT`, `AI_SDK_WORKFLOWS`, `AI_SDK_
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | unset | Key for oversight's optional `TypeSafe` judge (a hosted commercial service; `django-ai-sdk[typesafe]`). Without it that judge abstains. |
 | `TYPESAFE_MODEL` | unset | A TypeSafe model to pin; unset leaves the choice to `typesafe-sdk`. |
+
+## Automations
+
+Requires the opt-in `django_ai_sdk.automations` app in `INSTALLED_APPS`. One dict, `AI_SDK_AUTOMATIONS`, every key optional.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_AUTOMATIONS["ENABLED"]` | `True` | Global kill switch. `False` dispatches nothing, scheduled or by hand. See [Automations](/manual/automations/). |
+
+## Webhooks
+
+For an integration a platform pushes events into. Per-platform keys (`AGENT`, `RUN_AS`, `ALLOW_FROM`, ...) live in `AI_SDK_INTEGRATIONS[<name>]`; see [Webhooks](/manual/webhooks/).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_WEBHOOK_TIMEOUT` | `120` | Seconds a webhook-triggered agent run may take before the channel gets a timeout reply instead. |
+| `AI_SDK_WEBHOOK_MAX_TEXT` | `4000` | Characters of the inbound question kept, so the prompt is bounded by the SDK rather than by whatever the platform accepts. |
 
 ## Streaming and Titles
 
