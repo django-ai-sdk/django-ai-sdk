@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "django_ai_sdk.workflows",
     "django_ai_sdk.oversight",
     "django_ai_sdk.oversight.switches",
+    "django_ai_sdk.oversight.authoring",
     "django_ai_sdk.vault",
     "django_ai_sdk.oversight.ledger",
     "django_ai_sdk.integrations.mcp",

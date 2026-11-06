@@ -78,7 +78,7 @@ Every switch, whether it weakens oversight or not, writes an `AccessRecord` with
 
 ## When a switch applies
 
-A switch applies at once in the process that made it. Every other process, each web worker and task worker, reads the switches at most once per `AI_SDK_OVERSIGHT["RUNTIME_CACHE_SECONDS"]` (default `10`): a switch reaches all of them within that time, so for a few seconds two workers may run a rule in different modes. `0` reads the switches on every turn, at a query per turn.
+A switch applies at once in the process that made it. Every other process, each web worker and task worker, reads the switches at most once per `AI_SDK_OVERSIGHT["RUNTIME_CACHE_SECONDS"]` (default `10`, shared with authored policies): a switch reaches all of them within that time, so for a few seconds two workers may run a rule in different modes. `0` reads the switches on every turn, at a query per turn.
 
 When the database cannot be read, a process keeps the switches it read last; one that has read none runs on code alone until a read succeeds.
 

@@ -14,8 +14,8 @@ Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
     api.add_router("/", ai_sdk_routers.get_oversight_router())
 
 The oversight router is imported only when requested and needs
-``django_ai_sdk.oversight`` in INSTALLED_APPS. It adds the switches and ledger
-routes when those apps are installed.
+``django_ai_sdk.oversight`` in INSTALLED_APPS. It adds the switches, ledger and
+authoring routes when those apps are installed.
 
 Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
 ``exclude={"delete_all_threads"}`` and add your own on the result.

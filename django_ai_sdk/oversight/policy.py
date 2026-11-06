@@ -180,15 +180,17 @@ def build(
     *,
     modes: Mapping[str, str] | None = None,
     ancestors: Mapping[str, Mapping[str, str]] | None = None,
+    policy_class: type[Policy] | None = None,
 ) -> ResolvedPolicy:
     """Resolve `name` from code, then switch rule `modes` ({rule: mode}).
 
     `ancestors` maps each extended policy's name to its modes, so switching a
-    parent's rule affects every child.
+    parent's rule affects every child. `policy_class` builds that class instead of the
+    registered one, to check a draft before registering it.
     Raises LookupError for an unknown policy and ImproperlyConfigured for a cycle.
     """
     ancestors = ancestors or {}
-    resolved = _from_code(name, (), ancestors)
+    resolved = _from_code(name, (), ancestors, policy_class=policy_class)
     apply_modes(resolved, modes or {})
     ceiling = Capture(setting("CAPTURE"))
     if rank(CAPTURE_ORDER, resolved.capture) > rank(CAPTURE_ORDER, ceiling):
@@ -224,11 +226,15 @@ def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy, parent_name: str)
 
 
 def _from_code(
-    name: str, chain: tuple[str, ...], ancestors: Mapping[str, Mapping[str, str]]
+    name: str,
+    chain: tuple[str, ...],
+    ancestors: Mapping[str, Mapping[str, str]],
+    *,
+    policy_class: type[Policy] | None = None,
 ) -> ResolvedPolicy:
     if name in chain:
         raise ImproperlyConfigured(f"Policy {name!r} extends itself: {' -> '.join((*chain, name))}")
-    cls = get_policy_class(name)
+    cls = policy_class or get_policy_class(name)
     if cls is None:
         raise LookupError(f"No oversight policy {name!r}")
     policy = cls()
@@ -289,7 +295,7 @@ def _tunable(lens: Lens) -> set[str]:
 
 # The system check reports bad settings (conf.problems), but does not stop a turn.
 # So every value that reaches a built policy is checked again here: the settings
-# it inherits, and the policy's own.
+# it inherits, and a code or authored policy's own.
 
 
 def _choice(key: str, value: Any, choices: tuple[str, ...]) -> str:

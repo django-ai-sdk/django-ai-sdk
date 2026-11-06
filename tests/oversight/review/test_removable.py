@@ -55,9 +55,10 @@ assert not [m for m in sys.modules if m.startswith(REVIEW)], sorted(sys.modules)
 
 
 def test_core_runs_without_the_review_layer(tmp_path):
-    # The switches and ledger apps sit on the review layer: they go with it.
+    # The switches, authoring and ledger apps sit on the review layer: they go with it.
     apps = [
         "django_ai_sdk.oversight.switches",
+        "django_ai_sdk.oversight.authoring",
         "django_ai_sdk.oversight.ledger",
     ]
     run_without(tmp_path, apps, SCRIPT, before_setup=HIDE_REVIEW)

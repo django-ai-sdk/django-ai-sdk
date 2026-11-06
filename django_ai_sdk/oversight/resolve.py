@@ -2,7 +2,8 @@
 
 `aget_policy(name)` builds the policy with the installed `OverlaySource` and
 caches it for the source's `ttl`. Core's source is empty. Apps that switch rule modes
-at runtime install their own with `set_overlay_source`.
+at runtime install their own with `set_overlay_source`. Apps that register whole
+policies at runtime add a loader with `add_policy_loader`.
 """
 
 from __future__ import annotations
@@ -12,11 +13,12 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.policy import ResolvedPolicy, build
 from django_ai_sdk.oversight.registry import get_policy_class
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Awaitable, Callable, Iterable
 
 logger = get_logger(__name__)
 
@@ -42,6 +44,36 @@ class OverlaySource:
 
 
 _source: OverlaySource = OverlaySource()
+
+# Policy loaders let an app register whole policies at runtime (the authoring app
+# keeps operator-written ones in the database). Each registers or unregisters its
+# policies when awaited.
+_loaders: list[Callable[[], Awaitable[None]]] = []
+_loaded_at = -math.inf
+
+
+def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
+    """Await `loader` before policy lookups. Adding it twice has no effect."""
+    global _loaded_at
+    if loader not in _loaders:
+        _loaders.append(loader)
+        _loaded_at = -math.inf
+
+
+async def aload_policies() -> None:
+    """Run every loader, at most once per RUNTIME_CACHE_SECONDS.
+
+    Failures are logged, and already registered policies stay.
+    """
+    global _loaded_at
+    if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
+        return
+    _loaded_at = time.monotonic()
+    for loader in list(_loaders):
+        try:
+            await loader()
+        except Exception:
+            logger.opt(exception=True).warning("An oversight policy loader failed")
 
 
 def set_overlay_source(source: OverlaySource | None) -> None:
@@ -106,6 +138,7 @@ _agents_read_at = -math.inf
 async def aget_policy(name: str) -> ResolvedPolicy | None:
     """Return the effective policy with its overlay, cached for the source's `ttl`.
 
+    Policy loaders run first, so a policy registered at runtime is found.
     Returns None for an unknown or broken policy. The reason is logged once per
     cache period and kept for `broken_reason()`. The caller decides what happens next.
     `TurnGuard.start` refuses the turn unless FAIL_MODE is "open".
@@ -114,6 +147,7 @@ async def aget_policy(name: str) -> ResolvedPolicy | None:
     the policy as declared in code. That result is not cached, so the next turn
     tries the overlay again.
     """
+    await aload_policies()
     source = _source
     cached = _cache.get(name)
     if cached and time.monotonic() - cached[0] < source.ttl:
@@ -187,10 +221,10 @@ def invalidate(name: str | None = None) -> None:
     Clearing a policy also clears every policy that extends it. The last good
     policies are kept, since they are only used when the overlay cannot be read.
     """
-    global _agents_read_at
+    global _loaded_at, _agents_read_at
     if name is None:
         _cache.clear()
-        _agents_read_at = -math.inf
+        _agents_read_at = _loaded_at = -math.inf
         return
     for cached, (_, _, lineage) in list(_cache.items()):
         if cached == name or name in lineage:
@@ -200,7 +234,9 @@ def invalidate(name: str | None = None) -> None:
 __all__ = [
     "OverlaySource",
     "aassigned_policy",
+    "add_policy_loader",
     "aget_policy",
+    "aload_policies",
     "broken_reason",
     "code_ancestors",
     "invalidate",
