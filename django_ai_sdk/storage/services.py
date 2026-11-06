@@ -16,10 +16,22 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 
 if TYPE_CHECKING:
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
     from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
+
+
+def thread_metadata(agent_id: str, agent: Agent, created_via: str) -> dict[str, Any]:
+    """The metadata every new thread records about the agent it belongs to."""
+    return {
+        "agent_id": agent_id,
+        "model": agent.model,
+        "agent_name": agent.name or agent.__class__.__name__,
+        "agent_class": agent.__class__.__name__,
+        "created_via": created_via,
+    }
 
 
 async def _get_thread(thread_id: str) -> ThreadInfo | None:
@@ -86,13 +98,7 @@ class ThreadService(PermissionsMixin):
 
         storage_class = agent.storage_adapter
         title = title or ""
-        default_metadata = {
-            "agent_id": agent_id,
-            "model": agent.model,
-            "agent_name": agent.name or agent.__class__.__name__,
-            "agent_class": agent.__class__.__name__,
-            "created_via": "create_thread",
-        }
+        default_metadata = thread_metadata(agent_id, agent, "create_thread")
         default_metadata.update(metadata or {})
 
         thread_id = await storage_class.create_thread(
