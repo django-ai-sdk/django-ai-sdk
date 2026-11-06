@@ -47,7 +47,7 @@ Changelog = "https://github.com/django-ai-sdk/django-ai-sdk/releases"
 
 [project.optional-dependencies]
 # Leaves out typesafe: it is a paid hosted service, so a host opts in on purpose.
-all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers,local,ledger]"]
+all = ["django-ai-sdk[haystack,rag,mcp,files,providers,transformers,local,ledger,automations]"]
 providers = ["django-ai-sdk[anthropic,huggingface,mistral,ollama,openrouter]"]
 rag = ["django-ai-sdk[chroma,qdrant]"]
 # Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
@@ -88,6 +88,9 @@ local = ["onnxruntime>=1.18", "tokenizers>=0.19", "huggingface-hub>=0.23", "nump
 vault = ["cryptography>=44"]
 # The oversight ledger app (django_ai_sdk.oversight.ledger): a hash chain over the record, on the vault.
 ledger = ["django-ai-sdk[vault]"]
+# The automations app (django_ai_sdk.automations): APScheduler's CronTrigger reads a cron
+# expression and finds its next occurrence across DST. No scheduler of APScheduler's runs.
+automations = ["apscheduler>=3.11"]
 
 [dependency-groups]
 # Stack for the demo projects in demos/ (demos/base holds their shared settings).

@@ -158,6 +158,11 @@ def is_registered(definition: WorkflowDefinition) -> bool:
     return bool(definition.name) and _registry.get(definition.name) == definition
 
 
+def get_declared_workflows() -> dict[str, WorkflowDefinition]:
+    """Workflows declared in code, keyed by name."""
+    return dict(_registry)
+
+
 def get_invalid_workflows() -> dict[str, str]:
     """Declarations the registry refused, name -> reason. Read by the system check."""
     return dict(_invalid)
