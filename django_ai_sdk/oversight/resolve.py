@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.policy import ResolvedPolicy, build
 from django_ai_sdk.oversight.registry import get_policy_class
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 logger = get_logger(__name__)
 
 
@@ -160,10 +162,15 @@ def broken_reason(name: str) -> str:
     return _broken.get(name, "")
 
 
-def code_ancestors(name: str) -> list[str]:
-    """Every policy `name` extends in code, nearest first. build() reports cycles."""
+def code_ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
+    """Every policy `name` extends in code, nearest first. build() reports cycles.
+
+    `parents` replaces the `extends` of `name`, for a policy not registered yet.
+    """
     found: list[str] = []
-    todo = list(getattr(get_policy_class(name), "extends", []) or [])
+    if parents is None:
+        parents = getattr(get_policy_class(name), "extends", []) or []
+    todo = list(parents)
     while todo:
         parent = todo.pop(0)
         if parent in found or parent == name:

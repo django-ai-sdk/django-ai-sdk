@@ -105,6 +105,13 @@ jobs:
       - name: Run the oversight tests in random order
         run: make test UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-randomly" TEST_PATHS=tests/oversight
 
+      # The switches app is opt-in: core and review must pass without its overlay installed.
+      - name: Run the oversight tests without the switches app
+        run: >-
+          make test
+          TEST_PATHS=tests/oversight
+          PYTEST_ARGS='--ds=tests.settings_without_switches --ignore=tests/oversight/switches'
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest

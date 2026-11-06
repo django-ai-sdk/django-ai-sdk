@@ -25,6 +25,8 @@ class OversightDefaultPermission(BasePermission):
         Operation.VIEW_OVERSIGHT_METRICS: "django_ai_sdk_oversight.view_turn",
         Operation.VIEW_OVERSIGHT_CONTENT: "django_ai_sdk_oversight.view_turncontent",
         Operation.REVIEW_OVERSIGHT: "django_ai_sdk_oversight.change_reviewitem",
+        Operation.VIEW_OVERSIGHT_SWITCHES: "django_ai_sdk_oversight_switches.view_override",
+        Operation.SWITCH_OVERSIGHT: "django_ai_sdk_oversight_switches.change_override",
     }
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:

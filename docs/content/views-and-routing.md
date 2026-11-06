@@ -46,7 +46,7 @@ urlpatterns = [
 ]
 ```
 
-`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](/manual/oversight/#review-api). DRF has no review routes: call `OversightService` from your own view.
+`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](/manual/oversight/#review-api). It also serves the [runtime switches](/oversight-switches/) routes when the opt-in switches app is installed. DRF has no review or switch routes: call `OversightService` or `SwitchService` from your own view.
 
 Each `get_*_router()` builds a **new** Router, so you can trim it and add your own endpoints next to the SDK's without changing the router for anyone else. That is why they are functions rather than module-level routers: Ninja can't remove an endpoint from a router, so `exclude` has to happen while it is built.
 
