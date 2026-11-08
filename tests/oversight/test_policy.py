@@ -109,11 +109,10 @@ class Overlay(resolution.OverlaySource):
 
 @pytest.fixture
 def overlay():
-    before = resolution.overlay_source()
     source = Overlay()
     resolution.set_overlay_source(source)
     yield source
-    resolution.set_overlay_source(before)
+    resolution.set_overlay_source(None)
 
 
 @register_policy

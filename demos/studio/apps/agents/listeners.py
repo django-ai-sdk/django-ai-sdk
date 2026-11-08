@@ -1,6 +1,6 @@
-"""Workflow actions for the demo, named by `AI_SDK_WORKFLOW_ACTIONS`.
+"""Workflow listeners for the demo, named by `AI_SDK_WORKFLOWS["LISTENERS"]`.
 
-The package ships no actions a definition can name — delivering a result somewhere
+The package ships no listeners a definition can name — delivering a result somewhere
 is the host's business, not the SDK's. These two are this host's.
 """
 
@@ -10,13 +10,13 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.workflows.actions import WorkflowAction
+from django_ai_sdk.workflows.listeners import RunListener
 
 if TYPE_CHECKING:
     from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 
 
-class ConsoleLogAction(WorkflowAction):
+class ConsoleLogListener(RunListener):
     """Print every step's outcome as it settles (dev/debug).
 
     On the workflow it prints every step; on one step it prints that one.
@@ -31,7 +31,7 @@ class ConsoleLogAction(WorkflowAction):
         )
 
 
-class ThreadMessageAction(WorkflowAction):
+class ThreadMessageListener(RunListener):
     """Post a step's output into a new chat thread owned by the run's user.
 
     Config: `agent_id` — whose storage adapter opens the thread — and `step`, the
@@ -40,6 +40,12 @@ class ThreadMessageAction(WorkflowAction):
     """
 
     description = "Post a step's result into a new chat thread for the run's user"
+
+    @classmethod
+    def validate_config(cls, config: dict[str, Any]) -> None:
+        unknown = set(config) - {"agent_id", "step"}
+        if unknown or not all(isinstance(value, str) for value in config.values()):
+            raise ValueError("takes `agent_id` and `step`, both strings")
 
     async def on_run_end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
         from django_ai_sdk.common import ChatMessage
@@ -51,7 +57,7 @@ class ThreadMessageAction(WorkflowAction):
         payload = ctx.step(self.config.get("step", ""))
         if not agent_id or payload is None:
             return
-        if ctx.principal is None or ctx.principal.is_anonymous:
+        if ctx.user is None or ctx.user.is_anonymous:
             return
 
         content = _as_text(payload)
@@ -59,10 +65,10 @@ class ThreadMessageAction(WorkflowAction):
         thread_id = await ThreadService.create_thread(
             agent_id,
             title=source,
-            metadata={"created_via": "action:thread_message"},
-            user=ctx.principal,
+            metadata={"created_via": "listener:thread_message"},
+            user=ctx.user,
         )
-        storage = await ThreadService.storage_for_thread(thread_id, user=ctx.principal)
+        storage = await ThreadService.storage_for_thread(thread_id, user=ctx.user)
         await storage.store_chat_message(
             # Adapters take an id rather than minting one.
             ChatMessage(id=str(uuid.uuid4()), role="assistant", content=content)
@@ -88,10 +94,10 @@ async def _retitle(thread_id: str, content: str, agent_id: str, ctx: WorkflowCon
         agent=agent,
         messages=[ChatMessage(id=str(uuid.uuid4()), role="user", content=content)],
         thread_id=thread_id,
-        user=ctx.principal,
+        user=ctx.user,
     )
     if title:
-        await ThreadService.update_thread(thread_id, title=title, user=ctx.principal)
+        await ThreadService.update_thread(thread_id, title=title, user=ctx.user)
 
 
 def _as_text(payload: Any) -> str:

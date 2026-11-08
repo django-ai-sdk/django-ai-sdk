@@ -329,7 +329,10 @@ class SubagentStreamFilter:
         # the task, guards its tools and checks the response. Otherwise it joins
         # the outer turn.
         if self._subagent is None:
-            return await self._delegate(messages, streaming_callback, task, **kwargs)
+            from django_ai_sdk.oversight.calls import settled
+
+            with settled():
+                return await self._delegate(messages, streaming_callback, task, **kwargs)
         from django_ai_sdk.errors import Blocked
         from django_ai_sdk.oversight.agent_run import turn
         from django_ai_sdk.oversight.guard import current_guard

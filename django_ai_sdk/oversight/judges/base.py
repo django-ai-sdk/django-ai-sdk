@@ -20,6 +20,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.patterns import mask_secrets
 from django_ai_sdk.oversight.types import Answer, Subject
 
@@ -113,7 +114,9 @@ async def ask(judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext
         return Answer(answerer=judge.label(), error=error, latency_ms=_ms(started))
 
     try:
-        answer = await asyncio.wait_for(judge.answer(lens, view), timeout=judge.timeout)
+        # A judge's own model calls are oversight, not the turn's (`oversight.calls`).
+        with settled():
+            answer = await asyncio.wait_for(judge.answer(lens, view), timeout=judge.timeout)
     except TimeoutError:
         return failed("timeout")
     except asyncio.CancelledError:

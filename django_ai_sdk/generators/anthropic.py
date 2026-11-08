@@ -5,8 +5,10 @@ from typing import Any
 from haystack_integrations.components.generators.anthropic import AnthropicChatGenerator
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 
 
+@watched_factory
 def anthropic_chat(**kwargs: Any) -> AnthropicChatGenerator:
     """Anthropic Messages API generator wired to Django settings."""
     # AnthropicChatGenerator has no base-URL parameter, so there is no

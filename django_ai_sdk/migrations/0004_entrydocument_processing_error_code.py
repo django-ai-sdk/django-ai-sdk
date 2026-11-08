@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("django_ai_sdk", "0003_move_workflows_to_workflows_app"),
+        ("django_ai_sdk", "0002_memory_metadata_storage"),
     ]
 
     operations = [

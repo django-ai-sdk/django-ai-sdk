@@ -1,6 +1,6 @@
 """Registered workflow step types for the demo.
 
-Both are named by `AI_SDK_WORKFLOW_STEPS` and composed by the `thread-digest`
+Both are named by `AI_SDK_WORKFLOWS["STEPS"]` and composed by the `thread-digest`
 definition in workflows.py. The package ships no step types; these are the host's.
 
 Two namespaces, so nothing collides: `ctx.input(...)` is what the caller supplied,

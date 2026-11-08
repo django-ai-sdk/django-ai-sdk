@@ -85,6 +85,8 @@ class GuardState:
     run_error: str = ""
     # False for a dry run, which writes nothing.
     recording: bool = True
+    # The gate ran, so a model call now counts as seen (`oversight.calls`).
+    gated: bool = False
     # Refused unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     # Set when a stage failed closed, the policy did not load, or the caller called
