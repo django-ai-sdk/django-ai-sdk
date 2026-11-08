@@ -641,7 +641,7 @@ LENS_ATTRIBUTES = (
 
 
 def lens_from_dict(node: Mapping[str, Any]) -> Lens:
-    """Build a lens from its JSON form, as settings, overlays and authored policies use.
+    """Build a lens from its JSON form, as settings and overlays use.
 
     {"kind": "pattern" | "check" | "judge", "answer": "flag" | "score" | "choice" |
     "entities", ...attributes}. "preset" names a built-in lens instead (see

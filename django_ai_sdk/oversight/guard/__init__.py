@@ -312,9 +312,11 @@ def _stand_in(name: str) -> ResolvedPolicy:
 
 
 def _actor_id(user: Any) -> str:
-    """Return the record's id for `user`, its primary key as text. "" when anonymous or missing."""
+    """Return the record's id for `user` (custody's `actor`). "" when anonymous or missing."""
+    from django_ai_sdk.oversight import custody
+
     pk = getattr(user, "pk", None)
-    return "" if pk is None else str(pk)
+    return "" if pk is None else custody.get().actor(str(pk))
 
 
 __all__ = [

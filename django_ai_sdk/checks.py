@@ -2,7 +2,7 @@
 
 These catch misconfigurations that would not fail any request. Ids are
 `ai_sdk.E001` and up. Each opt-in app has its own `PREFIX`, such as
-`ai_sdk.workflows` or `ai_sdk.oversight.switches`, and reports a bad settings dict as
+`ai_sdk.workflows` or `ai_sdk.oversight.ledger`, and reports a bad settings dict as
 `<PREFIX>.E012`.
 """
 
@@ -84,6 +84,16 @@ def one_of(*choices: Any) -> Validator:
         if value in choices:
             return ""
         return f"is {value!r}, not one of {', '.join(repr(choice) for choice in choices)}"
+
+    return check
+
+
+def secret(validator: Validator) -> Validator:
+    """`validator`, whose message names the value's type, never the value: for keys."""
+
+    def check(value: Any) -> str:
+        problem = validator(value)
+        return problem.replace(repr(value), f"a {type(value).__name__}") if problem else ""
 
     return check
 
@@ -230,5 +240,6 @@ __all__ = [
     "of_type",
     "one_of",
     "per_database",
+    "secret",
     "task_backend_problem",
 ]

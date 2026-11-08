@@ -201,14 +201,15 @@ async def _refuse_own(turn: Turn, user: UserType) -> None:
 
     A subagent's turn may carry no actor, so the turn that delegated it counts too.
     """
+    from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import Turn
 
     actors = {turn.actor_id}
     if turn.parent_turn_id:
         parent = Turn.objects.filter(pk=turn.parent_turn_id).values_list("actor_id", flat=True)
         actors.add(await parent.afirst())
-    me = reader_id(user)
-    if me and me in actors:
+    names = custody.actor_names(reader_id(user))
+    if any(actor and actor in names for actor in actors):
         raise PermissionDenied("Nobody reviews a turn of their own.")
 
 

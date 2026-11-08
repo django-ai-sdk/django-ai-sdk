@@ -323,7 +323,7 @@ def test_the_manual_lists_every_check_id():
 
     root = Path(__file__).resolve().parents[2]
     # The opt-in apps raise their own ids, under their own PREFIX.
-    opt_in = {"switches"}
+    opt_in = {"ledger", "switches"}
     code = "".join(
         path.read_text(encoding="utf-8")
         for path in (root / "django_ai_sdk/oversight").rglob("*.py")

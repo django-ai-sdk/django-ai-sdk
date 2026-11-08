@@ -8,6 +8,7 @@
 - Durable workflow runs: a run is claimed by one worker, keeps a heartbeat, is swept with `manage.py workflows_sweep` when its worker dies, and resumes with `WorkflowService.resume(run_id)` or `POST /workflows/runs/{id}/resume/`. See [Workflows](docs/content/manual/workflows.md).
 - The oversight review API (`OversightService`, `get_oversight_router()`): the turns feed and one turn, review queues, per-operation model permissions with scope hooks, an access record of every read, forgetting on user and thread delete, and `manage.py oversight_prune`. See [Oversight](docs/content/manual/oversight.md).
 - The opt-in switches app (`django_ai_sdk.oversight.switches`): change a rule's mode or an agent's policy at runtime, with a reason when it weakens oversight, above the floors code sets (`Rule(min_mode=)`, `Agent.oversight_required`). See [Switches](docs/content/oversight-switches.md).
+- The opt-in vault (`django_ai_sdk.vault`): data encrypted under a key per scope, shredded to forget it, with master key rotation. And the opt-in ledger (`django_ai_sdk.oversight.ledger`): the oversight record hash-chained, content in the vault, pseudonyms for who asked, and signed checkpoints to publish. See [Vault](docs/content/vault.md) and [Audit-grade oversight](docs/content/oversight-ledger.md).
 
 ### Upgrading from 0.1.x
 

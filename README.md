@@ -140,7 +140,9 @@ except Blocked as refused:
 
 See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations. To flip a
 rule to enforce or give an agent another policy without a deploy, add the opt-in
-`django_ai_sdk.oversight.switches` app ([Runtime switches](docs/content/oversight-switches.md)).
+`django_ai_sdk.oversight.switches` app ([Runtime switches](docs/content/oversight-switches.md)). To encrypt the record,
+forget a thread by destroying its key and hash-chain what was recorded, add the opt-in vault
+and ledger apps ([Audit-grade oversight](docs/content/oversight-ledger.md)).
 
 ## Features
 

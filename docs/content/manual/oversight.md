@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators are an opt-in app on the `OverlaySource` seam below ([Runtime switches](/oversight-switches/)); an encrypted, chained record is not part of core and is planned as an opt-in app on the `custody` seam.
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators are an opt-in app on the `OverlaySource` seam below ([Runtime switches](/oversight-switches/)); an encrypted, chained record is two opt-in apps on the `custody` seam, the vault and the ledger ([Audit-grade oversight](/oversight-ledger/)).
 
 ## Installing
 
@@ -251,14 +251,14 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 
 | Model | Holds |
 | --- | --- |
-| `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out. |
+| `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, or with the [ledger](/oversight-ledger/#who-asked) a pseudonym; `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out. |
 | `TurnContent` | The content at the policy's capture level, as custody stored it (`stored`), with its scope (`thread:<id>`, or `turn:<id>` without a thread) and an expiry. Beside it: `texts`, by answer id, what each answer said in words (its reason, the names a judge gave for an `Entities` lens, its per-item scores by key, the same of the answers on its trail); and `notes`, by review item id, what reviewers wrote. Both are added as reflect's and reviewers' answers arrive, and go when the content goes. |
 | `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency, reviewer. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
 | `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once, whether reflect or a reviewer's answer made it match: both lock the turn before they look, and a unique constraint holds it. |
 | `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. Its resolution holds who closed it (a user id), the value as the record keeps it and whether they agreed; the reviewer's note is in the content's `notes`. Core creates items; the [review API](#review-api) resolves them. |
-| `AccessRecord` | A read of the record, or an operator's change of it: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews` and `review`; the change `switch`; or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
+| `AccessRecord` | A read of the record, or an operator's change of it: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews`, `review`, `verify` and `reveal`; the changes `checkpoint`, `switch` and `author`; or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API; views there write no access record. The access records list both reads and changes (switches and prune runs); filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API; views there write no access record. The access records list both reads and changes (switches, checkpoints and prune runs); filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
 
 ## Review API
 
@@ -296,6 +296,9 @@ Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `dj
 | `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and resolving an item with an answer. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
 | `VIEW_OVERSIGHT_SWITCHES` | `django_ai_sdk_oversight_switches.view_switch` | The [runtime switches](/oversight-switches/) in force (the opt-in switches app). |
 | `SWITCH_OVERSIGHT` | `django_ai_sdk_oversight_switches.change_switch` | Switching a rule's mode or an agent's policy. |
+| `VIEW_OVERSIGHT_LEDGER` | `django_ai_sdk_oversight_ledger.view_checkpoint` | The [ledger's](/oversight-ledger/) checkpoints, and verifying the chain (the opt-in ledger app). |
+| `CHECKPOINT_OVERSIGHT` | `django_ai_sdk_oversight_ledger.add_checkpoint` | Writing a checkpoint. |
+| `REVEAL_OVERSIGHT_ACTOR` | `django_ai_sdk_oversight_ledger.reveal_actor` | Who asked a turn, for a recorded reason. |
 
 A reviewer may hold review alone: they then work the queue from each item's queue, lens and rule, without the turn's row, and resolve it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
 
@@ -314,7 +317,7 @@ An empty `AI_SDK_PERMISSIONS["oversight"]` falls back to the default, as for age
 
 Every read of turns or review items writes an `AccessRecord` with the ids of the turns it showed, and of those whose content it showed when that is not all of them.
 
-What was forgotten reads back as gone. A turn whose thread or user was deleted, or whose content expired and was pruned, has `content_state` `"none"`, no preview, no answers' words and no reviewers' notes; a deleted user's turns have an empty `actor_id`; a pruned turn is not found. Content past its expiry and not yet pruned reads as `"expired"` on the turn, and as no preview and no notes in lists.
+What was forgotten reads back as gone. A turn whose thread or user was deleted, or whose content expired and was pruned, has `content_state` `"none"`, no preview, no answers' words and no reviewers' notes; a deleted user's turns have an empty `actor_id`; a pruned turn is not found. Content past its expiry and not yet pruned reads as `"expired"` on the turn, and as no preview and no notes in lists. Content kept under a master key not configured here (the [vault](/oversight-ledger/#the-vault)) reads as `"unreadable"`.
 
 ## Retention
 
@@ -328,7 +331,7 @@ It deletes, `--batch-size` rows per transaction so a backlog never holds one lon
 
 - content rows past their `expires_at`, and with them what judges and reviewers wrote there; the turn stays, its content cleared;
 - turns past theirs, with their answers, matches, review items and content. Retention wins over a review still open: the prune's access record counts them in `open_reviews`. Custody's `pruning(turn_ids)` is handed each batch first, in its transaction; when it raises, that batch stays and the run stops;
-- access records older than `RETENTION["metadata"]` days. This is the setting's value, not a policy's: when a policy keeps its turns longer, set the setting at least as long, or the record of who read them goes first.
+- access records older than `RETENTION["metadata"]` days. Custody's `pruning((), access_ids=ids)` is handed each batch first, in its transaction. This is the setting's value, not a policy's: when a policy keeps its turns longer, set the setting at least as long, or the record of who read them goes first.
 
 It ends with an `AccessRecord` of operation `prune`, with the counts in `query`. `AccessRecord.last_pruned()` reads it, and so does the deploy check `W007`, which warns when there are turns more than two days old and no run finished in the last two days. It reads the database, so it runs with `--database`:
 
@@ -338,23 +341,25 @@ python manage.py check --deploy --database default
 
 ## Custody
 
-`django_ai_sdk.oversight.custody` decides how a turn's content is kept. A custody has five methods, the `Custody` protocol; core installs `PlainCustody`:
+`django_ai_sdk.oversight.custody` decides how a turn's content is kept, and how the record names who asked. A custody has seven methods, the `Custody` protocol; core installs `PlainCustody`:
 
 | Method | What it is handed | `PlainCustody` |
 | --- | --- | --- |
+| `actor(user_pk) -> str` | A user's primary key: what `Turn.actor_id` holds for them. Pure, no query; `""` stays `""`. | The primary key |
 | `store(scope, content) -> dict` | A turn's content: what its `TurnContent.stored` keeps. May raise `custody.Forgotten`: the turn is then recorded without content. | The content as it is |
 | `load_many(items) -> list` | What `store` kept for each `(scope, stored)`, in order and in a fixed number of queries; None for one that no longer opens, instead of raising. | `stored` of each |
 | `forget(scope)` | A scope to forget (`"thread:<id>"`, `"turn:<id>"`). | Deletes its `TurnContent` rows; the turns stay, `content` cleared |
-| `chained(items)` | Rows just written, as `(kind, row)`: `turn`, `answer`, `match`, `access`, `override`. A turn is handed each time its row is written (open at the end of the gate, then at close). Raising aborts the write. | Nothing |
-| `pruning(turn_ids)` | Turns retention is about to delete with their answers, matches and content. | Nothing |
+| `chained(items)` | Rows just written, as `(kind, row)`: `turn`, `answer`, `match`, `access`, `switch`. A turn is handed each time its row is written (open at the end of the gate, then at close). Raising aborts the write. | Nothing |
+| `pruning(turn_ids, *, access_ids=())` | Turns retention is about to delete with their answers, matches and content, or access records past the metadata retention. | Nothing |
+| `expiring(content_ids)` | Content rows retention is about to delete ahead of their turns. | Nothing |
 
-Every method runs in the caller's transaction. An app installs its own with `custody.install(custody)` in its `AppConfig.ready()`.
+Every method runs in the caller's transaction. An app installs its own with `custody.install(custody)` in its `AppConfig.ready()`; `install` raises `TypeError` when the object lacks one of them. The [ledger app](/oversight-ledger/) installs `LedgerCustody`. `custody.actor_names(user_pk)` is every name the record may hold for a user: the installed custody's, and their primary key, as turns recorded before that custody was installed name them.
 
-Deleting a thread calls `forget("thread:<id>")`. Deleting a user forgets the content of each turn they asked without a thread, then clears `actor_id` on all their turns and their name on the access records they left (`signals.forget_actor`). Under `PlainCustody` that is one delete of content rows per 500 turns; another custody is handed `forget("turn:<id>")` per turn. A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
+Deleting a thread calls `forget("thread:<id>")`. Deleting a user forgets the content of each turn they asked without a thread, then clears `actor_id` on all their turns (under every name of `actor_names`) and their name on the access records they left (`signals.forget_actor`). Under `PlainCustody` that is one delete of content rows per 500 turns; another custody is handed `forget("turn:<id>")` per turn. A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy (a registered name) over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
@@ -423,6 +428,6 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 
-The opt-in switches app raises its own, under `ai_sdk.oversight.switches.*` ([Switches](/oversight-switches/)).
+The opt-in apps raise their own, under `ai_sdk.vault.*` and `ai_sdk.oversight.ledger.*` ([Audit-grade oversight](/oversight-ledger/#checks)), and `ai_sdk.oversight.switches.*` ([Switches](/oversight-switches/)).
 
-In every app the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.
+In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.

@@ -35,6 +35,10 @@ def scope_for(thread_id: Any = "", turn_id: Any = "") -> str:
 
 
 class Custody(Protocol):
+    def actor(self, user_pk: str) -> str:
+        """The `Turn.actor_id` to store for this user. Must not query. "" maps to ""."""
+        ...
+
     def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
         """Return the value to store for `content`. May raise Forgotten."""
         ...
@@ -52,19 +56,28 @@ class Custody(Protocol):
         """Receive rows just written as (kind, row) pairs.
 
         Kinds are "turn", "answer", "match", "access" (an `AccessRecord`) and
-        "override" (a runtime switch). A turn arrives again on each update: once
-        when its gate ends and again when it closes.
+        "switch" (a runtime switch), as named in `ledger.chain.KINDS`. A turn
+        arrives again on each update: once when its gate ends and again when it
+        closes.
         "aside" is a `TurnContent` whose judge text or reviewer notes were added to.
         """
         ...
 
-    def pruning(self, turn_ids: Iterable[Any]) -> None:
-        """Turns about to be deleted by retention."""
+    def pruning(self, turn_ids: Iterable[Any], *, access_ids: Iterable[Any] = ()) -> None:
+        """Called before retention deletes these turns (with their answers, matches
+        and content) and these access records."""
+        ...
+
+    def expiring(self, content_ids: Iterable[Any]) -> None:
+        """Called before retention deletes these content rows."""
         ...
 
 
 class PlainCustody:
-    """The default custody. Stores content as is and chains nothing."""
+    """The default custody. Stores content as is and names users by primary key."""
+
+    def actor(self, user_pk: str) -> str:
+        return user_pk
 
     def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
         from django_ai_sdk.oversight.models import TurnContent
@@ -94,21 +107,53 @@ class PlainCustody:
     def chained(self, items: list[tuple[str, Model]]) -> None:
         return None
 
-    def pruning(self, turn_ids: Iterable[Any]) -> None:
+    def pruning(self, turn_ids: Iterable[Any], *, access_ids: Iterable[Any] = ()) -> None:
+        return None
+
+    def expiring(self, content_ids: Iterable[Any]) -> None:
         return None
 
 
 _custody: Custody = PlainCustody()
 
+# The protocol's methods, which `install` requires.
+METHODS = tuple(
+    name for name, value in vars(Custody).items() if callable(value) and not name.startswith("_")
+)
+
 
 def install(custody: Custody | None) -> None:
-    """Use `custody` for every turn. None restores PlainCustody."""
+    """Use `custody` for every turn. None restores PlainCustody.
+
+    Raises TypeError if a protocol method is missing, so an outdated custody fails
+    at install time instead of during a turn.
+    """
     global _custody
+    if custody is not None:
+        missing = [name for name in METHODS if not callable(getattr(custody, name, None))]
+        if missing:
+            raise TypeError(
+                f"{type(custody).__name__} is not a Custody: it lacks {', '.join(missing)}"
+            )
     _custody = custody or PlainCustody()
 
 
 def get() -> Custody:
     return _custody
+
+
+def actor_names(user_pk: str) -> set[str]:
+    """All actor ids the record may hold for this user.
+
+    That is the installed custody's name, any `former_actors(user_pk)` it keeps, and
+    the primary key, which turns recorded before that custody was installed use.
+    Empty for "".
+    """
+    if not user_pk:
+        return set()
+    # A custody may name users differently over time, e.g. after a secret rotates.
+    former = getattr(_custody, "former_actors", None)
+    return {user_pk, _custody.actor(user_pk), *(former(user_pk) if former else ())} - {""}
 
 
 def is_plain() -> bool:
@@ -120,6 +165,7 @@ __all__ = [
     "Custody",
     "Forgotten",
     "PlainCustody",
+    "actor_names",
     "get",
     "install",
     "is_plain",

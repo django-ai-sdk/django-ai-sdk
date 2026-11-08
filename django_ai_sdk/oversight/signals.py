@@ -30,8 +30,11 @@ def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
     try:
         # Savepoint, so a failure here does not break the thread delete.
         with transaction.atomic():
+            # A custody that shreds keys leaves a mark even before the thread's first
+            # turn is written, so a turn still in its gate cannot store it afterwards.
             if (
-                Turn.objects.filter(thread_id=thread_id).exists()
+                not custody.is_plain()
+                or Turn.objects.filter(thread_id=thread_id).exists()
                 or TurnContent.objects.filter(scope=scope).exists()
             ):
                 custody.get().forget(scope)
@@ -58,10 +61,10 @@ def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
 def forget_actor(actor_id: str) -> int:
     """Forget a user on the turns they asked. Returns how many turns named them.
 
-    Clears `Turn.actor_id`. A turn in a thread keeps its content until the thread is
-    deleted. A turn without a thread is its own `turn:<id>` scope and is forgotten
-    here. Access records keep the reader id but lose the name. Answers, matches and
-    reviews stay.
+    Clears `Turn.actor_id` under both custody's name and the primary key. A turn
+    in a thread keeps its content until the thread is deleted. A turn without a
+    thread is its own `turn:<id>` scope and is forgotten here. Access records keep
+    the reader id but lose the name. Answers, matches and reviews stay.
 
     Safe to run again. `manage.py oversight_forget_actor <id>` calls it when the
     delete signal failed.
@@ -72,7 +75,7 @@ def forget_actor(actor_id: str) -> int:
     if not actor_id:
         return 0
     custodian = custody.get()
-    turns = Turn.objects.filter(actor_id=actor_id)
+    turns = Turn.objects.filter(actor_id__in=custody.actor_names(actor_id))
     plain = custody.is_plain()
     threadless = turns.filter(thread_id="").values_list("pk", flat=True).iterator(FORGET_BATCH)
     for batch in batched(threadless, FORGET_BATCH):
