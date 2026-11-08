@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading and resolving review items through an API, runtime switches for operators, and an encrypted, chained record are not part of core; they are planned as opt-in apps that build on the seams below (`OverlaySource`, `custody`).
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators and an encrypted, chained record are not part of core; they are planned as opt-in apps that build on the seams below (`OverlaySource`, `custody`).
 
 ## Installing
 
@@ -32,7 +32,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `MAX_INPUT_CHARS` | `100000` | A longer question is refused at the gate, unread. With history the server did not store (`gate_history`), the question and the history judged with it count together. `None`: no limit. |
 | `CLIENT_DETAIL` | `"actions"` | What `data-oversight` tells the chat client. `actions`: the stage, outcome and message when an enforced rule acted in a way the person sees (block, restrict_tools, mask) or its notice tells them, no rule names. `full`: rule names and every stage's answers too, for a developer view, each value as the record keeps it (see [Models](#models)). |
 | `FAIL_MODE` | `"closed"` | What a failed lens means: its check or judge raised, timed out, missed the deadline or was handed more than it reads (too long). `closed` treats an enforced rule that blocks, masks or takes tools away as matched when a lens it reads failed, withholds a tool result it cannot check, and refuses a turn whose policy cannot be chosen or loaded. Rules that only alert, queue or notify never fire on a failure; rules in report mode only record it. `open` lets the turn through and records the failure, and runs a turn whose policy cannot load unguarded. A policy may set its own (`fail_mode`); anything but `"open"` is closed. |
-| `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons and notes kept in it) and its metadata (the turn, its answers and matches) are kept, as each row's `expires_at`. A policy may set either. Not pruned yet ([Limitations](/oversight/#limitations)). |
+| `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons and notes kept in it) and its metadata (the turn, its answers and matches) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)); access records are kept for the `metadata` days set here. |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, dotted paths, or `{"class": "<dotted path>", **kwargs}` (unlike `JUDGES`, always the full path: `"django_ai_sdk.oversight.notifiers.WebhookNotifier"`). One that cannot be built is logged and left out. |
 
 Outside the dict:
@@ -250,18 +250,105 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 | `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out. |
 | `TurnContent` | The content at the policy's capture level, as custody stored it (`stored`), with its scope (`thread:<id>`, or `turn:<id>` without a thread) and an expiry. Beside it: `texts`, by answer id, what each answer said in words (its reason, the names a judge gave for an `Entities` lens, its per-item scores by key, the same of the answers on its trail); and `notes`, by review item id, what reviewers wrote. Both are added as reflect's and reviewers' answers arrive, and go when the content goes. |
 | `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency, reviewer. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
-| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once: reflect locks the turn before it looks. |
-| `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. It has room for a resolution (who closed it, as a user id; the value as the record keeps it; whether they agreed) and the content keeps room for a note, but core has no way to resolve an item yet. |
+| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once, whether reflect or a reviewer's answer made it match: both lock the turn before they look, and a unique constraint holds it. |
+| `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. Its resolution holds who closed it (a user id), the value as the record keeps it and whether they agreed; the reviewer's note is in the content's `notes`. Core creates items; the [review API](#review-api) resolves them. |
+| `AccessRecord` | A read of the record, or a prune run: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews` and `review`, or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` read-only, without the content. A turn also leaves out who asked and its thread and message ids. Reasons and notes are not in those rows, so the admin never shows them.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API; views there write no access record. The access records list both reads and prune runs; filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
+
+## Review API
+
+An opt-in layer above core: core never imports it, and nothing changes when it is not mounted. `django_ai_sdk.oversight.services.OversightService` is the API; `get_oversight_router()` serves it over django-ninja. There are no Django REST framework views for it in this release: a DRF project calls `OversightService` from views of its own, which keeps its permissions and access records.
+
+```python
+from django_ai_sdk.contrib.ninja import get_oversight_router
+
+api.add_router("/", get_oversight_router())
+```
+
+The router signs readers in with django-ninja's `django_auth`: the session, with Django's CSRF check on every POST. It does not take the API's auth, so an API that signs in another way passes its own: `get_oversight_router(auth=MyAuth())`.
+
+| Route | Service | Operation |
+| --- | --- | --- |
+| `GET /oversight/turns/` | `list_turns(filters, user=, limit=, cursor=)` | metrics |
+| `GET /oversight/turns/{id}/` | `get_turn(turn_id, user=)` | metrics; the content takes content |
+| `GET /oversight/reviews/` | `list_reviews(user=, queue=, status=, limit=, cursor=)` | review |
+| `GET /oversight/queues/` | `queues(user=)` | review |
+| `POST /oversight/reviews/{id}/` | `resolve_review(item_id, answer, user=)` | review |
+| `GET /oversight/metrics/` | `summarize(user=, days=, agent_id=, policy=)` | metrics |
+
+The turns feed filters on `outcome`, `report_outcome` (turns a report-mode rule would have changed), `status`, `agent_id`, `channel` (a prefix), `policy`, `severity`, `label` with an optional `value`, `rule`, `review` (`open`, `reviewed`, `unreviewed`), `thread_id` (content: it takes `VIEW_OVERSIGHT_CONTENT`, 403 without, and reaches only turns in the content scope), `since` and `until`. Lists are newest first (reviews: highest priority, then oldest) and page by cursor: pass a page's `next_cursor` back as `cursor`; there is no total. On Postgres a GIN index on the labels answers the label filter.
+
+Resolving an item (`ResolveIn`: `lens`, `value`, `note`, `agree` for a call on a rule, and `dismiss`) answers the item's lens, or `rule:<rule>` for an item a rule queued; a `lens` other than the item's own is refused, 400, unless the rule that queued the item reads it, so a reviewer answers only what their queue asks. For an item with neither, `lens` names a lens of the turn's policy, or `rule:<name>` for a rule that matched it. The answer is written as a `LensAnswer` with the reviewer's user id and answerer `reviewer`, the turn's labels follow it, rules it now makes match are recorded (and queue the turn when they queue), and the note goes into the turn's content. `dismiss` closes the item without an answer. Resolving claims the item with a conditional update: a second resolve answers 409. Nobody reviews a turn they asked (its `actor_id`, or that of the turn that delegated it, is theirs): resolving and dismissing it answer 403. A forgotten user's turns carry no actor, so this cannot hold for them. A turn still open (its answer is still being written) takes no answer, 409; its items may be dismissed.
+
+A rule a reviewer's answer makes match sends its `Notify` actions once the answer is written, as reflect's do, with `stage` `"review"`: a reviewer's "this leaked" alerts. Its other actions are recorded and do nothing more: a `Queue` queues the turn, but a `Mask` masks nothing and no notice reaches the person's thread.
+
+Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `django_ai_sdk.oversight.permissions.OversightDefaultPermission`, takes a Django model permission per operation and grants nothing for `is_staff`:
+
+| Operation | Model permission | Reads |
+| --- | --- | --- |
+| `VIEW_OVERSIGHT_METRICS` | `django_ai_sdk_oversight.view_turn` | Turns without their content, answers' values, rule matches, counts. |
+| `VIEW_OVERSIGHT_CONTENT` | `django_ai_sdk_oversight.view_turncontent` | On top of metrics: the turn's content, the preview, who asked, thread and message ids, answers' reasons, spans and words, reviewers' notes. |
+| `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and resolving an item with an answer. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
+
+A reviewer may hold review alone: they then work the queue from each item's queue, lens and rule, without the turn's row, and resolve it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
+
+Which turns a reader reaches is narrowed by two hooks a subclass overrides, `scope_turns(user, operation, queryset)` and `scope_reviews(user, operation, queryset)`. A turn or item outside them is not found (404), and a turn outside the content scope is shown without its content. Every read decides through these querysets, a list or one turn alike, so narrow in the hooks (or `get_queryset_perms`): a `has_object_permission` of your own is not consulted for content. By default an item is in scope when its turn is:
+
+```python
+from django_ai_sdk.oversight.permissions import OversightDefaultPermission
+
+
+class TeamOversight(OversightDefaultPermission):
+    def scope_turns(self, user, operation, queryset):
+        return queryset.filter(agent_id__in=agents_of(user))
+```
+
+An empty `AI_SDK_PERMISSIONS["oversight"]` falls back to the default, as for agents; a record open to every user says so with `["django_ai_sdk.permissions.AllowAll"]`.
+
+Every read of turns or review items writes an `AccessRecord` with the ids of the turns it showed, and of those whose content it showed when that is not all of them.
+
+What was forgotten reads back as gone. A turn whose thread or user was deleted, or whose content expired and was pruned, has `content_state` `"none"`, no preview, no answers' words and no reviewers' notes; a deleted user's turns have an empty `actor_id`; a pruned turn is not found. Content past its expiry and not yet pruned reads as `"expired"` on the turn, and as no preview and no notes in lists.
+
+## Retention
+
+Part of the review layer: `django_ai_sdk.oversight.retention.prune()`, run by `manage.py oversight_prune`. Core stamps every row with `expires_at` and deletes nothing. Schedule the command daily (cron, or your scheduler):
+
+```bash
+python manage.py oversight_prune --batch-size 500
+```
+
+It deletes, `--batch-size` rows per transaction so a backlog never holds one long lock:
+
+- content rows past their `expires_at`, and with them what judges and reviewers wrote there; the turn stays, its content cleared;
+- turns past theirs, with their answers, matches, review items and content. Retention wins over a review still open: the prune's access record counts them in `open_reviews`. Custody's `pruning(turn_ids)` is handed each batch first, in its transaction; when it raises, that batch stays and the run stops;
+- access records older than `RETENTION["metadata"]` days. This is the setting's value, not a policy's: when a policy keeps its turns longer, set the setting at least as long, or the record of who read them goes first.
+
+It ends with an `AccessRecord` of operation `prune`, with the counts in `query`. `AccessRecord.last_pruned()` reads it, and so does the deploy check `W007`, which warns when there are turns more than two days old and no run finished in the last two days. It reads the database, so it runs with `--database`:
+
+```bash
+python manage.py check --deploy --database default
+```
 
 ## Custody
 
-`django_ai_sdk.oversight.custody` decides how a turn's content is kept. Core installs `PlainCustody`: `store(scope, content)` keeps the content as it is, `load_many(items)` gives back what it kept for each `(scope, stored)`, in order, `forget(scope)` deletes the scope's `TurnContent` rows (the turns stay, `content` cleared), and `chained(items)` and `pruning(turn_ids)` do nothing. Deleting a thread calls `forget("thread:<id>")`. An app installs its own with `custody.install(custody)` in its `AppConfig.ready()`; every method runs in the caller's transaction, `chained` is handed the turn each time its row is written (open at the end of the gate, then at close), `store` may raise `custody.Forgotten` (the turn is then recorded without content), and a `chained` that raises aborts the write.
+`django_ai_sdk.oversight.custody` decides how a turn's content is kept. A custody has five methods, the `Custody` protocol; core installs `PlainCustody`:
+
+| Method | What it is handed | `PlainCustody` |
+| --- | --- | --- |
+| `store(scope, content) -> dict` | A turn's content: what its `TurnContent.stored` keeps. May raise `custody.Forgotten`: the turn is then recorded without content. | The content as it is |
+| `load_many(items) -> list` | What `store` kept for each `(scope, stored)`, in order and in a fixed number of queries; None for one that no longer opens, instead of raising. | `stored` of each |
+| `forget(scope)` | A scope to forget (`"thread:<id>"`, `"turn:<id>"`). | Deletes its `TurnContent` rows; the turns stay, `content` cleared |
+| `chained(items)` | Rows just written, as `(kind, row)`: `turn`, `answer`, `match`, `access`. A turn is handed each time its row is written (open at the end of the gate, then at close). Raising aborts the write. | Nothing |
+| `pruning(turn_ids)` | Turns retention is about to delete with their answers, matches and content. | Nothing |
+
+Every method runs in the caller's transaction. An app installs its own with `custody.install(custody)` in its `AppConfig.ready()`.
+
+Deleting a thread calls `forget("thread:<id>")`. Deleting a user forgets the content of each turn they asked without a thread, then clears `actor_id` on all their turns and their name on the access records they left (`signals.forget_actor`). Under `PlainCustody` that is one delete of content rows per 500 turns; another custody is handed `forget("turn:<id>")` per turn. A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
@@ -273,7 +360,9 @@ The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` re
 
 `oversight_sweep [--stale-after 30m] [--reflect-after 10m] [--limit 500] [--dry-run]` marks turns still `open` after `--stale-after` as `interrupted`, and queues `reflect_turn` again for turns `pending` longer than `--reflect-after` (their task was never queued) and turns `running` under a lease that ran out (their worker died), at most `--limit` of each, oldest first. A turn whose last attempt died is marked `failed`. Ages are a whole number with `s`, `m`, `h` or `d`. Schedule it; each run takes the next batch.
 
-`oversight_forget_thread <thread id> [...]` forgets threads as their delete does, through the installed custody: for threads deleted without signals (a queryset `.update()`, raw SQL, another database). Safe to run again.
+`oversight_prune [--batch-size 500]` applies retention; see [Retention](#retention).
+
+`oversight_forget_actor <user id> [...]` forgets users on the record as their delete does (`signals.forget_actor`): for a delete whose forgetting failed and was logged. `oversight_forget_thread <thread id> [...]` forgets threads as their delete does, through the installed custody: for threads deleted without signals (a queryset `.update()`, raw SQL, another database). Both are safe to run again.
 
 `oversight_sweep` and `workflows_sweep` share `django_ai_sdk.management.sweep.SweepCommand`: subclass it, return the stale rows from `stale(cutoff)` and set `marked` (or override `act`).
 
@@ -320,11 +409,14 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.W004` | A judge lens lists judges it never asks: a `Patterns` judge before them is sure when it finds nothing. |
 | `ai_sdk.oversight.W005` | An alias's judge cannot run here, such as `TypeSafe` without `TYPESAFE_API_KEY` or `typesafe-sdk`. |
 | `ai_sdk.oversight.W006` | A lens is at a stage that never reads its subject (the question at `tool` or `finish`, the answer at `gate` or `tool`, a tool call anywhere but `tool`): it never runs there. |
+| `ai_sdk.oversight.W007` | Deploy check, against a database (`check --deploy --database default`): there are turns more than two days old and `oversight_prune` has not finished in the last two days, so expired rows stay. |
 | `ai_sdk.oversight.W008` | An enforced rule reads lenses whose judges are all optional aliases and none is defined: it never acts. |
 | `ai_sdk.oversight.W011` | A policy in use masks or blocks the answer at finish but streams it live: the client has the text before finish judges it. Use `stream_mode = "auto"` or a client that applies the `replace` notice. |
 | `ai_sdk.oversight.W013` | An agent with a policy streams chat through a `get_pipeline_adapter()` annotated to return something other than the SDK's `Stream`: the answer is never finished. |
 | `ai_sdk.oversight.W014` | Deploy check: the `TASKS` backend runs reflect and notifications inline in the request (`ImmediateBackend`), never runs them (`DummyBackend`), or does not load. |
 
-`W001` and `W014` are checked only while oversight is enabled; `W001`, `E013` and `W014` only by `manage.py check --deploy`.
+`W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 
-The ids missing from this table (`E008`, `W002`, `W007`, `W009`, `W010` and `W012`) are reserved for the opt-in layers on top of core, so that no core id changes when they ship. An id is never reused for another meaning.
+The ids missing from this table (`E008`, `W002`, `W009`, `W010` and `W012`) are reserved: earlier builds raised them, and an id is never reused for another meaning.
+
+In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.
