@@ -22,6 +22,15 @@ def event_loop():
 
 
 @pytest.fixture
+def postgres_only():
+    """Skip unless the tests run on PostgreSQL: SQLite serialises every writer."""
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        pytest.skip("needs PostgreSQL: set DATABASE_URL")
+
+
+@pytest.fixture
 def mock_storage_adapter():
     """Mock storage adapter."""
     from unittest.mock import AsyncMock, MagicMock

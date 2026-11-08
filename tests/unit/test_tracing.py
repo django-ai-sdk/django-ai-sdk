@@ -326,6 +326,12 @@ class TestUsageHarvesting:
         row = Trace.objects.get(operation_name="haystack.agent.step.llm")
         assert (row.prompt_tokens, row.completion_tokens, row.total_tokens) == (21, 9, 30)
 
+    def test_a_token_name_set_to_none_falls_back_to_the_other(self):
+        from django_ai_sdk.pricing import token_counts
+
+        usage = {"prompt_tokens": None, "input_tokens": 21, "output_tokens": 9}
+        assert token_counts(usage) == (21, 9)
+
     @pytest.mark.django_db
     def test_agent_step_llm_payload_stored_with_content_tracing(self, orm_tracer, monkeypatch):
         monkeypatch.setattr(haystack_tracer, "is_content_tracing_enabled", True)

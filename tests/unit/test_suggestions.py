@@ -37,3 +37,15 @@ async def test_the_task_model_suggests_when_set(settings: Any) -> None:
     assert suggestions == ["Is postal code mandatory?"]
     assert task_run.call_args.kwargs["response_format"] is FollowUpSuggestions
     agent.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_suggesting_is_not_a_turn_of_its_own() -> None:
+    """A side task over a turn oversight already judged: the agent's policy does not run again."""
+    from django_ai_sdk.agents.base import Agent
+
+    agent = MagicMock(spec=Agent, run=AsyncMock(return_value=REPLY))
+
+    await DefaultSuggestionGenerator(agent=agent).generate(MESSAGES, "An audit file.")
+
+    assert agent.run.call_args.kwargs["oversight"] is False

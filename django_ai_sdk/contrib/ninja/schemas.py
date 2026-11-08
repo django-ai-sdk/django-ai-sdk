@@ -94,6 +94,8 @@ class MessageResponse(Schema):
 class RunResponse(Schema):
     result: str | None = None
     thread_id: str
+    # True when oversight stopped the run. `result` then holds the policy's message.
+    blocked: bool = False
 
 
 class ThreadTracesResponse(Schema):
@@ -245,6 +247,8 @@ class WorkflowRunStepOut(Schema):
     output: dict | None = None
     status: str
     error: str
+    # Why the step was skipped, or the start of its failure text.
+    detail: str = ""
     started_at: str | None = None
     completed_at: str | None = None
 

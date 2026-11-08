@@ -7,7 +7,7 @@ from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 
 from django_ai_sdk.agents.registry import registry
-from django_ai_sdk.errors import NotFound, UserError
+from django_ai_sdk.errors import Blocked, NotFound, UserError
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
     Operation,
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         AgentGroup,
         AgentUser,
     )
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.integrations.schemas import AgentIntegrationStatus
     from django_ai_sdk.types import UserType
 
@@ -128,6 +129,25 @@ class AgentService(PermissionsMixin):
             _logger.warning("RuntimeAgent lookup failed for {}: {!r}", agent_id, exc)
             raise NotFound(f"Agent '{agent_id}' not found")
         return get_runtime_agent_class(config.agent)(config)
+
+    @classmethod
+    async def arun_reply(
+        cls,
+        agent: Agent,
+        messages: list[ChatMessage],
+        *,
+        user: UserType,
+        thread_id: str | None = None,
+    ) -> tuple[Any, bool]:
+        """Run `agent` as one "api" turn and return (reply, blocked).
+
+        A refused or withheld reply returns the policy's message with blocked True.
+        """
+        try:
+            result = await agent.run(messages, thread_id=thread_id, user=user, channel="api")
+        except Blocked as blocked:
+            return blocked.message, True
+        return result, False
 
     @classmethod
     async def get_agent(cls, thread_id: str, user: UserType) -> Agent:

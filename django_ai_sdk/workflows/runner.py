@@ -106,11 +106,10 @@ class _StepRunner:
                 if (done := outcomes.get(name)) is None or done.status != "completed"
             ]
             if missing:
+                waited = outcomes.get(missing[0])
+                how = "failed" if waited and waited.status == "failed" else "was skipped"
                 await self._settle(
-                    ctx,
-                    step,
-                    outcomes,
-                    StepOutcome(status="skipped", detail=f"{missing[0]} produced nothing"),
+                    ctx, step, outcomes, StepOutcome(status="skipped", detail=f"{missing[0]} {how}")
                 )
                 continue
 

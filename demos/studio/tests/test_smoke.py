@@ -19,7 +19,8 @@ def test_health_answers_a_signed_in_user(client, django_user_model):
 
 @pytest.mark.django_db
 def test_the_drf_api_is_mounted(client, django_user_model):
-    client.force_login(django_user_model.objects.create(email="demo@example.com"))
+    # Listing stored workflows needs the manage permission, which a superuser has.
+    client.force_login(django_user_model.objects.create(email="demo@example.com", is_superuser=True))
     assert client.get("/api/v2/workflows/").status_code == 200
 
 
