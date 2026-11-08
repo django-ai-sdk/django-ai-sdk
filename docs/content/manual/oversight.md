@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators and an encrypted, chained record are not part of core; they are planned as opt-in apps that build on the seams below (`OverlaySource`, `custody`).
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Runtime switches for operators are an opt-in app on the `OverlaySource` seam below ([Runtime switches](/oversight-switches/)); an encrypted, chained record is not part of core and is planned as an opt-in app on the `custody` seam.
 
 ## Installing
 
@@ -34,6 +34,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `FAIL_MODE` | `"closed"` | What a failed lens means: its check or judge raised, timed out, missed the deadline or was handed more than it reads (too long). `closed` treats an enforced rule that blocks, masks or takes tools away as matched when a lens it reads failed, withholds a tool result it cannot check, and refuses a turn whose policy cannot be chosen or loaded. Rules that only alert, queue or notify never fire on a failure; rules in report mode only record it. `open` lets the turn through and records the failure, and runs a turn whose policy cannot load unguarded. A policy may set its own (`fail_mode`); anything but `"open"` is closed. |
 | `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons and notes kept in it) and its metadata (the turn, its answers and matches) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)); access records are kept for the `metadata` days set here. |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, dotted paths, or `{"class": "<dotted path>", **kwargs}` (unlike `JUDGES`, always the full path: `"django_ai_sdk.oversight.notifiers.WebhookNotifier"`). One that cannot be built is logged and left out. |
+| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches what operators change at runtime ([switches](/oversight-switches/)); `0` reads them every turn. |
 
 Outside the dict:
 
@@ -49,10 +50,11 @@ Outside the dict:
 | --- | --- |
 | `oversight` | A `Policy` subclass (registered when the agent class is defined), a registered policy's name, `None` (the default: `DEFAULT_POLICY`) or `False` (no oversight). Anything else (an instance, `True`, `""`) raises `ImproperlyConfigured` when the class is defined. |
 | `async get_oversight(*, channel, user, **kwargs)` | The policy for this turn; returns `oversight` unless overridden. It may read the database; keep `**kwargs`, as more about the turn may be passed later. Channels: `chat`, `run`, `api`, `workflow:<key>:<step>` (a stored workflow's slug or a registered workflow's name), `workflow:adhoc:<step>` (any other definition), or what a caller passes. A policy only this returns is registered when a turn first uses it: `@register_policy` it, so the checks see it. |
+| `oversight_required` | `True`: an overlay (a [runtime switch](/oversight-switches/)) may give the agent another policy but never switch its oversight off; an overlay's "off" is ignored and logged. Code (`oversight = False`, `run(oversight=False)`) still decides. Default `False`. |
 | `run(messages, ..., *, channel="run", oversight=None)` | One turn under the policy. `None` is the agent's own; a class or a name replaces it for this call; `False` runs unguarded (trusted code only). Raises `Blocked`. |
 | `as_view(...)` | Chat: one turn on channel `chat`. A refusal streams the policy's message. |
 
-A turn's policy is, first match wins: `run(oversight=...)`; an overlay's assignment for the agent (a name, or "off"; `OverlaySource.agent_policies`, none in core); `get_oversight()`; `DEFAULT_POLICY` when that returned `None`. `False` anywhere in that order means no oversight. A runtime agent (an `AgentSettings` row) without an assignment of its own takes its base class's `oversight` (`AI_SDK_RUNTIME_AGENT_BASES`), then `DEFAULT_POLICY`. A hook that raises, or a policy that cannot load, refuses the turn (unless `FAIL_MODE` is `"open"`).
+A turn's policy is, first match wins: `run(oversight=...)`; an overlay's assignment for the agent (a name, or "off" unless the agent sets `oversight_required`; `OverlaySource.agent_policies`, none in core); `get_oversight()`; `DEFAULT_POLICY` when that returned `None`. `False` anywhere in that order means no oversight. A runtime agent (an `AgentSettings` row) without an assignment of its own takes its base class's `oversight` (`AI_SDK_RUNTIME_AGENT_BASES`), then `DEFAULT_POLICY`. A hook that raises, or a policy that cannot load, refuses the turn (unless `FAIL_MODE` is `"open"`).
 
 `django_ai_sdk.errors.Blocked(message, *, stage="", turn_id="")`, error code `blocked` (HTTP 400, like `content_filtered`, through Ninja's `register_error_handlers` and DRF's `django_ai_sdk.contrib.drf.exception_handler`, with `message` as the body's message). Raised by `Agent.run()` when the gate refuses the history or the question, or finish withholds the answer, and when a masked structured result no longer validates. `message` is the policy's text for the person asking. The run endpoints answer `{"result", "thread_id", "blocked"}` instead (`thread_id` is `""` for the stateless one).
 
@@ -144,8 +146,10 @@ A lens that judges the answer against its grounding (subject `sources`, or `need
 
 ```python
 Rule(name, *, when=Condition, then=Action | [Action], mode=Mode.REPORT,
-     message="", notice="", description="")
+     message="", notice="", description="", min_mode=Mode.OFF)
 ```
+
+`min_mode` is a floor in code: an overlay mode (a [runtime switch](/oversight-switches/)) below it (`off` < `report` < `enforce`) is rejected, and so is `pick(..., mode=)` below it, and a `mode` below it when the rule is declared (both raise `ImproperlyConfigured`). `Rule(..., mode="enforce", min_mode="enforce")` stays enforced whatever an operator switches.
 
 Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= value`, `> < >= <=`, `.in_(values)`, `.contains(label)`, `.missing`, `.present`, `.confident(x)`, `.unsure(x)`, combined with `&`, `|` and `~`. Each serializes to JSON (`{"all": [...]}`, `{"any": [...]}`, `{"not": ...}`, `{"lens", "op", "value"}`). Every comparison on a lens without a usable answer is false; use `.missing` to test for that. A failed lens (its check or judge raised or timed out) is unknown, not false: a comparison on it is neither true nor false, so `~L("grounded").is_true` does not match just because "grounded" failed.
 
@@ -184,9 +188,9 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 
 `pick(items, *names, mode=None)` takes single lenses or rules out of a pack instead of extending it whole: `pick(SecurityPack.lenses, "prompt_injection")`, `pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. They come back in the order named; rules are copies, so `mode` leaves the pack's own alone. An unknown name raises `ImproperlyConfigured`, and `mode` on lenses raises `TypeError`.
 
-Every effective value has a source, in this order: the extended packs (`pack:<name>`), the class (`code`), then the overlay (`overlay`); a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. The overlay only switches rule modes. A parent's switched modes reach the policies that extend it, with the source `overlay:<parent>`. A mode that cannot apply (an unknown rule or mode) is listed under `rejected` (`{"rule", "mode", "reason"}`), logged and ignored.
+Every effective value has a source, in this order: the extended packs (`pack:<name>`), the class (`code`), then the overlay (`overlay`); a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. The overlay only switches rule modes. A parent's switched modes reach the policies that extend it, with the source `overlay:<parent>`. A mode that cannot apply (an unknown rule or mode, or one below `min_mode`) is listed under `rejected` (`{"rule", "mode", "reason"}`), logged and ignored.
 
-The overlay comes from an `OverlaySource` (`django_ai_sdk.oversight.resolve`). Core's is empty; an app that lets operators switch modes at runtime subclasses it and calls `set_overlay_source(source)`: `async rule_modes(names)` returns `{policy: {rule: mode}}` for the policy names asked, `async agent_policies()` every agent it assigns (agent id to a policy name, or `""` for off; an agent left out is up to code), and `ttl` is how long a resolution built with it, and its agent assignments, are reused (core: until settings change or a policy registers). When `rule_modes` or `agent_policies` raises, turns run the last good read, else the policy as code declares it.
+The overlay comes from an `OverlaySource` (`django_ai_sdk.oversight.resolve`). Core's is empty; an app that lets operators switch modes at runtime subclasses it and calls `set_overlay_source(source)`: `async rule_modes(names)` returns `{policy: {rule: mode}}` for the policy names asked, `async agent_policies()` every agent it assigns (agent id to a policy name, or `""` for off; an agent left out is up to code), and `ttl` is how long a resolution built with it, and its agent assignments, are reused (core: until settings change or a policy registers). When `rule_modes` or `agent_policies` raises, turns run the last good read, else the policy as code declares it. The [switches app](/oversight-switches/) installs one that reads its `Override` rows, with `ttl` = `RUNTIME_CACHE_SECONDS`.
 
 A policy that fails to load (a missing parent, a cycle) refuses its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`resolve.broken_reason(name)`).
 
@@ -252,9 +256,9 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 | `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency, reviewer. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
 | `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once, whether reflect or a reviewer's answer made it match: both lock the turn before they look, and a unique constraint holds it. |
 | `ReviewItem` | A turn waiting for a person, per queue and priority, created by a `Queue` action. Its resolution holds who closed it (a user id), the value as the record keeps it and whether they agreed; the reviewer's note is in the content's `notes`. Core creates items; the [review API](#review-api) resolves them. |
-| `AccessRecord` | A read of the record, or a prune run: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews` and `review`, or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
+| `AccessRecord` | A read of the record, or an operator's change of it: the reader (`reader_id`, a user id, and `reader_label`, their username and id, cut to the id when the user is deleted), the `operation` (`AccessRecord.Operation`: the reads `list`, `view`, `reviews` and `review`; the change `switch`; or `prune` for a run of `oversight_prune`, with what it deleted in `query`), the ids of the turns it showed (`turn_ids`, a list read included), whether it showed content, and the query. When a list showed the content of some of its turns only (the content scope is narrower), `query["content_ids"]` names those. The same reader repeating the same read within a minute is one record. Counts are not recorded. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API; views there write no access record. The access records list both reads and prune runs; filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch`, `ReviewItem` and `AccessRecord` read-only, without the content. It needs only metrics access, so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API; views there write no access record. The access records list both reads and changes (switches and prune runs); filter by operation to see one kind. Reasons and notes are not in those rows, so the admin never shows them.
 
 ## Review API
 
@@ -290,6 +294,8 @@ Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `dj
 | `VIEW_OVERSIGHT_METRICS` | `django_ai_sdk_oversight.view_turn` | Turns without their content, answers' values, rule matches, counts. |
 | `VIEW_OVERSIGHT_CONTENT` | `django_ai_sdk_oversight.view_turncontent` | On top of metrics: the turn's content, the preview, who asked, thread and message ids, answers' reasons, spans and words, reviewers' notes. |
 | `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and resolving an item with an answer. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
+| `VIEW_OVERSIGHT_SWITCHES` | `django_ai_sdk_oversight_switches.view_switch` | The [runtime switches](/oversight-switches/) in force (the opt-in switches app). |
+| `SWITCH_OVERSIGHT` | `django_ai_sdk_oversight_switches.change_switch` | Switching a rule's mode or an agent's policy. |
 
 A reviewer may hold review alone: they then work the queue from each item's queue, lens and rule, without the turn's row, and resolve it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
 
@@ -339,7 +345,7 @@ python manage.py check --deploy --database default
 | `store(scope, content) -> dict` | A turn's content: what its `TurnContent.stored` keeps. May raise `custody.Forgotten`: the turn is then recorded without content. | The content as it is |
 | `load_many(items) -> list` | What `store` kept for each `(scope, stored)`, in order and in a fixed number of queries; None for one that no longer opens, instead of raising. | `stored` of each |
 | `forget(scope)` | A scope to forget (`"thread:<id>"`, `"turn:<id>"`). | Deletes its `TurnContent` rows; the turns stay, `content` cleared |
-| `chained(items)` | Rows just written, as `(kind, row)`: `turn`, `answer`, `match`, `access`. A turn is handed each time its row is written (open at the end of the gate, then at close). Raising aborts the write. | Nothing |
+| `chained(items)` | Rows just written, as `(kind, row)`: `turn`, `answer`, `match`, `access`, `override`. A turn is handed each time its row is written (open at the end of the gate, then at close). Raising aborts the write. | Nothing |
 | `pruning(turn_ids)` | Turns retention is about to delete with their answers, matches and content. | Nothing |
 
 Every method runs in the caller's transaction. An app installs its own with `custody.install(custody)` in its `AppConfig.ready()`.
@@ -348,7 +354,7 @@ Deleting a thread calls `forget("thread:<id>")`. Deleting a user forgets the con
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy (a registered name) over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
@@ -417,6 +423,6 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 
-The ids missing from this table (`E008`, `W002`, `W009`, `W010` and `W012`) are reserved: earlier builds raised them, and an id is never reused for another meaning.
+The opt-in switches app raises its own, under `ai_sdk.oversight.switches.*` ([Switches](/oversight-switches/)).
 
-In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.
+In every app the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.

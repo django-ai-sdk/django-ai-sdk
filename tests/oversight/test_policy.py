@@ -109,10 +109,11 @@ class Overlay(resolution.OverlaySource):
 
 @pytest.fixture
 def overlay():
+    before = resolution.overlay_source()
     source = Overlay()
     resolution.set_overlay_source(source)
     yield source
-    resolution.set_overlay_source(None)
+    resolution.set_overlay_source(before)
 
 
 @register_policy
@@ -190,6 +191,12 @@ class TestConditions:
         assert again.to_dict() == rule.to_dict()
         assert [a.kind for a in again.ordered_actions()] == ["block", "alert"]
 
+    def test_a_rule_below_its_own_floor_is_refused(self):
+        with pytest.raises(ImproperlyConfigured, match="below its min_mode"):
+            Rule("r", when=L("a").is_true, then=Block(), mode="report", min_mode="enforce")
+        rule = Rule("r", when=L("a").is_true, then=Block(), mode="enforce", min_mode="report")
+        assert Rule.from_dict(rule.to_dict()).min_mode is Mode.REPORT
+
 
 class TestPolicies:
     def test_extends_merges_with_sources(self):
@@ -213,6 +220,36 @@ class TestPolicies:
         assert resolved.rules["block_x"].mode is Mode.ENFORCE
         assert resolved.sources["rule:block_x.mode"] == "overlay"
         assert [r["rule"] for r in resolved.rejected] == ["nope", "note_b"]
+
+    def test_the_overlay_cannot_set_a_rule_below_its_floor(self, registry_snapshot: Any):
+        @register_policy
+        class Floored(Policy):
+            name = "test-floored"
+            lenses = [PatternLens(name="x", keywords=["x"])]
+            rules = [
+                Rule(
+                    "block_x", when=L("x").is_true, then=Block(), mode="enforce", min_mode="enforce"
+                ),
+                Rule(
+                    "note_x",
+                    when=L("x").is_true,
+                    then=Alert("info"),
+                    mode="enforce",
+                    min_mode="report",
+                ),
+            ]
+
+        resolved = build("test-floored", modes={"block_x": "report", "note_x": "off"})
+        assert resolved.rules["block_x"].mode is Mode.ENFORCE
+        assert resolved.rules["note_x"].mode is Mode.ENFORCE
+        assert [r["rule"] for r in resolved.rejected] == ["block_x", "note_x"]
+        assert "min_mode" in resolved.rejected[0]["reason"]
+        assert build("test-floored", modes={"note_x": "report"}).rules["note_x"].mode is Mode.REPORT
+
+    def test_picking_a_rule_below_its_floor_is_refused(self):
+        rule = Rule("r", when=L("a").is_true, then=Block(), mode="enforce", min_mode="enforce")
+        with pytest.raises(ImproperlyConfigured, match="min_mode"):
+            pick([rule], "r", mode=Mode.REPORT)
 
     def test_incomplete_policies_are_not_registered(self):
         class NoName(Policy):
@@ -363,10 +400,15 @@ class TestInheritedTuning:
         assert (await resolution.aget_policy("test-child")).rules["block_x"].mode is Mode.ENFORCE
 
     async def test_core_has_no_overlay(self):
-        assert type(resolution.overlay_source()) is resolution.OverlaySource
-        assert await resolution.aassigned_policy("a-1") is None
-        resolved = await resolution.aget_policy("test-child")
-        assert resolved.rules["block_x"].mode is Mode.REPORT
+        before = resolution.overlay_source()
+        resolution.set_overlay_source(None)
+        try:
+            assert type(resolution.overlay_source()) is resolution.OverlaySource
+            assert await resolution.aassigned_policy("a-1") is None
+            resolved = await resolution.aget_policy("test-child")
+            assert resolved.rules["block_x"].mode is Mode.REPORT
+        finally:
+            resolution.set_overlay_source(before)
 
     async def test_the_overlay_chooses_an_agents_policy(self, overlay):
         overlay.agents["a-1"] = "test-child"

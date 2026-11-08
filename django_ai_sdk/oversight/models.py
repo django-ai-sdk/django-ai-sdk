@@ -13,7 +13,7 @@ scores, counts and errors.
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.db import models
 
@@ -255,11 +255,12 @@ class ReviewItem(models.Model):
 
 
 class AccessRecord(models.Model):
-    """A read of the record, or a change of it (a prune run): who, what and which turns.
+    """A read of the record, or an operator's change of it: who, what and which turns.
 
     Written by `oversight.services`, one per read of turns or review items, with
     the id of every turn shown. The same read by the same reader within a minute
     (a polling page) is one record. Counts (metrics, queues) are not recorded.
+    The opt-in switches app adds its changes.
     Holds no content.
     """
 
@@ -308,8 +309,42 @@ class AccessRecord(models.Model):
         )
 
 
+class OperatorChangeQuerySet(models.QuerySet):
+    def history(self, **key: Any) -> OperatorChangeQuerySet:
+        """Every version of one key, newest first. The first is the one in force."""
+        return self.filter(**key).order_by("-version")
+
+    def newest(self, *key: str) -> OperatorChangeQuerySet:
+        """The newest version per value of the `key` fields."""
+        newer = self.model._default_manager.filter(
+            **{name: models.OuterRef(name) for name in key}, version__gt=models.OuterRef("version")
+        )
+        return self.filter(~models.Exists(newer))
+
+
+class OperatorChange(models.Model):
+    """An operator's change (a switch, an authored policy), appended with `append_change`.
+
+    Each change of a key adds a row with the next `version`. The newest is in force.
+    Older rows are the history.
+    """
+
+    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
+    version = models.PositiveIntegerField()
+    reason = models.TextField(blank=True)
+    # A plain id, not a foreign key, so deleting a user keeps their changes.
+    changed_by_id = models.CharField(max_length=64, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects: ClassVar[OperatorChangeQuerySet] = OperatorChangeQuerySet.as_manager()  # ty: ignore[invalid-assignment]
+
+    class Meta:
+        abstract = True
+
+
 __all__ = [
     "AccessRecord",
+    "OperatorChange",
     "RuleMatch",
     "TurnContent",
     "LensAnswer",

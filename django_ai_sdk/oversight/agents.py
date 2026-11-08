@@ -50,17 +50,28 @@ def code_policy(agent: Any) -> tuple[str, str]:
     return _code_choice(getattr(agent, "oversight", None))
 
 
-def policy_needs_await(agent: Any) -> bool:
-    """Whether only an async run can tell the agent's policy: it overrides
-    `get_oversight()`, or an overlay is installed that may assign it one."""
+def sync_policy(agent: Any) -> str | None:
+    """The policy a sync run can tell the agent runs under, or None when only an async
+    run can: it overrides `get_oversight()`, or the overlay's assignments are not fresh.
+
+    Errors from reading the `oversight` attribute propagate.
+    """
     from django_ai_sdk.agents.base import Agent
-    from django_ai_sdk.oversight.resolve import OverlaySource, overlay_source
+    from django_ai_sdk.oversight.resolve import cached_assignment
 
     # The base method only returns `oversight`, which sync code reads itself.
     overridden = "get_oversight" in getattr(agent, "__dict__", {}) or (
         getattr(type(agent), "get_oversight", Agent.get_oversight) is not Agent.get_oversight
     )
-    return overridden or type(overlay_source()) is not OverlaySource
+    if overridden:
+        return None
+    known, assigned = cached_assignment(agent_key(agent))
+    if not known:
+        return None
+    # As `TurnGuard.start`: the overlay wins, but cannot turn off a required agent.
+    if assigned is None or (assigned == "" and getattr(agent, "oversight_required", False)):
+        return code_policy(agent)[0]
+    return assigned
 
 
 def _code_choice(chosen: Any) -> tuple[str, str]:
@@ -98,5 +109,5 @@ __all__ = [
     "agent_key",
     "code_policy",
     "fingerprint",
-    "policy_needs_await",
+    "sync_policy",
 ]

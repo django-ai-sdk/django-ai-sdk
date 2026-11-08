@@ -144,7 +144,8 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         `oversight` overrides the agent's policy for this turn. It can be a Policy
         subclass or a name. False or "" (no policy) opens no turn. None uses the
         overlay's choice (`OverlaySource.agent_policies`), falling back to the
-        agent's code (`acode_policy`).
+        agent's code (`acode_policy`). An agent with `oversight_required` ignores an overlay
+        that switches oversight off.
 
         If the policy cannot be chosen (`get_oversight` raised) or loaded (unknown
         or broken), every stage refuses with Block.DEFAULT_MESSAGE and the turn is
@@ -170,6 +171,13 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
             if not name:
                 # The overlay's choice wins over the agent's code.
                 assigned = await aassigned_policy(agent_key(agent))
+                if assigned == "" and getattr(agent, "oversight_required", False):
+                    # The agent's code requires oversight, so the overlay cannot turn it off.
+                    logger.warning(
+                        "Oversight ignores an overlay switching off {!r}: it requires oversight",
+                        agent_key(agent),
+                    )
+                    assigned = None
                 if assigned is None:
                     name = (await acode_policy(agent, channel=channel, user=user))[0]
                 else:
@@ -304,7 +312,7 @@ def _stand_in(name: str) -> ResolvedPolicy:
 
 
 def _actor_id(user: Any) -> str:
-    """`user`'s primary key as text; "" for no user or an anonymous one."""
+    """Return the record's id for `user`, its primary key as text. "" when anonymous or missing."""
     pk = getattr(user, "pk", None)
     return "" if pk is None else str(pk)
 

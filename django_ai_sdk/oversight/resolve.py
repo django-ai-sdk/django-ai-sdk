@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.policy import ResolvedPolicy, build
 from django_ai_sdk.oversight.registry import get_policy_class
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 logger = get_logger(__name__)
 
 
@@ -65,6 +67,19 @@ async def aassigned_policy(agent_id: str) -> str | None:
     if not agent_id:
         return None
     return (await _assignments()).get(agent_id)
+
+
+def cached_assignment(agent_id: str) -> tuple[bool, str | None]:
+    """For sync code, which cannot read the overlay: (known, the overlay's choice).
+
+    Known when there is no overlay, or when its agent assignments were read within its
+    `ttl` (every turn reads them as it starts). The choice is as `aassigned_policy`.
+    """
+    if type(_source) is OverlaySource:
+        return True, None
+    if _agent_map is None or time.monotonic() - _agents_read_at >= _source.ttl:
+        return False, None
+    return True, _agent_map.get(agent_id) if agent_id else None
 
 
 async def _assignments() -> dict[str, str]:
@@ -160,10 +175,15 @@ def broken_reason(name: str) -> str:
     return _broken.get(name, "")
 
 
-def code_ancestors(name: str) -> list[str]:
-    """Every policy `name` extends in code, nearest first. build() reports cycles."""
+def code_ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
+    """Every policy `name` extends in code, nearest first. build() reports cycles.
+
+    `parents` replaces the `extends` of `name`, for a policy not registered yet.
+    """
     found: list[str] = []
-    todo = list(getattr(get_policy_class(name), "extends", []) or [])
+    if parents is None:
+        parents = getattr(get_policy_class(name), "extends", []) or []
+    todo = list(parents)
     while todo:
         parent = todo.pop(0)
         if parent in found or parent == name:

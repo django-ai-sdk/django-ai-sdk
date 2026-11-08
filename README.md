@@ -138,7 +138,9 @@ except Blocked as refused:
     answer = refused.message  # the policy's own text for the person asking
 ```
 
-See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations.
+See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations. To flip a
+rule to enforce or give an agent another policy without a deploy, add the opt-in
+`django_ai_sdk.oversight.switches` app ([Runtime switches](docs/content/oversight-switches.md)).
 
 ## Features
 
