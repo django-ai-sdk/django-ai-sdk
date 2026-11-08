@@ -5,15 +5,30 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
 if TYPE_CHECKING:
     import contextvars
     from collections.abc import Callable, Generator
 
+    from django.contrib.auth.base_user import AbstractBaseUser
+
 
 def resolve_setting(setting_name: str, default: Any = None) -> Any:
     """Read a Django setting, falling back to `default` when it is unset."""
     return getattr(settings, setting_name, default)
+
+
+def app_setting(dict_name: str, defaults: dict[str, Any], name: str) -> Any:
+    """`settings.<dict_name>[name]`, or `defaults[name]` when the key is unset.
+
+    A value that is not a dict is a configuration error, not an AttributeError deep
+    inside a request.
+    """
+    configured = getattr(settings, dict_name, None) or {}
+    if not isinstance(configured, dict):
+        raise ImproperlyConfigured(f"{dict_name} must be a dict, not {type(configured).__name__}.")
+    return configured.get(name, defaults[name])
 
 
 def serialize(value: Any) -> Any:
@@ -65,3 +80,22 @@ def map_strings(value: Any, change: Callable[[str], str], *, keys: bool = False)
     if isinstance(value, list | tuple):
         return [map_strings(item, change, keys=keys) for item in value]
     return value
+
+
+async def aget_active_user(identifier: str) -> AbstractBaseUser | None:
+    """Return the active user whose USERNAME_FIELD is `identifier`, or None.
+
+    Also returns None when several users match a non-unique USERNAME_FIELD.
+    """
+    from django.contrib.auth import get_user_model
+
+    if not identifier:
+        return None
+    user_model = get_user_model()
+    # Every user model sets USERNAME_FIELD, but AbstractBaseUser does not, so the
+    # type stubs cannot see it.
+    field: str = user_model.USERNAME_FIELD  # ty: ignore[invalid-attribute-access, invalid-assignment]
+    try:
+        return await user_model._default_manager.aget(**{field: identifier, "is_active": True})
+    except (user_model.DoesNotExist, user_model.MultipleObjectsReturned):
+        return None

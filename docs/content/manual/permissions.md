@@ -23,6 +23,7 @@ PermissionDomain.MEMORY   # "memory"
 | `thread` | `ThreadDefaultPermission` |
 | `memory` | `MemoryDefaultPermission` |
 | `integrations` | `IntegrationDefaultPermission` |
+| `automations` | `AutomationDefaultPermission` (the automations app): any signed-in user sees them; managing takes `django_ai_sdk_automations.change_automationstate` |
 | `workflow` | `WorkflowDefaultPermission` |
 | `oversight` | `django_ai_sdk.oversight.permissions.OversightDefaultPermission` |
 
@@ -53,6 +54,8 @@ VIEW_DOCUMENT, LIST_DOCUMENTS, UPLOAD_DOCUMENT, DELETE_DOCUMENT,
 LIST_THREAD_MEMORIES, LINK_MEMORY, UNLINK_MEMORY
 # Integrations
 USE_INTEGRATION, MANAGE_INTEGRATION
+# Automations
+VIEW_AUTOMATION, MANAGE_AUTOMATION
 # Workflows
 VIEW_WORKFLOW, RUN_WORKFLOW, MANAGE_WORKFLOW
 # Oversight
