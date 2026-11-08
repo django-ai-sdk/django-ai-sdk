@@ -12,6 +12,7 @@ ONE_MIGRATION = [
     "django_ai_sdk_oversight_switches",
     "django_ai_sdk_vault",
     "django_ai_sdk_oversight_ledger",
+    "django_ai_sdk_oversight_authoring",
 ]
 
 
@@ -55,6 +56,7 @@ def _config(label):
         ("django_ai_sdk_oversight_ledger", "django_ai_sdk_oversight_ledger"),
         ("django_ai_sdk_vault", "django_ai_sdk_data_keys"),
         ("django_ai_sdk_oversight_switches", "django_ai_sdk_oversight_switches"),
+        ("django_ai_sdk_oversight_authoring", "django_ai_sdk_oversight_authored_policies"),
     ],
 )
 def test_an_opt_in_app_migrates_to_zero_and_back(label, table):

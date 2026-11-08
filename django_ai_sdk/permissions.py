@@ -90,6 +90,10 @@ class Operation(StrEnum):
     CHECKPOINT_OVERSIGHT = "checkpoint_oversight"
     # Reveal the user behind a turn's pseudonym, with a recorded reason.
     REVEAL_OVERSIGHT_ACTOR = "reveal_oversight_actor"
+    # See runtime-defined policies and what they may use.
+    VIEW_OVERSIGHT_AUTHORING = "view_oversight_authoring"
+    # Define, change, try or withdraw a policy at runtime.
+    AUTHOR_OVERSIGHT = "author_oversight"
 
 
 class PermissionDomain(StrEnum):

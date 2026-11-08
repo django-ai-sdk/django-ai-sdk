@@ -120,6 +120,8 @@ class Queue(Action):
     kind = "queue"
 
     def __init__(self, queue: str = "default", priority: int = 0) -> None:
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            raise TypeError(f"Queue priority is a whole number, not {priority!r}")
         self.queue = queue
         self.priority = priority
 
