@@ -216,3 +216,5 @@ class ZendeskConfig(IntegrationAppConfig):
 Add `"myapp.integrations.zendesk"` to `INSTALLED_APPS`, configure it under `AI_SDK_INTEGRATIONS["zendesk"]`, and list `"zendesk"` in any agent's `integrations`. For an MCP-backed integration instead, subclass `MCPIntegration` and point `config` at an `MCPIntegrationConfig`.
 
 See `django_ai_sdk/integrations/weather/` for a complete minimal example.
+
+Integrations can also point the other way: `telegram`, `slack` and `github_events` receive events a platform pushes in, and an agent answers them in the same channel. See [Webhooks](/manual/webhooks/).
