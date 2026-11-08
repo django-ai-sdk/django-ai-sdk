@@ -3,11 +3,14 @@ from __future__ import annotations
 import time
 import traceback
 from textwrap import dedent
-from typing import Any, Literal, NewType
+from typing import TYPE_CHECKING, Any, Literal, NewType
 
 from pydantic import BaseModel, Field
 
 from .logger import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 logger = get_logger(__name__)
 
@@ -91,6 +94,24 @@ class ChatMessage(BaseModel):
         self.finish_reason = finish_reason
         self.completed_at = time.time()
         self.processing_time_ms = self.duration
+
+
+def as_chat_messages(messages: Iterable[ChatMessage | Mapping[str, Any]]) -> list[ChatMessage]:
+    """Convert dicts to ChatMessages. Existing ChatMessages are kept as the same objects."""
+    return [
+        m if isinstance(m, ChatMessage) else ChatMessage.model_validate(dict(m)) for m in messages
+    ]
+
+
+def last_user_message(messages: list[ChatMessage]) -> ChatMessage | None:
+    """Return the latest user message, usually the question being asked."""
+    return next((m for m in reversed(messages) if m.role == "user"), None)
+
+
+def last_user_text(messages: list[ChatMessage]) -> str:
+    """Return the latest user message's text, or "" when there is none."""
+    message = last_user_message(messages)
+    return (message.content if message is not None else "") or ""
 
 
 class MessageChunk(BaseModel):
@@ -191,6 +212,20 @@ class StreamWriter:
     def text(self) -> str:
         """The answer text"""
         return "".join(self._content_chunks)
+
+    def replace_text(self, text: str) -> None:
+        """Store `text` instead of the streamed text, e.g. a masked answer."""
+        self._content_chunks = [text]
+
+    def drop_reasoning(self) -> None:
+        """Drop the reasoning, which could reveal a withheld answer."""
+        self._reasoning_chunks = []
+
+    def drop_tool_details(self) -> None:
+        """Keep only tool call names. Arguments and results could reveal a withheld answer."""
+        for call in self.message.tool_calls:
+            call["arguments"] = {}
+            call["result"] = None
 
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""

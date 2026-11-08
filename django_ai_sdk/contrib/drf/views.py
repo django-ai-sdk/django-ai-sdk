@@ -142,8 +142,10 @@ class ThreadViewSet(ApiViewSet):
         agent = get_thread_agent(thread_id, user=request.user)
         check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
-        result = async_to_sync(agent.run)(messages, thread_id=thread_id, user=request.user)
-        return Response({"result": result, "thread_id": thread_id})
+        result, blocked = async_to_sync(AgentService.arun_reply)(
+            agent, messages, user=request.user, thread_id=thread_id
+        )
+        return Response({"result": result, "thread_id": thread_id, "blocked": blocked})
 
     @action(detail=True, methods=["get"])
     def sources(self, request: Request, thread_id: str) -> Response:
@@ -347,7 +349,8 @@ class AgentViewSet(ApiViewSet):
         agent = get_agent(agent_id)
         check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
-        return Response({"result": async_to_sync(agent.run)(messages, user=request.user)})
+        result, blocked = async_to_sync(AgentService.arun_reply)(agent, messages, user=request.user)
+        return Response({"result": result, "thread_id": "", "blocked": blocked})
 
     @action(detail=True, methods=["post"])
     def reindex(self, request: Request, agent_id: str) -> Response:

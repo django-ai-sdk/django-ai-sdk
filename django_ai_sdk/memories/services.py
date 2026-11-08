@@ -14,6 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from django_ai_sdk.agents.services import AgentService
+from django_ai_sdk.common import last_user_message
 from django_ai_sdk.conversation.models import Thread
 from django_ai_sdk.errors import ErrorCode, NotFound, UserError, get_error_spec
 from django_ai_sdk.files.common import compute_file_hash, get_upload_settings
@@ -1370,7 +1371,7 @@ class MemoryService(PermissionsMixin):
         if dropped := ids - docs.keys():
             logger.warning(f"Dropping attachments not in thread {thread_id}: {sorted(dropped)}")
 
-        last_user = next((m for m in reversed(messages) if m.role == "user"), None)
+        last_user = last_user_message(messages)
         max_bytes = resolve_setting("AI_SDK_MAX_INLINE_IMAGE_BYTES", 5 * 1024 * 1024)
 
         for message in messages:

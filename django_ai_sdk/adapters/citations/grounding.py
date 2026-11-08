@@ -314,11 +314,10 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
     logger.info("Citing a block with {} of {} sources", len(sources), len(registry))
     if not sources:
         return []
-    reply = await agent.run(
-        [ChatMessage(role="user", content=render(answer, sources))],
-        system_prompt=CITATION_PROMPT,
-        response_format=None,
-    )
+    from django_ai_sdk.adapters.base import run_side_task  # noqa: PLC0415
+
+    asked = [ChatMessage(role="user", content=render(answer, sources))]
+    reply = await run_side_task(agent, asked, system_prompt=CITATION_PROMPT, response_format=None)
     citations: list[Citation] = []
     outcomes: Counter[str] = Counter()  # per supporting passage
     cursor = 0
@@ -340,6 +339,42 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
         cursor = span[1]
     logger.info("Citations placed: {}, passages {}", len(citations), dict(outcomes))
     return citations
+
+
+def rebase(data: CitationsData, answer: str) -> CitationsData:
+    """Move citations onto `answer` after oversight masked part of it.
+
+    Citations whose quote is unchanged stay. Moved quotes are found again. Quotes
+    that are gone are dropped, and sources no longer cited are unmarked. Fuzzy
+    matches are ignored, since a near match may be the masked part.
+    """
+    from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
+
+    kept: list[Citation] = []
+    for citation in data.citations:
+        if answer[citation.start : citation.end] == citation.quote:
+            kept.append(citation)
+            continue
+        found = match(answer, citation.quote)
+        if found and found[2] != "fuzzy":
+            start, end, _ = found
+            kept.append(
+                citation.model_copy(update={"start": start, "end": end, "quote": answer[start:end]})
+            )
+    if len(kept) == len(data.citations) and all(
+        a is b for a, b in zip(kept, data.citations, strict=True)
+    ):
+        return data
+    kept.sort(key=lambda c: c.start)
+    numbers: dict[str, int] = {}
+    for citation in kept:
+        for evidence in citation.evidence:
+            numbers.setdefault(evidence.key, len(numbers) + 1)
+    sources = [
+        s.model_copy(update={"number": numbers.get(s.key, 0), "cited": s.key in numbers})
+        for s in data.sources
+    ]
+    return CitationsData(citations=kept, sources=sources)
 
 
 def uncited(registry: SourceRegistry) -> CitationsData:

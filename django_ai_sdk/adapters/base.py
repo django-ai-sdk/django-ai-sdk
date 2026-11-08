@@ -14,12 +14,14 @@ from haystack.dataclasses import (
     ReasoningContent,
     StreamingChunk,
     ToolCall,
+    ToolCallResult,
 )
 
-from django_ai_sdk.adapters.citations.grounding import Grounder, uncited
+from django_ai_sdk.adapters.citations.grounding import Grounder, rebase, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
+from django_ai_sdk.artifacts.schemas import turn_artifacts
 from django_ai_sdk.artifacts.tool_artifacts import build_artifact
 from django_ai_sdk.common import (
     ChatMessage,
@@ -43,18 +45,24 @@ from django_ai_sdk.events import (
 )
 from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.guard import current_guard, guarding
+from django_ai_sdk.oversight.stream import (
+    CONTENT_FILTER,
+    StreamTurn,
+    report_usage,
+    restrict_agent_tools,
+)
 from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from haystack.dataclasses import ToolCallResult
-
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
+    from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -258,6 +266,7 @@ class Run:
                 generation_kwargs=schema_kwargs(self.generator, response_format),
             )
             reply = response["replies"][0]
+            _report_usage(reply)
             if not reply.text:
                 # no answer to validate
                 logger.warning(
@@ -269,7 +278,25 @@ class Run:
             return response_format.model_validate_json(reply.text)
 
         response = await self.generator.run_async(messages=user_messages)
-        return response["replies"][0].text
+        reply = response["replies"][0]
+        _report_usage(reply)
+        return reply.text
+
+
+def _report_usage(reply: HaystackChatMessage) -> None:
+    """Add the reply's token usage to the current turn, if any."""
+    if (guard := current_guard()) is not None:
+        report_usage(guard, [reply])
+
+
+async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
+    """Run a side task of a turn, such as suggestions or citations, on an Agent or a Run."""
+    from django_ai_sdk.agents.base import Agent as SdkAgent  # noqa: PLC0415
+
+    if isinstance(runner, SdkAgent):
+        # Oversight: off on purpose. The turn itself is judged, not its side tasks.
+        kwargs["oversight"] = False
+    return await runner.run(messages, **kwargs)
 
 
 class Stream:
@@ -293,6 +320,10 @@ class Stream:
     _grounder: Grounder | None = None
     # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
+    # Oversight: the turn's guard, handed over by Agent.as_view when a policy applies.
+    guard: TurnGuard | None = None
+    # The oversight side of the turn being streamed, when there is a guard.
+    _turn: StreamTurn | None = None
 
     # Message processing configuration
     merge_messages: bool = False
@@ -319,6 +350,9 @@ class Stream:
         self.suggestion_generator = suggestion_generator
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
+        # Artifacts stored during this answer, deleted if the answer is withheld.
+        # Artifact tools also add to this list through turn_artifacts.
+        self._artifact_ids: list[str] = []
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
@@ -486,6 +520,7 @@ class Stream:
         if built is None:
             return
         data, payload = built
+        self._artifact_ids.append(str(payload["artifact_id"]))
         name = spec.artifact.tool_name()
         tool_call_id = f"{name}-{payload['artifact_id']}"
         self._persist_tool(
@@ -525,7 +560,8 @@ class Stream:
                 async for _ in grounder.wait(answer, timeout):
                     for event in self._partial_citations(grounder):
                         yield event
-                data = grounder.citations()
+                # Drop quotes that are no longer in the answer after masking.
+                data = rebase(grounder.citations(), answer)
         except Exception:
             logger.exception("Placing citations failed; the answer has none")
             data = None
@@ -587,6 +623,17 @@ class Stream:
         output = data.model_dump(mode="json", by_alias=True)
         events.append(ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=output))
         return events
+
+    def _withdraw_citations(self) -> list[StreamEvent]:
+        """Clear the citations shown while a now withheld answer streamed."""
+        from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
+
+        if self._grounder:
+            self._grounder.cancel()
+        if not self._citations_call_id:
+            return []
+        empty = CitationsData().model_dump(mode="json", by_alias=True)
+        return [ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=empty)]
 
     def _tool_input(
         self,
@@ -722,9 +769,11 @@ class Stream:
                         result.origin.arguments,
                     )
                 if result.error:
-                    logger.error(
-                        f"Tool call failed: tool={result.origin.tool_name}, result={result.result}"
-                    )
+                    # The result may contain sensitive data, so log it at debug only.
+                    logger.warning(f"Tool call failed: tool={result.origin.tool_name}")
+                    logger.debug(f"Tool call result: {result.result}")
+                if self._turn is not None:
+                    result = await self._turn.mask_tool_result(result)
                 tool_output = parse_tool_output(result.to_dict())
                 self._persist_tool(
                     stream_writer,
@@ -745,8 +794,8 @@ class Stream:
         self,
         pipeline_task: asyncio.Task[Any],
         stream_writer: StreamWriter | None,
-    ) -> None:
-        """Await pipeline completion and store tool chunks from response messages."""
+    ) -> list[Any]:
+        """Await pipeline completion, store tool chunks and return the response messages."""
         pipeline_result = await pipeline_task
 
         if self.first_component and self.first_component in pipeline_result:
@@ -765,16 +814,18 @@ class Stream:
                         elif cid in self._persisted_tool_ids:
                             continue
                         stream_writer.add_chunk(chunk)
+        return response_messages
 
     async def get_final_message(
         self,
         stream_writer: StreamWriter | None,
+        finish_reason: str = "stop",
     ) -> ChatMessage | None:
         """Finalize the stream writer: the message is stored."""
         if not stream_writer:
             return None
 
-        result = await stream_writer.finalize("stop")
+        result = await stream_writer.finalize(finish_reason)
         self.message_result = result
         return result
 
@@ -825,11 +876,9 @@ class Stream:
         async def streaming_callback(chunk: StreamingChunk) -> None:
             await queue.put(chunk)
             if chunk.tool_call_result and chunk.tool_call_result.error:
-                logger.error(
-                    f"Tool call failed: "
-                    f"tool={chunk.tool_call_result.origin.tool_name}, "
-                    f"result={chunk.tool_call_result.result}"
-                )
+                # The result may contain sensitive data, so log it at debug only.
+                logger.warning(f"Tool call failed: tool={chunk.tool_call_result.origin.tool_name}")
+                logger.debug(f"Tool call result: {chunk.tool_call_result.result}")
 
         self.generator.streaming_callback = streaming_callback
 
@@ -837,36 +886,64 @@ class Stream:
             await asyncio.to_thread(self.generator.warm_up)
 
         pipeline_task: asyncio.Task[Any] | None = None
+        # Oversight: the guard learns the message id and streams the calls it refuses.
+        turn = self._turn = (
+            StreamTurn(
+                self.guard,
+                message_id,
+                stream_writer,
+                self.citation_registry,
+                self._artifact_ids,
+                queue,
+            )
+            if self.guard is not None
+            else None
+        )
+        # Why the turn ended early: the exception name, or "disconnected".
+        turn_error = ""
 
         try:
             yield MessageStartEvent(message_id=message_id)
-
+            # Oversight: send the notices raised before the answer started.
+            for event in await turn.start() if turn else []:
+                yield event
             # take snapshots of current contextvars
-            # The task copies the context: tools register sources in this turn's registry.
+            # The task copies the context, so tools see this turn's citation registry
+            # and artifact list.
             registry_token = current_registry.set(self.citation_registry)
+            artifacts_token = turn_artifacts.set(self._artifact_ids)
             try:
-                with bind_trace(
-                    thread_id=getattr(self.storage_adapter, "thread_id", None),
-                    message_id=message_id,
+                with (
+                    bind_trace(
+                        thread_id=getattr(self.storage_adapter, "thread_id", None),
+                        message_id=message_id,
+                    ),
+                    # Oversight: tools and generators started here see the guard.
+                    guarding(self.guard),
                 ):
+                    if turn is not None:
+                        restrict_agent_tools(self.agent_component, turn.guard)
                     pipeline_task = self.get_task(haystack_messages, streaming_callback)
             finally:
                 current_registry.reset(registry_token)
+                turn_artifacts.reset(artifacts_token)
             pipeline_task.add_done_callback(lambda _: queue.put_nowait(_SENTINEL))
 
             registry = self.citation_registry
             if registry is not None and self.thread_id and self.citation_agent and stream_writer:
+                # A held answer shows no citations while it streams.
                 self._grounder = Grounder(
                     registry,
                     self.citation_agent,
-                    on_block=lambda: queue.put_nowait(_CITED),
+                    on_block=None if turn and turn.hold else lambda: queue.put_nowait(_CITED),
                 )
 
             async for event in self.get_events(queue, stream_writer):
-                yield event
+                for sent in turn.pass_event(event) if turn else [event]:
+                    yield sent
 
             try:
-                await self.get_pipeline_result(pipeline_task, stream_writer)
+                replies = await self.get_pipeline_result(pipeline_task, stream_writer)
             except Exception as pipeline_error:
                 info = describe_error(pipeline_error)
                 logger.opt(exception=pipeline_error).error(
@@ -876,24 +953,44 @@ class Stream:
                     type(pipeline_error).__name__,
                     pipeline_error,
                 )
+                turn_error = type(pipeline_error).__name__
                 if stream_writer:
                     stream_writer.add_chunk(get_error_chunk(pipeline_error, info))
+                    if turn:
+                        turn.end_early()
                     self.message_result = await stream_writer.finalize("error")
                     _finalize_called = True
                 yield get_error_event(info)
                 yield StreamEndEvent()
                 return
 
+            finish_reason = None
+            withheld = False
+            # No follow-up suggestions for a masked or withheld answer.
+            changed = False
+            # Oversight: check the whole answer, then pass, mask or withhold it.
+            if turn is not None:
+                events, finished = await turn.afinish(replies, self.model_name)
+                for event in events:
+                    yield event
+                withheld, changed = finished.blocked, finished.replaced
+                if withheld:
+                    finish_reason = CONTENT_FILTER
+
             # the text is done
             yield TextEndEvent()
-            async for event in self.get_citations_artifact(stream_writer):
-                yield event
-            await self.get_final_message(stream_writer)
+            if withheld:
+                for event in self._withdraw_citations():
+                    yield event
+            else:
+                async for event in self.get_citations_artifact(stream_writer):
+                    yield event
+            await self.get_final_message(stream_writer, finish_reason or "stop")
             _finalize_called = True
 
-            yield MessageEndEvent()
+            yield MessageEndEvent(finish_reason=finish_reason)
 
-            if suggestion := await self.get_suggestions(messages):
+            if not (withheld or changed) and (suggestion := await self.get_suggestions(messages)):
                 yield suggestion
 
         except Exception as critical_error:
@@ -908,8 +1005,11 @@ class Stream:
                 type(critical_error).__name__,
                 critical_error,
             )
+            turn_error = type(critical_error).__name__
             if stream_writer and not _finalize_called:
                 stream_writer.add_chunk(get_error_chunk(critical_error, info))
+                if turn:
+                    turn.end_early()
                 self.message_result = await stream_writer.finalize("error")
                 _finalize_called = True
             yield get_error_event(info)
@@ -926,6 +1026,10 @@ class Stream:
                 except (TimeoutError, asyncio.CancelledError, Exception):
                     pass
             if stream_writer and not _finalize_called:
+                if turn:
+                    turn.end_early()
                 self.message_result = await stream_writer.finalize("cancelled")
+            if turn is not None:
+                await turn.aclose(turn_error)
 
         yield StreamEndEvent()

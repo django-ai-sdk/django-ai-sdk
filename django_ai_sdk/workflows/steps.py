@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel
 
 from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.errors import Blocked
+from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -185,15 +187,31 @@ class AgentStep(Step):
         # Omitted rather than passed as None: Agent.run reads an explicit None as
         # "no structured output", which would strip the agent's own.
         response_format = {"response_format": self.schema} if self.schema else {}
-        result = await agent.run(
-            await self.messages(ctx),
-            system_prompt=await self.system_prompt(ctx),
-            user=ctx.principal,
-            **response_format,
-        )
+        messages = await self.messages(ctx)
+
+        try:
+            # Oversight: a workflow step is a turn like any other, under the agent's policy.
+            result = await agent.run(
+                messages,
+                system_prompt=await self.system_prompt(ctx),
+                user=ctx.principal,
+                channel=self.channel(ctx),
+                **response_format,
+            )
+        except Blocked as blocked:
+            done = "refused" if blocked.stage == Stage.GATE else "withheld"
+            return StepOutcome(status="failed", detail=f"{done} by oversight: {blocked.message}")
         if result is None:
             return StepOutcome(status="failed", detail="the agent returned nothing")
         return self.outcome_for(result)
+
+    def channel(self, ctx: WorkflowContext) -> str:
+        """The channel this step's turns are recorded on; use it when overriding run().
+
+        "workflow:<workflow>:<step>" for a stored or code workflow, and
+        "workflow:adhoc:<step>" for a definition a client submitted.
+        """
+        return f"workflow:{ctx.workflow or 'adhoc'}:{self.name}"
 
     def outcome_for(self, result: Any) -> StepOutcome:
         """What the agent's result means as this step's outcome.

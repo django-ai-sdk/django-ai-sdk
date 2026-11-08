@@ -53,6 +53,7 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
     INVALID_REQUEST = "invalid_request"
+    BLOCKED = "blocked"
     UNKNOWN = "unknown"
 
 
@@ -147,6 +148,11 @@ register_error_code(
     ErrorCode.CONFLICT, message=_("This conflicts with something that already exists."), status=409
 )
 register_error_code(ErrorCode.INVALID_REQUEST, message=_("The request was invalid."), status=400)
+# 400 like CONTENT_FILTERED. A 403 would look like an auth failure, but the
+# refusal is about the content, not the user.
+register_error_code(
+    ErrorCode.BLOCKED, message=_("This assistant's policy stopped this answer."), status=400
+)
 register_error_code(
     ErrorCode.UNKNOWN,
     message=_("Something went wrong. Please try again."),
@@ -185,6 +191,21 @@ class UserError(AiSdkError, ValueError):
     """
 
     code = ErrorCode.INVALID_REQUEST
+
+
+class Blocked(AiSdkError):
+    """Raised by `Agent.run()` when the policy refuses the question or withholds the answer.
+
+    Show `message` to the user as the reply. `stage` is "gate" or "finish".
+    """
+
+    code = ErrorCode.BLOCKED
+
+    def __init__(self, message: str, *, stage: str = "", turn_id: str = "") -> None:
+        super().__init__(f"blocked by oversight at {stage or 'unknown stage'}")
+        self.message = message
+        self.stage = stage
+        self.turn_id = turn_id
 
 
 # Providers report context overflow as a 400 with prose, and OpenAI-compatible
@@ -367,6 +388,8 @@ def error_response(exc: BaseException) -> tuple[int, dict[str, Any]]:
     body = info.as_dict()
     if isinstance(exc, UserError) and str(exc):
         body["message"] = str(exc)
+    if isinstance(exc, Blocked) and exc.message:
+        body["message"] = exc.message
     if isinstance(exc, ValidationError):
         # Field errors describe the caller's own input.
         body["errors"] = [
