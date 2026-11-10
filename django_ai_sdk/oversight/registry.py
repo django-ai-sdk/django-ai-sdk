@@ -74,9 +74,9 @@ def register_policy[T: type[Policy]](cls: T) -> T:
         return cls
     # A re-import of the same declaration replaces the old class.
     _registry[cls.name] = cls
-    from django_ai_sdk.oversight.resolve import invalidate
+    from django_ai_sdk.oversight.resolve import forget
 
-    invalidate(cls.name)
+    forget(cls.name)
     return cls
 
 
@@ -131,6 +131,18 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
                     "only an entities lens says where: name the lenses to mask, "
                     "Mask(lenses=[...])."
                 )
+
+
+def unregister_policy(name: str) -> None:
+    """Remove a policy registered at runtime.
+
+    Later turns naming it find no policy and are refused, unless FAIL_MODE is "open".
+    """
+    _registry.pop(name, None)
+    _invalid.pop(name, None)
+    from django_ai_sdk.oversight.resolve import forget
+
+    forget(name)
 
 
 def get_policy_class(name: str) -> type[Policy] | None:
@@ -227,6 +239,7 @@ __all__ = [
     "register_policy",
     "register_validator",
     "reset_registry",
+    "unregister_policy",
     "validate_policy",
     "validate_rule",
 ]
