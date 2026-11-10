@@ -1,5 +1,6 @@
-"""Forget oversight content when a thread is deleted (the oversight guide's Forgetting
-says what goes and what stays), and drop cached policies when AI_SDK_OVERSIGHT changes.
+"""Forget oversight content when a thread is deleted (the oversight guide's
+Forgetting says what goes and what stays), and drop cached policies when
+AI_SDK_OVERSIGHT changes.
 """
 
 from __future__ import annotations

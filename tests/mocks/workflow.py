@@ -1,4 +1,4 @@
-"""Workflow step and action fakes.
+"""Workflow step and listener fakes.
 
 A step that appends to a list is the whole test double: the model call is
 the only boundary these tests care about, and none of them cross it.
@@ -7,9 +7,32 @@ the only boundary these tests care about, and none of them cross it.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
-from django_ai_sdk.workflows.actions import WorkflowAction
+from django_ai_sdk.workflows.listeners import RunListener
+from django_ai_sdk.workflows.schemas import StepDefinition, WorkflowDefinition
 from django_ai_sdk.workflows.steps import OnError, Step, StepOutcome, WorkflowContext
+
+# Patch targets: the agent an agent step loads, and the hand-off to the task queue.
+AGENT_GET = "django_ai_sdk.agents.services.AgentService.get"
+ENQUEUE = "django_ai_sdk.workflows.runs._enqueue"
+
+
+def fake_agent(result: Any = "agent result") -> MagicMock:
+    """An agent whose `run` returns `result`."""
+    agent = MagicMock()
+    agent.run = AsyncMock(return_value=result)
+    return agent
+
+
+def two_steps() -> WorkflowDefinition:
+    """`first`, then `second`, which requires it."""
+    return WorkflowDefinition(
+        steps=[
+            StepDefinition(name="first", agent_id="a1"),
+            StepDefinition(name="second", agent_id="a1", requires=["first"]),
+        ]
+    )
 
 
 class FakeStep(Step):
@@ -27,8 +50,8 @@ class FakeStep(Step):
         outcome: StepOutcome | None = None,
         raises: Exception | None = None,
         skip_reason: str = "",
-        on_error: OnError = OnError.FAIL,
-        actions: tuple[WorkflowAction, ...] = (),
+        on_error: OnError = OnError.STOP,
+        listeners: tuple[RunListener, ...] = (),
         journal: list[str] | None = None,
     ) -> None:
         self.name = name
@@ -37,11 +60,11 @@ class FakeStep(Step):
         self.raises = raises
         self.skip_reason = skip_reason
         self.on_error = on_error
-        self.actions = tuple(actions)
+        self.listeners = tuple(listeners)
         self.journal = journal
         self.calls = 0
 
-    async def skip_when(self, ctx: WorkflowContext) -> str:
+    async def skip_if(self, ctx: WorkflowContext) -> str:
         return self.skip_reason
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
@@ -53,8 +76,8 @@ class FakeStep(Step):
         return self.outcome
 
 
-class RecordingAction(WorkflowAction):
-    """A WorkflowAction that appends every call, for assertions."""
+class RecordingListener(RunListener):
+    """A RunListener that appends every call, for assertions."""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
@@ -71,3 +94,23 @@ class RecordingAction(WorkflowAction):
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
         self.events.append(("step_end", step.name, outcome.status))
+
+
+async def run_now(
+    workflow: Any,
+    *,
+    inputs: dict[str, Any] | None = None,
+    user: Any = None,
+    run: Any = None,
+) -> tuple[dict[str, Any], Any]:
+    """Open a run of `workflow` (or take `run`) and execute it here, as a worker would.
+
+    Returns the run's outputs and the run, read back after it closed.
+    """
+    from django_ai_sdk.workflows.runs import execute_run, open_run
+
+    if run is None:
+        run = await open_run(workflow, inputs=inputs, user=user)
+    await execute_run(str(run.pk))
+    await run.arefresh_from_db()
+    return run.outputs or {}, run

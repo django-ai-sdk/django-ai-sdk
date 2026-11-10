@@ -1,7 +1,7 @@
 """How the SDK and oversight's layers may import each other.
 
-Core oversight is a layer of its own: it imports no workflows and no routes. The rest of the
-SDK reaches oversight only through the seams below.
+Core oversight is the bottom layer. The rest of the SDK reaches oversight only through the
+seams below.
 
 Every import is read from the source, including lazy imports inside functions and imports
 under `TYPE_CHECKING`, so a layer cannot lean on another one without it showing here.
@@ -23,6 +23,7 @@ OVERSIGHT = "django_ai_sdk.oversight"
 SEAMS = {
     f"{OVERSIGHT}.agent_run": "the agent opens, runs and replays each turn through it",
     f"{OVERSIGHT}.agents": "a subagent finds the policy its agent declares in code",
+    f"{OVERSIGHT}.calls": "generators and workflows wrap each model call so the turn sees it",
     f"{OVERSIGHT}.conf": "the agent reads whether oversight is on, and its settings",
     f"{OVERSIGHT}.guard": "the adapter and subagents find the guard of the turn in flight",
     f"{OVERSIGHT}.hooks": "tool agents add the tool checks; the adapter masks tool results",

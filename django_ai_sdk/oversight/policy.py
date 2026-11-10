@@ -224,9 +224,7 @@ def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy, parent_name: str)
 
 
 def _from_code(
-    name: str,
-    chain: tuple[str, ...],
-    ancestors: Mapping[str, Mapping[str, str]],
+    name: str, chain: tuple[str, ...], ancestors: Mapping[str, Mapping[str, str]]
 ) -> ResolvedPolicy:
     if name in chain:
         raise ImproperlyConfigured(f"Policy {name!r} extends itself: {' -> '.join((*chain, name))}")

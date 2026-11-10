@@ -6,11 +6,7 @@ Success responses are the services' own ``*Out`` models.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
-
-from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
 class MessagePart(BaseModel):
@@ -174,27 +170,3 @@ class UpdateAgentUserIn(BaseModel):
 class AddAgentGroupIn(BaseModel):
     group_id: int
     can_manage: bool = False
-
-
-# Workflows
-
-
-class WorkflowRunRequest(BaseModel):
-    workflow: WorkflowDefinition
-    inputs: dict[str, Any] = {}
-
-
-class WorkflowCreateRequest(BaseModel):
-    name: str
-    workflow: WorkflowDefinition
-
-
-class WorkflowUpdateRequest(BaseModel):
-    name: str | None = None
-    workflow: WorkflowDefinition | None = None
-    active: bool | None = None
-
-
-class WorkflowRunByIdRequest(BaseModel):
-    inputs: dict[str, Any] = {}
-    run_id: str | None = None

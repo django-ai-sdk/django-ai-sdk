@@ -31,7 +31,7 @@ from django_ai_sdk.workflows import AgentStep, OnError, Step, StepOutcome
 
 class ReadFileStep(Step):
     name = "text"
-    on_error = OnError.FAIL
+    on_error = OnError.STOP
 
     async def run(self, ctx):
         document = ctx.input("document")
@@ -66,11 +66,11 @@ from django_ai_sdk.workflows import run_steps
 outcomes = await run_steps(
     PIPELINE,
     inputs={"document": document},
-    principal=request.user,
+    user=request.user,
 )
 ```
 
-`inputs` seeds `ctx.input`. `principal` is the user an `AgentStep` runs as. `outcomes` maps every step's name to its `StepOutcome`.
+`inputs` seeds `ctx.input`. `user` is the user an `AgentStep` runs as. `outcomes` maps every step's name to its `StepOutcome`.
 
 ## Agent steps
 
@@ -81,12 +81,12 @@ outcomes = await run_steps(
 | `agent` | An `Agent` subclass, for a step written in code. |
 | `agent_id` | An id resolved through `AgentService`, for a step compiled from JSON. |
 | `schema` | A pydantic model, passed as the agent's `response_format`. Nested output is expressible. A result that does not come back as that model fails the step. |
-| `instructions` | A system prompt replacing the agent's own; empty keeps the agent's. |
-| `history` | Names of the inputs to send as the conversation — the author names them, per step, whether the step comes from code or JSON. A `str` input is one user turn; a `list` is a conversation of messages, message dicts, or strings. |
+| `instructions` | A system prompt replacing the agent's own; empty keeps the agent's. Code steps only: a JSON definition cannot set it. |
+| `history` | Names of the inputs to send as the conversation — the author names them, per step, whether the step comes from code or JSON. A `str` input is one user turn; a `list` is a conversation of messages, message dicts, or strings. Only user and assistant turns: a `system` message fails the step. |
 
 It sends the inputs named in `history` as the transcript, then one turn. Override the async `user_message(ctx)` to write that turn, or `messages(ctx)` to write the whole conversation; both may query. By default the turn is what the steps in `requires` produced, each under a `[name]` heading. A `None` result is reported as `failed`, not stored.
 
-A step's call is a turn under the agent's [oversight](/oversight/) policy, recorded on the channel `workflow:<workflow>:<step>`; a definition a client submitted (not a stored workflow) runs on `workflow:adhoc:<step>`, so it cannot pick the channel a policy chooses by. The `history` inputs are not what the server stored: the gate judges them on every run. A question the policy refuses or an answer it withholds fails the step (`refused by oversight: ...` or `withheld by oversight: ...`), so `on_error` decides what that costs; a masked structured result is rebuilt from its masked JSON. A step that overrides `run()` and calls the agent itself passes `channel=self.channel(ctx)` and handles `django_ai_sdk.errors.Blocked`.
+A step's call is a turn under the agent's [oversight](/oversight/) policy, recorded on the channel `workflow:<key>:<step>`. The key is the run's `workflow_key`, which the server sets when it opens the run: the stored workflow's slug, the registered workflow's name, or `adhoc` for any other definition. A definition's own `name` never picks it, so a definition cannot borrow the channel a policy chooses by, and no stored or registered workflow may be called `adhoc`. The `history` inputs are not what the server stored: the gate judges them on every run. A question the policy refuses or an answer it withholds fails the step (`refused by oversight: ...` or `withheld by oversight: ...`), so `on_error` decides what that costs; a masked structured result is rebuilt from its masked JSON. A step that overrides `run()` and calls the agent itself passes `channel=self.channel(ctx)` and handles `django_ai_sdk.errors.Blocked`.
 
 The transcript is **named, not guessed**. An input is data until a step names it as `history`, so a list of role-shaped rows that happens to be data is never mistaken for a prompt, and a workflow with two agent steps can give each a different conversation. What a history field holds is the author's choice: a `str` arrives as one user turn, a message dict as one message, a list item-by-item.
 
@@ -96,19 +96,19 @@ The transcript is **named, not guessed**. An input is data until a step names it
 
 | | |
 | --- | --- |
-| `OnError.FAIL` | The run stops. Every step that will now not run is recorded as `skipped`, then the exception propagates — `StepFailed` when the step reported failure rather than raising. |
+| `OnError.STOP` | The run stops. Every step that will now not run is recorded as `skipped`, then the exception propagates — `WorkflowStopped` when the step reported failure rather than raising. |
 | `OnError.CONTINUE` | The failure is recorded and the rest of the run proceeds. |
 
-A failed step produces nothing, and that is the whole cascade: a step whose required step produced nothing is recorded `skipped`, naming what it waited for. So a failure reaches exactly what read it and nothing else. To *react* to a failure — notify someone, file a ticket, write a fallback — use an [action](#actions); that is what they are for.
+A failed step produces nothing, and that is the whole cascade: a step whose required step did not complete is recorded `skipped`, naming what it waited for and whether that failed or was skipped. So a failure reaches exactly what read it and nothing else. To *react* to a failure — notify someone, file a ticket, write a fallback — use a [listener](#listeners); that is what they are for.
 
 Returning a failure rather than raising lets the step describe it: the detail reaches the record, and the output the step had already built is still on the outcome.
 
 ## Preconditions
 
-`skip_when` covers what the names cannot say: a step having completed proves it produced something, never that the value is usable.
+`skip_if` covers what the names cannot say: a step having completed proves it produced something, never that the value is usable.
 
 ```python
-    async def skip_when(self, ctx):
+    async def skip_if(self, ctx):
         if ctx.input("document").category != "invoice":
             return "not an invoice"
         return ""
@@ -116,19 +116,19 @@ Returning a failure rather than raising lets the step describe it: the detail re
 
 It is async, because a precondition is usually a database read. A skipped step never starts, and its reason is recorded.
 
-## Actions
+## Listeners
 
-Everything that watches a run rather than doing its work is an action, and there is one kind of object for all of it — recording the run's rows, telling someone a step finished, delivering the result when it ends.
+Everything that watches a run rather than doing its work is a listener, and there is one kind of object for all of it — recording the run's rows, telling someone a step finished, delivering the result when it ends.
 
 ```python
-from django_ai_sdk.workflows import WorkflowAction
+from django_ai_sdk.workflows import RunListener
 
 
-class NotifyAction(WorkflowAction):
+class NotifyListener(RunListener):
     description = "Tell the run's user a step finished"
 
     async def on_step_end(self, ctx, step, outcome):
-        await notify(ctx.principal, f"{step.name}: {outcome.status}")
+        await notify(ctx.user, f"{step.name}: {outcome.status}")
 ```
 
 | Callback | When |
@@ -136,50 +136,51 @@ class NotifyAction(WorkflowAction):
 | `on_run_start(ctx)` | Before the first step is considered. |
 | `on_step_start(ctx, step)` | A step is about to run. Not called for a step that is skipped. |
 | `on_step_end(ctx, step, outcome)` | A step settled — completed, failed or skipped. |
-| `on_run_end(ctx, error)` | The run is over. `error` is what ended it, or `None`. |
+| `on_run_end(ctx, error)` | The run is over, and in a worker its row already says how it ended. `error` is what ended it, or `None`. An attempt that lost the run to a newer one does not call it. |
 
-Every callback is a no-op by default, so an action implements only the moments it cares about.
+Every callback is a no-op by default, so a listener implements only the moments it cares about.
 
-**An action cannot fail the run.** Steps do the work; actions watch it. An action that raises is that action's own bug — it is logged against its class name and the run carries on, so a notification nobody received does not turn a workflow whose every step completed into a failed one, and one broken action does not stop the actions after it. The single exception is `StepAlreadyRunning`, below.
+A listener named in a definition gets that definition's `config`. By default a listener takes none, and a definition that passes one is refused when it is stored or registered. A listener that takes settings overrides `validate_config(config)` and raises `ValueError` for anything it does not accept, as a step does.
 
-**Where it is attached decides what it sees.** An action on the workflow gets all four callbacks, for the run and for every step in it. An action on one step gets the two step callbacks, for that step alone:
+**A listener cannot fail the run.** Steps do the work; listeners watch it. A listener that raises is that listener's own bug — it is logged against its class name and the run carries on, so a notification nobody received does not turn a workflow whose every step completed into a failed one, and one broken listener does not stop the listeners after it.
+
+**Where it is attached decides what it sees.** A listener on the workflow gets all four callbacks, for the run and for every step in it. A listener on one step gets the two step callbacks, for that step alone:
 
 ```python
-await run_steps(PIPELINE, actions=[NotifyAction()])          # every step
-SummariseStep.actions = (NotifyAction(),)                    # this step only
+await run_steps(PIPELINE, listeners=[NotifyListener()])          # every step
+SummariseStep.listeners = (NotifyListener(),)                    # this step only
 ```
-
-An action whose rows are also a claim refuses a duplicate delivery by raising `StepAlreadyRunning` — the one exception the runner lets through rather than logging. The queued entry point treats it as the ordinary case, and neither the recorder nor the executor stamps the run row, because the delivery that holds the run is still working on it.
 
 ## Recording a run
 
-The runner knows things no step can: that a step was blocked by an upstream failure, that it was skipped, that it crashed before writing anything. `RunRecorder` is the action that writes them down, and the executor always attaches it.
+The runner knows things no step can: that a step was blocked by an upstream failure, that it was skipped, that it crashed before writing anything. `RunRecorder` writes them down, and every queued run walks with one.
 
 ```python
-from django_ai_sdk.workflows import RunRecorder, WorkflowRun
+from django_ai_sdk.workflows.runs import RunRecorder
+from django_ai_sdk.workflows.models import WorkflowRun
 
 run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING)
-await run_steps(PIPELINE, inputs={"document": document}, actions=[RunRecorder(run, PIPELINE)])
+await run_steps(PIPELINE, inputs={"document": document}, recorder=RunRecorder(run, PIPELINE))
 ```
 
-`RunRecorder` writes one `WorkflowRunStep` row per step, and takes the declared pipeline because that is what fixes each row's order. A host that already keeps a step table — because a review screen queries one — adds an action of its own instead of writing the same fact twice under two retention policies.
+`RunRecorder` writes one `StepRun` row per step, and takes the declared pipeline because that is what fixes each row's order. It is passed as `recorder=`, not among the listeners, because it is the run's own record: it is told about each step first, and an error it raises (a database that is down, a run that is no longer this worker's) stops the run instead of being logged. A step does not run without its row. It also refreshes the run's `heartbeat_at` at every step, and every minute while a step runs, which is what `workflows_sweep` reads. A host that already keeps a step table — because a review screen queries one — adds a listener of its own instead of writing the same fact twice under two retention policies.
 
 ## Resume
 
-Dispatch is at-least-once, so the same pipeline can be handed to a worker twice. A re-dispatch resumes rather than repeating: pass what already finished as `completed=`, and those steps are trusted rather than run again. They get no action call either, so a resume does not re-date the row it is trusting.
+A pipeline you run yourself resumes by passing what already finished as `completed=`: those steps are trusted rather than run again. They get no listener call either, so a resume does not re-date the row it is trusting.
 
 ```python
 await run_steps(PIPELINE, completed={"text": stored_text})
 ```
 
-`WorkflowExecutor` does this for you, reading the run's own completed rows.
+A queued run does this for you. Dispatch is at-least-once, so the same run can reach a worker twice: the worker claims the run first (pending to running, in one conditional update), and a second delivery finds nothing to claim. A run that failed, or that `workflows_sweep` marked interrupted after its worker died, is queued again with `WorkflowService.resume(run_id)`; the worker that claims it reads the run's completed rows and continues from there.
 
 ## Interpreting a step's output
 
 The runner never inspects `output`. What a step returns means whatever the host decides — a value the next step reads, a payload to file, a list of things a person should check. That interpretation belongs in the host's own code, in its own vocabulary:
 
 ```python
-outcomes = await run_steps(PIPELINE, inputs={"document": document}, actions=[recorder])
+outcomes = await run_steps(PIPELINE, inputs={"document": document}, recorder=recorder)
 
 if outcomes["extract"].status == "completed":
     my_app.record_issues(document, outcomes["extract"].output)
@@ -204,14 +205,14 @@ is the gate: a type that is not listed cannot be composed by a runtime author.
 
 ```python
 # settings.py
-AI_SDK_WORKFLOW_STEPS = {"ocr": "myapp.steps.OcrStep"}
+AI_SDK_WORKFLOWS = {"STEPS": {"ocr": "myapp.steps.OcrStep"}}
 ```
 
 ```python
 # myapp/workflows.py — autodiscovered on startup
-from django_ai_sdk.workflows import FieldDefinition, StepDefinition, WorkflowDefinition, register
+from django_ai_sdk.workflows import FieldDefinition, StepDefinition, WorkflowDefinition, register_workflow
 
-register(
+register_workflow(
     WorkflowDefinition(
         name="process-document",
         input_fields={"document": FieldDefinition(type="str", description="Document id")},
@@ -228,28 +229,54 @@ register(
 )
 ```
 
-The definition owns the graph — `name`, `requires`, `on_error`, `actions` — and the class
+The definition owns the graph — `name`, `requires`, `on_error`, `listeners` — and the class
 supplies the behaviour. Class attributes on a registered `Step` are not defaults for
 those fields.
+
+A registered step that needs settings — which language to read, how many pages —
+takes them from its definition's `config`, and says what it accepts in
+`validate_config`. The definition is checked when it is stored or registered, so a bad
+config is refused there rather than in the worker. A step that does not override it
+accepts no config at all.
+
+```python
+from pydantic import BaseModel
+
+
+class OcrConfig(BaseModel):
+    language: str = "nld"
+
+
+class OcrStep(Step):
+    @classmethod
+    def validate_config(cls, config):
+        OcrConfig.model_validate(config)  # a ValidationError is a ValueError
+
+    async def run(self, ctx):
+        language = OcrConfig.model_validate(self.config).language
+        ...
+
+
+StepDefinition(type="ocr", name="text", config={"language": "eng"})
+```
 
 A run's inputs cross a queue as JSON, so pass the id of a row rather than the row and
 let the step resolve it:
 
 ```python
-run = await WorkflowService.run_by_id(workflow_id, inputs={"document": str(document.pk)}, user=user)
+run = await WorkflowService.start("process-document", inputs={"document": str(document.pk)}, user=user)
 ```
 
-The queued entry point logs a `StepFailed` or a `StepAlreadyRunning` rather than
-re-raising: both are already recorded by the time they reach it. Anything else reaches
-the queue as a real failure.
+The queued entry point logs a `WorkflowStopped` or a `RunSuperseded` rather than
+re-raising: the run's rows already say what happened. Anything else reaches the queue
+as a real failure.
 
 ## Limitations
 
-- **A queued workflow has to be declared at module level.** `enqueue` names it by import path, so a class nested inside another class or a function cannot be resolved by the worker.
-- **No retry, and no re-run of one step.** A failed step is re-run only by dispatching the whole pipeline again, which resumes past whatever already completed.
-- **No timeout of its own.** A model call is bounded by [`AI_SDK_LLM_TIMEOUT`](/manual/settings/) in the generator, but a step doing its own HTTP or subprocess work has to bound its own client. `django_tasks` has no timeout either.
-- **A worker that dies mid-step leaves the row open.** Nothing fires once the process is gone, so a host that must recover from a killed worker needs its own sweep over rows still marked running.
-- **Sequential.** Steps run one at a time, in declared order, even where two of them read nothing from each other.
+Workflows are a beta: retries, timeouts, parallel steps, human approval, the sweep, run data and snapshot semantics are listed once, under [Beta limitations](/manual/workflows/#beta-limitations). What concerns writing steps in particular:
+
+- **No re-run of one step.** A failed step runs again only when the whole run is resumed, which continues past whatever already completed.
+- **A blocked event loop does not beat.** A step that blocks the loop (sync work not wrapped in `sync_to_async`) for longer than `workflows_sweep --stale-after` gets its live run marked `interrupted` (its worker then stops at its next step).
 - **Order is yours to get right.** A step declared ahead of the one it reads is refused, not reordered.
-- **An `AgentStep` runs the CHAT permission check** on the principal, the same way a JSON agent step does. A code pipeline is not a permission bypass.
-- **`RunRecorder` is an action, so it is isolated like any other.** A database error while writing a step row is logged rather than fatal, which means a run can finish with a row missing from its record. The trade is deliberate: the alternative is letting any action fail the work.
+- **An `AgentStep` runs the CHAT permission check** on the user, the same way a JSON agent step does. A code pipeline is not a permission bypass.
+- **A pipeline you pass to `run_steps` yourself is not queued**, recorded or swept: only a `WorkflowRun` is.

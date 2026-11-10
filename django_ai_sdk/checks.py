@@ -2,7 +2,8 @@
 
 These catch misconfigurations that would not fail any request. Ids are
 `ai_sdk.E001` and up. Each opt-in app has its own `PREFIX`, such as
-`ai_sdk.oversight`, and reports a bad settings dict as `<PREFIX>.E012`.
+`ai_sdk.workflows` or `ai_sdk.oversight`, and reports a bad settings dict as
+`<PREFIX>.E012`.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Iterator
 
     # Returns what is wrong with a value, or "" when it is fine.
     Validator = Callable[[Any], str]
@@ -115,6 +116,13 @@ def number(minimum: float, *, above: bool = False, allow_none: bool = False) -> 
     return check
 
 
+def names(value: Any) -> str:
+    """Accept a list or tuple of strings."""
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
+        return ""
+    return f"is {value!r}, not a list of names"
+
+
 class AppSettings:
     """One settings dict, declared once as `{key: (default, validator, fix hint)}`.
 
@@ -174,10 +182,27 @@ class AppSettings:
         ]
 
 
+def per_database[T](
+    databases: Iterable[str] | None, read: Callable[[str], T]
+) -> Iterator[tuple[str, T]]:
+    """Yield (alias, read(alias)) for each database a check is given.
+
+    A database whose tables are not migrated yet has nothing to check, so it is skipped.
+    """
+    from django.db import DatabaseError
+
+    for alias in databases or ():
+        try:
+            found = read(alias)
+        except DatabaseError:
+            continue
+        yield alias, found
+
+
 def task_backend_problem(task: Any) -> str:
     """Why `task` would not run on a worker, or "" when its backend has one.
 
-    Phrased to follow "<what> ...", such as "Oversight's reflect stage and notifications are queued but never run".
+    Phrased to follow "<what> ...", such as "Workflow runs are queued but never run".
     """
     from django_tasks.backends.dummy import DummyBackend
     from django_tasks.backends.immediate import ImmediateBackend
@@ -200,8 +225,10 @@ __all__ = [
     "AppSettings",
     "TASKS_HINT",
     "check_oversight_installed",
+    "names",
     "number",
     "of_type",
     "one_of",
+    "per_database",
     "task_backend_problem",
 ]

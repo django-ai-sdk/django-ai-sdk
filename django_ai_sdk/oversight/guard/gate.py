@@ -59,6 +59,7 @@ class GateStage(Masking, Notices):
         Always writes the turn ahead (`write_ahead`) afterwards, refused or not.
         """
         result = await self._gate_checked()
+        self.gated = True
         await self.write_ahead()
         return result
 

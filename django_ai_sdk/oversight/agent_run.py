@@ -25,6 +25,7 @@ from django_ai_sdk.common import as_chat_messages, last_user_message, last_user_
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.actions import Block
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
     closing_turn,
@@ -273,8 +274,9 @@ async def turn(
             return await t.finish(answer)  # masked; raises Blocked
 
     Pass `messages` (history, then the question) or `input` (just the question).
-    `oversight` works as in `run_turn`. Inside the block, tool hooks see the turn.
-    An exception other than `Blocked` is recorded as the run's error.
+    `oversight` works as in `run_turn`. Inside the block, tool hooks see the turn
+    and SDK model calls count toward it (`oversight.calls`). An exception other
+    than `Blocked` is recorded as the run's error.
     """
     if oversight is False:
         with guarding(None), unguarded():
@@ -299,7 +301,8 @@ async def turn(
     )
     if not opened:
         # Joined the outer turn, or no policy: an opt-out on purpose.
-        yield current
+        with settled():
+            yield current
         return
     async with closing_turn(guard, error=lambda: current.error):
         with guarding(guard):

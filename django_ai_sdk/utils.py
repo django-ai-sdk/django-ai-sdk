@@ -28,6 +28,11 @@ def serialize(value: Any) -> Any:
     return dump(mode="json") if callable(dump) else str(value)
 
 
+def isoformat_or_none(value: Any) -> str | None:
+    """ISO 8601 text of a date or datetime, or None when there is none."""
+    return value.isoformat() if value else None
+
+
 def as_uuid(value: Any) -> uuid.UUID | None:
     """`value` as a UUID, or None when it is empty or not one."""
     if not value:
