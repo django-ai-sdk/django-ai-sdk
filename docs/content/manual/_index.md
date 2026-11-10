@@ -110,4 +110,5 @@ django_ai_sdk/
   {{< card link="files/" title="Files" icon="document" subtitle="Processors, transforms, upload lifecycle" >}}
   {{< card link="workflows/" title="Workflows" icon="server" subtitle="Definition schema, models, runs" >}}
   {{< card link="automations/" title="Automations" icon="clock" subtitle="Cron schedules over workflows" >}}
+  {{< card link="webhooks/" title="Webhooks" icon="globe-alt" subtitle="Inbound events, answered by an agent" >}}
 {{< /cards >}}
