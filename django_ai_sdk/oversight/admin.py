@@ -1,7 +1,8 @@
 """Read-only admin for the oversight record.
 
-It never shows content (turn text, reasons, notes) or who asked in which
-thread.
+It needs only metrics access, so it never shows content (turn text, reasons,
+notes) or who asked in which thread. Turns and their rows are narrowed by the
+same scope hooks as the review API. Views here write no access record.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from typing import Any
 
 from django.contrib import admin
 
-from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
+from django_ai_sdk.oversight.models import AccessRecord, LensAnswer, ReviewItem, RuleMatch, Turn
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -24,29 +25,54 @@ class ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
+class ScopedAdmin(ReadOnlyAdmin):
+    """Rows of the turns the reader's METRICS scope keeps, as in the review API."""
+
+    # The path from a row to its turn; "" for the turn itself.
+    turn_path = "turn"
+
+    def get_queryset(self, request: Any) -> Any:
+        from django_ai_sdk.oversight.services import OversightService
+        from django_ai_sdk.oversight.services.access import METRICS
+
+        turns = OversightService.has_queryset_perms(
+            request.user, METRICS, queryset=Turn.objects.all()
+        )
+        lookup = f"{self.turn_path}__in" if self.turn_path else "pk__in"
+        return super().get_queryset(request).filter(**{lookup: turns.values("pk")})
+
+
 @admin.register(Turn)
-class TurnAdmin(ReadOnlyAdmin):
+class TurnAdmin(ScopedAdmin):
+    turn_path = ""
     list_display = ("created_at", "channel", "agent_name", "outcome", "report_outcome", "severity")
     list_filter = ("outcome", "report_outcome", "severity", "channel", "policy")
-    # Who asked, and in which thread, counts as content here.
+    # The review API shows these ids only with VIEW_OVERSIGHT_CONTENT.
     exclude = ("content", "actor_id", "thread_id", "user_message_id", "message_id")
 
 
 @admin.register(LensAnswer)
-class LensAnswerAdmin(ReadOnlyAdmin):
+class LensAnswerAdmin(ScopedAdmin):
     # Reasons live in the turn's content, which the admin does not show.
     list_display = ("created_at", "lens", "stage", "answerer", "value", "confidence", "error")
     list_filter = ("lens", "stage", "answerer")
 
 
 @admin.register(RuleMatch)
-class RuleMatchAdmin(ReadOnlyAdmin):
+class RuleMatchAdmin(ScopedAdmin):
     list_display = ("created_at", "rule", "stage", "mode", "acted")
     list_filter = ("rule", "mode", "acted")
 
 
 @admin.register(ReviewItem)
-class ReviewItemAdmin(ReadOnlyAdmin):
+class ReviewItemAdmin(ScopedAdmin):
     # The reviewer's note lives in the turn's content, which the admin does not show.
     list_display = ("created_at", "queue", "lens", "rule", "priority", "status")
     list_filter = ("queue", "status")
+
+
+@admin.register(AccessRecord)
+class AccessRecordAdmin(ReadOnlyAdmin):
+    # Reads and changes through the API. Views in this admin are not recorded.
+    list_display = ("created_at", "reader_label", "operation", "content")
+    list_filter = ("operation", "content")

@@ -11,12 +11,18 @@ Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
     api.add_router("/", ai_sdk_routers.get_workflows_router())
     api.add_router("/memories", ai_sdk_routers.get_memories_router())
     api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
+    api.add_router("/", ai_sdk_routers.get_oversight_router())
+
+The oversight router is imported only when requested and needs
+``django_ai_sdk.oversight`` in INSTALLED_APPS.
 
 Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
 ``exclude={"delete_all_threads"}`` and add your own on the result.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 try:
     import ninja  # noqa: F401
@@ -34,10 +40,21 @@ from django_ai_sdk.contrib.ninja.routing import register_error_handlers
 from django_ai_sdk.contrib.ninja.threads import get_threads_router
 from django_ai_sdk.contrib.ninja.workflows import get_workflows_router
 
+
+def __getattr__(name: str) -> Any:
+    """Import the oversight router on first use (PEP 562): it needs its app installed."""
+    if name == "get_oversight_router":
+        from django_ai_sdk.contrib.ninja.oversight import get_oversight_router
+
+        return get_oversight_router
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "get_agents_router",
     "get_integrations_router",
     "get_memories_router",
+    "get_oversight_router",
     "get_threads_router",
     "get_workflows_router",
     "register_error_handlers",

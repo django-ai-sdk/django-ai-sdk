@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
-from django.db import DatabaseError
+from django.db import DatabaseError, OperationalError
 from django.test import override_settings
 from django.utils import timezone
 from django_ai_sdk.common import ChatMessage
@@ -150,7 +150,6 @@ class WorkerBackend(BaseTaskBackend):
 
     def enqueue(self, task: Any, args: Any, kwargs: Any) -> Any:
         raise NotImplementedError
-
 
 
 @pytest.mark.django_db(transaction=True)
@@ -467,6 +466,45 @@ class TestReflectLease:
         kept = await sync_to_async(_commit_reflection)(turn, *judged, lease=stale_lease)
         assert kept is False
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
+
+    async def test_a_run_that_fails_gives_its_claim_back(self):
+        turn_id = await self.closed("fine")
+        with patch("django_ai_sdk.oversight.reflect.save_answers", side_effect=RuntimeError("db")):
+            with pytest.raises(RuntimeError):
+                await areflect(turn_id)
+        assert (await Turn.objects.aget(id=turn_id)).reflected_at is None
+        assert await areflect(turn_id) == 1
+
+    async def test_an_after_effect_that_fails_writes_nothing_and_is_retried(self):
+        turn_id = await self.closed()
+        with (
+            patch("django_ai_sdk.oversight.reflect._after_effects", side_effect=RuntimeError("x")),
+            pytest.raises(RuntimeError),
+        ):
+            await areflect(turn_id)
+        # Its answers and matches went with it: the reflection is all or nothing.
+        assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
+        assert not await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").aexists()
+        with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
+            assert await areflect(turn_id) == 1
+        assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").aexists()
+        assert (await Turn.objects.aget(id=turn_id)).reflect_state == "done"
+
+    async def test_a_policy_that_did_not_load_gives_the_claim_back(self):
+        turn_id = await self.closed("fine")
+        with patch("django_ai_sdk.oversight.resolve.aget_policy", return_value=None):
+            assert await areflect(turn_id) == 0
+        assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
+        assert await areflect(turn_id) == 1
+
+    async def test_a_turn_that_cannot_be_read_gives_the_claim_back(self):
+        turn_id = await self.closed("fine")
+        with (
+            patch.object(Turn.objects, "select_related", side_effect=OperationalError("db")),
+            pytest.raises(OperationalError),
+        ):
+            await areflect(turn_id)
+        assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
 
     async def test_a_turn_that_keeps_failing_is_marked_failed(self):
         turn_id = await self.closed()

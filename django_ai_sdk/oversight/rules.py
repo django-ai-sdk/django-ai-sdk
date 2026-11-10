@@ -39,7 +39,7 @@ class Rule:
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
         # Shown to the user when the rule refuses (a block, or a tool it took away).
-        # Overrides Block's message; the overlay may tune it.
+        # Overrides Block's message.
         self.message = message
         # Shown to the user whenever the rule acts, e.g. "The fraud team is alerted."
         # Leave empty to queue or alert without telling the user.

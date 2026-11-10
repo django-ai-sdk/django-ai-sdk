@@ -38,12 +38,15 @@ api.add_router("/", ai_sdk_routers.get_agents_router())
 api.add_router("/", ai_sdk_routers.get_workflows_router())
 api.add_router("/memories", ai_sdk_routers.get_memories_router())
 api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
+api.add_router("/", ai_sdk_routers.get_oversight_router())  # opt-in review API
 
 urlpatterns = [
     path("api/", api.urls),
     path("api/integrations/", include("django_ai_sdk.integrations.mcp.urls")),  # OAuth callback
 ]
 ```
+
+`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](/manual/oversight/#review-api). DRF has no review routes: call `OversightService` from your own view.
 
 Each `get_*_router()` builds a **new** Router, so you can trim it and add your own endpoints next to the SDK's without changing the router for anyone else. That is why they are functions rather than module-level routers: Ninja can't remove an endpoint from a router, so `exclude` has to happen while it is built.
 

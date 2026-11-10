@@ -13,6 +13,8 @@ import secrets
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from django.utils import timezone
+
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.patterns import mask_all, mask_json
 from django_ai_sdk.oversight.types import (
@@ -268,6 +270,22 @@ def load_content(turn: Turn) -> dict[str, Any] | None:
     return _load([turn.content], f"turn {turn.id}")[0]
 
 
+def load_contents(turns: list[Turn]) -> dict[Any, dict[str, Any] | None]:
+    """Like `load_content` for many turns, keyed by turn id, in a fixed number of queries.
+
+    Content past its expiry and not yet pruned loads as None, as `content_state` says.
+    """
+    now = timezone.now()
+    rows = [
+        None
+        if t.content is None or (t.content.expires_at and t.content.expires_at <= now)
+        else t.content
+        for t in turns
+    ]
+    loaded = _load(rows, f"{len(turns)} turns")
+    return dict(zip((t.id for t in turns), loaded, strict=True))
+
+
 def _load(rows: list[TurnContent | None], what: str) -> list[dict[str, Any] | None]:
     """Load `rows` through custody. None for a row that is missing or cannot be read here."""
     from django_ai_sdk.oversight import custody
@@ -354,6 +372,7 @@ __all__ = [
     "context_from_turn",
     "found_literals",
     "load_content",
+    "load_contents",
     "masker_for_capture",
     "stored_value",
     "turn_found",

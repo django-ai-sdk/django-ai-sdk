@@ -13,10 +13,14 @@ scores, counts and errors.
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from django.db import models
 
 from django_ai_sdk.oversight.types import Outcome
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 APP_LABEL = "django_ai_sdk_oversight"
 
@@ -201,6 +205,16 @@ class RuleMatch(models.Model):
         app_label = APP_LABEL
         db_table = "django_ai_sdk_oversight_matches"
         ordering = ["created_at"]
+        constraints = [
+            # After close, a rule matches a turn at most once, even if reflect and a
+            # reviewer's answer both find it. Inline stages may match more than once
+            # (history and question, or each tool call).
+            models.UniqueConstraint(
+                fields=["turn", "rule"],
+                condition=models.Q(stage="reflect"),
+                name="oversight_one_reflect_match_per_rule",
+            )
+        ]
 
 
 class ReviewItem(models.Model):
@@ -240,7 +254,62 @@ class ReviewItem(models.Model):
         ]
 
 
+class AccessRecord(models.Model):
+    """A read of the record, or a change of it (a prune run): who, what and which turns.
+
+    Written by `oversight.services`, one per read of turns or review items, with
+    the id of every turn shown. The same read by the same reader within a minute
+    (a polling page) is one record. Counts (metrics, queues) are not recorded.
+    Holds no content.
+    """
+
+    # The kinds of record core writes: what was done, not the permission it took
+    # (`permissions.Operation`). An opt-in app logs its own (switch, author, ...).
+    class Operation(models.TextChoices):
+        LIST = "list"
+        VIEW = "view"
+        REVIEWS = "reviews"
+        # A review item resolved.
+        REVIEW = "review"
+        # A run of oversight_prune, with its counts in `query`.
+        PRUNE = "prune"
+
+    id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
+    # An id, not a foreign key, so deleting the reader keeps their reads.
+    reader_id = models.CharField(max_length=64, blank=True)
+    # The reader's name at read time, for accountability. Reset to the id when the
+    # user is deleted (`signals.forget_actor`).
+    reader_label = models.CharField(max_length=255, blank=True)
+    # One of `Operation`. No `choices=`, so an app may log its own operation.
+    operation = models.CharField(max_length=16)
+    turn_ids = models.JSONField(default=list, blank=True)
+    # Whether the read showed content (a question, an answer, a reason, a note).
+    content = models.BooleanField(default=False)
+    # The read's filters and cursor. When a list showed content for only some
+    # turns, "content_ids" names them.
+    query = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        app_label = APP_LABEL
+        db_table = "django_ai_sdk_oversight_access"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["reader_id", "operation", "created_at"])]
+
+    @classmethod
+    def last_pruned(cls, using: str = "default") -> datetime | None:
+        """When `oversight_prune` last finished on `using`, or None if it never ran."""
+        return (
+            cls.objects.using(using)
+            .filter(operation=cls.Operation.PRUNE)
+            .order_by("-created_at")
+            .values_list("created_at", flat=True)
+            .first()
+        )
+
+
 __all__ = [
+    "AccessRecord",
     "RuleMatch",
     "TurnContent",
     "LensAnswer",
