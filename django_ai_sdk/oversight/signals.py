@@ -56,17 +56,15 @@ def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
 
 
 def forget_actor(actor_id: str) -> int:
-    """Clear `actor_id` from the turns it asked, after forgetting those turns' own content.
+    """Forget a user on the turns they asked. Returns how many turns named them.
 
-    A turn in a thread keeps its content until that thread is deleted (a user's own
-    threads go with them). A turn without a thread is its own scope, `turn:<id>`,
-    handed to custody's `forget`; under `PlainCustody` their content rows go in one
-    delete per batch of FORGET_BATCH. The access records the actor left as a reader
-    keep their id and lose their name. The answers, matches and reviews stay.
-    Returns how many turns named the actor.
+    Clears `Turn.actor_id`. A turn in a thread keeps its content until the thread is
+    deleted. A turn without a thread is its own `turn:<id>` scope and is forgotten
+    here. Access records keep the reader id but lose the name. Answers, matches and
+    reviews stay.
 
-    Safe to run again: `manage.py oversight_forget_actor <id>` does, for a user whose
-    delete could not reach the record (the failure is logged).
+    Safe to run again. `manage.py oversight_forget_actor <id>` calls it when the
+    delete signal failed.
     """
     from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import AccessRecord, Turn, TurnContent

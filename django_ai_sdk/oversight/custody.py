@@ -49,11 +49,11 @@ class Custody(Protocol):
         ...
 
     def chained(self, items: list[tuple[str, Model]]) -> None:
-        """Rows just written, as (kind, row): "turn", "answer", "match".
+        """Receive rows just written as (kind, row) pairs.
 
-        Kinds are "turn", "answer", "match" and "access" (an `AccessRecord`). A
-        turn arrives again on each update: once when its gate ends and again when
-        it closes.
+        Kinds are "turn", "answer", "match", "access" (an `AccessRecord`) and
+        "override" (a runtime switch). A turn arrives again on each update: once
+        when its gate ends and again when it closes.
         "aside" is a `TurnContent` whose judge text or reviewer notes were added to.
         """
         ...
@@ -64,7 +64,7 @@ class Custody(Protocol):
 
 
 class PlainCustody:
-    """Content kept as it is; forgetting deletes it; nothing is chained."""
+    """The default custody. Stores content as is and chains nothing."""
 
     def store(self, scope: str, content: dict[str, Any]) -> dict[str, Any]:
         from django_ai_sdk.oversight.models import TurnContent
@@ -102,7 +102,7 @@ _custody: Custody = PlainCustody()
 
 
 def install(custody: Custody | None) -> None:
-    """Make `custody` the one every turn uses; None puts PlainCustody back."""
+    """Use `custody` for every turn. None restores PlainCustody."""
     global _custody
     _custody = custody or PlainCustody()
 

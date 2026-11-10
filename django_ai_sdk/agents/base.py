@@ -263,6 +263,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
     oversight: type[Policy] | str | Literal[False] | None = None
 
+    # When True, an overlay may swap this agent's policy but not turn it off.
+    # Code can still turn it off with `oversight = False` or `run(oversight=False)`.
+    oversight_required: bool = False
+
     # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
     # Assign the factory itself, never call it: get_llm() builds it with this
     # agent's model.

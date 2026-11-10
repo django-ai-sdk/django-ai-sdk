@@ -1,8 +1,8 @@
 """How the SDK and oversight's layers may import each other.
 
-Core oversight is the bottom layer. The review layer sits on it as an opt-in part, and can be
-removed without touching core. The rest of the SDK reaches oversight only through the seams
-below.
+Core oversight is the bottom layer. The review layer and the runtime switches sit on it as
+opt-in parts, and each can be removed without touching the layers below. The rest of the SDK
+reaches oversight only through the seams below.
 
 Every import is read from the source, including lazy imports inside functions and imports
 under `TYPE_CHECKING`, so a layer cannot lean on another one without it showing here.
@@ -68,6 +68,16 @@ LAYERS = {
         may_import=("core", "review"),
         why="The HTTP routes that serve the review API.",
     ),
+    "switches": Layer(
+        modules=(f"{OVERSIGHT}.switches",),
+        may_import=("core", "review"),
+        why="Runtime switches over the code's policies, an app of its own.",
+    ),
+    "switches routes": Layer(
+        modules=("django_ai_sdk.contrib.ninja.oversight_switches",),
+        may_import=("seams", "switches"),
+        why="The HTTP routes that serve the switches.",
+    ),
     "core": Layer(
         modules=(OVERSIGHT,),
         may_import=(),
@@ -76,7 +86,11 @@ LAYERS = {
     ),
     "sdk": Layer(
         modules=("django_ai_sdk",),
-        may_import=("seams", "review routes"),
+        may_import=(
+            "seams",
+            "review routes",
+            "switches routes",
+        ),
         why="The rest of the SDK: it uses oversight through its seams and mounts the routes.",
     ),
 }

@@ -322,7 +322,13 @@ def test_the_manual_lists_every_check_id():
     from django_ai_sdk.checks import SETTINGS_CHECK
 
     root = Path(__file__).resolve().parents[2]
-    code = "".join(path.read_text(encoding="utf-8") for path in (root / "django_ai_sdk/oversight").rglob("*.py"))
+    # The opt-in apps raise their own ids, under their own PREFIX.
+    opt_in = {"switches"}
+    code = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (root / "django_ai_sdk/oversight").rglob("*.py")
+        if not opt_in & set(path.relative_to(root).parts)
+    )
     raised = set(re.findall(r'id=f"\{PREFIX\}\.([EW]\d{3})"', code)) | {SETTINGS_CHECK}
     manual = (root / "docs/content/manual/oversight.md").read_text(encoding="utf-8")
     section = manual.split("\n## System checks\n", 1)[1].split("\n## ", 1)[0]

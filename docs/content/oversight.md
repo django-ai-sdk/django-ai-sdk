@@ -230,7 +230,7 @@ A hook that raises, like a policy that cannot load, refuses the turn with a gene
 Which policy a turn runs under, first match wins:
 
 1. `run(oversight=...)` for that one call (trusted code; see below).
-2. An overlay's assignment for the agent, including "off", when an app installs one (`policy.OverlaySource`). An operator's choice wins over what the code says.
+2. An overlay's assignment for the agent, including "off" (unless the agent sets `oversight_required`), when an app installs one (`resolve.OverlaySource`; the [switches app](/oversight-switches/) does). An operator's choice wins over what the code says.
 3. `get_oversight(channel=..., user=...)`, which returns `oversight` unless you override it.
 4. `DEFAULT_POLICY`, when the steps above gave `None`.
 
@@ -720,3 +720,4 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. An app that encr
 
 - The [Oversight manual](/manual/oversight/): every class, setting, model and check.
 - The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
+- [Runtime switches](/oversight-switches/): flip a rule's mode or an agent's policy without a deploy, with a reason, a notification and an access record, an opt-in app.

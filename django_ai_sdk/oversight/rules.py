@@ -7,17 +7,25 @@
         mode=Mode.ENFORCE,
     )
 
-A rule starts in report mode: it reports what it would have done, on every turn,
-so its false-positive rate is known before it can block anyone.
+A rule starts in report mode. It reports what it would have done on every turn,
+so you learn its false-positive rate before it can block anyone.
+
+`min_mode` is a floor set in code. A runtime overlay cannot set the rule below it,
+and cannot change the condition or actions of a rule that has a floor.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.oversight.actions import ACTION_ORDER, Action, action_from_dict
 from django_ai_sdk.oversight.conditions import Condition, condition_from_dict
 from django_ai_sdk.oversight.types import Mode, rank
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class Rule:
@@ -33,13 +41,20 @@ class Rule:
         message: str = "",
         notice: str = "",
         description: str = "",
+        min_mode: Mode | str = Mode.OFF,
     ) -> None:
         self.name = name
         self.when = when if isinstance(when, Condition) else condition_from_dict(when)
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
+        # An overlay may not set the mode below this.
+        self.min_mode = Mode(min_mode)
+        if below(self.mode, self.min_mode):
+            raise ImproperlyConfigured(
+                f"Rule {name!r}: mode {self.mode} is below its min_mode {self.min_mode}"
+            )
         # Shown to the user when the rule refuses (a block, or a tool it took away).
-        # Overrides Block's message.
+        # Overrides Block's message; the overlay may tune it.
         self.message = message
         # Shown to the user whenever the rule acts, e.g. "The fraud team is alerted."
         # Leave empty to queue or alert without telling the user.
@@ -61,6 +76,7 @@ class Rule:
             "message": self.message,
             "notice": self.notice,
             "description": self.description,
+            "min_mode": str(self.min_mode),
         }
 
     @classmethod
@@ -73,10 +89,42 @@ class Rule:
             message=node.get("message", ""),
             notice=node.get("notice", ""),
             description=node.get("description", ""),
+            min_mode=node.get("min_mode", Mode.OFF),
         )
 
     def ordered_actions(self) -> list[Action]:
         return sorted(self.then, key=lambda action: rank(ACTION_ORDER, action.kind))
 
 
-__all__ = ["Rule"]
+# Modes from least to most protective.
+MODE_ORDER = (Mode.OFF, Mode.REPORT, Mode.ENFORCE)
+
+
+def below(mode: Mode | str, floor: Mode | str) -> bool:
+    """Whether `mode` protects less than `floor` (off < report < enforce)."""
+    return rank(MODE_ORDER, Mode(mode)) < rank(MODE_ORDER, Mode(floor))
+
+
+def floor_problems(floored: Mapping[str, Rule], rules: Mapping[str, Rule]) -> list[str]:
+    """How `rules` falls short of the floors code set in `floored`.
+
+    Every rule there with a `min_mode` must be in `rules` with the same condition and
+    actions, at its floor or above, and keep the floor.
+    """
+    problems = []
+    for name, rule in floored.items():
+        if rule.min_mode is Mode.OFF:
+            continue
+        kept = rules.get(name)
+        if kept is None:
+            problems.append(f"rule {name!r}, which runs at least {rule.min_mode}, is missing")
+        elif kept.when.to_dict() != rule.when.to_dict() or [a.to_dict() for a in kept.then] != [
+            a.to_dict() for a in rule.then
+        ]:
+            problems.append(f"rule {name!r} has a floor, so its condition and actions stay")
+        elif below(kept.mode, rule.min_mode) or below(kept.min_mode, rule.min_mode):
+            problems.append(f"rule {name!r} may not go below {rule.min_mode}")
+    return problems
+
+
+__all__ = ["MODE_ORDER", "Rule", "below", "floor_problems"]

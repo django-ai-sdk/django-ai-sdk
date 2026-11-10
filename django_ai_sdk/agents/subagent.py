@@ -359,8 +359,9 @@ class SubagentStreamFilter:
     def _needs_own_turn(self) -> bool:
         """Return True when a sync delegation would need its own turn.
 
-        Sync runs cannot open a turn. They cannot await `get_oversight()` or an
-        overlay either, so a subagent that has one is assumed to need a turn.
+        Sync runs cannot open a turn. They cannot await `get_oversight()` or read
+        the overlay either: a subagent whose policy only those can tell is assumed to
+        need a turn. The overlay's assignments count while the last read is fresh.
         """
         if self._subagent is None:
             return False
@@ -369,14 +370,14 @@ class SubagentStreamFilter:
         if not is_enabled():
             return False
         from django_ai_sdk.oversight.agent_run import joins_turn
-        from django_ai_sdk.oversight.agents import code_policy, policy_needs_await
+        from django_ai_sdk.oversight.agents import sync_policy
         from django_ai_sdk.oversight.guard import current_guard
 
-        if policy_needs_await(self._subagent):
-            return True
         try:
-            own = code_policy(self._subagent)[0]
+            own = sync_policy(self._subagent)
         except Exception:
+            return True
+        if own is None:
             return True
         return bool(own) and not joins_turn(current_guard(), own)
 

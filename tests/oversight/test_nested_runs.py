@@ -229,6 +229,27 @@ class TestSubagents:
             result = component.run(messages=[HaystackChatMessage.from_user("x")], task="send")
         assert subagent_response(result["messages"]) == "done"
 
+    def test_a_sync_delegation_reads_the_overlays_last_fresh_assignments(self):
+        """Once a turn read the overlay, sync code knows the subagent is not switched."""
+        from django_ai_sdk.agents.subagent import UNGUARDABLE, subagent_response
+        from django_ai_sdk.oversight import resolve
+        from django_ai_sdk.oversight.resolve import OverlaySource
+
+        ran: list[str] = []
+        sub = secret_subagent(ran)
+        sub.oversight = False
+        component = asyncio.run(delegation(sub))
+        before = resolve.overlay_source()
+        switches = type("Switches", (OverlaySource,), {"ttl": 60.0})()
+        resolve.set_overlay_source(switches)
+        try:
+            asyncio.run(resolve.aassigned_policy("someone-else"))  # A turn's read.
+            result = component.run(messages=[HaystackChatMessage.from_user("x")], task="send")
+        finally:
+            resolve.set_overlay_source(before)
+        assert subagent_response(result["messages"]) != str(UNGUARDABLE)
+        assert ran == [SECRET]
+
     def test_a_sync_delegation_whose_policy_only_an_overlay_or_hook_can_tell_is_refused(self):
         from django_ai_sdk.agents.subagent import UNGUARDABLE, subagent_response
         from django_ai_sdk.oversight import resolve
