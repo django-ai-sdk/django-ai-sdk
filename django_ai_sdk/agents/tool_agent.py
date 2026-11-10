@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from haystack import Pipeline
@@ -20,6 +21,20 @@ SKIPPED_META_KEY = "django_ai_sdk.skipped"
 TRUNCATED_META_KEY = "django_ai_sdk.truncated"
 
 
+_END_RAW = re.compile(r"{%-?\s*endraw\s*-?%}")
+
+
+def _literal(text: str) -> str:
+    """`text` as a Jinja template that renders to itself.
+
+    Haystack treats a system prompt as a template; a prompt is plain text, often
+    written by a user, and its braces (JSON examples, `{{ name }}`) are just braces.
+    """
+    if "{" not in text:
+        return text
+    return "{% raw %}" + _END_RAW.sub("", text) + "{% endraw %}"
+
+
 class ToolCallBudgetHook:
     """Hard cap on how many tool calls an agent may make in a single run."""
 
@@ -33,14 +48,27 @@ class ToolCallBudgetHook:
         )
 
     def run(self, state: State) -> None:
-        counts = state.data.get("tool_call_counts") or {}
-        if sum(counts.values()) < self.max_tool_calls:
-            return
         messages = state.data.get("messages") or []
         if not messages or not messages[-1].tool_calls:
             return
+        pending = len(messages[-1].tool_calls)
+        counts = state.data.get("tool_call_counts") or {}
+        remaining = self.max_tool_calls - sum(counts.values())
+        if pending <= remaining:
+            return
+        # A batch of parallel calls runs whole or not at all: one that would
+        # overshoot is refused, with what is left so the model can ask for less.
+        message = (
+            self.message
+            if remaining <= 0
+            else (
+                f"Only {remaining} of {self.max_tool_calls} tool calls are left, so none of "
+                f"these {pending} calls were run. Call at most {remaining} tool(s), or "
+                "answer directly with what you have now."
+            )
+        )
         # answer the pending calls with a stub result
-        payload = json.dumps({"skipped": self.message})
+        payload = json.dumps({"skipped": message})
         skipped = [
             ChatMessage.from_tool(
                 payload,
@@ -163,7 +191,9 @@ class RequireToolsHook:
         if sum(1 for m in messages if m.meta.get(REQUIRE_TOOLS_META_KEY)) >= self.max_nudges:
             logger.warning(f"Required tools never called: {missing}")
             return
-        nudge = ChatMessage.from_system(
+        # A user message: providers that lift system messages out of the conversation
+        # (Anthropic) would otherwise be left ending on the assistant's own answer.
+        nudge = ChatMessage.from_user(
             f"Before answering you must call: {', '.join(missing)}. Call it now, then answer.",
             meta={REQUIRE_TOOLS_META_KEY: True},
         )
@@ -264,7 +294,7 @@ class ToolAgent:
         kwargs: dict[str, Any] = {
             "chat_generator": generator,
             "tools": tools,
-            "system_prompt": system_prompt,
+            "system_prompt": _literal(system_prompt),
         }
         if user_prompt is not None:
             kwargs["user_prompt"] = user_prompt

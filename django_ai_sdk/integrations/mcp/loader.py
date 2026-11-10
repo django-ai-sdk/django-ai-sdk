@@ -190,6 +190,12 @@ class DynamicMCPIntegration(Integration):
             return IntegrationStatus.EXPIRED
 
         await self.get_tools(user)
+        # Still expired after the attempt: the refresh failed, only a reconnect helps.
+        token = await self._get_oauth_token(user)
+        if token is None:
+            return IntegrationStatus.DISCONNECTED
+        if token.is_expired():
+            return IntegrationStatus.EXPIRED
         # A non-None token already required a valid user.pk, so _cache_key(user) here
         # can't be None.
         return self._cache.status_for(self._cache_key(user))
@@ -336,13 +342,16 @@ class DynamicMCPIntegration(Integration):
 
         if token_obj.is_expired():
             logger.info("Access token expired for %r — attempting refresh", self.name)
-            token_obj = await refresh_oauth_token(token_obj, self.config)
+            # Shielded: the caller's timeout must not cancel a refresh the IdP has
+            # already processed, or a rotated refresh token is lost for good.
+            token_obj = await asyncio.shield(refresh_oauth_token(token_obj, self.config))
             if token_obj is None:
-                return []
+                # Raised, not []: an empty list would be cached as a success.
+                raise RuntimeError(f"OAuth token refresh failed for {self.name!r}")
 
         access_token = token_obj.get_access_token()
         if not access_token:
-            return []
+            raise RuntimeError(f"OAuth access token for {self.name!r} cannot be read")
 
         logger.info("Connecting to OAuth MCP server %r for user %s", self.name, user.pk)
         return await _connect(

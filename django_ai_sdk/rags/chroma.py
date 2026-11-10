@@ -158,12 +158,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         else:
             filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
 
-        # Get matching documents
-        matching_docs = self._cached_document_store.filter_documents(filters=filters)
-        doc_ids_to_delete = [doc.id for doc in matching_docs]
-
-        if doc_ids_to_delete:
-            self._cached_document_store.delete_documents(document_ids=doc_ids_to_delete)
+        await asyncio.to_thread(_delete_matching, self._cached_document_store, filters)
 
         logger.info(f"Removed {len(document_ids)} documents from Chroma index")
 
@@ -187,14 +182,16 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
             f"[warmup] force_rebuild={force_rebuild}, source_documents={len(self.documents)}"
         )
 
-        document_store = self._create_document_store(recreate=force_rebuild)
+        document_store = await asyncio.to_thread(
+            self._create_document_store, recreate=force_rebuild
+        )
 
         if (
             not force_rebuild
             and self.config.storage.is_persistent
-            and self._has_existing_index(document_store)
+            and await asyncio.to_thread(self._has_existing_index, document_store)
         ):
-            existing_count = document_store.count_documents()
+            existing_count = await asyncio.to_thread(document_store.count_documents)
             self._cached_document_store = document_store
             self._is_warmed_up = True
             logger.info(
@@ -216,7 +213,7 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         )
         await self._index_documents(haystack_docs, document_store)
 
-        indexed_count = document_store.count_documents()
+        indexed_count = await asyncio.to_thread(document_store.count_documents)
         self._cached_document_store = document_store
         self._is_warmed_up = True
         logger.info(
@@ -230,9 +227,9 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         if self._cached_document_store is not None:
             document_store = self._cached_document_store
         else:
-            document_store = self._create_document_store(recreate=False)
+            document_store = await asyncio.to_thread(self._create_document_store, recreate=False)
 
-            if not self._has_existing_index(document_store):
+            if not await asyncio.to_thread(self._has_existing_index, document_store):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
@@ -269,14 +266,12 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
 
         document_store = self._cached_document_store
 
-        existing_docs = document_store.filter_documents()
-        if existing_docs:
-            document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
+        await asyncio.to_thread(_delete_matching, document_store, None)
 
         haystack_docs = self._convert_documents()
         await self._index_documents(haystack_docs, document_store)
 
-        indexed_count = document_store.count_documents()
+        indexed_count = await asyncio.to_thread(document_store.count_documents)
         logger.info(
             f"[refresh_documents] Done: {len(documents)} source docs -> {indexed_count} chunks"
         )
@@ -313,6 +308,13 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
                 "required": ["query"],
             },
         )
+
+
+def _delete_matching(document_store: ChromaDocumentStore, filters: dict[str, Any] | None) -> None:
+    """Delete the chunks matching `filters`; all of them when None."""
+    matching = document_store.filter_documents(filters=filters)
+    if matching:
+        document_store.delete_documents(document_ids=[doc.id for doc in matching])
 
 
 @component

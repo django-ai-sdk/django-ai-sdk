@@ -1068,6 +1068,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         protocol_messages: list[Any],
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
+        trigger: str | None = None,
     ) -> Any:
         """
         Convert protocol messages to streaming HTTP response with optional storage.
@@ -1079,6 +1080,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             protocol_messages: Raw protocol messages (e.g., Vercel Message objects)
             thread_id: Optional thread ID for conversation persistence
             user: Optional user for conversation attribution and permission checks
+            trigger: The request's trigger; on "regenerate-message" the user message
+                is already stored and is not stored again
 
         Returns:
             StreamingHttpResponse ready for Django views
@@ -1137,7 +1140,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         # Store only the last user message (the new one just sent)
         # Many protocols send full conversation history, but we only want to store new messages
-        if storage_adapter and thread_id:
+        if storage_adapter and thread_id and trigger != "regenerate-message":
             user_messages = []
             for message in messages:
                 if message.role == "user":

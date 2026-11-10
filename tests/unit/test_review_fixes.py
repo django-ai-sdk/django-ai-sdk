@@ -65,3 +65,116 @@ async def test_empty_and_pathless_files_are_readable():
 
 def test_feedback_without_id_validates():
     assert FeedbackResponse(rating=1, feedback="").id is None
+
+
+# --- second round ------------------------------------------------------------
+
+
+def test_system_prompt_braces_are_literal():
+    from haystack.components.generators.chat import MockChatGenerator
+
+    from django_ai_sdk.agents.tool_agent import ToolAgent
+
+    prompt = 'Reply as {"x": {{1+1}}} to {{ customer }} {% if %}'
+    agent = ToolAgent.build_agent(MockChatGenerator(), [], prompt)
+    result = agent.run(messages=[ChatMessage.from_user("hi")])
+    assert result["messages"][0].text == prompt
+
+
+def test_tool_budget_refuses_a_batch_that_overshoots():
+    from haystack.components.agents.state.state import State
+
+    from django_ai_sdk.agents.tool_agent import ToolCallBudgetHook
+
+    calls = [ToolCall(tool_name="t", arguments={}, id=f"c{i}") for i in range(3)]
+    state = State(schema={"tool_call_counts": {"type": dict}})
+    state.set("messages", [ChatMessage.from_assistant(tool_calls=calls)])
+    state.set("tool_call_counts", {"t": 4})
+
+    ToolCallBudgetHook(max_tool_calls=6).run(state)  # 2 left, 3 asked
+
+    stubs = state.data["messages"][1:]
+    assert len(stubs) == 3
+    assert "at most 2" in stubs[0].tool_call_results[0].result
+
+
+async def test_managing_a_code_agent_needs_staff():
+    from types import SimpleNamespace
+
+    from django_ai_sdk.permissions import AgentDefaultPermission, Operation
+
+    agent = SimpleNamespace(is_runtime=False)
+    user = SimpleNamespace(is_authenticated=True, is_staff=False, is_superuser=False)
+    staff = SimpleNamespace(is_authenticated=True, is_staff=True, is_superuser=False)
+    check = AgentDefaultPermission().has_permission
+
+    assert not await check(user, Operation.UPDATE_AGENT, agent=agent)
+    assert await check(staff, Operation.UPDATE_AGENT, agent=agent)
+    assert await check(user, Operation.CREATE_AGENT)
+
+
+def test_openai_content_shapes():
+    from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
+
+    messages = OpenAIProtocolHandler().to_chat_messages(
+        [
+            {"role": "assistant", "content": None},
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        ]
+    )
+    assert [m.content for m in messages] == ["", "hi"]
+
+
+@pytest.mark.django_db
+def test_changing_an_mcp_server_url_forgets_its_grants(django_user_model):
+    from django_ai_sdk.integrations.mcp.models import (
+        MCPOAuthClient,
+        MCPOAuthToken,
+        MCPServerConfig,
+    )
+
+    user = django_user_model.objects.create(email="u@example.com")
+    server = MCPServerConfig.objects.create(name="srv", url="https://a.example/mcp", auth="oauth")
+    MCPOAuthToken.objects.create(user=user, server_name="srv", access_token="x")
+    MCPOAuthClient.objects.create(server_name="srv", client_id="c")
+
+    server.label = "renamed"
+    server.save()
+    assert MCPOAuthToken.objects.filter(server_name="srv").exists()
+
+    server.url = "https://b.example/mcp"
+    server.save()
+    assert not MCPOAuthToken.objects.filter(server_name="srv").exists()
+    assert not MCPOAuthClient.objects.filter(server_name="srv").exists()
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_deleting_a_thread_removes_its_files(settings, tmp_path, mock_agents_registry):
+    import os
+
+    from asgiref.sync import sync_to_async
+
+    from django_ai_sdk.artifacts import FileArtifact
+    from django_ai_sdk.conversation.models import Thread
+    from django_ai_sdk.memories.models import EntryDocument, Memory
+    from django_ai_sdk.memories.services import MemoryService
+    from django_ai_sdk.storage.db import DbStorageAdapter
+
+    settings.MEDIA_ROOT = str(tmp_path)
+    thread = await Thread.objects.acreate(metadata={"agent_id": "test-agent"})
+    other = await Thread.objects.acreate(metadata={"agent_id": "test-agent"})
+    memory = await MemoryService.get_or_create_thread_file_memory(str(thread.id))
+    doc = EntryDocument(memory=memory, file_name="a.txt", content_type="text/plain")
+    await sync_to_async(doc.file.save)("a.txt", ContentFile(b"x"), save=True)
+    path = doc.file.path
+
+    # The model cannot show a file of another thread, whatever url it makes up.
+    files = {"files": [{"documentId": str(doc.id), "url": "https://evil.example/x"}]}
+    with pytest.raises(ValueError, match="No file"):
+        await FileArtifact.store(files, str(other.id))
+    stored = await FileArtifact.store(files, str(thread.id))
+    assert "evil.example" not in stored["files"][0]["url"]
+
+    assert await DbStorageAdapter.delete_thread(str(thread.id))
+    assert not await Memory.objects.filter(id=memory.id).aexists()
+    assert not os.path.exists(path)

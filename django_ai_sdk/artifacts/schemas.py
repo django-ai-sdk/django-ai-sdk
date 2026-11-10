@@ -4,7 +4,7 @@ import json
 import re
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from haystack.tools import Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -89,7 +89,9 @@ class ArtifactSchema(ArtifactModel):
         """
         from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
 
-        cast("type[BaseModel]", cls.model_fields["data"].annotation).model_validate(data)
+        model = cast("type[BaseModel]", cls.model_fields["data"].annotation)
+        # The validated form is what gets stored: default ids filled in, keys by alias.
+        data = model.model_validate(data).model_dump(by_alias=True, exclude_none=True, mode="json")
         data = await cls.resolve(data, thread_id)
         artifact = await Artifact.objects.acreate(
             thread_id=thread_id,
@@ -659,6 +661,26 @@ class FileArtifact(ArtifactSchema):
         "answer as normal, without repeating file names or links."
     )
     data: FileData
+
+    @classmethod
+    async def resolve(cls, data: dict[str, Any], thread_id: str) -> dict[str, Any]:
+        """Look every file up in the thread: the model's own name and url are not trusted."""
+        from django_ai_sdk.memories.models import EntryDocument  # noqa: PLC0415
+        from django_ai_sdk.memories.tools import get_thread_file  # noqa: PLC0415
+
+        files = []
+        for item in data["files"]:
+            doc_id = item["documentId"]
+            try:
+                doc = await EntryDocument.objects.filter(
+                    id=UUID(doc_id), memory__thread_files__id=thread_id
+                ).afirst()
+            except ValueError:
+                doc = None
+            if doc is None:
+                raise ValueError(f"No file {doc_id!r} in this thread")
+            files.append(get_thread_file(doc, thread_id))
+        return {**data, "files": files}
 
 
 # ── Citations ─────────────────────────────────────────────────────────────────

@@ -173,8 +173,15 @@ class DbStorageAdapter(BaseStorageAdapter):
             thread = await Thread.objects.aget(id=thread_id)
             # Delete all messages first (cascade or manually)
             await thread.messages.all().adelete()
+            file_memory_id = thread.file_memory_id
             # Delete thread
             await thread.adelete()
+            if file_memory_id:
+                # The hidden memory of its uploads belongs to the thread alone;
+                # nothing cascades to it. Entries, files and index go with it.
+                from django_ai_sdk.memories.models import Memory  # noqa: PLC0415
+
+                await Memory.objects.filter(id=file_memory_id, is_hidden=True).adelete()
             return True
         except (Thread.DoesNotExist, ValidationError):
             return False

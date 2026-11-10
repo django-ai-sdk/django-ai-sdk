@@ -92,7 +92,9 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
 async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     """The chat endpoint: streams the agent's reply (SSE)."""
     agent = await AgentService.get_agent(thread_id, user=request.user)
-    return await agent.as_view(payload.messages, thread_id=thread_id, user=request.user)
+    return await agent.as_view(
+        payload.messages, thread_id=thread_id, user=request.user, trigger=payload.trigger
+    )
 
 
 @routes.patch("/threads/{thread_id}/", response=Success)

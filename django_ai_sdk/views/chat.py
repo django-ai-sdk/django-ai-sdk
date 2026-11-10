@@ -36,14 +36,20 @@ class ChatView(View):
     agent: str | None = None
 
     async def post(self, request: HttpRequest, thread_id: str | None = None) -> HttpResponse:
-        user = await request.auser()
         try:
+            user = await self.get_user(request)
             payload = ChatRequest.model_validate_json(request.body)
             agent = await self.get_agent(thread_id, user)
-            return await agent.as_view(payload.messages, thread_id=thread_id, user=user)
+            return await agent.as_view(
+                payload.messages, thread_id=thread_id, user=user, trigger=payload.trigger
+            )
         except Exception as exc:
             # Before the stream starts; errors inside it arrive as stream events.
             return self.error_response(exc)
+
+    async def get_user(self, request: HttpRequest) -> UserType:
+        """Who is chatting. Override to authenticate some other way than the session."""
+        return await request.auser()
 
     async def get_agent(self, thread_id: str | None, user: UserType) -> Agent:
         if thread_id is not None:

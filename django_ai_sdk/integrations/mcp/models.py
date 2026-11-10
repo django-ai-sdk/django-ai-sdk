@@ -151,6 +151,16 @@ class MCPOAuthClient(models.Model):
             return ""
 
 
+def forget_oauth_grants(server_name: str) -> None:
+    """Drop the user tokens and registered client stored for a server.
+
+    They are keyed by name only: once the row points somewhere else (or is gone),
+    they must not be sent to whatever takes that name next.
+    """
+    MCPOAuthToken.objects.filter(server_name=server_name).delete()
+    MCPOAuthClient.objects.filter(server_name=server_name).delete()
+
+
 class MCPServerConfig(models.Model):
     """One MCP server declared as data instead of code -- add/edit/enable from
     Django admin or a settings UI, no app, no deploy, no restart.
@@ -205,16 +215,28 @@ class MCPServerConfig(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    # Every URL this app's own process fetches or POSTs to.
+    URL_FIELDS = ("url", "oauth_discovery_url", "authorization_endpoint", "token_endpoint")
+
     def clean(self) -> None:
         # A form error in admin, instead of save() raising a 500.
-        try:
-            _validate_public_url(self.url)
-        except UserError as exc:
-            raise ValidationError({"url": str(exc)}) from exc
+        for field in self.URL_FIELDS:
+            try:
+                _validate_public_url(getattr(self, field))
+            except UserError as exc:
+                raise ValidationError({field: str(exc)}) from exc
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        _validate_public_url(self.url)
+        for field in self.URL_FIELDS:
+            _validate_public_url(getattr(self, field))
+        previous = (
+            type(self).objects.filter(pk=self.pk).values("name", "url", "auth").first()
+            if self.pk
+            else None
+        )
         super().save(*args, **kwargs)
+        if previous and (previous["url"], previous["auth"]) != (self.url, self.auth):
+            forget_oauth_grants(previous["name"])
 
     def set_token(self, token: str) -> None:
         self.token = _get_fernet().encrypt(token.encode()).decode() if token else ""

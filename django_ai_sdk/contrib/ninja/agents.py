@@ -95,8 +95,8 @@ async def _runtime_out(request: HttpRequest, config: Any) -> AgentSettingsOut:
 
 
 @routes.get("/agents/runtimes/", response=list[AgentSettingsOut])
-async def list_runtime_agents(request: HttpRequest) -> Any:
-    configs = await AgentService.list_runtime_agents(user=request.user)
+async def list_runtime_agents(request: HttpRequest, limit: Limit = 100, offset: Offset = 0) -> Any:
+    configs = await AgentService.list_runtime_agents(user=request.user, limit=limit, offset=offset)
     return [await _runtime_out(request, config) for config in configs]
 
 

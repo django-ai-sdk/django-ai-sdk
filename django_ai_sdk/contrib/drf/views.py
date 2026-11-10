@@ -8,12 +8,15 @@ DRF views are sync, so they call the services' sync wrappers
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
+from django.http import JsonResponse
 from django.urls import reverse
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from django_ai_sdk import Agent
 from django_ai_sdk.agents import services as agent_services
@@ -29,6 +32,7 @@ from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.storage import services as thread_services
 from django_ai_sdk.tracing import services as trace_services
 from django_ai_sdk.views import permissions as object_permissions
+from django_ai_sdk.views.chat import ChatView
 from django_ai_sdk.views.files import (
     source_file_response,
     source_page_response,
@@ -39,8 +43,10 @@ from django_ai_sdk.workflows import services as workflow_services
 from django_ai_sdk.workflows.services import WorkflowService
 
 if TYPE_CHECKING:
-    from django.http import FileResponse, HttpResponse
+    from django.http import FileResponse, HttpRequest, HttpResponse
     from rest_framework.request import Request
+
+    from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
 
@@ -65,6 +71,32 @@ def chat_messages(agent: Agent, validated: dict[str, Any]) -> list[Any]:
     return agent.protocol_handler.to_chat_messages(
         [Message.model_validate(m) for m in validated["messages"]]
     )
+
+
+class ApiChatView(ChatView):
+    """The streaming chat view, behind DRF's authentication, permissions and throttles.
+
+    They come from your ``REST_FRAMEWORK`` settings; set ``api_view`` to an ``APIView``
+    subclass to use other classes for the chat alone.
+    """
+
+    api_view: ClassVar[type[APIView]] = APIView
+
+    async def get_user(self, request: HttpRequest) -> UserType:
+        return await sync_to_async(self._authenticate)(request)
+
+    def _authenticate(self, request: HttpRequest) -> UserType:
+        view = self.api_view()
+        drf_request = view.initialize_request(request)
+        view.perform_authentication(drf_request)
+        view.check_permissions(drf_request)
+        view.check_throttles(drf_request)
+        return drf_request.user
+
+    def error_response(self, exc: Exception) -> HttpResponse:
+        if isinstance(exc, APIException):
+            return JsonResponse({"detail": str(exc.detail)}, status=exc.status_code)
+        return super().error_response(exc)
 
 
 class ThreadViewSet(ApiViewSet):
@@ -394,7 +426,8 @@ class RuntimeAgentViewSet(ApiViewSet):
     }
 
     def list(self, request: Request) -> Response:
-        configs = agent_services.list_runtime_agents(user=request.user)
+        limit, offset = self.page(request)
+        configs = agent_services.list_runtime_agents(user=request.user, limit=limit, offset=offset)
         return Response([self._with_permissions(request, config) for config in configs])
 
     def create(self, request: Request) -> Response:

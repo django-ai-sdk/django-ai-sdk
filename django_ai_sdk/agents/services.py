@@ -392,9 +392,12 @@ class AgentService(PermissionsMixin):
             raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
-        deleted, _ = await AgentUser.objects.filter(
-            agent_id=agent_id, user_id=target_user_id
-        ).adelete()
+        try:
+            deleted, _ = await AgentUser.objects.filter(
+                agent_id=agent_id, user_id=target_user_id
+            ).adelete()
+        except (ValueError, ValidationError):  # malformed pk
+            deleted = 0
         if not deleted:
             raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 

@@ -484,22 +484,12 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     yield format_sse("[DONE]")
                 else:
                     yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
+            # Close blocks an event stream left open. Not in `finally`: a generator
+            # being closed (client gone) must not yield.
+            for chunk in state._close_blocks():
+                yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
         finally:
             await protocol_stream.aclose()
-            # Ensure any open blocks are closed if stream was interrupted
-            cleanup_chunks = []
-            reasoning_id = state.reasoning_id
-            text_id = state.text_id
-            if state.reasoning_started and reasoning_id:
-                cleanup_chunks.append(ReasoningEndPart(id=reasoning_id))
-                state.reasoning_started = False
-            if state.text_started and text_id:
-                cleanup_chunks.append(TextEndPart(id=text_id))
-                state.text_started = False
-
-            # Yield cleanup chunks
-            for chunk in cleanup_chunks:
-                yield format_sse(chunk.model_dump(exclude_none=True, by_alias=True))
 
     async def handle_stream(
         self, events: AsyncGenerator[StreamEvent, None]
@@ -600,6 +590,9 @@ class VercelProtocolHandler(BaseProtocolHandler):
                     error_event = cast("ErrorEvent", event)
                     # data-error stays in message.parts, as on reload; error triggers onError.
                     data = error_data(error_event.error_code, error_event.ref)
+                    # Before the error, not after the stream's terminator.
+                    for part in self._close_blocks():
+                        yield part
                     yield DataPart(type="data-error", data=data)
                     yield ErrorPart(error_text=data["code"])
 
