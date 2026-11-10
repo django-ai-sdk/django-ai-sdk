@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone as tz
 
@@ -203,6 +204,13 @@ class MCPServerConfig(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def clean(self) -> None:
+        # A form error in admin, instead of save() raising a 500.
+        try:
+            _validate_public_url(self.url)
+        except UserError as exc:
+            raise ValidationError({"url": str(exc)}) from exc
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         _validate_public_url(self.url)

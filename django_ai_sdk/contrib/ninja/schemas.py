@@ -45,7 +45,7 @@ class CreateThreadResponse(Schema):
 
 
 class FeedbackResponse(Schema):
-    id: str
+    id: str | None = None  # the in-memory store keeps none
     user_id: str | None = None
     rating: int
     feedback: str

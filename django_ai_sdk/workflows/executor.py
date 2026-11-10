@@ -103,7 +103,10 @@ class WorkflowExecutor:
         workflow_run.status = WorkflowRun.Status.RUNNING
         if not workflow_run.started_at:
             workflow_run.started_at = timezone.now()
-        fields = ["status", "started_at", "updated_at"]
+        # A resumed run starts clean: don't carry the failed attempt's outcome.
+        workflow_run.error = ""
+        workflow_run.completed_at = None
+        fields = ["status", "started_at", "error", "completed_at", "updated_at"]
         if not workflow_run.inputs:
             workflow_run.inputs = serialize(inputs)
             fields.append("inputs")
@@ -148,7 +151,9 @@ def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> d
             f"declare, or is missing ones it does: {exc}"
         ) from exc
     # Undeclared extras are dropped: the schema is the contract.
-    return {name: getattr(parsed, name) for name in model.model_fields}
+    # Dumped, so nested objects reach the steps as JSON, not model instances.
+    dumped = parsed.model_dump()
+    return {name: dumped[name] for name in model.model_fields}
 
 
 async def _already_completed(run: WorkflowRun) -> dict[str, Any]:

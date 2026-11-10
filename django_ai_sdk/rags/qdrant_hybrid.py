@@ -226,6 +226,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             logger.warning("No document store available, cannot add documents")
             return
 
+        # Chunk ids hash the content: drop an edited document's old chunks first.
+        await self.remove_documents([doc.id for doc in documents])
+        self.documents = [*self.documents, *documents]
+
         haystack_docs = [to_document(doc) for doc in documents]
         await self._index_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to Qdrant index")
@@ -282,6 +286,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
+
+        # Keep the rebuild source in sync, or a later warmup resurrects them.
+        self.documents = [doc for doc in self.documents if doc.id not in document_ids]
 
         # Use delete_by_filter with metadata filtering
         # Build filter for doc_id field in metadata

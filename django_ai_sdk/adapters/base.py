@@ -85,9 +85,11 @@ def parse_tool_output(obj: Any) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         if isinstance(obj, str):
             try:
-                return ast.literal_eval(obj)
-            except (ValueError, SyntaxError):
+                parsed = ast.literal_eval(obj)
+                json.dumps(parsed)  # a set or bytes literal is not JSON: keep the text
+            except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
                 return obj
+            return parsed
         return obj
 
     if isinstance(obj, dict):

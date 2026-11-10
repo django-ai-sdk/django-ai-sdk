@@ -29,10 +29,15 @@ class MCPServerConfigForm(forms.ModelForm):
 
     def save(self, commit: bool = True) -> MCPServerConfig:
         instance = super().save(commit=False)
+        # Blank means "keep": the model form has already written "" over the secret.
         if token := self.cleaned_data.get("token"):
             instance.set_token(token)
+        else:
+            instance.token = self.initial.get("token", "")
         if client_secret := self.cleaned_data.get("client_secret"):
             instance.set_client_secret(client_secret)
+        else:
+            instance.client_secret = self.initial.get("client_secret", "")
         if commit:
             instance.save()
         return instance

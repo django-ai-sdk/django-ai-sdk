@@ -158,9 +158,9 @@ class QuestionFlowArtifact(ArtifactSchema):
     system_prompt_hint: ClassVar[str] = prompt("""
         Use artifact_question_flow_artifact() when you need to guide the user through
         a multi-step questionnaire or decision tree.
-        Provide a unique `id` slug (e.g. 'onboarding-flow').
-        Each step needs its own `id`, `title`, optional `description`,
-        a list of options (each with unique `id` and `label`, optional `description`/`disabled`),
+        Provide a unique `id` slug (e.g. 'onboarding-flow') and a `title`.
+        Each step needs its own `id`, `question`, optional `description`,
+        a list of options (each with a `label` and unique `value`),
         and optional `selectionMode` ('single' or 'multi', default single).
         Call it once you have all steps ready.
     """)
@@ -248,7 +248,7 @@ class ApprovalCardArtifact(ArtifactSchema):
         Use artifact_approval_card_artifact() when an action requires explicit user confirmation.
         Provide a unique `id` slug (e.g. 'delete-account'), a `title`,
         optional `description`, optional `icon` (lucide icon name in kebab-case e.g. 'trash-2'),
-        optional `metadata` items as `key`/`value` pairs for context,
+        optional `metadata` items as `label`/`value` pairs for context,
         optional `variant` ('destructive' for dangerous actions, else 'default'),
         and optional `confirmLabel`/`cancelLabel` to override button text.
     """)

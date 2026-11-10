@@ -609,7 +609,8 @@ class PermissionsMixin:
             can_read=flags.get("read", False),
             can_write=flags.get("write", False),
             can_manage=flags.get("manage", False),
-            can_delete=flags.get("delete", False),
+            # Only memories have a DELETE tier; elsewhere deleting is a MANAGE operation.
+            can_delete=flags.get("delete", flags.get("manage", False)),
         )
 
     @classmethod

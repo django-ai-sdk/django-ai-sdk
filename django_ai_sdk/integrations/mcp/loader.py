@@ -564,22 +564,23 @@ async def resolve_client_credentials(
 ) -> tuple[str, str]:
     """Return (client_id, client_secret) for an OAuth server.
 
-    A dynamically-registered client (RFC 7591, stored in MCPOAuthClient) takes
-    precedence over static credentials configured on the integration. This is the
-    single source of truth for credential resolution; the OAuth start and refresh
-    paths all go through it.
+    Static credentials configured on the integration win, as they do when the
+    authorize URL is built (get_or_register_client); otherwise the dynamically
+    registered client (RFC 7591, stored in MCPOAuthClient) is used. The token
+    exchange and refresh paths go through it.
     """
     from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
 
-    try:
-        oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
-        return oauth_client.client_id, oauth_client.get_client_secret()
-    except MCPOAuthClient.DoesNotExist:
-        logger.debug(
-            "No dynamically registered OAuth client for %r, using static credentials",
-            server_name,
+    if not config.client_id:
+        # A row without a client_id is a registration that never completed.
+        oauth_client = (
+            await MCPOAuthClient.objects.filter(server_name=server_name)
+            .exclude(client_id="")
+            .afirst()
         )
-        return config.client_id, config.client_secret.get_secret_value()
+        if oauth_client is not None:
+            return oauth_client.client_id, oauth_client.get_client_secret()
+    return config.client_id, config.client_secret.get_secret_value()
 
 
 def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> AsyncOAuth2Client:
@@ -617,7 +618,10 @@ async def refresh_oauth_token(
     from django_ai_sdk.integrations.mcp.discovery import discover
 
     try:
-        discovery = await discover(config.url)
+        token_endpoint = (
+            config.token_endpoint
+            or (await discover(config.oauth_discovery_url or config.url)).token_endpoint
+        )
     except Exception as e:
         logger.error(
             "Cannot discover token endpoint for refresh of %r: %s", token_obj.server_name, e
@@ -652,8 +656,8 @@ async def refresh_oauth_token(
     client = build_oauth_client(client_id, client_secret, update_token=_persist)
     try:
         async with client:
-            await client.refresh_token(discovery.token_endpoint, refresh_token=refresh_token)
-    except (*HTTP_ERRORS, OAuthError) as e:
+            await client.refresh_token(token_endpoint, refresh_token=refresh_token)
+    except (*HTTP_ERRORS, OAuthError, ValueError) as e:  # ValueError: non-JSON body
         # Our own exchange may have failed *because* a concurrent refresh already
         # rotated this refresh_token (e.g. the IDP rejected our now-stale one with
         # invalid_grant). Check whether another writer already landed a good token

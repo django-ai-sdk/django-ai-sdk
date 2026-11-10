@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from haystack import Pipeline, component
 from haystack.components.preprocessors import RecursiveDocumentSplitter
@@ -53,6 +54,9 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         self.documents = documents
         self._cached_document_store = None
         self._is_warmed_up = False
+        # In-memory Chroma clients share one process-wide system: without its own
+        # collection every instance would read and write the same documents.
+        self._ephemeral_collection = f"documents-{uuid4().hex}"
         logger.debug(f"ChromaDBQueryExpanderRAG initialized with {len(documents)} documents")
 
     def _convert_documents(self) -> list[HaystackDocument]:
@@ -76,7 +80,11 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
                 **storage.extra,
             )
         else:
-            return ChromaDocumentStore(**storage.extra)
+            extra: dict[str, Any] = {
+                "collection_name": self._ephemeral_collection,
+                **storage.extra,
+            }
+            return ChromaDocumentStore(**extra)
 
     def _has_existing_index(self, document_store: ChromaDocumentStore) -> bool:
         """Check if document store already has indexed documents."""
@@ -87,6 +95,10 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot add documents")
             return
+
+        # Chunk ids hash the content: drop an edited document's old chunks first.
+        await self.remove_documents([doc.id for doc in documents])
+        self.documents = [*self.documents, *documents]
 
         haystack_docs = [to_document(doc) for doc in documents]
         await self._index_documents(haystack_docs, self._cached_document_store)
@@ -136,24 +148,24 @@ class ChromaDBQueryExpanderRAG(RAGBase[ChromaDBQueryExpanderRAGConfig]):
             logger.warning("No document store available, cannot remove documents")
             return
 
-        try:
-            # Use filter_documents to find documents, then delete by IDs
-            # Haystack filter format for Chroma
-            if len(document_ids) == 1:
-                filters = {"field": "meta.doc_id", "operator": "==", "value": document_ids[0]}
-            else:
-                filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
+        # Keep the rebuild source in sync, or a later warmup resurrects them.
+        self.documents = [doc for doc in self.documents if doc.id not in document_ids]
 
-            # Get matching documents
-            matching_docs = self._cached_document_store.filter_documents(filters=filters)
-            doc_ids_to_delete = [doc.id for doc in matching_docs]
+        # Use filter_documents to find documents, then delete by IDs
+        # Haystack filter format for Chroma
+        if len(document_ids) == 1:
+            filters = {"field": "meta.doc_id", "operator": "==", "value": document_ids[0]}
+        else:
+            filters = {"field": "meta.doc_id", "operator": "in", "value": document_ids}
 
-            if doc_ids_to_delete:
-                self._cached_document_store.delete_documents(document_ids=doc_ids_to_delete)
+        # Get matching documents
+        matching_docs = self._cached_document_store.filter_documents(filters=filters)
+        doc_ids_to_delete = [doc.id for doc in matching_docs]
 
-            logger.info(f"Removed {len(document_ids)} documents from Chroma index")
-        except Exception as e:
-            logger.error(f"Failed to remove documents: {e}")
+        if doc_ids_to_delete:
+            self._cached_document_store.delete_documents(document_ids=doc_ids_to_delete)
+
+        logger.info(f"Removed {len(document_ids)} documents from Chroma index")
 
     async def warmup(self, force_rebuild: bool = False) -> None:
         """

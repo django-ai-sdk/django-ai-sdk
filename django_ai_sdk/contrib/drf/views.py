@@ -21,7 +21,7 @@ from django_ai_sdk.agents.config import get_runtime_agent_bases, get_tool_regist
 from django_ai_sdk.agents.services import AgentCreateData, AgentService, AgentUpdateData
 from django_ai_sdk.contrib.drf import serializers as s
 from django_ai_sdk.contrib.drf.base import ApiViewSet
-from django_ai_sdk.errors import NotFound
+from django_ai_sdk.errors import NotFound, UserError
 from django_ai_sdk.integrations import services as integration_services
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories import services as memory_services
@@ -50,6 +50,14 @@ ID = r"[^/]+"
 get_agent = async_to_sync(AgentService.get)
 get_thread_agent = async_to_sync(AgentService.get_agent)
 check_agent_perms = async_to_sync(AgentService.has_perms)
+
+
+def _uploaded_file(request: Request) -> Any:
+    """The request's `file` part; a 400 when it is missing, not a KeyError."""
+    file = request.FILES.get("file")
+    if file is None:
+        raise UserError("No file uploaded")
+    return file
 
 
 def chat_messages(agent: Agent, validated: dict[str, Any]) -> list[Any]:
@@ -103,7 +111,7 @@ class ThreadViewSet(ApiViewSet):
 
     def partial_update(self, request: Request, thread_id: str) -> Response:
         """Rename the thread and/or switch it to another agent, moving the memories along."""
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         agent_id = serializer.validated_data.get("agent_id")
         title = serializer.validated_data.get("title")
@@ -245,7 +253,7 @@ class ThreadViewSet(ApiViewSet):
     @files.mapping.post
     def upload_file(self, request: Request, thread_id: str) -> Response:
         uploaded = memory_services.upload_thread_file(
-            thread_id, request.FILES["file"], user=request.user
+            thread_id, _uploaded_file(request), user=request.user
         )
         return Response(s.UploadResultSerializer(uploaded).data, status=202)
 
@@ -421,7 +429,7 @@ class RuntimeAgentViewSet(ApiViewSet):
         return Response(self._with_permissions(request, config))
 
     def partial_update(self, request: Request, runtime_id: str) -> Response:
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = cast("AgentUpdateData", dict(serializer.validated_data))
         config = agent_services.update_runtime_agent(runtime_id, data, user=request.user)
@@ -629,7 +637,7 @@ class MemoryViewSet(ApiViewSet):
     @documents.mapping.post
     def upload_document(self, request: Request, memory_id: str) -> Response:
         uploaded = memory_services.upload_document(
-            memory_id, request.FILES["file"], user=request.user
+            memory_id, _uploaded_file(request), user=request.user
         )
         return Response(s.UploadResultSerializer(uploaded).data, status=202)
 
@@ -767,7 +775,7 @@ class WorkflowViewSet(ApiViewSet):
         return Response(s.WorkflowSerializer(record).data)
 
     def partial_update(self, request: Request, workflow_id: str) -> Response:
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         record = workflow_services.update_workflow(

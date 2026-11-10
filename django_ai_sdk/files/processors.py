@@ -40,16 +40,31 @@ def get_file_name(file: FileSource) -> str | None:
     return None
 
 
+def _local_path(file: FileSource) -> str | Path | None:
+    if isinstance(file, (str, Path)):
+        return file
+    try:
+        return getattr(file, "path", None)
+    except (NotImplementedError, ValueError):
+        # Remote storages (S3, ...) have no local path.
+        return None
+
+
+def _read_file(file: File) -> bytes:
+    with file.open("rb") as f:
+        return f.read()
+
+
 async def read_aio_bytes(
     file: FileSource,
 ) -> bytes | None:
-    if hasattr(file, "path"):
-        async with aiofiles.open(file.path, mode="rb") as f:
+    path = _local_path(file)
+    if path is not None:
+        async with aiofiles.open(path, mode="rb") as f:
             return await f.read()
 
-    elif isinstance(file, (str, Path)):
-        async with aiofiles.open(file, mode="rb") as f:
-            return await f.read()
+    if isinstance(file, File):
+        return await asyncio.to_thread(_read_file, file)
 
     return None
 
@@ -58,13 +73,13 @@ async def read_aio_text(
     file: FileSource,
     encoding: str | None = None,
 ) -> str | None:
-    if hasattr(file, "path"):
-        async with aiofiles.open(file.path, encoding=encoding) as f:
+    path = _local_path(file)
+    if path is not None:
+        async with aiofiles.open(path, encoding=encoding) as f:
             return await f.read()
 
-    elif isinstance(file, (str, Path)):
-        async with aiofiles.open(file, encoding=encoding) as f:
-            return await f.read()
+    if isinstance(file, File):
+        return (await asyncio.to_thread(_read_file, file)).decode(encoding or "utf-8")
 
     return None
 
@@ -75,7 +90,7 @@ async def get_mime_type(file: FileSource) -> str | None:
     if stream is not None:
         try:
             return puremagic.from_string(stream, mime=True)
-        except puremagic.PureError:
+        except (puremagic.PureError, ValueError):  # ValueError: empty file
             pass
 
     name = get_file_name(file)

@@ -193,6 +193,20 @@ def _handoff_context(messages: list[ChatMessage]) -> list[ChatMessage]:
     ]
 
 
+def _handoff_result_ids(handoff: list[ChatMessage]) -> set[str]:
+    """Tool results the coordinator already streamed; never re-emit them."""
+    return {r.origin.id or "" for m in handoff for r in m.tool_call_results or []}
+
+
+def _drop_handoff(result: dict[str, Any], handoff: list[ChatMessage]) -> None:
+    """Leave only the subagent's own messages, so its response and sources
+    don't report the coordinator's earlier work as its own."""
+    messages = result.get("messages") or []
+    start = 1 if messages and messages[0].is_from(ChatRole.SYSTEM) else 0
+    if handoff and messages[start : start + len(handoff)] == handoff:
+        result["messages"] = messages[:start] + messages[start + len(handoff) :]
+
+
 def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[StreamingChunk]:
     """Chunks for tool results the run produced without streaming them."""
     chunks = []
@@ -246,10 +260,11 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        seen: set[str] = set()
+        handoff = _handoff_context(messages)
+        seen = _handoff_result_ids(handoff)
         with self._span():
             result = self._agent.run(
-                messages=_handoff_context(messages),
+                messages=handoff,
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
                 ),
@@ -269,6 +284,7 @@ class SubagentStreamFilter:
                         exc,
                     )
         self._flush(result, seen, streaming_callback)
+        _drop_handoff(result, handoff)
         return result
 
     def _flush(
@@ -291,10 +307,11 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        seen: set[str] = set()
+        handoff = _handoff_context(messages)
+        seen = _handoff_result_ids(handoff)
         with self._span():
             result = await self._agent.run_async(
-                messages=_handoff_context(messages),
+                messages=handoff,
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,
@@ -312,6 +329,7 @@ class SubagentStreamFilter:
                         exc,
                     )
         await self._aflush(result, seen, streaming_callback)
+        _drop_handoff(result, handoff)
         return result
 
     async def _aflush(
