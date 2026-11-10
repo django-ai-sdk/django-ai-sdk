@@ -188,7 +188,7 @@ async def _write(
 
     return await append_change(
         Switch,
-        "override",
+        "switch",
         {"kind": kind, "policy": policy, "target": target},
         {"value": value, "reason": reason},
         user=user,

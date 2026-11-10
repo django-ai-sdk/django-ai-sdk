@@ -74,7 +74,7 @@ async def test_it_deletes_in_batches_each_its_own_transaction():
     handed: list[list[Any]] = []
 
     class Counting(custody.PlainCustody):
-        def pruning(self, turn_ids: Any) -> None:
+        def pruning(self, turn_ids: Any, *, access_ids: Any = ()) -> None:
             handed.append(list(turn_ids))
 
     custody.install(Counting())
@@ -96,7 +96,7 @@ async def test_a_failed_batch_keeps_the_batches_before_it():
     calls: list[int] = []
 
     class FailsSecond(custody.PlainCustody):
-        def pruning(self, turn_ids: Any) -> None:
+        def pruning(self, turn_ids: Any, *, access_ids: Any = ()) -> None:
             calls.append(len(list(turn_ids)))
             if len(calls) == 2:
                 raise RuntimeError("chain down")
@@ -116,7 +116,7 @@ async def test_a_custody_that_refuses_keeps_the_batch():
     await expire(turn_id, turn=True)
 
     class Refusing(custody.PlainCustody):
-        def pruning(self, turn_ids: Any) -> None:
+        def pruning(self, turn_ids: Any, *, access_ids: Any = ()) -> None:
             raise RuntimeError("chain down")
 
     custody.install(Refusing())

@@ -1,5 +1,5 @@
 """Fixtures for the oversight tests: the test policies, fresh resolution and permission
-caches."""
+caches, core's own custody."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+from django_ai_sdk.oversight import custody
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy
 from django_ai_sdk.oversight.resolve import invalidate
 from django_ai_sdk.permissions import get_domain_permissions
@@ -28,6 +29,16 @@ def _fresh_resolutions():
     yield
     invalidate()
     get_domain_permissions.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def custody_under_test():
+    """Core's own custody, though the test settings install the ledger's: these tests are
+    about core. The ledger's tests override this fixture with the ledger's custody."""
+    before = custody.get()
+    custody.install(custody.PlainCustody())
+    yield
+    custody.install(before)
 
 
 @pytest.fixture
