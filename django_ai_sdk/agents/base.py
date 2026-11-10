@@ -1100,6 +1100,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # Before anything is stored: a refused chat must leave no trace in the thread.
         thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
         if thread:
+            # Reading a thread is not writing to it: the thread's own permissions too.
+            await ThreadService.has_perms(user, Operation.CHAT, thread)
             await check_object_permissions(
                 user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
             )

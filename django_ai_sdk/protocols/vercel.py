@@ -256,9 +256,11 @@ def unwrap_tool_output(raw: Any) -> tuple[bool, dict[str, Any]]:
 
     On failure the output is dropped: it is the invocation's error text.
     """
-    if isinstance(raw, dict) and raw.get("error"):
+    # An artifact payload arrives bare and may have `error`/`result` fields of its own.
+    wrapped = isinstance(raw, dict) and ("origin" in raw or raw.keys() <= {"result", "error"})
+    if wrapped and raw.get("error"):
         return True, {}
-    output = raw.get("result", raw) if isinstance(raw, dict) else raw
+    output = raw.get("result", raw) if wrapped else raw
     if not isinstance(output, dict):
         output = {"result": output}
     return False, output

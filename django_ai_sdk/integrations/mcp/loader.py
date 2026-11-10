@@ -83,6 +83,8 @@ class DynamicMCPIntegration(Integration):
             timeout=self._timeout,
             cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
         )
+        # OAuth only: which stored token each cached toolset was built with.
+        self._token_stamps: dict[str, tuple[Any, str]] = {}
         self.label = config.label or name.title()
         self.hint = config.hint
         self.config = config
@@ -156,7 +158,40 @@ class DynamicMCPIntegration(Integration):
         key = self._cache_key(user)
         if key is None:
             return []
+        if isinstance(self.config, OAuthMCPIntegrationConfig):
+            return await self._get_oauth_tools(user, key)
         return await self._cache.get(key, lambda: self._fetch(user))
+
+    async def _get_oauth_tools(
+        self, user: AbstractBaseUser | AnonymousUser | None, key: str
+    ) -> list[Any]:
+        """The cached toolset, rebuilt when its bearer token is no longer the one stored.
+
+        A toolset keeps the token it was built with, and tokens are refreshed,
+        replaced and revoked by other processes too (the refresh cron, the OAuth
+        callback on another worker), whose cache invalidation never reaches this one.
+        """
+        token = await self._get_oauth_token(user)
+        built_with = self._token_stamps.get(key)
+        if built_with is not None and (
+            token is None or built_with != (token.pk, token.access_token) or token.is_expired()
+        ):
+            del self._token_stamps[key]
+            await self._cache.invalidate(key)
+        if token is None:
+            return []
+
+        tools = await self._cache.get(key, lambda: self._fetch(user))
+        # Stamped only after a fetch that worked: a failing refresh must stay behind
+        # the breaker, not be retried by an invalidation on every call.
+        if key not in self._token_stamps and self._cache.status_for(key) == (
+            IntegrationStatus.ACTIVE
+        ):
+            if token.is_expired():  # the fetch refreshed it
+                token = await self._get_oauth_token(user)
+            if token is not None:
+                self._token_stamps[key] = (token.pk, token.access_token)
+        return tools
 
     async def get_status(
         self,

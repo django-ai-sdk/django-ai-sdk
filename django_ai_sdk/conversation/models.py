@@ -114,11 +114,12 @@ class Message(models.Model):
         )
         return f"{chat_msg.role}: {content_preview}"
 
-    async def asave(self, *args: Any, **kwargs: Any) -> None:
-        # Update thread's updated_at timestamp when a message is saved
-        await super().asave(*args, **kwargs)
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Update thread's updated_at timestamp when a message is saved; asave()
+        # runs this too.
+        super().save(*args, **kwargs)
         # Use atomic update to avoid race conditions
-        await Thread.objects.filter(id=self.thread_id).aupdate(updated_at=timezone.now())
+        Thread.objects.filter(id=self.thread_id).update(updated_at=timezone.now())
 
     def to_chat_message(self) -> ChatMessage:
         """Convert stored JSON data to ChatMessage object."""

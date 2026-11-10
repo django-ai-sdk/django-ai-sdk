@@ -32,14 +32,19 @@ async def athread_permissions(user: UserType, thread_id: str) -> ObjectPermissio
 
 async def aagent_permissions(user: UserType, agent_id: str) -> ObjectPermissions:
     from django_ai_sdk.agents.models import AgentSettings
+    from django_ai_sdk.agents.registry import registry
     from django_ai_sdk.agents.services import AgentService
 
     try:
-        config = await AgentSettings.objects.aget(slug=agent_id)
-    except AgentSettings.DoesNotExist:
+        config = await AgentSettings.objects.aget(id=agent_id)
+    except (AgentSettings.DoesNotExist, ValueError, ValidationError):
+        # A code agent has no row: a runtime agent whose slug happens to equal its
+        # id must not lend it its flags.
+        if registry.get(agent_id) is not None:
+            return ObjectPermissions()
         try:
-            config = await AgentSettings.objects.aget(id=agent_id)
-        except (AgentSettings.DoesNotExist, ValueError, ValidationError):
+            config = await AgentSettings.objects.aget(slug=agent_id)
+        except AgentSettings.DoesNotExist:
             return ObjectPermissions()
     return await AgentService.get_object_permissions(user, config)
 

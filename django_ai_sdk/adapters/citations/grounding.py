@@ -307,7 +307,6 @@ class Grounder:
 
 async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> list[Citation]:
     """Citations of `answer`, offsets into it, from one citation agent call."""
-    from django_ai_sdk.artifacts.schemas import Citation, Evidence  # noqa: PLC0415
     from django_ai_sdk.common import ChatMessage  # noqa: PLC0415
 
     sources = pick(answer, registry)
@@ -319,10 +318,20 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
         system_prompt=CITATION_PROMPT,
         response_format=None,
     )
+    # Fuzzy matching is CPU work: on the loop it would stall every other stream.
+    return await asyncio.to_thread(
+        _place, answer, reply if isinstance(reply, str) else "", registry
+    )
+
+
+def _place(answer: str, reply: str, registry: SourceRegistry) -> list[Citation]:
+    """The citation agent's reply as citations located in `answer`."""
+    from django_ai_sdk.artifacts.schemas import Citation, Evidence  # noqa: PLC0415
+
     citations: list[Citation] = []
     outcomes: Counter[str] = Counter()  # per supporting passage
     cursor = 0
-    for quote, support in parse_pairs(reply if isinstance(reply, str) else ""):
+    for quote, support in parse_pairs(reply):
         evidence = get_evidence(support, registry, Evidence, outcomes)
         span = locate(answer, quote, cursor)
         if not evidence or span is None:

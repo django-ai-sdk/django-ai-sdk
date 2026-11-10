@@ -178,3 +178,70 @@ async def test_deleting_a_thread_removes_its_files(settings, tmp_path, mock_agen
     assert await DbStorageAdapter.delete_thread(str(thread.id))
     assert not await Memory.objects.filter(id=memory.id).aexists()
     assert not os.path.exists(path)
+
+
+# --- third round -------------------------------------------------------------
+
+
+def test_only_haystacks_wrapper_is_unwrapped():
+    from django_ai_sdk.protocols.vercel import unwrap_tool_output
+
+    artifact = {"artifact_id": "a1", "error": "shown to the user", "result": 3}
+    assert unwrap_tool_output(artifact) == (False, artifact)
+    assert unwrap_tool_output({"result": {"a": 1}, "origin": {}, "error": False}) == (
+        False,
+        {"a": 1},
+    )
+    assert unwrap_tool_output({"result": "boom", "origin": {}, "error": True}) == (True, {})
+
+
+async def test_in_memory_thread_id_cannot_be_taken_over():
+    from django_ai_sdk.permissions import ConflictError
+    from django_ai_sdk.storage.memory import MemoryStorageAdapter
+
+    thread_id = await MemoryStorageAdapter.create_thread("mine")
+    with pytest.raises(ConflictError):
+        await MemoryStorageAdapter.create_thread("theirs", thread_id=thread_id)
+
+
+@pytest.mark.django_db
+def test_sync_message_save_bumps_the_thread():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from django_ai_sdk.common import ChatMessage as SdkMessage
+    from django_ai_sdk.conversation.models import Thread
+
+    thread = Thread.objects.create()
+    old = timezone.now() - timedelta(days=1)
+    Thread.objects.filter(id=thread.id).update(updated_at=old)
+
+    thread.add_user_message(SdkMessage(role="user", content="hi", id="6ba7b810-9dad-11d1-80b4-00c04fd430c8"))
+
+    thread.refresh_from_db()
+    assert thread.updated_at > old
+
+
+async def test_oauth_toolset_is_rebuilt_when_the_token_changes():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from django_ai_sdk.integrations.mcp.loader import (
+        DynamicMCPIntegration,
+        OAuthMCPIntegrationConfig,
+    )
+
+    integration = DynamicMCPIntegration(
+        "srv", OAuthMCPIntegrationConfig(url="https://a.example/mcp", client_id="c")
+    )
+    token = SimpleNamespace(pk=1, access_token="t1", is_expired=lambda: False)
+    integration._get_oauth_token = AsyncMock(return_value=token)
+    integration._fetch = AsyncMock(side_effect=[["tool-1"], ["tool-2"]])
+    user = SimpleNamespace(pk=7)
+
+    assert await integration.get_tools(user) == ["tool-1"]
+    assert await integration.get_tools(user) == ["tool-1"]  # cached
+
+    token.access_token = "t2"  # refreshed by another process
+    assert await integration.get_tools(user) == ["tool-2"]

@@ -56,6 +56,7 @@ ID = r"[^/]+"
 get_agent = async_to_sync(AgentService.get)
 get_thread_agent = async_to_sync(AgentService.get_agent)
 check_agent_perms = async_to_sync(AgentService.has_perms)
+check_thread_perms = async_to_sync(thread_services.ThreadService.has_perms)
 
 
 def _uploaded_file(request: Request) -> Any:
@@ -180,6 +181,8 @@ class ThreadViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_thread_agent(thread_id, user=request.user)
+        thread = thread_services.get_thread(thread_id, user=request.user)
+        check_thread_perms(request.user, Operation.CHAT, thread)
         check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         result = async_to_sync(agent.run)(messages, thread_id=thread_id, user=request.user)
