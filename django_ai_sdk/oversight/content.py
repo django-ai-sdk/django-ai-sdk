@@ -12,6 +12,8 @@ import re
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from django.utils import timezone
+
 from django_ai_sdk.oversight.patterns import mask_all, mask_json
 from django_ai_sdk.oversight.types import (
     Answer,
@@ -260,6 +262,20 @@ def load_content(turn: Turn) -> dict[str, Any] | None:
     return turn.content.stored if turn.content is not None else None
 
 
+def load_contents(turns: list[Turn]) -> dict[Any, dict[str, Any] | None]:
+    """Like `load_content` for many turns, keyed by turn id.
+
+    Content past its expiry and not yet pruned loads as None, as `content_state` says.
+    """
+    now = timezone.now()
+    return {
+        t.id: None
+        if t.content is None or (t.content.expires_at and t.content.expires_at <= now)
+        else t.content.stored
+        for t in turns
+    }
+
+
 def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
     """Add answer texts to the turn's content.
 
@@ -322,6 +338,7 @@ __all__ = [
     "context_from_turn",
     "found_literals",
     "load_content",
+    "load_contents",
     "masker_for_capture",
     "stored_value",
     "turn_found",

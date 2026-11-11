@@ -1,6 +1,8 @@
 """Read-only admin for the oversight record.
 
-It never shows content (turn text, reasons, notes) or who asked in which thread.
+It needs only metrics access, so it never shows content (turn text, reasons,
+notes) or who asked in which thread. Turns and their rows are narrowed by the
+same scope hooks as the review API.
 """
 
 from __future__ import annotations
@@ -23,28 +25,47 @@ class ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
+class ScopedAdmin(ReadOnlyAdmin):
+    """Rows of the turns the reader's METRICS scope keeps, as in the review API."""
+
+    # The path from a row to its turn; "" for the turn itself.
+    turn_path = "turn"
+
+    def get_queryset(self, request: Any) -> Any:
+        from django_ai_sdk.oversight.services import OversightService
+        from django_ai_sdk.oversight.services.access import METRICS
+
+        turns = OversightService.has_queryset_perms(
+            request.user, METRICS, queryset=Turn.objects.all()
+        )
+        lookup = f"{self.turn_path}__in" if self.turn_path else "pk__in"
+        return super().get_queryset(request).filter(**{lookup: turns.values("pk")})
+
+
 @admin.register(Turn)
-class TurnAdmin(ReadOnlyAdmin):
+class TurnAdmin(ScopedAdmin):
+    turn_path = ""
     list_display = ("created_at", "channel", "agent_name", "outcome", "report_outcome", "severity")
     list_filter = ("outcome", "report_outcome", "severity", "channel", "policy")
-    # Who asked, and in which thread, is kept out like the content.
+    # The review API shows these ids only with VIEW_OVERSIGHT_CONTENT.
     exclude = ("content", "actor_id", "thread_id", "user_message_id", "message_id")
 
 
 @admin.register(LensAnswer)
-class LensAnswerAdmin(ReadOnlyAdmin):
+class LensAnswerAdmin(ScopedAdmin):
     # Reasons live in the turn's content, which the admin does not show.
     list_display = ("created_at", "lens", "stage", "answerer", "value", "confidence", "error")
     list_filter = ("lens", "stage", "answerer")
 
 
 @admin.register(RuleMatch)
-class RuleMatchAdmin(ReadOnlyAdmin):
+class RuleMatchAdmin(ScopedAdmin):
     list_display = ("created_at", "rule", "stage", "mode", "acted")
     list_filter = ("rule", "mode", "acted")
 
 
 @admin.register(ReviewItem)
-class ReviewItemAdmin(ReadOnlyAdmin):
-    list_display = ("created_at", "queue", "rule", "status")
+class ReviewItemAdmin(ScopedAdmin):
+    # The reviewer's note is content, which the admin does not show.
+    list_display = ("created_at", "queue", "rule", "status", "agree")
     list_filter = ("queue", "status")

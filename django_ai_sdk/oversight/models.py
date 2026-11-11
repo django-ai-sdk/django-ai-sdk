@@ -196,6 +196,16 @@ class RuleMatch(models.Model):
         app_label = APP_LABEL
         db_table = "django_ai_sdk_oversight_matches"
         ordering = ["created_at"]
+        constraints = [
+            # After close, a rule matches a turn at most once, even if reflect and a
+            # reviewer's answer both find it. Inline stages may match more than once
+            # (history and question, or each tool call).
+            models.UniqueConstraint(
+                fields=["turn", "rule"],
+                condition=models.Q(stage="reflect"),
+                name="oversight_one_reflect_match_per_rule",
+            )
+        ]
 
 
 class ReviewItem(models.Model):

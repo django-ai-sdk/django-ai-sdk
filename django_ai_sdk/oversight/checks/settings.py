@@ -1,11 +1,12 @@
 """Checks on AI_SDK_OVERSIGHT and the deployment.
 
-Covers the settings schema, judge aliases, the default policy, plain content and
-the task backend.
+Covers the settings schema, judge aliases, the default policy, plain content, the
+task backend and pruning.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from django.core.checks import Error, Warning
@@ -83,3 +84,38 @@ def task_backend_checks() -> list[Any]:
             )
         ]
     return []
+
+
+# How long `oversight_prune` may go without running before W007.
+PRUNE_DUE = timedelta(days=2)
+
+
+def retention_checks(databases: Any) -> list[Any]:
+    """Warn when rows expired more than PRUNE_DUE ago are still there: nothing prunes.
+
+    Retention only stamps `expires_at`. Runs under `manage.py check --deploy --database <alias>`.
+    """
+    from django.utils import timezone
+
+    from django_ai_sdk.checks import per_database
+    from django_ai_sdk.oversight.models import Turn, TurnContent
+
+    due = timezone.now() - PRUNE_DUE
+
+    def overdue(alias: str) -> bool:
+        return (
+            Turn.objects.using(alias).filter(expires_at__lt=due).exists()
+            or TurnContent.objects.using(alias).filter(expires_at__lt=due).exists()
+        )
+
+    return [
+        Warning(
+            f"Expired oversight rows in database {alias!r} are not deleted: "
+            "oversight_prune does not run.",
+            hint="Schedule `manage.py oversight_prune` daily; RETENTION only stamps "
+            "expires_at on each row.",
+            id=f"{PREFIX}.W007",
+        )
+        for alias, late in per_database(databases, overdue)
+        if late
+    ]

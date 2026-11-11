@@ -125,7 +125,15 @@ async def test_the_agent_answers_without_a_model():
 
 ### Review what it queued
 
-Queued turns are `ReviewItem` rows, per queue. The Django admin lists turns, lens answers, rule matches and review items, read-only and without the turn's content. Resolving or dismissing an item is not part of core yet ([what core ships](/manual/oversight/)).
+Queued turns are `ReviewItem` rows, per queue. The Django admin lists turns, lens answers, rule matches and review items, read-only and without the turn's content. To work the queues, mount the review API, an opt-in layer, and give reviewers its model permissions ([Review API](/manual/oversight/#review-api)):
+
+```python
+from django_ai_sdk.contrib.ninja import get_oversight_router
+
+api.add_router("/", get_oversight_router())
+```
+
+`GET /oversight/reviews/` lists what waits, and `POST /oversight/reviews/{id}/` with `{"lens": "topic", "value": "other", "note": "Not HR."}` resolves an item (or `{"dismiss": true}`). Reading a turn's content takes a permission of its own, and every read is recorded.
 
 ### Grow it
 
@@ -669,17 +677,20 @@ A stretch a lens found in a tool call is masked only where the built-in patterns
 
 Under `masked`, reflect does not judge the masked content where a chat thread stores the turn: it reads the question and answer as the thread stores them, so a mask it asks for reaches the stored answer. A turn with no stored messages (a run endpoint) is judged as its content keeps it, masked.
 
-Retention is per policy: `{"content": 90, "metadata": 730}` days by default, stamped on each row as `expires_at`.
+Retention is per policy: `{"content": 90, "metadata": 730}` days by default, stamped on each row as `expires_at`; `manage.py oversight_prune` deletes what expired: schedule it daily ([Retention](/manual/oversight/#retention)).
 
 ## Forgetting
 
 Deleting a thread (`ThreadService.delete_thread`, the admin, a cascade) deletes its content, and with it every reason, name and score kept there, and blanks reviewers' notes on its turns. The thread's turns stay, with who asked, their labels and rule matches, which hold no text of the turn. A later turn in a thread of the same id records content again.
 
+Deleting a user deletes their threads, and with them those threads' content. Oversight then clears `actor_id` on every turn they asked and deletes the content of those without a thread (a stateless run endpoint, a workflow step). Their turns stay, as above, with nobody named as having asked, and reviewers' notes on the turns without a thread are blanked. What reviewers did stays theirs: a closed review item keeps the reviewer's id.
+
 What deleting does not reach:
 
 - **Backups** taken before.
 - **Copies already made**: what was sent to remote judges, and what notifiers received.
-- **Turns without a thread** (a stateless run endpoint, a workflow step).
+- **A thread deleted without its user**: its turns keep `actor_id` until the user goes.
+- **A delete whose forgetting failed**: when custody cannot forget (its store is down), the user is still deleted, the error is logged, and their turns stay as they were. `manage.py oversight_forget_actor <user id>` does it again.
 - **A thread deleted where signals do not fire** (a queryset `.update()`, raw SQL, another database) keeps its content until `manage.py oversight_forget_thread <thread id>` runs.
 
 Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encrypted.
@@ -697,8 +708,8 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
   The SDK's own side calls run with `oversight=False` on purpose: the thread title, the follow-up suggestions and the citations are model calls over a turn already judged, and are neither judged nor recorded themselves.
 - **No injection check on tool results or sources.** Tool results and retrieved sources are masked, but no lens asks whether they carry instructions to the model.
 - **Reflect notices arrive by polling.** Reflect runs after the stream has closed: what it masks reaches the client only when the thread is read again.
-- **Expired rows are not deleted yet.** Each row carries `expires_at` from the policy's retention; nothing prunes them in core.
 
 ## Next
 
 - The [Oversight manual](/manual/oversight/): every class, setting, model and check.
+- The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
