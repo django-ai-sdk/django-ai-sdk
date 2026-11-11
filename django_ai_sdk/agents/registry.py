@@ -243,3 +243,15 @@ class AgentRegistry:
 
 # Global singleton instance
 registry = AgentRegistry()
+
+
+def registered_agent_classes() -> list[type[Agent]]:
+    """The registered agents' classes, or none while the registry is not set up.
+
+    System checks read it; in a real project they run after AppConfig.ready().
+    """
+    try:
+        agents = registry.all().values()
+    except RuntimeError:
+        return []
+    return list(dict.fromkeys(type(agent) for agent in agents))

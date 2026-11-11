@@ -18,6 +18,7 @@ Branch on the code, not on the message. `retryable` tells the client whether try
 | `provider_timeout` | 504 | yes | The provider took longer than the generator's timeout, often on a very large prompt |
 | `configuration_error` | 500 | no | Bad API key, unknown model, invalid tool schema, exhausted quota, missing setting |
 | `content_filtered` | 400 | no | The provider's content filter blocked the request |
+| `blocked` | 400 | no | The agent's [oversight](/oversight/) policy refused the question or withheld the answer (`django_ai_sdk.errors.Blocked`) |
 | `knowledge_unavailable` | 503 | yes | A vector store (RAG) failed or is locked |
 | `tool_failed` | 500 | yes | A tool call failed (on tool parts only) |
 | `file_unsupported` | 400 | no | An uploaded file is empty or of a type no pipeline reads |

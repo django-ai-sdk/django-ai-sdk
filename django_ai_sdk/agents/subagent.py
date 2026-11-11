@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy
 from haystack import component
 from haystack.dataclasses import (
     ChatMessage,
@@ -34,6 +35,12 @@ if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
 
 logger = get_logger(__name__)
+
+# Told to the coordinator when a sync delegation needs its own turn, which a
+# sync run cannot open.
+UNGUARDABLE = gettext_lazy(
+    "This task cannot be delegated here: it could not be checked. Answer without it."
+)
 
 # meta key naming the subagent
 SUBAGENT_META_KEY = "django_ai_sdk.subagent"
@@ -140,6 +147,12 @@ def subagent_response(messages: list[ChatMessage] | None) -> str:
     )
 
 
+def _answered(text: str) -> dict[str, Any]:
+    """Build a delegation result that holds only `text`."""
+    reply = ChatMessage.from_assistant(text)
+    return {"messages": [reply], "last_message": reply}
+
+
 def _tag_subagent(chunk: StreamingChunk, name: str) -> StreamingChunk:
     """Return a copy of ``chunk`` stamped with the subagent it came from."""
     return dataclasses.replace(chunk, meta={**chunk.meta, SUBAGENT_META_KEY: name})
@@ -208,12 +221,30 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
 
 @component
 class SubagentStreamFilter:
-    """Wrap a subagent Agent so only its tool calls and results reach the stream."""
+    """Wrap a subagent Agent so only its tool calls and results reach the stream.
 
-    def __init__(self, agent: Any, name: str = "", agent_id: str = "") -> None:
+    When `subagent` is given, each delegation runs under that agent's policy. It
+    joins the coordinator's turn when the policy is the same (or there is none).
+    Otherwise it opens a child turn that checks the task, the tool calls and the
+    response before the coordinator reads it. On a refusal the coordinator reads
+    the policy's message.
+    """
+
+    def __init__(
+        self,
+        agent: Any,
+        name: str = "",
+        *,
+        subagent: Agent | None = None,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> None:
         self._agent = agent
         self.name = name
-        self.agent_id = agent_id
+        self.agent_id = subagent.agent_id if subagent is not None else ""
+        self._subagent = subagent
+        self._thread_id = thread_id
+        self._user = user
 
     def _span(self) -> Any:
         """Open a named span so the subagent's own loop is a readable subtree."""
@@ -246,6 +277,9 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        # Oversight: a sync run cannot open the child turn this delegation needs.
+        if self._needs_own_turn():
+            return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
             result = self._agent.run(
@@ -291,6 +325,65 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        # Oversight: a subagent with its own policy runs as a child turn that gates
+        # the task, guards its tools and checks the response. Otherwise it joins
+        # the outer turn.
+        if self._subagent is None:
+            return await self._delegate(messages, streaming_callback, task, **kwargs)
+        from django_ai_sdk.errors import Blocked
+        from django_ai_sdk.oversight.agent_run import turn
+        from django_ai_sdk.oversight.guard import current_guard
+
+        outer = current_guard()
+        try:
+            async with turn(
+                self._subagent,
+                channel=outer.channel if outer is not None else "subagent",
+                user=self._user,
+                thread_id=self._thread_id or None,
+                input=task or "",
+            ) as child:
+                question = await child.gate()
+                result = await self._delegate(
+                    messages, streaming_callback, question if task is not None else None, **kwargs
+                )
+                response = subagent_response(result.get("messages"))
+                answer = await child.finish(response)
+        except Blocked as refused:
+            return _answered(refused.message)
+        return result if answer == response else _answered(answer)
+
+    def _needs_own_turn(self) -> bool:
+        """Return True when a sync delegation would need its own turn.
+
+        Sync runs cannot open a turn. They cannot await `get_oversight()` either,
+        so a subagent that overrides it is assumed to need a turn.
+        """
+        if self._subagent is None:
+            return False
+        from django_ai_sdk.oversight.conf import is_enabled
+
+        if not is_enabled():
+            return False
+        from django_ai_sdk.oversight.agent_run import joins_turn
+        from django_ai_sdk.oversight.agents import code_policy, policy_needs_await
+        from django_ai_sdk.oversight.guard import current_guard
+
+        if policy_needs_await(self._subagent):
+            return True
+        try:
+            own = code_policy(self._subagent)[0]
+        except Exception:
+            return True
+        return bool(own) and not joins_turn(current_guard(), own)
+
+    async def _delegate(
+        self,
+        messages: list[ChatMessage],
+        streaming_callback: StreamingCallbackT | None,
+        task: str | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         seen: set[str] = set()
         with self._span():
             result = await self._agent.run_async(
@@ -333,8 +426,11 @@ async def build_subagent(
     subagent_cls: type[Agent],
     thread_id: str = "",
     user: AbstractBaseUser | AnonymousUser | None = None,
-) -> tuple[HaystackAgent, str] | None:
-    """Build a bare Haystack Agent from an SDK Agent subclass."""
+) -> tuple[HaystackAgent, Agent] | None:
+    """Build a bare Haystack Agent from an SDK Agent subclass, and return both.
+
+    The SDK agent's policy guards the delegation. None for a cyclic graph.
+    """
     path = f"{subagent_cls.__module__}.{subagent_cls.__qualname__}"
     chain = _build_chain.get()
     if path in chain:
@@ -364,6 +460,6 @@ async def build_subagent(
             hooks=default_hooks(subagent),
             stream_subagent_tools=True,
         )
-        return agent, subagent.agent_id
+        return agent, subagent
     finally:
         _build_chain.reset(token)

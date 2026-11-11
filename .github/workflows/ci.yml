@@ -59,6 +59,52 @@ jobs:
         if: runner.os == 'Linux'
         run: make test-demos
 
+  postgres:
+    name: Test (Postgres 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: pg
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # tests/settings.py switches to Postgres when DATABASE_URL is set.
+      DATABASE_URL: postgres://postgres:pg@127.0.0.1:5432/postgres
+      UV_RUN_ARGS: '--with "psycopg[binary]"'
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-liberation
+
+      # The race tests in tests/oversight/test_durability.py only run on Postgres.
+      - name: Run tests, with a coverage floor for oversight
+        run: >-
+          make test
+          UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-cov"
+          PYTEST_ARGS='--cov=django_ai_sdk/oversight --cov-report=term --cov-fail-under=90'
+
+      - name: Run the oversight tests in random order
+        run: make test UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-randomly" TEST_PATHS=tests/oversight
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
@@ -81,3 +127,6 @@ jobs:
 
       - name: Typecheck
         run: make typecheck
+
+      - name: Migrations match the models
+        run: make check-migrations
