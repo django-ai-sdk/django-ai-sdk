@@ -121,6 +121,8 @@ setting = AppSettings(
             of_type(list, tuple, label="a list of dotted paths or Notifier instances"),
             'A list: ["myapp.notifiers.Slack", WebhookNotifier(url)].',
         ),
+        # How long each process caches authored policies. 0 reads them every turn.
+        "RUNTIME_CACHE_SECONDS": (10, number(0), "Seconds, such as 10."),
     },
 )
 

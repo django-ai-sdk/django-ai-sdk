@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are not part of core. A lens or rule declared in code changes only with a deploy.
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are the opt-in [authoring app](/oversight-authoring/). A lens or rule declared in code changes only with a deploy.
 
 ## Installing
 
@@ -33,6 +33,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `FAIL_MODE` | `"closed"` | What a failed lens means: its check or judge raised, timed out, missed the deadline or was handed more than it reads (too long). `closed` treats an enforced rule that blocks, masks or takes tools away as matched when a lens it reads failed, withholds a tool result it cannot check, and refuses a turn whose policy cannot be chosen or loaded. Rules that only alert, queue or notify never fire on a failure; rules in report mode only record it. `open` lets the turn through and records the failure, and runs a turn whose policy cannot load unguarded. A policy may set its own (`fail_mode`); anything but `"open"` is closed. |
 | `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons kept in it, and reviewers' notes) and its metadata (the turn, its answers, matches and review items) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)). |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, dotted paths, or `{"class": "<dotted path>", **kwargs}` (unlike `JUDGES`, always the full path: `"django_ai_sdk.oversight.notifiers.WebhookNotifier"`). One that cannot be built is logged and left out. |
+| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches [authored policies](/oversight-authoring/); `0` reads them every turn. |
 
 Outside the dict:
 
@@ -185,6 +186,8 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 
 Every effective value has a source, in this order: the extended packs (`pack:<name>`), then the class (`code`); a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached (`django_ai_sdk.oversight.resolve`) until settings change or a policy registers; `resolve.invalidate(name)` clears it and every policy that extends it.
 
+An app can register whole policies at runtime. It adds a loader with `resolve.add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `resolve.invalidate()`), that registers policies (`registry.register_policy`) and removes them (`registry.unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's, but it cannot change what it extends.
+
 A policy that fails to load (a missing parent, a cycle) refuses its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`resolve.broken_reason(name)`).
 
 ## Packs
@@ -285,6 +288,8 @@ Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `dj
 | `VIEW_OVERSIGHT_METRICS` | `django_ai_sdk_oversight.view_turn` | Turns without their content, answers' values, rule matches, counts. |
 | `VIEW_OVERSIGHT_CONTENT` | `django_ai_sdk_oversight.view_turncontent` | On top of metrics: the turn's content, the preview, who asked, thread and message ids, answers' reasons, spans and words, reviewers' notes. |
 | `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and closing an item with a verdict. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
+| `VIEW_OVERSIGHT_AUTHORING` | `django_ai_sdk_oversight_authoring.view_authoredpolicy` | The [policies defined at runtime](/oversight-authoring/) and what a definition may use (the opt-in authoring app). |
+| `AUTHOR_OVERSIGHT` | `django_ai_sdk_oversight_authoring.change_authoredpolicy` | Saving, toggling, trying and deleting a policy defined at runtime. |
 
 A reviewer may hold review alone: they then work the queue from each item's queue and rule, without the turn's row, and close it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
 

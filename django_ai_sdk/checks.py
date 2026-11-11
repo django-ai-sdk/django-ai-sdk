@@ -174,6 +174,13 @@ class AppSettings:
         ]
 
 
+def names(value: Any) -> str:
+    """Accept a list or tuple of strings."""
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
+        return ""
+    return f"is {value!r}, not a list of names"
+
+
 def per_database[T](
     databases: Iterable[str] | None, read: Callable[[str], T]
 ) -> Iterator[tuple[str, T]]:
@@ -219,6 +226,7 @@ __all__ = [
     "check_oversight_installed",
     "number",
     "of_type",
+    "names",
     "one_of",
     "per_database",
     "task_backend_problem",

@@ -1,14 +1,24 @@
 """Resolve the policy a turn runs, cached.
 
 `aget_policy(name)` builds the policy from the registry and caches it until
-`invalidate()` clears it. Nothing changes a registered policy at runtime.
+`invalidate()` clears it. A lens or rule declared in code never changes at runtime.
+Apps that register whole policies at runtime (the authoring app) add a loader with
+`add_policy_loader`.
 """
 
 from __future__ import annotations
 
+import math
+import time
+from typing import TYPE_CHECKING
+
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.policy import ResolvedPolicy, build
 from django_ai_sdk.oversight.registry import get_policy_class
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Iterable
 
 logger = get_logger(__name__)
 
@@ -16,15 +26,46 @@ logger = get_logger(__name__)
 _cache: dict[str, tuple[ResolvedPolicy | None, frozenset[str]]] = {}
 # name -> why it failed to load
 _broken: dict[str, str] = {}
+# Each loader registers or unregisters its app's policies when awaited.
+_loaders: list[Callable[[], Awaitable[None]]] = []
+_loaded_at = -math.inf
+
+
+def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
+    """Await `loader` before policy lookups. Adding it twice has no effect."""
+    global _loaded_at
+    if loader not in _loaders:
+        _loaders.append(loader)
+        _loaded_at = -math.inf
+
+
+async def aload_policies() -> None:
+    """Run every loader, at most once per RUNTIME_CACHE_SECONDS.
+
+    Failures are logged, and already registered policies stay.
+    """
+    global _loaded_at
+    if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
+        return
+    started = time.monotonic()
+    for loader in list(_loaders):
+        try:
+            await loader()
+        except Exception:
+            logger.opt(exception=True).warning("An oversight policy loader failed")
+    # Marked after the loaders, so a lookup meanwhile loads too instead of resolving
+    # against a registry that is not filled yet.
+    _loaded_at = started
 
 
 async def aget_policy(name: str) -> ResolvedPolicy | None:
-    """Return the effective policy, cached.
+    """Return the effective policy, cached. Policy loaders run first.
 
     Returns None for an unknown or broken policy. The reason is logged once and
     kept for `broken_reason()`. The caller decides what happens next.
     `TurnGuard.start` refuses the turn unless FAIL_MODE is "open".
     """
+    await aload_policies()
     cached = _cache.get(name)
     if cached:
         return cached[0]
@@ -56,10 +97,15 @@ def broken_reason(name: str) -> str:
     return _broken.get(name, "")
 
 
-def code_ancestors(name: str) -> list[str]:
-    """Every policy `name` extends in code, nearest first. build() reports cycles."""
+def code_ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
+    """Every policy `name` extends, nearest first. build() reports cycles.
+
+    `parents` replaces the `extends` of `name`, for a policy not registered yet.
+    """
     found: list[str] = []
-    todo = list(getattr(get_policy_class(name), "extends", []) or [])
+    if parents is None:
+        parents = getattr(get_policy_class(name), "extends", []) or []
+    todo = list(parents)
     while todo:
         parent = todo.pop(0)
         if parent in found or parent == name:
@@ -74,12 +120,21 @@ def invalidate(name: str | None = None) -> None:
 
     Clearing a policy also clears every policy that extends it.
     """
+    global _loaded_at
     if name is None:
         _cache.clear()
+        _loaded_at = -math.inf
         return
     for cached, (_, lineage) in list(_cache.items()):
         if cached == name or name in lineage:
             _cache.pop(cached, None)
 
 
-__all__ = ["aget_policy", "broken_reason", "code_ancestors", "invalidate"]
+__all__ = [
+    "add_policy_loader",
+    "aget_policy",
+    "aload_policies",
+    "broken_reason",
+    "code_ancestors",
+    "invalidate",
+]

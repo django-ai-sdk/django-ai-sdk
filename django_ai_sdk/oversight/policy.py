@@ -170,12 +170,14 @@ class ResolvedPolicy:
         return any(stage in lens.stages for lens in self.lenses.values() if lens.enabled)
 
 
-def build(name: str) -> ResolvedPolicy:
+def build(name: str, *, policy_class: type[Policy] | None = None) -> ResolvedPolicy:
     """Resolve `name` from the registry, with its parents and the settings.
 
-    Raises LookupError for an unknown policy and ImproperlyConfigured for a cycle.
+    `policy_class` builds that class instead of the registered one, to check a draft
+    before registering it. Raises LookupError for an unknown policy and
+    ImproperlyConfigured for a cycle.
     """
-    resolved = _from_code(name, ())
+    resolved = _from_code(name, (), policy_class=policy_class)
     ceiling = Capture(setting("CAPTURE"))
     if rank(CAPTURE_ORDER, resolved.capture) > rank(CAPTURE_ORDER, ceiling):
         resolved.capture = ceiling
@@ -198,10 +200,12 @@ def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy, parent_name: str)
         resolved.retention = {**resolved.retention, **parent.retention}
 
 
-def _from_code(name: str, chain: tuple[str, ...]) -> ResolvedPolicy:
+def _from_code(
+    name: str, chain: tuple[str, ...], *, policy_class: type[Policy] | None = None
+) -> ResolvedPolicy:
     if name in chain:
         raise ImproperlyConfigured(f"Policy {name!r} extends itself: {' -> '.join((*chain, name))}")
-    cls = get_policy_class(name)
+    cls = policy_class or get_policy_class(name)
     if cls is None:
         raise LookupError(f"No oversight policy {name!r}")
     policy = cls()
@@ -262,7 +266,7 @@ def _tunable(lens: Lens) -> set[str]:
 
 # The system check reports bad settings (conf.problems), but does not stop a turn.
 # So every value that reaches a built policy is checked again here: the settings
-# it inherits, and a policy's own.
+# it inherits, and a code or authored policy's own.
 
 
 def _choice(key: str, value: Any, choices: tuple[str, ...]) -> str:
