@@ -32,6 +32,24 @@ class UserFactory(AsyncFactoryMixin, DjangoModelFactory):
         superuser = Trait(is_superuser=True)
 
 
+def grant(user, *perms):
+    """Give `user` Django model permissions, each spelled "app_label.codename"."""
+    from django.contrib.auth.models import Permission
+
+    for perm in perms:
+        app_label, codename = perm.split(".")
+        user.user_permissions.add(
+            Permission.objects.get(content_type__app_label=app_label, codename=codename)
+        )
+    # ModelBackend caches what it read on the instance.
+    for cache in ("_perm_cache", "_user_perm_cache", "_group_perm_cache"):
+        user.__dict__.pop(cache, None)
+    return user
+
+
+agrant = sync_to_async(grant)
+
+
 class MemoryFactory(AsyncFactoryMixin, DjangoModelFactory):
     class Meta:
         model = Memory

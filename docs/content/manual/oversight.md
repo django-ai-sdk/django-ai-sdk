@@ -6,7 +6,7 @@ weight: 127
 
 The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading and resolving review items through an API, and policies operators write at runtime, are not part of core. A lens or rule declared in code changes only with a deploy.
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are not part of core. A lens or rule declared in code changes only with a deploy.
 
 ## Installing
 
@@ -246,10 +246,62 @@ A refused question or withheld answer ends with finish reason `content-filter` (
 | `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out; `content_forgotten`, set when the turn was forgotten while open, so it stores no content when it closes. |
 | `TurnContent` | The content at the policy's capture level (`stored`), with an expiry: past it, the content reads as none (`load_content`) and reflect adds nothing to it. Beside it: `texts`, by answer id, what each answer said in words (its reason, the names a judge gave for an `Entities` lens, its per-item scores by key, the same of the answers on its trail). Reflect adds to it, and it goes when the content goes. |
 | `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
-| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); at reflect it matches a turn once, even when reflect is retried. |
-| `ReviewItem` | A turn a rule queued for a person, per queue and rule, created by a `Queue` action. It has room for who closed it (a user id), whether they agreed with the rule, and a note, which forgetting the turn, or its content expiring, blanks. Core has no way to resolve an item. |
+| `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once: reflect locks the turn before it looks. |
+| `ReviewItem` | A turn a rule queued for a person, per queue and rule, created by a `Queue` action. When closed it holds who closed it (`resolved_by_id`, a user id), whether they agreed with the rule (`agree`) and their `note`. The note is content: forgetting the thread, or the content expiring, blanks it. Core creates items; the [review API](#review-api) closes them. |
 
-The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` read-only, without the content, reviewers' notes, or who asked and who closed an item.
+The Django admin registers `Turn`, `LensAnswer`, `RuleMatch` and `ReviewItem` read-only, without the content, reviewers' notes, or who closed an item. It needs only metrics access (Django's view permission, and `VIEW_OVERSIGHT_METRICS` from the `oversight` permission domain), so a turn also leaves out who asked and its thread and message ids. Turns and their rows are narrowed by the metrics scope (`scope_turns`), as in the API.
+
+## Review API
+
+An opt-in layer above core: core never imports it, and nothing changes when it is not mounted. `django_ai_sdk.oversight.services.OversightService` is the API; `get_oversight_router()` serves it over django-ninja. There are no Django REST framework views for it in this release: a DRF project calls `OversightService` from views of its own, which keeps its permissions.
+
+```python
+from django_ai_sdk.contrib.ninja import get_oversight_router
+
+api.add_router("/", get_oversight_router())
+```
+
+The router signs readers in with django-ninja's `django_auth`: the session, with Django's CSRF check on every POST. It does not take the API's auth, so an API that signs in another way passes its own: `get_oversight_router(auth=MyAuth())`.
+
+| Route | Service | Operation |
+| --- | --- | --- |
+| `GET /oversight/turns/` | `list_turns(filters, user=, limit=, cursor=)` | metrics |
+| `GET /oversight/turns/{id}/` | `get_turn(turn_id, user=)` | metrics; the content takes content |
+| `GET /oversight/reviews/` | `list_reviews(user=, queue=, status=, limit=, cursor=)` | review |
+| `GET /oversight/queues/` | `queues(user=)` | review |
+| `POST /oversight/reviews/{id}/` | `resolve_review(item_id, answer, user=)` | review |
+| `GET /oversight/metrics/` | `summarize(user=, days=, agent_id=, policy=)` | metrics |
+
+The turns feed filters on `outcome`, `report_outcome` (turns a report-mode rule would have changed), `status`, `agent_id`, `channel` (a prefix), `policy`, `severity`, `label` with an optional `value`, `rule`, `review` (`open`, `reviewed`, `unreviewed`), `thread_id` (content: it takes `VIEW_OVERSIGHT_CONTENT`, 403 without, and reaches only turns in the content scope), `since` and `until`. Lists are newest first (reviews: oldest first) and page by cursor: pass a page's `next_cursor` back as `cursor`; there is no total. On Postgres a GIN index on the labels answers the label filter.
+
+Closing an item (`ResolveIn`: `agree`, `note`, `dismiss`) says whether the rule that queued the turn was right (`agree` true or false), or dismisses it (`dismiss`); exactly one of the two, else 400. The note is kept on the item. Closing claims the item with a conditional update: a second close answers 409. Nobody reviews a turn they asked (its `actor_id` is theirs; a child turn carries the actor of the outer turn, however deep): closing and dismissing it answer 403. A forgotten user's turns carry no actor, so this cannot hold for them. A verdict changes nothing else: no label, no rule match, no notification.
+
+
+Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `django_ai_sdk.oversight.permissions.OversightDefaultPermission`, takes a Django model permission per operation and grants nothing for `is_staff`:
+
+| Operation | Model permission | Reads |
+| --- | --- | --- |
+| `VIEW_OVERSIGHT_METRICS` | `django_ai_sdk_oversight.view_turn` | Turns without their content, answers' values, rule matches, counts. |
+| `VIEW_OVERSIGHT_CONTENT` | `django_ai_sdk_oversight.view_turncontent` | On top of metrics: the turn's content, the preview, who asked, thread and message ids, answers' reasons, spans and words, reviewers' notes. |
+| `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and closing an item with a verdict. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
+
+A reviewer may hold review alone: they then work the queue from each item's queue and rule, without the turn's row, and close it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
+
+Which turns a reader reaches is narrowed by two hooks a subclass overrides, `scope_turns(user, operation, queryset)` and `scope_reviews(user, operation, queryset)`. A turn or item outside them is not found (404), and a turn outside the content scope is shown without its content. Every read decides through these querysets, a list or one turn alike, so narrow in the hooks (or `get_queryset_perms`): a `has_object_permission` of your own is not consulted for content. By default an item is in scope when its turn is:
+
+```python
+from django_ai_sdk.oversight.permissions import OversightDefaultPermission
+
+
+class TeamOversight(OversightDefaultPermission):
+    def scope_turns(self, user, operation, queryset):
+        return queryset.filter(agent_id__in=agents_of(user))
+```
+
+An empty `AI_SDK_PERMISSIONS["oversight"]` falls back to the default, as for agents; a record open to every user says so with `["django_ai_sdk.permissions.AllowAll"]`.
+
+
+What was forgotten reads back as gone. A turn whose thread or user was deleted, or whose content expired and was pruned, has `content_state` `"none"`, no preview, no answers' words and no reviewers' notes; a deleted user's turns have an empty `actor_id`; a pruned turn is not found. Content past its expiry and not yet pruned reads as `"expired"` on the turn, and as no preview and no notes in lists.
 
 ## Forgetting
 
@@ -278,7 +330,7 @@ python manage.py check --deploy --database default
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
@@ -351,3 +403,4 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 The ids missing from this table (`E003`, `E008`, `W002`, `W006`, `W009`, `W010` and `W012`) are reserved: earlier builds raised them, and an id is never reused for another meaning.
 
+In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.

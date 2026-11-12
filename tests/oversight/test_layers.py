@@ -1,7 +1,8 @@
 """How the SDK and oversight's layers may import each other.
 
-Core oversight is a layer of its own: it imports no workflows and no routes. The rest of the
-SDK reaches oversight only through the seams below.
+Core oversight is a layer of its own: it imports no workflows and no routes. The review layer
+sits on it as an opt-in part, and can be removed without touching core. The rest of the SDK
+reaches oversight only through the seams below.
 
 Every import is read from the source, including lazy imports inside functions and imports
 under `TYPE_CHECKING`, so a layer cannot lean on another one without it showing here.
@@ -48,6 +49,22 @@ class Layer:
 # A module belongs to the first layer that names it, so core and the SDK, which are named by
 # their whole package, take whatever the layers before them leave.
 LAYERS = {
+    "review": Layer(
+        modules=(
+            f"{OVERSIGHT}.services",
+            f"{OVERSIGHT}.schemas",
+            f"{OVERSIGHT}.permissions",
+            # It narrows turns with the review layer's scope hooks.
+            f"{OVERSIGHT}.admin",
+        ),
+        may_import=("core",),
+        why="The read and review API over the record; turns run without it.",
+    ),
+    "review routes": Layer(
+        modules=("django_ai_sdk.contrib.ninja.oversight",),
+        may_import=("core", "review"),
+        why="The HTTP routes that serve the review API.",
+    ),
     "core": Layer(
         modules=(OVERSIGHT,),
         may_import=(),
@@ -56,7 +73,7 @@ LAYERS = {
     ),
     "sdk": Layer(
         modules=("django_ai_sdk",),
-        may_import=("seams",),
+        may_import=("seams", "review routes"),
         why="The rest of the SDK: it uses oversight through its seams and mounts the routes.",
     ),
 }

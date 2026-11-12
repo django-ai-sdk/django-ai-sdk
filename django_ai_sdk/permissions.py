@@ -74,6 +74,12 @@ class Operation(StrEnum):
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
+    # Oversight records without content: turn fields, rule matches, counts.
+    VIEW_OVERSIGHT_METRICS = "view_oversight_metrics"
+    # Turn content: question, answer, sources, reasons, notes and who asked.
+    VIEW_OVERSIGHT_CONTENT = "view_oversight_content"
+    # Work review queues, resolving an item with an answer.
+    REVIEW_OVERSIGHT = "review_oversight"
 
 
 class PermissionDomain(StrEnum):
@@ -82,6 +88,7 @@ class PermissionDomain(StrEnum):
     MEMORY = "memory"
     INTEGRATIONS = "integrations"
     WORKFLOW = "workflow"
+    OVERSIGHT = "oversight"
 
 
 class BasePermission(ABC):
@@ -498,6 +505,29 @@ class WorkflowDefaultPermission(BasePermission):
         return queryset
 
 
+def has_model_perm(user: UserType, perm: str) -> bool:
+    """Return whether `user` has the model permission `perm` ("app_label.codename").
+
+    This may query the database. Async code should use `ahas_model_perm`.
+    """
+    if user is None or not bool(user.is_authenticated):
+        return False
+    has_perm = getattr(user, "has_perm", None)
+    return has_perm is not None and bool(has_perm(perm))
+
+
+async def ahas_model_perm(user: UserType, perm: str) -> bool:
+    """Async version of `has_model_perm`."""
+    if user is None or not bool(user.is_authenticated):
+        return False
+    ahas_perm = getattr(user, "ahas_perm", None)
+    if ahas_perm is not None:
+        return bool(await ahas_perm(perm))
+    from asgiref.sync import sync_to_async
+
+    return await sync_to_async(has_model_perm)(user, perm)
+
+
 def user_pk(user: UserType) -> Any:
     """The user's primary key, or None for anonymous. Safe as a query value."""
     if user is None or not user.is_authenticated:
@@ -522,6 +552,8 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
     PermissionDomain.MEMORY: ["django_ai_sdk.permissions.MemoryDefaultPermission"],
     PermissionDomain.INTEGRATIONS: ["django_ai_sdk.permissions.IntegrationDefaultPermission"],
     PermissionDomain.WORKFLOW: ["django_ai_sdk.permissions.WorkflowDefaultPermission"],
+    # Only the oversight service resolves this domain.
+    PermissionDomain.OVERSIGHT: ["django_ai_sdk.oversight.permissions.OversightDefaultPermission"],
 }
 
 
