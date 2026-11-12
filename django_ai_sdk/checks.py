@@ -174,6 +174,13 @@ class AppSettings:
         ]
 
 
+def names(value: Any) -> str:
+    """Accept a list or tuple of strings."""
+    if isinstance(value, list | tuple) and all(isinstance(item, str) for item in value):
+        return ""
+    return f"is {value!r}, not a list of names"
+
+
 def task_backend_problem(task: Any) -> str:
     """Why `task` would not run on a worker, or "" when its backend has one.
 
@@ -202,6 +209,7 @@ __all__ = [
     "check_oversight_installed",
     "number",
     "of_type",
+    "names",
     "one_of",
     "task_backend_problem",
 ]

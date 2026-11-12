@@ -54,4 +54,5 @@ assert not [m for m in sys.modules if m.startswith(REVIEW)], sorted(sys.modules)
 
 
 def test_core_runs_without_the_review_layer(tmp_path):
-    run_without(tmp_path, [], SCRIPT, before_setup=HIDE_REVIEW)
+    # The authoring app sits on the review layer: it goes with it.
+    run_without(tmp_path, ["django_ai_sdk.oversight.authoring"], SCRIPT, before_setup=HIDE_REVIEW)

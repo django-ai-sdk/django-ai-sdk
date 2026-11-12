@@ -19,7 +19,7 @@ from django_ai_sdk.permissions import AllowAll
 from tests.oversight.helpers import chat, make_agent, text_of
 from tests.removable import run_without
 
-OVERSIGHT_APPS = ["django_ai_sdk.oversight"]
+OVERSIGHT_APPS = ["django_ai_sdk.oversight.authoring", "django_ai_sdk.oversight"]
 
 
 @pytest.fixture

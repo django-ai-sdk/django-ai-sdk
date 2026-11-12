@@ -12,6 +12,8 @@ first keeps it and the check fails until one is renamed.
 from __future__ import annotations
 
 import inspect
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
@@ -20,7 +22,7 @@ from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.actions import Mask
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Generator, Mapping
 
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.policy import Policy
@@ -35,6 +37,10 @@ _invalid: dict[str, str] = {}
 
 # Names used by more than one class, with every class path that uses them.
 _duplicates: dict[str, list[str]] = {}
+
+# Unregistered classes that stand in for registered ones in this context only, so a
+# check can build a policy against a draft parent that other turns never see.
+_drafts: ContextVar[Mapping[str, type[Policy]] | None] = ContextVar("policy_drafts", default=None)
 
 # Validators a check lens may name, by name.
 _validators: dict[str, Callable[..., Any]] = {}
@@ -81,6 +87,18 @@ def register_policy[T: type[Policy]](cls: T) -> T:
 
     invalidate(cls.name)
     return cls
+
+
+def unregister_policy(name: str) -> None:
+    """Remove a policy registered at runtime.
+
+    Later turns naming it find no policy and are refused, unless FAIL_MODE is "open".
+    """
+    _registry.pop(name, None)
+    _invalid.pop(name, None)
+    from django_ai_sdk.oversight.resolve import invalidate
+
+    invalidate(name)
 
 
 def validate_policy(cls: type[Policy]) -> None:
@@ -143,7 +161,17 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
 
 
 def get_policy_class(name: str) -> type[Policy] | None:
-    return _registry.get(name)
+    return (_drafts.get() or {}).get(name) or _registry.get(name)
+
+
+@contextmanager
+def drafted(classes: Mapping[str, type[Policy]]) -> Generator[None]:
+    """Look up `classes` before the registry inside this block, in this context only."""
+    token = _drafts.set({**(_drafts.get() or {}), **classes})
+    try:
+        yield
+    finally:
+        _drafts.reset(token)
 
 
 def policy_name(policy: type[Policy] | str) -> str:
@@ -226,6 +254,7 @@ def reset_registry() -> None:
 
 
 __all__ = [
+    "drafted",
     "get_duplicate_policies",
     "get_invalid_policies",
     "get_policies",
@@ -236,6 +265,7 @@ __all__ = [
     "register_policy",
     "register_validator",
     "reset_registry",
+    "unregister_policy",
     "validate_policy",
     "validate_rule",
 ]

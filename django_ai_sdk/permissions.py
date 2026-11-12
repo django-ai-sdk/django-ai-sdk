@@ -80,6 +80,10 @@ class Operation(StrEnum):
     VIEW_OVERSIGHT_CONTENT = "view_oversight_content"
     # Work review queues, resolving an item with an answer.
     REVIEW_OVERSIGHT = "review_oversight"
+    # See runtime-defined policies and what they may use.
+    VIEW_OVERSIGHT_AUTHORING = "view_oversight_authoring"
+    # Define, change, toggle, try or delete a policy at runtime.
+    AUTHOR_OVERSIGHT = "author_oversight"
 
 
 class PermissionDomain(StrEnum):

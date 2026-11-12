@@ -712,3 +712,4 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
 
 - The [Oversight manual](/manual/oversight/): every class, setting, model and check.
 - The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
+- [Runtime authoring](/oversight-authoring/): define whole policies without a deploy, checked like code's, and turn their own rules and lenses on or off; an opt-in app.

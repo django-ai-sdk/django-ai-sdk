@@ -105,6 +105,13 @@ jobs:
       - name: Run the oversight tests in random order
         run: make test UV_RUN_ARGS="$UV_RUN_ARGS --with pytest-randomly" TEST_PATHS=tests/oversight
 
+      # The authoring app is opt-in: without it, policies are code's alone.
+      - name: Run the oversight tests without the authoring app
+        run: >-
+          make test
+          TEST_PATHS=tests/oversight
+          PYTEST_ARGS='--ds=tests.settings_without_authoring --ignore=tests/oversight/authoring'
+
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
