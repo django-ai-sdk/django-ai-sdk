@@ -14,8 +14,15 @@ import pytest
 from django.test import override_settings
 from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, Patterns, Rule, Score
 from django_ai_sdk.oversight.guard.asking import answer_lens, run_lenses, should_retry
-from django_ai_sdk.oversight.judges import LexicalSupport, TypeSafe
-from django_ai_sdk.oversight.judges.base import TOO_LONG, Judge, ask, resolve, sampled
+from django_ai_sdk.oversight.judges import TypeSafe
+from django_ai_sdk.oversight.judges.base import (
+    NO_VERDICT,
+    TOO_LONG,
+    Judge,
+    ask,
+    resolve,
+    sampled,
+)
 from django_ai_sdk.oversight.judges.llm import parse_json_reply, render_turn
 from django_ai_sdk.oversight.types import Answer, Source, Stage, Subject, ToolCall, TurnContext
 
@@ -199,33 +206,6 @@ class TestSecretsStayHome:
         assert "correct horse" not in str(kept)
 
 
-class TestLexicalSupport:
-    async def test_lexical_groundedness(self):
-        lens = JudgeLens(
-            answer=Score, name="grounded", question="?", subject=Subject.OUTPUT, judges=[]
-        )
-        sources = ["The office opens at nine and closes at five on weekdays."]
-        good = await ask(
-            LexicalSupport(),
-            lens,
-            view(output="The office opens at nine weekdays.", sources=sources),
-        )
-        bad = await ask(
-            LexicalSupport(),
-            lens,
-            view(output="Penguins migrate across Antarctic ice.", sources=sources),
-        )
-        assert good.value == 1.0
-        assert bad.value == 0.0
-        assert good.confidence < 0.75
-
-    async def test_lexical_abstains_without_sources(self):
-        lens = JudgeLens(
-            answer=Score, name="grounded", question="?", subject=Subject.OUTPUT, judges=[]
-        )
-        assert await ask(LexicalSupport(), lens, view(output="anything")) is None
-
-
 class TestCascade:
     """A judge lens's judges are asked in order until one is sure."""
 
@@ -352,6 +332,26 @@ class TestAsk:
         judge.timeout = 0.01
         assert (await ask(judge, self.lens, view("x"))).error == "timeout"
 
+    async def test_an_answer_without_a_value_is_no_verdict(self):
+        # A model replying {"value": null} must not slip past FAIL_MODE.
+        answer = await ask(Says(lambda lens, v: Answer(confidence=0.9)), self.lens, view("x"))
+        assert answer.error == NO_VERDICT
+
+    async def test_a_judge_with_something_missing_abstains(self):
+        class Unset(Says):
+            def missing(self):
+                return "KEY is not set"
+
+        assert await ask(Unset(lambda lens, v: pytest.fail("asked")), self.lens, view("x")) is None
+
+    def test_every_judge_takes_a_name_and_a_timeout(self):
+        from django_ai_sdk.oversight.judges import LLMJudge, LocalClassifier
+
+        for cls in (Patterns, TypeSafe, LocalClassifier, LLMJudge):
+            judge = cls(name="n", timeout=1.5)
+            assert (judge.label(), judge.timeout) == ("n", 1.5)
+            assert cls().timeout == cls.timeout
+
 
 class TestAliases:
     @override_settings(
@@ -365,7 +365,14 @@ class TestAliases:
     def test_aliases_resolve_through_aliases(self):
         judge = resolve("fast")
         assert isinstance(judge, Patterns)
-        assert judge.name == "cheap"
+        # Named after the alias the lens used.
+        assert judge.name == "fast"
+
+    def test_a_shared_instance_is_not_renamed(self):
+        shared = Patterns(["x"])
+        with override_settings(AI_SDK_OVERSIGHT={"JUDGES": {"a": shared, "b": shared}}):
+            a, b = resolve("a"), resolve("b")
+        assert (a.name, b.name, shared.name) == ("a", "b", "patterns")
 
     def test_optional_aliases_drop_out_when_undefined(self):
         lens = JudgeLens(name="f", question="?", judges=[Patterns(["x"]), "judge?"])
@@ -524,6 +531,14 @@ class TestTypeSafe:
         answer = judgment_answer(typesafe_response(choices={"c": judged}), "c", choice)
         assert (answer.value, answer.confidence, answer.rationale) == ("a", 0.7, "a 0.70, b 0.30")
         assert judgment_answer(typesafe_response(), "c", choice) is None
+        # A stated 0 is kept, and none at all is too unsure to end the chain.
+        judged |= {"confidence": 0.0}
+        assert (
+            judgment_answer(typesafe_response(choices={"c": judged}), "c", choice).confidence == 0
+        )
+        judged |= {"confidence": None, "probabilities": {}}
+        unstated = judgment_answer(typesafe_response(choices={"c": judged}), "c", choice)
+        assert unstated.confidence < JudgeLens(name="c", question="?").min_confidence
 
     def test_history_is_kept_short(self):
         from django_ai_sdk.oversight.types import HistoryItem
@@ -593,11 +608,11 @@ class TestTypeSafe:
         flag = JudgeLens(name="f", question="?", judges=[TypeSafe()])
         with (
             typesafe(fail=APIError(body)),
-            patch("django_ai_sdk.oversight.judges.classifier.logger", log),
+            patch("django_ai_sdk.oversight.judges.base.logger", log),
         ):
             answers = [
                 await answer_lens(flag, view("x"), Stage.GATE),
-                await TypeSafe().answer(TakenFrom(), view("x", "y", ["z"])),
+                await ask(TypeSafe(), TakenFrom(), view("x", "y", ["z"])),
             ]
         assert [a.error for a in answers] == ["unavailable: APIError"] * 2
         assert log.warning.called
@@ -792,6 +807,13 @@ class TestTakenFrom:
         assert (answer and answer.value) == taken
         _, questions = mock.await_args.args
         assert list(questions) == ["facts"]
+
+    async def test_without_sources_a_facts_question_left_unanswered_is_a_failure(self):
+        from django_ai_sdk.oversight.packs.quality import TakenFrom
+
+        with typesafe(typesafe_response()):
+            answer = await ask(TypeSafe(), TakenFrom(), view("Leave?", "25 days."))
+        assert answer.error == NO_VERDICT
 
     async def test_a_per_source_request_stays_within_the_request_limit(self):
         from django_ai_sdk.oversight.judges import TypeSafe

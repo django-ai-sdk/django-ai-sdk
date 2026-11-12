@@ -24,9 +24,10 @@ It supports two kinds of model:
 It reads only the judged text (the question or the answer), with secrets masked,
 up to TEXT_CHARS and MAX_TOKENS. A longer text fails as too long. It abstains on
 blank texts, on lenses about sources or tool calls, on lenses that need grounding,
-and on "taken from". Until the model is loaded it abstains and loads it in the
-background, so a policy whose only judge it is answers nothing meanwhile. Call
-`load()` at startup to avoid that.
+and on "taken from". Until the model is loaded it answers unavailable and loads it
+in the background, so the next judge is asked, FAIL_MODE applies, and reflect asks
+again later. A failed load is logged and tried again after LOAD_RETRY_SECONDS.
+Call `load()` at startup to have it ready.
 """
 
 from __future__ import annotations
@@ -35,15 +36,19 @@ import asyncio
 import json
 import re
 import threading
+import time
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from django_ai_sdk.oversight.judges.base import TOO_LONG, modules_installed
+from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.judges.base import TOO_LONG, UNAVAILABLE, modules_installed
 from django_ai_sdk.oversight.judges.classifier import Classifier, ranked_rationale, yes_answer
 from django_ai_sdk.oversight.lenses import Flag, JudgeLens
 from django_ai_sdk.oversight.types import Answer, Subject
 
 if TYPE_CHECKING:
     from django_ai_sdk.oversight.lenses import Lens
+
+logger = get_logger(__name__)
 
 # Secret masks like "[SLACK_TOKEN]" become "(slack token)". A small model reads
 # bracketed capitals as injected markup.
@@ -57,6 +62,10 @@ QUANTIZED = "onnx/model_quantized.onnx"
 # DeBERTa's token limit. TEXT_CHARS keeps Latin-script text well inside it. Denser
 # scripts like Chinese may still overflow. Then nothing is judged (TOO_LONG).
 MAX_TOKENS = 512
+# Confidence of a score. Entailment of `high` is a rough scale, so it is never sure.
+SCORE_CONFIDENCE = 0.6
+# Seconds before a model that failed to load is tried again.
+LOAD_RETRY_SECONDS = 60.0
 
 
 class LocalClassifier(Classifier):
@@ -64,6 +73,7 @@ class LocalClassifier(Classifier):
 
     external: ClassVar[str] = ""
     timeout = 10.0
+    name = "local"
     # About 400 tokens, leaving room for the statement within MAX_TOKENS.
     TEXT_CHARS: ClassVar[int] = 1_600
 
@@ -74,11 +84,12 @@ class LocalClassifier(Classifier):
         file: str = QUANTIZED,
         positive: str = "",
         name: str = "",
+        timeout: float | None = None,
     ) -> None:
+        super().__init__(name=name, timeout=timeout)
         self.model = model
         self.file = file
         self.positive = positive
-        self.name = name or "local"
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -91,8 +102,6 @@ class LocalClassifier(Classifier):
     def missing(self) -> str:
         if not modules_installed("onnxruntime", "tokenizers", "huggingface_hub"):
             return "needs django-ai-sdk[local] (onnxruntime, tokenizers, huggingface-hub)"
-        if error := _load_errors.get((self.model, self.file)):
-            return error
         runner = _loaded(self.model, self.file)
         wanted = self.positive.lower() or "entailment"
         if runner is not None and wanted not in runner.labels:
@@ -101,14 +110,14 @@ class LocalClassifier(Classifier):
         return ""
 
     async def answer(self, lens: Lens, view: Any) -> Answer | None:
-        # Abstain while the model loads in the background, so the first turn after
+        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
+        # A lens it can't read, or nothing to read: nothing to say.
+        if self.question(lens) is None or not view.text(lens.subject).strip():
+            return None
+        # Unavailable while the model loads in the background, so the first turn after
         # a deploy goes to the next judge instead of hitting the deadline.
         if _loaded(self.model, self.file) is None:
-            _load_in_background(self.model, self.file)
-            return None
-        # Nothing to read, so nothing to say. Asked, a missing answer would be a failure.
-        if isinstance(lens, JudgeLens) and not view.text(lens.subject).strip():
-            return None
+            return Answer(error=f"{UNAVAILABLE}: {_load_in_background(self.model, self.file)}")
         return await super().answer(lens, view)
 
     async def per_source(self, lens: JudgeLens, view: Any) -> Answer | None:
@@ -168,8 +177,6 @@ class LocalClassifier(Classifier):
         answers: dict[str, Answer] = {}
         for name, question in questions.items():
             text = texts[question["reads"]]
-            if not text.strip():
-                continue
             try:
                 if question["kind"] == "fixed":
                     [probabilities] = runner.run([(text, None)])
@@ -178,12 +185,14 @@ class LocalClassifier(Classifier):
                     continue
                 entailed = runner.entailment([(text, s) for s in question["statements"]])
             except _TooLong:
-                answers[name] = Answer(error=TOO_LONG, answerer=self.label())
+                answers[name] = Answer(error=TOO_LONG)
                 continue
             if question["kind"] == "flag":
                 answers[name] = yes_answer(entailed[0], self.model, f"entails {entailed[0]:.2f}")
             elif question["kind"] == "score":
-                answers[name] = Answer(value=entailed[0], confidence=0.6, model=self.model)
+                answers[name] = Answer(
+                    value=entailed[0], confidence=SCORE_CONFIDENCE, model=self.model
+                )
             else:
                 total = sum(entailed) or 1.0
                 shares = [e / total for e in entailed]
@@ -267,11 +276,13 @@ class _Runner:
         return scores
 
 
-# Loaded models and load errors, keyed by (model, file).
+# Loaded models, keyed by (model, file), and for each failed load its error and time.
 _runners: dict[tuple[str, str], _Runner] = {}
-_load_errors: dict[tuple[str, str], str] = {}
+_load_errors: dict[tuple[str, str], tuple[str, float]] = {}
 _loading: set[tuple[str, str]] = set()
+# Held while a model loads. The short one guards the two above, so a turn never waits.
 _load_lock = threading.Lock()
+_state_lock = threading.Lock()
 
 
 def _loaded(model: str, file: str) -> _Runner | None:
@@ -287,28 +298,36 @@ def load(model: str = ENGLISH, file: str = QUANTIZED) -> None:
         try:
             runner = _Runner(model, file)
         except Exception as exc:
-            _load_errors[key] = f"{model} does not load: {type(exc).__name__}: {exc}"[:300]
+            with _state_lock:
+                _load_errors[key] = (type(exc).__name__, time.monotonic())
             raise
         _runners[key] = runner
-        _load_errors.pop(key, None)
+        with _state_lock:
+            _load_errors.pop(key, None)
 
 
-def _load_in_background(model: str, file: str) -> None:
+def _load_in_background(model: str, file: str) -> str:
+    """Load the model in a thread, unless it is loading or failed lately. Says which."""
     key = (model, file)
-    with _load_lock:
-        if key in _loading or key in _load_errors:
-            return
+    with _state_lock:
+        failed = _load_errors.get(key)
+        if failed and time.monotonic() - failed[1] < LOAD_RETRY_SECONDS:
+            return f"does not load: {failed[0]}"
+        if key in _loading:
+            return "loading"
         _loading.add(key)
 
     def run() -> None:
         try:
             load(model, file)
-        except Exception:
-            pass  # missing() reports it from _load_errors
+        except Exception as exc:
+            logger.opt(exception=exc).warning("Local model {} does not load", model)
         finally:
-            _loading.discard(key)
+            with _state_lock:
+                _loading.discard(key)
 
     threading.Thread(target=run, name=f"oversight-load-{model}", daemon=True).start()
+    return "loading"
 
 
 __all__ = ["ENGLISH", "MULTILINGUAL", "LocalClassifier", "load"]

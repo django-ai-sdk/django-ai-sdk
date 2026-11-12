@@ -170,7 +170,7 @@ def builtin_patterns():
     import re
 
     from django_ai_sdk.oversight import patterns, presets
-    from django_ai_sdk.oversight.judges import lexical, llm, local
+    from django_ai_sdk.oversight.judges import llm, local
     from django_ai_sdk.oversight.judges.patterns import Patterns
     from django_ai_sdk.oversight.packs import QualityPack, SafetyPack, SecurityPack
     from django_ai_sdk.oversight.presets import PIILens, RefusalLens, SecretsLens
@@ -184,7 +184,7 @@ def builtin_patterns():
         for judge in judges:
             if isinstance(judge, Patterns):
                 compiled_in(judge, found)
-    for module in (patterns, presets, lexical, llm, local):
+    for module in (patterns, presets, llm, local):
         compiled_in(list(vars(module).values()), found)
     return sorted(found, key=lambda p: p.pattern)
 

@@ -63,15 +63,15 @@ class TestHooks:
         assert sum(isinstance(h, ToolCallBudgetHook) for h in before) == 1
         [limit] = [h for h in after if isinstance(h, ToolOutputLimitHook)]
         assert limit.max_chars == 1234
-        # Last: only what the model will read is masked.
-        assert isinstance(after[-1], OversightToolResultHook)
-        assert sum(isinstance(h, OversightToolResultHook) for h in after) == 1
+        # Masked before the cut, so the stream and the hook mask the same text.
+        [mask] = [h for h in after if isinstance(h, OversightToolResultHook)]
+        assert after.index(mask) + 1 == after.index(limit)
 
     def test_every_tool_agent_gets_the_oversight_hooks(self):
         agent, _ = agent_with("x")
         hooks = default_hooks(agent)
         assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
-        assert isinstance(hooks["after_tool"][-1], OversightToolResultHook)
+        assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
 
 
 @pytest.mark.django_db(transaction=True)
@@ -101,6 +101,24 @@ class TestToolCallsInTheTurn:
         assert IBAN not in str(seen.result)
         handed_on = state.get("messages")[-1].tool_call_result.result
         assert IBAN not in handed_on
+
+    async def test_a_run_that_outlived_its_turn_is_refused_and_withheld(self):
+        from django_ai_sdk.oversight.guard import TOOL_UNAVAILABLE
+
+        guard = await self.guard()
+        call = HaystackToolCall(id="c1", tool_name="lookup", arguments={"name": "Jan"})
+        asked = HaystackChatMessage.from_assistant(tool_calls=[call])
+        state = State(schema={"messages": {"type": list[HaystackChatMessage]}})
+        state.set("messages", [asked])
+        ran = State(schema={"messages": {"type": list[HaystackChatMessage]}})
+        ran.set("messages", [HaystackChatMessage.from_tool(f"IBAN {IBAN}", origin=call)])
+        with guarding(guard):
+            await guard.close()
+            await OversightToolHook().run_async(state)
+            await OversightToolResultHook().run_async(ran)
+        assert str(TOOL_UNAVAILABLE) in state.get("messages")[-1].tool_call_result.result
+        assert ran.get("messages")[-1].tool_call_result.result == str(UNCHECKED_TEXT)
+        assert guard.context.tool_calls == []
 
     async def test_text_in_a_content_list_is_masked_and_images_pass(self):
         guard = await self.guard()

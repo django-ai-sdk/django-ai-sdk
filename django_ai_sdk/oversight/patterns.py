@@ -134,7 +134,7 @@ REFUSAL_PATTERNS: list[str] = [
 ]
 
 
-def _compile_patterns(patterns: PatternTable, flags: int = 0) -> list[tuple[str, re.Pattern[str]]]:
+def compile_patterns(patterns: PatternTable, flags: int = 0) -> list[tuple[str, re.Pattern[str]]]:
     """Compile `patterns` to (label, regex) pairs, in the order given."""
     groups = patterns.items() if isinstance(patterns, Mapping) else [("", patterns)]
     return [
@@ -144,7 +144,7 @@ def _compile_patterns(patterns: PatternTable, flags: int = 0) -> list[tuple[str,
     ]
 
 
-def _regex_spans(
+def regex_spans(
     patterns: Iterable[tuple[str, re.Pattern[str]]], text: str, default_label: str = ""
 ) -> list[TextSpan]:
     """A span for every match of every (label, regex) pair in `text`."""
@@ -155,7 +155,7 @@ def _regex_spans(
     ]
 
 
-def _scan(text: str, find: Callable[[str], list[TextSpan]]) -> list[TextSpan]:
+def scan(text: str, find: Callable[[str], list[TextSpan]]) -> list[TextSpan]:
     """Run `find` over `text` in windows. Span offsets refer to the full `text`."""
     if len(text) <= MAX_SCAN_CHARS:
         return find(text)
@@ -170,7 +170,7 @@ def _scan(text: str, find: Callable[[str], list[TextSpan]]) -> list[TextSpan]:
     return list(found.values())
 
 
-def _verified(
+def verified(
     pattern: re.Pattern[str], valid: Verifier | None, text: str
 ) -> Iterator[tuple[int, int]]:
     """Yield (start, end) for each match that passes `valid`.
@@ -202,14 +202,14 @@ def _shorter(pattern: re.Pattern[str], valid: Verifier, text: str, start: int, e
     return 0
 
 
-_SECRETS = _compile_patterns(SECRET_PATTERNS)
+_SECRETS = compile_patterns(SECRET_PATTERNS)
 
 
 def mask_secrets(text: str) -> str:
     """Mask every built-in secret pattern, e.g. before text is sent to a judge."""
     if not text:
         return text
-    spans = _regex_spans(_SECRETS, text)
+    spans = regex_spans(_SECRETS, text)
     return mask(text, spans) if spans else text
 
 
@@ -270,10 +270,14 @@ __all__ = [
     "SECRET_PATTERNS",
     "WORD",
     "bsn_ok",
+    "compile_patterns",
     "iban_ok",
     "luhn_ok",
     "mask",
     "mask_all",
     "mask_json",
     "mask_secrets",
+    "regex_spans",
+    "scan",
+    "verified",
 ]

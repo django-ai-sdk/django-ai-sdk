@@ -58,9 +58,9 @@ class Condition:
         `failed` names the lenses that failed this turn. Comparisons on them are
         unknown, and an unknown condition does not match.
         """
-        return self.judge(answers, failed) is True
+        return self.decide(answers, failed) is True
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
         """Return True, False, or None when a failed or `pending` lens makes it unknown.
@@ -112,7 +112,7 @@ class Compare(Condition):
         # A number, a list, a label or None, depending on `op`.
         self.value: Any = sorted(value) if isinstance(value, set | frozenset) else value
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
         if self.lens in pending:
@@ -164,10 +164,10 @@ class _Group(Condition):
 class All(_Group):
     key = "all"
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
-        results = [item.judge(answers, failed, pending) for item in self.items]
+        results = [item.decide(answers, failed, pending) for item in self.items]
         if False in results:
             return False
         return None if None in results else True
@@ -177,10 +177,10 @@ class AnyOf(_Group):
     # Not `Any`, which would shadow typing.Any in this module.
     key = "any"
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
-        results = [item.judge(answers, failed, pending) for item in self.items]
+        results = [item.decide(answers, failed, pending) for item in self.items]
         if True in results:
             return True
         return None if None in results else False
@@ -190,10 +190,10 @@ class Not(Condition):
     def __init__(self, item: Condition) -> None:
         self.item = item
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
-        result = self.item.judge(answers, failed, pending)
+        result = self.item.decide(answers, failed, pending)
         return None if result is None else not result
 
     def to_dict(self) -> dict[str, Any]:
@@ -206,7 +206,7 @@ class Not(Condition):
 class Always(Condition):
     """Matches every turn, e.g. for a rule that always alerts."""
 
-    def judge(
+    def decide(
         self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
     ) -> bool | None:
         return True

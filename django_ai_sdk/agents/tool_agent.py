@@ -239,9 +239,12 @@ def _tool_hooks(
     ):
         after.append(ToolOutputLimitHook(limit))
     # Oversight: its tool hook goes first, so a refused call is neither budgeted
-    # nor logged. Its result hook goes last, so only what the model reads is masked.
+    # nor logged. Its result hook masks the full result just before the cut, as
+    # the stream does, so both share one masking per result.
+    limits = [h for h in after if isinstance(h, ToolOutputLimitHook)]
+    others = [h for h in after if not isinstance(h, ToolOutputLimitHook)]
     hooks["before_tool"] = [OversightToolHook(), *before]
-    hooks["after_tool"] = [*after, OversightToolResultHook()]
+    hooks["after_tool"] = [*others, OversightToolResultHook(), *limits]
     on_exit = hooks.setdefault("on_exit", [])
     if not any(isinstance(h, RequireToolsHook) for h in on_exit):
         on_exit.append(RequireToolsHook(required_tools))

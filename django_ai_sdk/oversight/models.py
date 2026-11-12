@@ -4,7 +4,7 @@ Answers and matches are written once. A turn is written open at the gate,
 completed at close, and reflect updates its reflect fields, labels and severity.
 
 Content lives separately in `TurnContent`, so it can be forgotten while the
-record stays (`oversight.custody`). Content means the turn's text and anything
+record stays (`oversight.content.forget_turns`). Content means the turn's text and anything
 that can quote it: judges' reasons, names a judge wrote out for an `Entities` lens
 and per-item scores. A reviewer's note sits on its review item and is forgotten
 with the content. The other rows keep only values, labels,
@@ -17,9 +17,8 @@ import uuid
 
 from django.db import models
 
+from django_ai_sdk.oversight.conf import APP_LABEL
 from django_ai_sdk.oversight.types import Outcome
-
-APP_LABEL = "django_ai_sdk_oversight"
 
 # Choices for a turn's outcome and report outcome, worst first.
 OUTCOME_CHOICES = [(str(o), str(o).capitalize()) for o in Outcome]
@@ -35,8 +34,6 @@ class TurnContent(models.Model):
     """
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
-    # Content in one scope is forgotten together. "thread:<id>", or "turn:<id>" without a thread.
-    scope = models.CharField(max_length=100, db_index=True)
     capture = models.CharField(max_length=16)
     stored = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -85,7 +82,7 @@ class Turn(models.Model):
     # The outer turn when this one ran nested, e.g. as a subagent. Null otherwise.
     parent_turn_id = models.UUIDField(null=True, blank=True, db_index=True)
 
-    # The asking user's primary key (or custody's name for them). "" when anonymous.
+    # The asking user's primary key. "" when anonymous or once the user is deleted.
     actor_id = models.CharField(max_length=64, blank=True, db_index=True)
 
     model = models.CharField(max_length=255, blank=True)
@@ -107,6 +104,8 @@ class Turn(models.Model):
 
     content = models.ForeignKey(TurnContent, null=True, blank=True, on_delete=models.SET_NULL)
     content_id: uuid.UUID | None
+    # Set by forgetting while the turn was open, so its close stores no content.
+    content_forgotten = models.BooleanField(default=False)
     # When prune deletes the turn, based on the policy's metadata retention.
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
@@ -154,7 +153,8 @@ class LensAnswer(models.Model):
     """
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
-    turn = models.ForeignKey(Turn, on_delete=models.CASCADE, related_name="answers")
+    # Indexed by (turn, lens) in Meta.
+    turn = models.ForeignKey(Turn, on_delete=models.CASCADE, related_name="answers", db_index=False)
     turn_id: uuid.UUID
     lens = models.CharField(max_length=100, db_index=True)
     stage = models.CharField(max_length=16)
@@ -197,9 +197,8 @@ class RuleMatch(models.Model):
         db_table = "django_ai_sdk_oversight_matches"
         ordering = ["created_at"]
         constraints = [
-            # After close, a rule matches a turn at most once, even if reflect and a
-            # reviewer's answer both find it. Inline stages may match more than once
-            # (history and question, or each tool call).
+            # Reflect matches a rule once per turn, even when retried. Inline stages may
+            # match more than once (history and question, or each tool call).
             models.UniqueConstraint(
                 fields=["turn", "rule"],
                 condition=models.Q(stage="reflect"),
@@ -220,14 +219,14 @@ class ReviewItem(models.Model):
         DISMISSED = "dismissed", "Dismissed"
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
-    turn = models.ForeignKey(Turn, on_delete=models.CASCADE, related_name="reviews")
+    # Indexed by the unique (turn, queue, rule) in Meta.
+    turn = models.ForeignKey(Turn, on_delete=models.CASCADE, related_name="reviews", db_index=False)
     turn_id: uuid.UUID
     queue = models.CharField(max_length=100, db_index=True, default="default")
     # The rule that queued the turn.
     rule = models.CharField(max_length=100, blank=True)
-    status = models.CharField(
-        max_length=16, choices=Status.choices, default=Status.OPEN, db_index=True
-    )
+    # Indexed by (status, queue, created_at) in Meta.
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
     created_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     # A plain id, not a foreign key, so deleting a user keeps the review.

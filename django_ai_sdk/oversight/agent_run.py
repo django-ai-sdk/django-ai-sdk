@@ -33,6 +33,7 @@ from django_ai_sdk.oversight.guard import (
     unguarded,
 )
 from django_ai_sdk.oversight.guard.masks import gate_masking_lenses
+from django_ai_sdk.oversight.guard.state import merge_restrict
 from django_ai_sdk.oversight.types import Stage
 from django_ai_sdk.tracing import bind as bind_trace
 
@@ -138,7 +139,7 @@ def guard_run_override(cls: type) -> None:
     async def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
         call = _run_arguments(args, kwargs)
         messages = call.get("messages")
-        if not isinstance(messages, list):
+        if messages is None:
             # Nothing to judge yet. The base run() opens the turn when it is called.
             return await run(self, *args, **kwargs)
 
@@ -294,6 +295,10 @@ async def turn(
     opened = guard.active and not joins_turn(outer, guard.resolved.name)
     if opened and outer is not None:
         guard.parent_turn_id = outer.id
+        # A child turn is still the outer turn's person, and keeps the tools it took away.
+        guard.actor_id = guard.actor_id or outer.actor_id
+        if outer.restrict is not None:
+            guard.restrict = merge_restrict(guard.restrict, outer.restrict)
     current = OpenTurn(
         agent, guard if opened else None, thread_id=thread_id, messages=messages, input=input
     )
@@ -315,7 +320,6 @@ async def gate_conversation(
     for is not judged again, but attachment context always is: it is rebuilt from
     the document each turn and the model reads it.
     """
-    guard.set_history(messages)
     if messages:
         checked = await guard.gate_history(messages, history=not vouched)
         if checked.blocked:

@@ -284,7 +284,7 @@ def evaluate_rules(
         # A block ends the turn, so its other actions do not matter. A tool restriction
         # that also masks waits, or the mask would never see the answer.
         stops = "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
-        if pending and not (stops and rule.when.judge(answers, errored, pending) is True):
+        if pending and not (stops and rule.when.decide(answers, errored, pending) is True):
             continue
         failed = (
             fail_closed

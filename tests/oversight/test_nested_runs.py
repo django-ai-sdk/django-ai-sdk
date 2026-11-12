@@ -92,6 +92,22 @@ class TestNestedRuns:
         async with turn(agent, channel="chat", input="hi") as alone:
             assert alone.guard is not None and alone.guard.parent_turn_id == ""
 
+    async def test_the_child_turn_keeps_the_outer_person_and_removed_tools(self):
+        from django_ai_sdk.oversight.agent_run import turn
+
+        agent, _ = agent_with("x", policy=RunPolicy)
+        outer = await self.outer()
+        outer.actor_id, outer.restrict = "7", ["send"]
+        with guarding(outer):
+            async with turn(agent, channel="chat", input="hi") as child:
+                assert child.guard is not None
+                assert (child.guard.actor_id, child.guard.restrict) == ("7", ["send"])
+                assert not child.guard.allows_tool("send")
+        outer.restrict = []
+        with guarding(outer):
+            async with turn(agent, channel="chat", input="hi") as child:
+                assert child.guard is not None and child.guard.restrict == []
+
     async def test_the_same_policy_or_none_joins(self):
         same, _ = agent_with("Fine.", policy=LenientPolicy)
         none, _ = agent_with("Fine.", policy=None)
@@ -175,6 +191,23 @@ class TestSubagents:
             messages=[HaystackChatMessage.from_user("x")], task="who"
         )
         assert subagent_response(result["messages"]) == "Ask [EMAIL]."
+
+    async def test_a_child_turn_hands_the_subagent_only_the_checked_task(self):
+        component = await delegation(secret_subagent([], "done"))
+        handed: list[list[Any]] = []
+        run_async = component._agent.run_async
+
+        async def spy(**kwargs: Any) -> Any:
+            handed.append(kwargs["messages"])
+            return await run_async(**kwargs)
+
+        component._agent.run_async = spy
+        context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
+        await component.run_async(messages=context, task="who")
+        guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")
+        with guarding(guard):  # joined: the coordinator's turn judged that context
+            await component.run_async(messages=context, task="who")
+        assert handed == [[], context]
 
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []

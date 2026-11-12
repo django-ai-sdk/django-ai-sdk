@@ -22,19 +22,15 @@ FORGET_BATCH = 500
 
 def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
     """Forget a deleted thread's oversight content."""
-    from django_ai_sdk.oversight import custody
-    from django_ai_sdk.oversight.models import Turn, TurnContent
+    from django_ai_sdk.oversight.content import forget_thread
+    from django_ai_sdk.oversight.models import Turn
 
     thread_id = str(instance.pk)
-    scope = custody.scope_for(thread_id)
     try:
         # Savepoint, so a failure here does not break the thread delete.
         with transaction.atomic():
-            if (
-                Turn.objects.filter(thread_id=thread_id).exists()
-                or TurnContent.objects.filter(scope=scope).exists()
-            ):
-                custody.forget(scope)
+            if Turn.objects.filter(thread_id=thread_id).exists():
+                forget_thread(thread_id)
     except Exception:
         logger.exception("Oversight could not forget deleted thread {}", thread_id)
 
@@ -59,30 +55,22 @@ def forget_actor(actor_id: str) -> int:
     """Clear `actor_id` from the turns it asked, after forgetting those turns' own content.
 
     A turn in a thread keeps its content until that thread is deleted (a user's own
-    threads go with them). A turn without a thread is its own scope, `turn:<id>`:
-    its content rows, and reviewers' notes on it, go in one delete per batch of
-    FORGET_BATCH. The answers, matches and reviews stay.
-    Returns how many turns named the actor.
+    threads go with them). A turn without a thread is forgotten here
+    (`content.forget_turns`), FORGET_BATCH turns at a time. The answers, matches and
+    reviews stay. Run it in a transaction. Returns how many turns named the actor.
 
     Safe to run again: `manage.py oversight_forget_actor <id>` does, for a user whose
     delete could not reach the record (the failure is logged).
     """
-    from django_ai_sdk.oversight import custody
-    from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
+    from django_ai_sdk.oversight.content import forget_turns
+    from django_ai_sdk.oversight.models import Turn
 
     if not actor_id:
         return 0
     turns = Turn.objects.filter(actor_id=actor_id)
     threadless = turns.filter(thread_id="").values_list("pk", flat=True).iterator(FORGET_BATCH)
     for batch in batched(threadless, FORGET_BATCH):
-        # The turns stay and SET_NULL clears their content link.
-        TurnContent.objects.filter(
-            scope__in=[custody.scope_for(turn_id=turn_id) for turn_id in batch]
-        ).delete()
-        ReviewItem.objects.filter(turn_id__in=batch).exclude(note="").update(note="")
-    # Open turns get a marker, so they store no content when they close.
-    for turn_id in turns.filter(thread_id="", status=Turn.Status.OPEN).values_list("pk", flat=True):
-        custody.forget(custody.scope_for(turn_id=turn_id))
+        forget_turns(Turn.objects.filter(pk__in=batch))
     return turns.update(actor_id="")
 
 

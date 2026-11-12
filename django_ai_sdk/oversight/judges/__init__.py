@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from django_ai_sdk.oversight.judges.base import Judge
     from django_ai_sdk.oversight.judges.classifier import Classifier
-    from django_ai_sdk.oversight.judges.lexical import LexicalSupport
     from django_ai_sdk.oversight.judges.llm import LLMJudge
     from django_ai_sdk.oversight.judges.local import LocalClassifier
     from django_ai_sdk.oversight.judges.patterns import Patterns
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
 _MODULES = {
     "Judge": "base",
     "Classifier": "classifier",
-    "LexicalSupport": "lexical",
     "LLMJudge": "llm",
     "LocalClassifier": "local",
     "Patterns": "patterns",
@@ -42,7 +40,6 @@ __all__ = [
     "Classifier",
     "Judge",
     "LLMJudge",
-    "LexicalSupport",
     "LocalClassifier",
     "Patterns",
     "TypeSafe",

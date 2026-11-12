@@ -9,7 +9,7 @@ from django_ai_sdk.oversight.agent_run import turn
 from django_ai_sdk.oversight.guard import current_guard
 from django_ai_sdk.oversight.models import Turn
 
-from tests.oversight.helpers import make_agent
+from tests.oversight.helpers import make_agent, opened
 
 
 @pytest.mark.django_db(transaction=True)
@@ -71,6 +71,18 @@ class TestTurn:
             assert await t.gate() == "jan@example.com"
             assert await t.finish("piet@example.com") == "piet@example.com"
         assert not await Turn.objects.aexists()
+
+    async def test_an_inert_guard_gates_to_the_question_itself(self):
+        from django_ai_sdk.common import ChatMessage
+        from django_ai_sdk.oversight.guard import TurnGuard
+
+        agent = make_agent([], None, policy="")
+        messages = [ChatMessage(role="user", content="hi"), ChatMessage(role="user", content="go")]
+        inert = await TurnGuard.start(agent, channel="api", messages=messages)
+        assert not inert.active and (await inert.gate()).input == "go"
+        with opened():
+            unknown = await TurnGuard.start(agent, channel="api", input="hi", oversight="fc-none")
+        assert not unknown.active and (await unknown.gate()).input == "hi"
 
     async def test_an_empty_policy_name_opens_no_turn_at_any_layer(self):
         from django_ai_sdk.oversight.guard import TurnGuard

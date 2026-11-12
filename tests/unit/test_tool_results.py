@@ -127,7 +127,7 @@ class TestToolOutputLimitWiring:
 
         from django_ai_sdk.oversight.hooks import OversightToolResultHook
 
-        # The cut first, then oversight masks what the model will read.
-        limit, mask = default_hooks(Agent())["after_tool"]
+        # Oversight masks the full result first, then the cut.
+        mask, limit = default_hooks(Agent())["after_tool"]
         assert isinstance(limit, ToolOutputLimitHook)
         assert isinstance(mask, OversightToolResultHook)

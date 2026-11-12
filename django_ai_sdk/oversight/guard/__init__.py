@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from django_ai_sdk.common import last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy, agent_key, fingerprint
@@ -117,6 +118,16 @@ def current_guard() -> TurnGuard | None:
     return guard if guard is not None and not guard._closed else None
 
 
+def outlived_turn() -> bool:
+    """True when this code runs under a guard that already closed.
+
+    A task started inside a turn can outlive it. Its tool calls are refused,
+    since nothing would check or record them.
+    """
+    guard = _current.get()
+    return guard is not None and guard._closed
+
+
 class TurnGuard(GateStage, ToolStage, FinishStage):
     """One turn under a policy. Build it with `start()`. Inert when `active` is False.
 
@@ -150,8 +161,12 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         recorded as blocked with the error. With FAIL_MODE "open" the turn runs
         unguarded instead, and the failure is logged.
         """
+        # An inert guard still knows the question, so `gate().input` is the question.
+        if input is None:
+            input = last_user_text(messages or [])
+        inert = cls(context=TurnContext(input=input))
         if oversight in (False, "") or is_unguarded() or not is_enabled():
-            return cls()
+            return inert
         from django_ai_sdk.oversight.registry import policy_name
         from django_ai_sdk.oversight.resolve import aget_policy
 
@@ -172,7 +187,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
             logger.exception("Oversight could not choose a policy for {!r}", agent_key(agent))
             return cls._unloadable(name="", error="policy could not be chosen", **opening)
         if not name:
-            return cls()
+            return inert
         try:
             resolved = await aget_policy(name)
         except Exception:
@@ -192,11 +207,9 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         user: Any,
         thread_id: str | None,
         messages: list[ChatMessage] | None,
-        input: str | None,
+        input: str,
     ) -> TurnGuard:
         messages = messages or []
-        if input is None:
-            input = next((m.content for m in reversed(messages) if m.role == "user"), "") or ""
         guard = cls(
             active=True,
             policy=policy,
@@ -232,7 +245,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
                 agent_key(opening["agent"]),
                 error,
             )
-            return cls()
+            return cls(context=TurnContext(input=opening["input"]))
         try:
             guard = cls._opened(_stand_in(name), **opening)
         except Exception:
@@ -314,6 +327,7 @@ __all__ = [
     "current_guard",
     "guarding",
     "is_unguarded",
+    "outlived_turn",
     "rule_notes",
     "unguarded",
 ]
