@@ -56,11 +56,9 @@ LAYERS = {
             f"{OVERSIGHT}.permissions",
             # It narrows turns with the review layer's scope hooks.
             f"{OVERSIGHT}.admin",
-            f"{OVERSIGHT}.retention",
-            f"{OVERSIGHT}.management.commands.oversight_prune",
         ),
         may_import=("core",),
-        why="The read and review API over the record, and retention; turns run without it.",
+        why="The read and review API over the record; turns run without it.",
     ),
     "review routes": Layer(
         modules=("django_ai_sdk.contrib.ninja.oversight",),

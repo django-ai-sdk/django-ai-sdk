@@ -18,6 +18,7 @@ from django_ai_sdk.permissions import (
     ConflictError,
     Operation,
     PermissionDenied,
+    get_domain_permissions,
 )
 from pydantic import ValidationError
 
@@ -34,7 +35,7 @@ class TestTurns:
         assert row.labels["topic"] == "hr"
         assert {m.rule for m in row.matches} >= {"hr_to_people", "would_block_hr"}
         assert row.reviews_open == 1
-        assert row.preview is None
+        assert row.preview == ""
         assert row.actor_id == ""
         [row] = (await OversightService.list_turns(user=await reader(METRICS, CONTENT))).items
         assert row.preview == "What about my salary?"
@@ -167,8 +168,8 @@ class TestTurns:
         [row] = (await OversightService.list_turns(user=user)).items
         [item] = (await OversightService.list_reviews(user=user)).items
 
-        assert row.preview is None
-        assert item.turn.preview is None
+        assert row.preview == ""
+        assert item.turn.preview == ""
         assert (await OversightService.get_turn(turn_id, user=user)).content_state == "expired"
 
     async def test_the_feed_reads_a_fixed_number_of_queries(self):
@@ -275,13 +276,17 @@ class TestReviews:
                 await call
         await item.arefresh_from_db()
         assert item.status == ReviewItem.Status.OPEN
-        # Nor a turn a subagent ran for it, which carries no actor of its own.
-        child = await a_turn()
-        await Turn.objects.filter(id=child).aupdate(actor_id="", parent_turn_id=turn_id)
-        child_item = await ReviewItem.objects.aget(turn_id=child)
+        # Nor a turn a subagent ran for it, however deep: core copies the outer actor down.
+        actor = (await Turn.objects.aget(id=turn_id)).actor_id
+        parent = turn_id
+        for _ in range(2):
+            child = await a_turn()
+            await Turn.objects.filter(id=child).aupdate(actor_id=actor, parent_turn_id=parent)
+            parent = child
+        grandchild_item = await ReviewItem.objects.aget(turn_id=parent)
         with pytest.raises(PermissionDenied):
             await OversightService.resolve_review(
-                str(child_item.id), ResolveIn(dismiss=True), user=asker
+                str(grandchild_item.id), ResolveIn(dismiss=True), user=asker
             )
         # Someone else may.
         other = await reader(REVIEW)
@@ -305,6 +310,15 @@ class TestReviews:
         settings.AI_SDK_PERMISSIONS = {"oversight": [f"{__name__}.NoMetricTurns"]}
         [item] = (await OversightService.list_reviews(user=await reader(METRICS, REVIEW))).items
         assert item.turn is None
+
+    async def test_turn_detail_and_feed_counts_follow_the_review_scope(self, settings):
+        turn_id = await a_turn()
+        settings.AI_SDK_PERMISSIONS = {"oversight": [f"{__name__}.NoReviewItems"]}
+        user = await reader(METRICS)
+        detail = await OversightService.get_turn(turn_id, user=user)
+        assert (detail.reviews, detail.reviews_open) == ([], 0)
+        [row] = (await OversightService.list_turns(user=user)).items
+        assert row.reviews_open == 0
 
     async def test_review_pages_follow_a_cursor(self):
         for n in range(3):
@@ -335,10 +349,10 @@ class TestMetrics:
         assert metrics.by_channel == {"api": 1, "webhook:x": 1}
         [agent_id] = {t.agent_id async for t in Turn.objects.all()}
         assert metrics.by_agent == {agent_id: 2}
-        rules = {row["rule"]: row for row in metrics.rules}
-        assert rules["hr_to_people"]["matches"] == 1
-        assert rules["hr_to_people"]["acted"] == 1
-        assert rules["would_block_hr"]["acted"] == 0
+        rules = {row.rule: row for row in metrics.rules}
+        assert rules["hr_to_people"].matches == 1
+        assert rules["hr_to_people"].acted == 1
+        assert rules["would_block_hr"].acted == 0
         assert metrics.queues == {"hr": 1}
 
     async def test_a_policy_narrows_it(self):
@@ -371,6 +385,13 @@ class NoMetricTurns(OversightDefaultPermission):
         return queryset
 
 
+class NoReviewItems(OversightDefaultPermission):
+    """Reaches every turn, but no review item."""
+
+    def scope_reviews(self, user, operation, queryset):
+        return queryset.none()
+
+
 @pytest.mark.django_db(transaction=True)
 async def test_an_empty_oversight_permission_list_falls_back_to_the_default(settings):
     turn_id = await a_turn()
@@ -400,3 +421,22 @@ async def test_the_admin_follows_the_metrics_scope(settings):
     ):
         rows = await sync_to_async(model_admin(model, AdminSite()).get_queryset)(request)
         assert not await rows.aexists(), model
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_the_admin_asks_the_oversight_permission_domain(settings):
+    from django.contrib.admin import AdminSite
+    from django.test import RequestFactory, modify_settings
+
+    with modify_settings(INSTALLED_APPS={"append": "django.contrib.admin"}):
+        from django_ai_sdk.oversight import admin
+
+    request = RequestFactory().get("/")
+    request.user = await reader(METRICS)
+    turns = admin.TurnAdmin(Turn, AdminSite())
+    assert await sync_to_async(turns.has_view_permission)(request)
+    # Django's view permission is not enough when the domain says no.
+    settings.AI_SDK_PERMISSIONS = {"oversight": ["django_ai_sdk.permissions.IsAdminUser"]}
+    get_domain_permissions.cache_clear()
+    assert not await sync_to_async(turns.has_view_permission)(request)
+    assert not await sync_to_async(turns.has_module_permission)(request)

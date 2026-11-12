@@ -43,7 +43,7 @@ async def test_a_deleted_thread_reads_back_without_its_content():
     after = await OversightService.get_turn(turn_id, user=user)
     assert after.content is None
     assert after.content_state == "none"
-    assert after.preview is None
+    assert after.preview == ""
     assert all(a.rationale == "" for a in after.answers)
     # The record stays: labels, matches and the reviewer's verdict, without the note.
     assert after.labels["topic"] == "hr"
@@ -51,7 +51,7 @@ async def test_a_deleted_thread_reads_back_without_its_content():
     [review] = after.reviews
     assert (review.resolved_by, review.agree, review.note) == (str(user.pk), True, "")
     [row] = (await OversightService.list_turns(TurnFilter(thread_id=thread_id), user=user)).items
-    assert row.preview is None
+    assert row.preview == ""
 
 
 async def test_a_deleted_user_is_nobody_on_their_turns():
@@ -67,7 +67,7 @@ async def test_a_deleted_user_is_nobody_on_their_turns():
     assert detail.content is None
     assert detail.content_state == "none"
     [row] = (await OversightService.list_turns(user=user)).items
-    assert (row.actor_id, row.preview) == ("", None)
+    assert (row.actor_id, row.preview) == ("", "")
 
 
 async def test_a_pruned_turn_is_not_found():

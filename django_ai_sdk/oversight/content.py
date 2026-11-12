@@ -262,25 +262,12 @@ def without_nul(value: Any) -> Any:
 def load_content(turn: Turn) -> dict[str, Any] | None:
     """Load the turn's content. None when it has none or it expired (prune deletes it later)."""
     row = turn.content
-    return None if row is None or _expired(row) else row.stored
+    return None if row is None or expired(row) else row.stored
 
 
-def _expired(row: TurnContent) -> bool:
+def expired(row: TurnContent) -> bool:
+    """Whether the content is past its expiry, though prune has not deleted it yet."""
     return row.expires_at is not None and row.expires_at <= timezone.now()
-
-
-def load_contents(turns: list[Turn]) -> dict[Any, dict[str, Any] | None]:
-    """Like `load_content` for many turns, keyed by turn id.
-
-    Content past its expiry and not yet pruned loads as None, as `content_state` says.
-    """
-    now = timezone.now()
-    return {
-        t.id: None
-        if t.content is None or (t.content.expires_at and t.content.expires_at <= now)
-        else t.content.stored
-        for t in turns
-    }
 
 
 def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
@@ -298,7 +285,7 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
         return False
     with transaction.atomic():
         row = TurnContent.objects.select_for_update().filter(pk=turn.content_id).first()
-        content = row.stored if row is not None and not _expired(row) else None
+        content = row.stored if row is not None and not expired(row) else None
         if row is None or content is None:
             return False
         content = {
@@ -366,11 +353,11 @@ __all__ = [
     "as_source",
     "capture_content",
     "context_from_turn",
+    "expired",
     "forget_thread",
     "forget_turns",
     "found_literals",
     "load_content",
-    "load_contents",
     "masker_for_capture",
     "stored_value",
     "turn_found",

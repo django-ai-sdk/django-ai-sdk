@@ -176,7 +176,7 @@ class TestScopeHooks:
             rows = {row.id: row for row in (await OversightService.list_turns(user=user)).items}
             hidden = await OversightService.get_turn(outside, user=user)
         assert rows[inside].preview == "What about my salary?"
-        assert rows[outside].preview is None
+        assert rows[outside].preview == ""
         assert hidden.content is None
         assert hidden.content_state == "withheld"
 
@@ -191,13 +191,13 @@ class TestWhatEachOperationShows:
         [item] = (await OversightService.list_reviews(user=await reader(REVIEW, METRICS))).items
         assert item.turn is not None
         assert item.turn.labels["topic"] == "hr"
-        assert item.turn.preview is None
+        assert item.turn.preview == ""
 
     async def test_a_reviewer_without_content_resolves_without_the_question(self):
         await a_turn()
         reviewer = await reader(REVIEW, METRICS)
         [item] = (await OversightService.list_reviews(user=reviewer)).items
-        assert item.turn.preview is None
+        assert item.turn.preview == ""
         resolved = await OversightService.resolve_review(
             item.id, ResolveIn(agree=False, note="Not HR."), user=reviewer
         )

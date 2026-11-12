@@ -133,7 +133,7 @@ from django_ai_sdk.contrib.ninja import get_oversight_router
 api.add_router("/", get_oversight_router())
 ```
 
-`GET /oversight/reviews/` lists what waits, and `POST /oversight/reviews/{id}/` with `{"lens": "topic", "value": "other", "note": "Not HR."}` resolves an item (or `{"dismiss": true}`). Reading a turn's content takes a permission of its own, and every read is recorded.
+`GET /oversight/reviews/` lists what waits, and `POST /oversight/reviews/{id}/` with `{"agree": false, "note": "Not HR."}` says whether the rule was right (or `{"dismiss": true}`). Reading a turn's content takes a permission of its own.
 
 ### Grow it
 

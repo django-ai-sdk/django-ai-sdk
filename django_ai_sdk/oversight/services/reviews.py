@@ -10,20 +10,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from django_ai_sdk.errors import UserError
-from django_ai_sdk.oversight.content import load_contents
-from django_ai_sdk.oversight.schemas import Page, ResolveIn, ReviewOut, ReviewStatus
-from django_ai_sdk.oversight.services.access import (
+from django_ai_sdk.oversight.permissions import (
     CONTENT,
     METRICS,
     REVIEW,
     OversightAccess,
-    count_by,
     reader_id,
 )
+from django_ai_sdk.oversight.schemas import Page, ResolveIn, ReviewOut, ReviewStatus
+from django_ai_sdk.oversight.services.metrics import count_by
 from django_ai_sdk.oversight.services.paging import keyset_page, page_size
 from django_ai_sdk.oversight.services.turns import review_out, rows_of
 from django_ai_sdk.permissions import ConflictError, PermissionDenied
@@ -76,8 +74,8 @@ class ReviewActions(OversightAccess):
                 )
             }
             listed = [t for t in turns if t.id in in_scope]
-            contents = await sync_to_async(load_contents)([t for t in listed if t.id in shown])
-            rows = {row.id: row for row in await rows_of(listed, shown, contents=contents)}
+            reviews = await cls.scoped(user, METRICS, ReviewItem.objects.all())
+            rows = {row.id: row for row in await rows_of(listed, shown, reviews)}
         return Page[ReviewOut](
             items=[
                 review_out(r, rows.get(str(r.turn_id)), shown=r.turn_id in shown) for r in items
@@ -120,7 +118,7 @@ class ReviewActions(OversightAccess):
         item = await scoped.filter(pk=pk).afirst() if pk else None
         if item is None:
             return None
-        await _refuse_own(item.turn, user)
+        _refuse_own(item.turn, user)
         closed = {
             "status": ReviewItem.Status.DISMISSED if answer.dismiss else ReviewItem.Status.DONE,
             "resolved_at": timezone.now(),
@@ -141,19 +139,13 @@ class ReviewActions(OversightAccess):
         return review_out(item, shown=shown)
 
 
-async def _refuse_own(turn: Turn, user: UserType) -> None:
+def _refuse_own(turn: Turn, user: UserType) -> None:
     """Raise PermissionDenied when `user` asked this turn. Nobody reviews their own turn.
 
-    A subagent's turn may carry no actor, so the turn that delegated it counts too.
+    A subagent's turn carries the actor of the turn that delegated it.
     """
-    from django_ai_sdk.oversight.models import Turn
-
-    actors = {turn.actor_id}
-    if turn.parent_turn_id:
-        parent = Turn.objects.filter(pk=turn.parent_turn_id).values_list("actor_id", flat=True)
-        actors.add(await parent.afirst())
     me = reader_id(user)
-    if me and me in actors:
+    if me and turn.actor_id == me:
         raise PermissionDenied("Nobody reviews a turn of their own.")
 
 
