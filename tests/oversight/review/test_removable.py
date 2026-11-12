@@ -8,8 +8,7 @@ REVIEW = (
     "django_ai_sdk.oversight.services",
     "django_ai_sdk.oversight.schemas",
     "django_ai_sdk.oversight.permissions",
-    "django_ai_sdk.oversight.retention",
-    "django_ai_sdk.oversight.management.commands.oversight_prune",
+    "django_ai_sdk.oversight.admin",
     "django_ai_sdk.contrib.ninja.oversight",
 )
 

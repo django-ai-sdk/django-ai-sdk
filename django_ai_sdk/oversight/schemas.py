@@ -17,8 +17,10 @@ from django_ai_sdk.oversight.types import Outcome
 # Fixed vocabularies, so a typo is refused instead of matching nothing. "" does not filter.
 TurnStatus = Literal["", "open", "closed", "interrupted"]
 ReviewStatus = Literal["", "open", "done", "dismissed"]
-# "open" (waiting for a reviewer), "reviewed" (answered or closed) or "unreviewed" (neither).
+# "open" (waiting for a reviewer), "reviewed" (a person closed one) or "unreviewed" (neither).
 ReviewState = Literal["", "open", "reviewed", "unreviewed"]
+# A turn's capture level, or why it shows no content (`TurnDetail.content_state`).
+ContentState = Literal["metadata", "masked", "full", "withheld", "none", "expired"]
 
 
 class TurnFilter(BaseModel):
@@ -78,8 +80,9 @@ class TurnOut(BaseModel):
     latency_ms: float | None = None
     reviews_open: int = 0
     reflected: bool = False
-    # Content. The start of the question, and the asker's user id ("" if anonymous).
-    preview: str | None = None
+    # Content. The start of the question ("" when not shown), and the asker's user id
+    # ("" if anonymous).
+    preview: str = ""
     actor_id: str = ""
 
 
@@ -117,7 +120,7 @@ class ReviewOut(BaseModel):
     turn_id: str
     queue: str
     rule: str = ""
-    status: str
+    status: Literal["open", "done", "dismissed"]
     created_at: datetime
     resolved_at: datetime | None = None
     # The reviewer's user id.
@@ -133,7 +136,7 @@ class TurnDetail(TurnOut):
     content: dict[str, Any] | None = None
     # The capture level ("metadata", "masked" or "full"), or why there is no content:
     # "withheld" (not for this reader), "none" (never kept or forgotten) or "expired".
-    content_state: str = ""
+    content_state: ContentState = "withheld"
     answers: list[LensAnswerOut] = Field(default_factory=list)
     reviews: list[ReviewOut] = Field(default_factory=list)
     # What went wrong, such as a failed stage or a disconnect. Never content.
@@ -164,6 +167,15 @@ class ResolveIn(BaseModel):
     dismiss: bool = False
 
 
+class RuleCountOut(BaseModel):
+    """How often one rule in one mode matched, and how often it acted."""
+
+    rule: str
+    mode: str
+    matches: int
+    acted: int
+
+
 class MetricsOut(BaseModel):
     """Counts over a window of turns, from SQL aggregates."""
 
@@ -175,13 +187,13 @@ class MetricsOut(BaseModel):
     by_channel: dict[str, int] = Field(default_factory=dict)
     # Keyed by agent id, like the `agent_id` filters, so a rename does not split counts.
     by_agent: dict[str, int] = Field(default_factory=dict)
-    # Per rule: "rule", "mode", "matches" and "acted".
-    rules: list[dict[str, Any]] = Field(default_factory=list)
+    rules: list[RuleCountOut] = Field(default_factory=list)
     # Open review items per queue, regardless of age.
     queues: dict[str, int] = Field(default_factory=dict)
 
 
 __all__ = [
+    "ContentState",
     "LensAnswerOut",
     "MetricsOut",
     "Page",
@@ -189,6 +201,7 @@ __all__ = [
     "ReviewOut",
     "ReviewState",
     "ReviewStatus",
+    "RuleCountOut",
     "RuleMatchOut",
     "TurnDetail",
     "TurnFilter",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from asgiref.sync import async_to_sync
 from django.contrib import admin
 
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
@@ -26,16 +27,30 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 
 class ScopedAdmin(ReadOnlyAdmin):
-    """Rows of the turns the reader's METRICS scope keeps, as in the review API."""
+    """Rows of the turns the reader's METRICS scope keeps, as in the review API.
+
+    Only for readers the `oversight` permission domain allows METRICS, on top of
+    Django's own view permission.
+    """
 
     # The path from a row to its turn; "" for the turn itself.
     turn_path = "turn"
 
-    def get_queryset(self, request: Any) -> Any:
-        from django_ai_sdk.oversight.services import OversightService
-        from django_ai_sdk.oversight.services.access import METRICS
+    def may_read(self, request: Any) -> bool:
+        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
 
-        turns = OversightService.has_queryset_perms(
+        return async_to_sync(OversightAccess.has_perms)(request.user, METRICS, raise_on_deny=False)
+
+    def has_module_permission(self, request: Any) -> bool:
+        return super().has_module_permission(request) and self.may_read(request)
+
+    def has_view_permission(self, request: Any, obj: Any = None) -> bool:
+        return super().has_view_permission(request, obj) and self.may_read(request)
+
+    def get_queryset(self, request: Any) -> Any:
+        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
+
+        turns = OversightAccess.has_queryset_perms(
             request.user, METRICS, queryset=Turn.objects.all()
         )
         lookup = f"{self.turn_path}__in" if self.turn_path else "pk__in"

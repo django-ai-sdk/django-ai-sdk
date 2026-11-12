@@ -6,19 +6,28 @@ Everything is a SQL aggregate over the turns the reader may reach (`scope_turns`
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.db.models import Count, F, Q
 from django.utils import timezone
 
-from django_ai_sdk.oversight.schemas import MetricsOut
-from django_ai_sdk.oversight.services.access import METRICS, OversightAccess, count_by
+from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
+from django_ai_sdk.oversight.schemas import MetricsOut, RuleCountOut
 
 if TYPE_CHECKING:
+    from django.db.models import QuerySet
+
     from django_ai_sdk.types import UserType
 
 # The longest window `summarize` counts over.
 MAX_DAYS = 365
+
+
+async def count_by(qs: QuerySet, field: str) -> dict[str, Any]:
+    """Count the rows of `qs` per value of `field`."""
+    return {
+        row[field]: row["n"] async for row in qs.order_by().values(field).annotate(n=Count("pk"))
+    }
 
 
 class MetricReads(OversightAccess):
@@ -58,7 +67,7 @@ class MetricReads(OversightAccess):
             by_channel=await count_by(turns, "channel"),
             by_agent=await count_by(turns, "agent_id"),
             rules=[
-                row
+                RuleCountOut(**row)
                 async for row in matches.order_by("rule", "mode")
                 .values("rule", "mode")
                 .annotate(matches=Count("id"), acted=Count("id", filter=Q(acted=True)))
@@ -67,4 +76,4 @@ class MetricReads(OversightAccess):
         )
 
 
-__all__ = ["MetricReads"]
+__all__ = ["MetricReads", "count_by"]

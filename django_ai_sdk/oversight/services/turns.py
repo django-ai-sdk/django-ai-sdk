@@ -8,17 +8,18 @@ who asked) also needs `VIEW_OVERSIGHT_CONTENT` for that turn.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from asgiref.sync import sync_to_async
 from django.db import connections
 from django.db.models import Exists, OuterRef
 from django.db.models.fields.json import KeyTransform
-from django.utils import timezone
 
 from django_ai_sdk.errors import UserError
-from django_ai_sdk.oversight.content import load_content, load_contents
+from django_ai_sdk.oversight.content import expired, load_content
+from django_ai_sdk.oversight.permissions import CONTENT, METRICS, OversightAccess
 from django_ai_sdk.oversight.schemas import (
+    ContentState,
     LensAnswerOut,
     Page,
     ReviewOut,
@@ -27,7 +28,6 @@ from django_ai_sdk.oversight.schemas import (
     TurnFilter,
     TurnOut,
 )
-from django_ai_sdk.oversight.services.access import CONTENT, METRICS, OversightAccess
 from django_ai_sdk.oversight.services.paging import keyset_page, page_size
 from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.utils import as_uuid
@@ -71,7 +71,7 @@ class TurnReads(OversightAccess):
         cursor: str = "",
     ) -> Page[TurnOut]:
         """List turns newest first. There is no total because paging is keyset-based."""
-        from django_ai_sdk.oversight.models import Turn
+        from django_ai_sdk.oversight.models import ReviewItem, Turn
 
         await cls.has_perms(user, METRICS)
         limit = page_size(limit)
@@ -89,7 +89,8 @@ class TurnReads(OversightAccess):
             qs = qs.select_related("content")
         turns, next_cursor = await keyset_page(qs, ("-created_at", "-pk"), limit, cursor)
         shown = await cls.content_ids(user, [t.id for t in turns], allowed=may_content)
-        rows = await rows_of(turns, shown)
+        reviews = await cls.scoped(user, METRICS, ReviewItem.objects.all())
+        rows = await rows_of(turns, shown, reviews)
         return Page[TurnOut](items=rows, limit=limit, next_cursor=next_cursor)
 
     @classmethod
@@ -108,8 +109,9 @@ class TurnReads(OversightAccess):
         shown = turn.id in await cls.content_ids(user, [turn.id], allowed=may_content)
         content, state = await sync_to_async(content_state)(turn) if shown else (None, "withheld")
         answers = [a async for a in LensAnswer.objects.filter(turn=turn)]
-        reviews = [r async for r in ReviewItem.objects.filter(turn=turn)]
-        [row] = await rows_of([turn], {turn.id} if shown else set(), contents={turn.id: content})
+        scoped_reviews = await cls.scoped(user, METRICS, ReviewItem.objects.filter(turn=turn))
+        reviews = [r async for r in scoped_reviews]
+        [row] = await rows_of([turn], {turn.id} if shown else set(), scoped_reviews)
         texts = (content or {}).get("texts") or {}
         resolved = await aget_policy(turn.policy)
         detail = TurnDetail(
@@ -192,13 +194,11 @@ def _typed_value(value: str) -> Any:
         return value
 
 
-async def rows_of(
-    turns: list[Turn],
-    shown: set[Any],
-    *,
-    contents: dict[Any, dict[str, Any] | None] | None = None,
-) -> list[TurnOut]:
-    """Build feed rows for `turns`, with content only for ids in `shown`."""
+async def rows_of(turns: list[Turn], shown: set[Any], reviews: QuerySet) -> list[TurnOut]:
+    """Build feed rows for `turns`, with content only for ids in `shown`.
+
+    `reviews` is the review items the reader's METRICS scope keeps, for the open counts.
+    """
     from django_ai_sdk.oversight.models import ReviewItem, RuleMatch
 
     ids = [t.id for t in turns]
@@ -207,15 +207,13 @@ async def rows_of(
     if ids:
         async for m in RuleMatch.objects.filter(turn_id__in=ids).order_by("created_at"):
             matches.setdefault(m.turn_id, []).append(RuleMatchOut.model_validate(m))
-        open_items = ReviewItem.objects.filter(turn_id__in=ids, status=ReviewItem.Status.OPEN)
+        open_items = reviews.filter(turn_id__in=ids, status=ReviewItem.Status.OPEN)
         async for turn_id in open_items.values_list("turn_id", flat=True):
             open_reviews[turn_id] = open_reviews.get(turn_id, 0) + 1
-    if contents is None:
-        contents = await sync_to_async(load_contents)([t for t in turns if t.id in shown])
     return [
         row_of(
             t,
-            contents.get(t.id) if t.id in shown else None,
+            load_content(t) if t.id in shown else None,
             matches.get(t.id, []),
             open_reviews.get(t.id, 0),
             shown=t.id in shown,
@@ -232,10 +230,8 @@ def row_of(
     *,
     shown: bool,
 ) -> TurnOut:
-    preview = None
-    if content is not None:
-        text = content.get("shown_input") or content.get("input")
-        preview = text[:PREVIEW_CHARS] if isinstance(text, str) else None
+    text = (content or {}).get("shown_input") or (content or {}).get("input")
+    preview = text[:PREVIEW_CHARS] if isinstance(text, str) else ""
     return TurnOut(
         id=str(turn.id),
         created_at=turn.created_at,
@@ -260,17 +256,17 @@ def row_of(
     )
 
 
-def content_state(turn: Turn) -> tuple[dict[str, Any] | None, str]:
+def content_state(turn: Turn) -> tuple[dict[str, Any] | None, ContentState]:
     """Load the turn's content and its state (see `TurnDetail.content_state`)."""
     row = turn.content
     if row is None:
         return None, "none"
-    if row.expires_at is not None and row.expires_at <= timezone.now():
+    if expired(row):
         return None, "expired"
     content = load_content(turn)
     if content is None:
         return None, "none"
-    return content, row.capture
+    return content, cast("ContentState", row.capture)
 
 
 def visible_content(content: dict[str, Any] | None) -> dict[str, Any] | None:
