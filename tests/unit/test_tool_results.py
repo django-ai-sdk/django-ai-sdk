@@ -125,5 +125,9 @@ class TestToolOutputLimitWiring:
         class Agent:
             max_tool_calls = None
 
-        [hook] = default_hooks(Agent())["after_tool"]
-        assert isinstance(hook, ToolOutputLimitHook)
+        from django_ai_sdk.oversight.hooks import OversightToolResultHook
+
+        # Oversight masks the full result first, then the cut.
+        mask, limit = default_hooks(Agent())["after_tool"]
+        assert isinstance(limit, ToolOutputLimitHook)
+        assert isinstance(mask, OversightToolResultHook)

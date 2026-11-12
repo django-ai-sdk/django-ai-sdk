@@ -6,7 +6,7 @@ from typing import Any
 from haystack import Pipeline
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.agents.state.state import State, replace_values
-from haystack.dataclasses import ChatMessage
+from haystack.dataclasses import ChatMessage, ToolCallResult
 from pydantic import BaseModel
 
 from django_ai_sdk.logger import get_logger
@@ -14,10 +14,56 @@ from django_ai_sdk.utils import resolve_setting
 
 logger = get_logger(__name__)
 
-# message meta flag on a tool result the budget hook
+# Message meta keys the SDK sets, all under "django_ai_sdk.".
+# On a stub result for a call the budget hook skipped.
 SKIPPED_META_KEY = "django_ai_sdk.skipped"
-# message meta on a cut tool result: {"original_chars", "kept_chars"}
+# On a cut tool result: {"original_chars", "kept_chars"}.
 TRUNCATED_META_KEY = "django_ai_sdk.truncated"
+# On a stub result for a call oversight refused (True) or skipped with it (False).
+REFUSED_META_KEY = "django_ai_sdk.refused"
+# On a tool result oversight has checked for masking.
+MASKED_META_KEY = "django_ai_sdk.masked"
+
+
+def pending_tool_calls(state: State) -> list[ChatMessage] | None:
+    """Return the run's messages when the last one calls tools, else None."""
+    messages = state.data.get("messages") or []
+    return messages if messages and messages[-1].tool_calls else None
+
+
+def answer_calls_with(
+    state: State, messages: list[ChatMessage], stubs: list[tuple[dict[str, Any], dict[str, Any]]]
+) -> list[ChatMessage]:
+    """Answer the last message's tool calls with error stubs, so they never run.
+
+    `stubs` holds a (payload, meta) pair per call. Returns the stub messages.
+    """
+    answers = [
+        ChatMessage.from_tool(json.dumps(payload), origin=call, error=True, meta=meta)
+        for call, (payload, meta) in zip(messages[-1].tool_calls, stubs, strict=True)
+    ]
+    state.set("messages", [*messages, *answers], handler_override=replace_values)
+    return answers
+
+
+def tool_results(
+    messages: list[ChatMessage], unmarked: str
+) -> list[tuple[int, ChatMessage, ToolCallResult]]:
+    """Return the tool results without the `unmarked` meta key, with their index."""
+    return [
+        (index, message, result)
+        for index, message in enumerate(messages)
+        if (result := message.tool_call_result) is not None and unmarked not in message.meta
+    ]
+
+
+def replace_messages(
+    state: State, messages: list[ChatMessage], changed: dict[int, ChatMessage]
+) -> None:
+    """Replace the messages at the indexes in `changed`. Nothing happens when it is empty."""
+    if changed:
+        updated = [changed.get(index, message) for index, message in enumerate(messages)]
+        state.set("messages", updated, handler_override=replace_values)
 
 
 class ToolCallBudgetHook:
@@ -36,21 +82,11 @@ class ToolCallBudgetHook:
         counts = state.data.get("tool_call_counts") or {}
         if sum(counts.values()) < self.max_tool_calls:
             return
-        messages = state.data.get("messages") or []
-        if not messages or not messages[-1].tool_calls:
+        messages = pending_tool_calls(state)
+        if messages is None:
             return
-        # answer the pending calls with a stub result
-        payload = json.dumps({"skipped": self.message})
-        skipped = [
-            ChatMessage.from_tool(
-                payload,
-                origin=call,
-                error=True,
-                meta={SKIPPED_META_KEY: True},
-            )
-            for call in messages[-1].tool_calls
-        ]
-        state.set("messages", [*messages, *skipped], handler_override=replace_values)
+        stub = ({"skipped": self.message}, {SKIPPED_META_KEY: True})
+        answer_calls_with(state, messages, [stub] * len(messages[-1].tool_calls))
 
 
 class LogToolCallsHook:
@@ -90,16 +126,10 @@ class ToolOutputLimitHook:
         self.max_chars = max_chars
 
     def run(self, state: State) -> None:
-        messages = list(state.data.get("messages") or [])
-        changed = False
-        for index, message in enumerate(messages):
-            result = message.tool_call_result
-            if (
-                result is None
-                or not isinstance(result.result, str)
-                or len(result.result) <= self.max_chars
-                or TRUNCATED_META_KEY in message.meta
-            ):
+        messages = state.data.get("messages") or []
+        changed: dict[int, ChatMessage] = {}
+        for index, message, result in tool_results(messages, TRUNCATED_META_KEY):
+            if not isinstance(result.result, str) or len(result.result) <= self.max_chars:
                 continue
             original = len(result.result)
             logger.warning(
@@ -108,7 +138,7 @@ class ToolOutputLimitHook:
                 self.max_chars,
                 original,
             )
-            messages[index] = ChatMessage.from_tool(
+            changed[index] = ChatMessage.from_tool(
                 self._NOTE.format(kept=self.max_chars, original=original)
                 + result.result[: self.max_chars],
                 origin=result.origin,
@@ -118,9 +148,7 @@ class ToolOutputLimitHook:
                     TRUNCATED_META_KEY: {"original_chars": original, "kept_chars": self.max_chars},
                 },
             )
-            changed = True
-        if changed:
-            state.set("messages", messages, handler_override=replace_values)
+        replace_messages(state, messages, changed)
 
 
 def tool_output_limit(max_chars: int | None = None) -> int | None:
@@ -173,14 +201,53 @@ class RequireToolsHook:
 
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
     """Standard hooks for a tool-capable agent."""
-    hooks: dict[str, list[Any]] = {
-        "before_tool": [LogToolCallsHook()],
-        "on_exit": [RequireToolsHook(getattr(agent, "required_tools", None))],
-    }
-    if agent.max_tool_calls is not None:
-        hooks["before_tool"].append(ToolCallBudgetHook(agent.max_tool_calls))
-    if (limit := tool_output_limit()) is not None:
-        hooks["after_tool"] = [ToolOutputLimitHook(limit)]
+    return _tool_hooks(
+        {"before_tool": [LogToolCallsHook()]},
+        max_tool_calls=agent.max_tool_calls,
+        max_output_chars=None,
+        required_tools=getattr(agent, "required_tools", None),
+    )
+
+
+def _tool_hooks(
+    base: dict[str, list[Any]] | None,
+    *,
+    max_tool_calls: int | None,
+    max_output_chars: int | None,
+    required_tools: list[str] | None,
+) -> dict[str, list[Any]]:
+    """Add the SDK's tool hooks to `base`: oversight, call budget, output limit, required tools.
+
+    `base` may already hold them (from `default_hooks`), so each kind is added
+    once and a limit passed here wins over one already in `base`.
+    """
+    from django_ai_sdk.oversight.hooks import OversightToolHook, OversightToolResultHook
+
+    hooks = {point: list(items) for point, items in (base or {}).items()}
+    replaced: tuple[type, ...] = (OversightToolHook, OversightToolResultHook)
+    if max_tool_calls is not None:
+        replaced += (ToolCallBudgetHook,)
+    if max_output_chars is not None:
+        replaced += (ToolOutputLimitHook,)
+    before = [h for h in hooks.get("before_tool", []) if not isinstance(h, replaced)]
+    after = [h for h in hooks.get("after_tool", []) if not isinstance(h, replaced)]
+    if max_tool_calls is not None:
+        before.append(ToolCallBudgetHook(max_tool_calls))
+    if (
+        not any(isinstance(h, ToolOutputLimitHook) for h in after)
+        and (limit := tool_output_limit(max_output_chars)) is not None
+    ):
+        after.append(ToolOutputLimitHook(limit))
+    # Oversight: its tool hook goes first, so a refused call is neither budgeted
+    # nor logged. Its result hook masks the full result just before the cut, as
+    # the stream does, so both share one masking per result.
+    limits = [h for h in after if isinstance(h, ToolOutputLimitHook)]
+    others = [h for h in after if not isinstance(h, ToolOutputLimitHook)]
+    hooks["before_tool"] = [OversightToolHook(), *before]
+    hooks["after_tool"] = [*others, OversightToolResultHook(), *limits]
+    on_exit = hooks.setdefault("on_exit", [])
+    if not any(isinstance(h, RequireToolsHook) for h in on_exit):
+        on_exit.append(RequireToolsHook(required_tools))
     return hooks
 
 
@@ -283,18 +350,14 @@ class ToolAgent:
         kwargs["tool_streaming_callback_passthrough"] = stream_subagent_tools
         return HaystackAgent(**kwargs)
 
-    def _hooks(self) -> dict[str, list[Any]] | None:
-        hooks = {point: list(items) for point, items in (self.config.hooks or {}).items()}
-        if self.config.max_tool_calls is not None:
-            hooks.setdefault("before_tool", []).append(
-                ToolCallBudgetHook(self.config.max_tool_calls)
-            )
-        if (limit := tool_output_limit(self.config.max_tool_output_chars)) is not None:
-            hooks.setdefault("after_tool", []).append(ToolOutputLimitHook(limit))
-        on_exit = hooks.setdefault("on_exit", [])
-        if not any(isinstance(h, RequireToolsHook) for h in on_exit):
-            on_exit.append(RequireToolsHook(self.config.required_tools))
-        return hooks
+    def _hooks(self) -> dict[str, list[Any]]:
+        config = self.config
+        return _tool_hooks(
+            config.hooks,
+            max_tool_calls=config.max_tool_calls,
+            max_output_chars=config.max_tool_output_chars,
+            required_tools=config.required_tools,
+        )
 
     def pipeline(self) -> Pipeline:
         """Build and return the fully connected pipeline."""

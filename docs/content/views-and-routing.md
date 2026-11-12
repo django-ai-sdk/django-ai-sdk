@@ -185,10 +185,10 @@ Common agent endpoints:
 | `POST /agents/{id}/run/` | Non-streaming `agent.run()` |
 | `POST /agents/{id}/reindex/` | `Agent.reindex(agent, memory_id, force_rebuild)` |
 
-The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then `agent.run(chat_messages, user=...)`:
+The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then `agent.run(chat_messages, user=..., channel="api")`:
 
 {{< callout type="info" >}}
-`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output.
+`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output. Under an [oversight](/oversight/) policy the run is checked like a chat turn; when the policy refuses, the reply is `{"result": <the policy's message>, "thread_id": "", "blocked": true}` (Ninja and DRF alike). Without a thread, the server never stored the history the client sends: the gate judges it on every request. `/threads/{id}/run/` takes the thread's stored history instead, as chat does, so it is judged once.
 {{< /callout >}}
 
 ## Threads and Messages
@@ -265,11 +265,22 @@ await ThreadService.restore_message(thread_id, message_id, user=request.user)
 Useful for structured extraction or a "quick answer" that doesn't need SSE:
 
 ```python
+from django_ai_sdk.errors import Blocked
+from django_ai_sdk.permissions import Operation
+
+
 @router.post("/threads/{thread_id}/run/")
 async def run_thread(request, thread_id: str, payload: ChatRequest):
     agent = await AgentService.get_agent(thread_id, user=request.user)
+    await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
-    result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
+    try:
+        result = await agent.run(
+            chat_messages, thread_id=thread_id, user=request.user, channel="api"
+        )
+    except Blocked as blocked:
+        # The agent's oversight policy refused: its message is the reply.
+        return RunResponse(result=blocked.message, thread_id=thread_id, blocked=True)
     return RunResponse(result=result, thread_id=thread_id)
 ```
 

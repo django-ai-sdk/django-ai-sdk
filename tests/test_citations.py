@@ -336,6 +336,45 @@ class TestGrounder:
         assert [answer[c.start : c.end] for c in data.citations] == ["element is optional"]
 
 
+class TestRebase:
+    """Review may mask the answer after it was grounded: citations follow the stored text."""
+
+    def data(self, *quotes: tuple[int, str]):
+        from django_ai_sdk.artifacts.schemas import Citation, CitationsData, CitedSource, Evidence
+
+        evidence = [Evidence(key="doc:d1:c1", text="passage")]
+        return CitationsData(
+            citations=[
+                Citation(start=start, end=start + len(q), quote=q, evidence=evidence)
+                for start, q in quotes
+            ],
+            sources=[CitedSource(key="doc:d1:c1", number=1, title="XAF", cited=True)],
+        )
+
+    def test_a_quote_still_in_place_is_kept_as_it_is(self):
+        data = self.data((0, "Mail the team"))
+        assert grounding.rebase(data, "Mail the team today.") is data
+
+    def test_a_shifted_quote_is_found_again(self):
+        data = self.data((24, "the leave policy"))
+        answer = "Mail [EMAIL] about the leave policy."
+        (citation,) = grounding.rebase(data, answer).citations
+        assert answer[citation.start : citation.end] == "the leave policy"
+
+    def test_a_quote_holding_a_masked_span_is_dropped(self):
+        data = self.data((0, "Mail jan@example.com about the leave policy"))
+        rebased = grounding.rebase(data, "Mail [EMAIL] about the leave policy.")
+        assert rebased.citations == []
+        assert rebased.sources[0].cited is False
+
+    def test_a_withheld_answer_clears_the_citations_shown(self):
+        from django_ai_sdk.oversight.stream import withdrawn_citations
+
+        (event,) = withdrawn_citations(None, "artifact-1")
+        assert (event.tool_call_id, event.tool_output["citations"]) == ("artifact-1", [])
+        assert withdrawn_citations(None, None) == []
+
+
 @pytest.mark.django_db
 @pytest.mark.asyncio
 class TestStream:
@@ -608,3 +647,19 @@ class TestCitationAgent:
         settings.AI_SDK_TASK_MODEL = "openai/gpt-oss-120b"
         settings.AI_SDK_CITATION_AGENT = "tests.unit.test_workflow_steps.StubAgent"
         assert type(get_citation_agent(object())).__name__ == "StubAgent"
+
+
+async def test_citing_is_not_a_turn_of_its_own():
+    """A side task over an answer oversight judges in its own turn: the policy does not run again."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from django_ai_sdk.adapters.citations.grounding import cite
+    from django_ai_sdk.agents.base import Agent
+
+    registry = SourceRegistry()
+    registry.add([from_document(CHUNK)])
+    agent = MagicMock(spec=Agent, run=AsyncMock(return_value="[]"))
+
+    await cite(ANSWER, registry, agent)
+
+    assert agent.run.call_args.kwargs["oversight"] is False

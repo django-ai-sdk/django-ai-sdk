@@ -44,8 +44,11 @@ async def generate_thread_title(
                 messages=user_messages, system_prompt=system_prompt, response_format=None
             )
         else:
-            title = await agent.run(
-                messages=user_messages,
+            from django_ai_sdk.oversight.stream import run_side_task  # noqa: PLC0415
+
+            title = await run_side_task(
+                agent,
+                user_messages,
                 system_prompt=system_prompt,
                 thread_id=thread_id,
                 user=user,

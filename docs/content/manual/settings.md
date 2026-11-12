@@ -22,6 +22,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | --- | --- | --- |
 | `AI_SDK_DEFAULT_MODEL` | `"gpt-4o-mini"` | Fallback model identifier for `llm_generator()`, and the usual value for an agent's `model` attribute. The [generator factories](/manual/generators/) never read it: an agent always passes its own model. |
 | `AI_SDK_EXTRACTION_MODEL` | `None` | Model used by the document-extraction generator (`agents/utils.py`). Falls back to `AI_SDK_DEFAULT_MODEL` when unset. |
+| `AI_SDK_MODEL_PRICES` | `{}` | Per-million-token prices by model or model prefix: `{"gpt-4.1-mini": {"input": 0.4, "output": 1.6}}`. Fills the cost of traces, turns and judges. |
 
 ## RAG and Vector Stores
 
@@ -82,6 +83,17 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
 | `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Actions a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.actions.ConsoleLogAction"}`. Every action is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
+## Oversight
+
+One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings).
+
+`AI_SDK_OVERSIGHT` is checked on start: an unknown key or a value of the wrong kind is `ai_sdk.oversight.E012`, with the fix in its hint. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `TYPESAFE_API_KEY` | unset | Key for oversight's optional `TypeSafe` judge (a hosted commercial service; `django-ai-sdk[typesafe]`). Without it that judge abstains. |
+| `TYPESAFE_MODEL` | unset | A TypeSafe model to pin; unset leaves the choice to `typesafe-sdk`. |
+
 ## Streaming and Titles
 
 | Setting | Default | Purpose |
@@ -114,7 +126,7 @@ changing it needs a restart. Assigning it in `settings.py` does nothing.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_ENABLE_LOGS` | `False` | When `True`, adds a DEBUG-level loguru handler to stderr. File logging to `logs/django_ai_sdk.log` runs regardless. |
+| `AI_SDK_ENABLE_LOGS` | `False` | When `True`, adds a DEBUG-level loguru handler to stderr. File logging to `logs/django_ai_sdk.log` runs regardless. Neither writes local variables into a traceback (`diagnose` is off). |
 
 ## Background Tasks
 

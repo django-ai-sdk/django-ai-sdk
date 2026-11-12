@@ -19,6 +19,8 @@ if resolve_setting("AI_SDK_ENABLE_LOGS", False):
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
         level="DEBUG",
         colorize=True,
+        # diagnose would log local variables, such as turn text and tokens.
+        diagnose=False,
     )
 
 logger.add(
@@ -29,6 +31,8 @@ logger.add(
     retention="30 days",
     compression="zip",
     enqueue=True,
+    # diagnose would log local variables, such as turn text and tokens.
+    diagnose=False,
 )
 
 

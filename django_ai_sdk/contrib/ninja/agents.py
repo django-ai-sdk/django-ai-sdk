@@ -266,8 +266,8 @@ async def run_agent(request: HttpRequest, agent_id: str, payload: ChatRequest) -
     agent = await AgentService.get(agent_id)
     await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
-    result = await agent.run(chat_messages, user=request.user)
-    return RunResponse(result=result, thread_id="")
+    result, blocked = await AgentService.arun_reply(agent, chat_messages, user=request.user)
+    return RunResponse(result=result, thread_id="", blocked=blocked)
 
 
 @routes.post("/agents/{agent_id}/reindex/", response=Success)

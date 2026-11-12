@@ -209,3 +209,31 @@ class TestStructuredCallsDoNotResolveTools:
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])),
         ):
             assert await agent.run([user_message()], response_format=None, tools=True) == "fine"
+
+
+class TestDefaultRunAdapter:
+    async def test_an_agent_runs_on_its_own_generator_without_overriding_get_run_adapter(self):
+        from haystack.components.generators.chat import MockChatGenerator
+
+        from django_ai_sdk.agents.base import Agent
+        from django_ai_sdk.permissions import AllowAll
+
+        generator = MockChatGenerator(responses=[HaystackChatMessage.from_assistant("Hi.")])
+        made = []
+
+        def factory(**kwargs):
+            made.append(kwargs)
+            return generator
+
+        class Plain(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "plain"
+            model = "some-model"
+            oversight = False
+            llm = staticmethod(factory)
+
+        adapter = await Plain().get_run_adapter()
+        assert isinstance(adapter, Run) and adapter.generator is generator
+        assert made == [{"model": "some-model"}]
+        assert await Plain().run([user_message()]) == "Hi."

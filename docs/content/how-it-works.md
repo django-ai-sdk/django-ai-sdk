@@ -217,3 +217,5 @@ async def my_custom_view(request):
 ```
 
 It returns a `StreamingHttpResponse` with `content_type="text/event-stream"`, CORS headers, and the `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends.
+
+A custom view that calls `stream_response()` is not guarded by [oversight](/oversight/#limitations).

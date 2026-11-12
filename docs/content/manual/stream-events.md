@@ -16,6 +16,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `TextChunkEvent` | Text token | `content` |
 | `ReasoningChunkEvent` | Reasoning token | `content` |
 | `DataEvent` | Arbitrary structured data | `data_type`, `data` |
+| `DataEvent` (`oversight`) | An [oversight](../oversight/#client-notices) rule acted at the gate, the tool stage or finish | `data_type="oversight"`, `data`: `turn_id`, `stage`, `outcome`, and `message`, `replace` or `input` as they apply |
 | `ToolCallStartEvent` | Tool call begins | `tool_call_id`, `tool_name` |
 | `ToolInputChunkEvent` | Incremental tool args | `tool_call_id`, `input_chunk` |
 | `ToolInputCompleteEvent` | Tool args ready | `tool_call_id`, `tool_name`, `tool_input` |
@@ -23,7 +24,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `SourceEvent` | RAG citation | `index`, `title`, `content`, `source_id` |
 | `SuggestionEvent` | Follow-up questions | `suggestions` |
 | `TextEndEvent` | The answer's text is complete; citations may still follow | (none) |
-| `MessageEndEvent` | Message complete | `finish_reason` |
+| `MessageEndEvent` | Message complete | `finish_reason` (`content-filter` when oversight refused the question or withheld the answer) |
 | `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](/errors/)) |
 | `StreamEndEvent` | Stream terminated | (none) |
 
