@@ -32,6 +32,7 @@ from django_ai_sdk.oversight.guard import (
     guarding,
     unguarded,
 )
+from django_ai_sdk.oversight.guard.gate import GateResult
 from django_ai_sdk.oversight.guard.masks import gate_masking_lenses
 from django_ai_sdk.oversight.guard.state import merge_restrict
 from django_ai_sdk.oversight.types import Stage
@@ -44,8 +45,8 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.guard import GateResult
     from django_ai_sdk.oversight.policy import Policy
+    from django_ai_sdk.oversight.runs import TurnRun
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 logger = get_logger(__name__)
@@ -210,25 +211,46 @@ class OpenTurn:
         self.input = input if input is not None else last_user_text(self.messages)
         # An error that did not raise, such as "no result". Recorded at close.
         self.error = ""
-        self._gated = False
+        self._gate: GateResult | None = None
 
     @property
     def id(self) -> str:
         """The turn's id, or "" when no turn opened."""
         return self.guard.id if self.guard is not None else ""
 
-    async def gate(self) -> str:
-        """Judge the history and the question before the model reads them.
+    def hooks(
+        self,
+        to_haystack: Callable[[list[ChatMessage]], list[Any]] | None = None,
+        *,
+        answer: Callable[[list[Any]], str] | None = None,
+    ) -> TurnRun | None:
+        """Hand this turn to a Haystack run, whose hooks gate and finish it. None when no turn opened.
 
-        Returns the question, masked if a rule said so. `messages` then holds the
-        history and question to send. Raises `Blocked`.
+        `to_haystack` builds the run's input from `messages` once the gate masked
+        them. `answer` picks the text to finish, as in `TurnRun`.
         """
-        if self._gated:
-            return self.input
-        self._gated = True
+        if self.guard is None:
+            return None
+        from django_ai_sdk.oversight.runs import TurnRun
+
+        return TurnRun(
+            self.guard,
+            gate=self.check,
+            to_haystack=(lambda: to_haystack(self.messages)) if to_haystack else None,
+            answer=answer,
+        )
+
+    async def check(self) -> GateResult:
+        """Judge the history and the question once. Never raises.
+
+        The gate hook of a run calls this; `gate()` reads the same result.
+        """
+        if self._gate is not None:
+            return self._gate
         guard = self.guard
         if guard is None:
-            return self.input
+            self._gate = GateResult(input=self.input)
+            return self._gate
         vouched = None
         if self.messages:
             self.messages = _working_copy(self.messages)
@@ -236,23 +258,43 @@ class OpenTurn:
             vouched = await thread_history(guard, storage, self.messages) if storage else None
             if vouched is not None:
                 self.messages = vouched
-        gate = await gate_conversation(guard, self.messages, vouched=vouched is not None)
-        if gate.blocked:
-            raise _blocked(guard, Stage.GATE, gate.message)
-        self.input = gate.input
+        self._gate = await gate_conversation(guard, self.messages, vouched=vouched is not None)
+        if not self._gate.blocked:
+            self.input = self._gate.input
+        return self._gate
+
+    async def gate(self) -> str:
+        """Judge the history and the question before the model reads them.
+
+        Returns the question, masked if a rule said so. `messages` then holds the
+        history and question to send. Raises `Blocked`, also when a run's gate
+        hook already refused it.
+        """
+        gate = await self.check()
+        if gate.blocked and self.guard is not None:
+            raise _blocked(self.guard, Stage.GATE, gate.message)
         return self.input
 
     async def finish(self, result: Any) -> Any:
         """Return the answer as the policy allows it, or raise `Blocked`.
 
         A string comes back as a string. A Pydantic model comes back as the same
-        model, rebuilt from its masked JSON.
+        model, rebuilt from its masked JSON. When a run's hook already finished
+        the turn, this applies that decision.
         """
         if self.guard is None:
             return result
-        if not self._gated:
-            await self.gate()
+        await self.gate()
         return await _finish(self.guard, result)
+
+    def unparsable(self) -> Blocked:
+        """The refusal for a structured answer whose finished text no longer parses."""
+        assert self.guard is not None
+        finished = self.guard.finished
+        if finished is not None and finished.blocked:
+            return _blocked(self.guard, Stage.FINISH, finished.message)
+        self.guard.refuse("masked result does not fit its schema")
+        return _blocked(self.guard, Stage.FINISH, str(Block.DEFAULT_MESSAGE))
 
 
 @contextlib.asynccontextmanager

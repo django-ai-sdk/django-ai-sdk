@@ -192,16 +192,18 @@ class TestSubagents:
         )
         assert subagent_response(result["messages"]) == "Ask [EMAIL]."
 
-    async def test_a_child_turn_hands_the_subagent_only_the_checked_task(self):
+    async def test_a_child_turn_hands_the_subagent_only_the_checked_task(self, monkeypatch):
         component = await delegation(secret_subagent([], "done"))
         handed: list[list[Any]] = []
-        run_async = component._agent.run_async
+        from django_ai_sdk.oversight import runs
 
-        async def spy(**kwargs: Any) -> Any:
-            handed.append(kwargs["messages"])
-            return await run_async(**kwargs)
+        run_attached = runs.run_attached
 
-        component._agent.run_async = spy
+        async def spy(agent: Any, messages: list[Any], **kwargs: Any) -> Any:
+            handed.append(messages)
+            return await run_attached(agent, messages, **kwargs)
+
+        monkeypatch.setattr(runs, "run_attached", spy)
         context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
         await component.run_async(messages=context, task="who")
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")

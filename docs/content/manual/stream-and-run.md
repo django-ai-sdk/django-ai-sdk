@@ -89,28 +89,28 @@ answer = await agent.run(messages, tools=True)
 resolved = self.response_format if response_format is self._UNSET else response_format
 adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
 
-if tools and resolved is None and isinstance(adapter, Run):
-    return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
-
-return await adapter.run(messages=messages, system_prompt=rendered_prompt, response_format=resolved)
+if not isinstance(adapter, Run):
+    await current.gate()
+    return await adapter.run(messages=current.messages, system_prompt=rendered_prompt, response_format=resolved)
+if not tools or resolved is not None:
+    return await adapter.run(current.messages, rendered_prompt, response_format=resolved, turn=current)
 ```
 
 - **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
 - **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
 - **`isinstance(adapter, Run)`** — only the SDK's own plain `Run` is ours to add a tool loop to. A `get_run_adapter()` override that returns something else made that choice on purpose and is left alone, calling its own `.run()` unchanged.
 
-`Agent._run_own_tools()` then builds the loop:
+`Agent._run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
 ```python
-haystack_agent = ToolAgent.build_agent(
-    getattr(adapter, "generator", None) or self.get_llm(),
-    await self.get_tools(thread_id=thread_id or "", user=user),
-    system_prompt,
+return await adapter.run(
+    current.messages,
+    rendered_prompt,
+    tools=await self.get_tools(thread_id=thread_id or "", user=user),
     max_agent_steps=self.max_agent_steps,
     hooks=default_hooks(self),
+    turn=current,
 )
-result = await haystack_agent.run_async(messages=adapter.get_messages(messages))
-return result["messages"][-1].text if result.get("messages") else None
 ```
 
 This is **the same assembly** `build_subagent()` uses to turn a subagent into
@@ -136,11 +136,12 @@ first real caller.
 {{< /callout >}}
 
 Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
-turn: the gate judges the history and the question before the work above starts,
-every tool call is checked before it runs (`OversightToolHook`, in
-`django_ai_sdk.agents.tool_agent.default_hooks(agent)`), every result is masked
-before the model reads it (`OversightToolResultHook`), and finish judges what the
-loop did before the answer is returned. A refusal raises
+turn, and oversight runs inside the Haystack Agent as hooks
+(`django_ai_sdk.oversight.runs.attach`): the gate judges the history and the
+question before the first model call, every tool call is checked before it runs
+(`OversightToolHook`), every result is masked before the model reads it
+(`OversightToolResultHook`), and finish judges what the loop wrote before the
+answer is returned (`OversightRunHook`). A refusal raises
 `django_ai_sdk.errors.Blocked`.
 
 What oversight does not guard (`stream_response()` from your own view, an adapter

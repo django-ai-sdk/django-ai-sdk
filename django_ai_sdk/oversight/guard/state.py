@@ -92,6 +92,8 @@ class GuardState:
     refused: bool = False
     original_input: str = ""
     original_output: str = ""
+    # What finish decided. A turn is finished once, inside its run or after it.
+    finished: Any = None
     # data-oversight payloads waiting to be streamed.
     notices: list[dict[str, Any]] = field(default_factory=list)
     # The enclosing turn when this one has its own policy, like a subagent or nested run().
@@ -104,6 +106,8 @@ class GuardState:
     # In-flight tool result masking, keyed by call id and text hash. Shared by the
     # stream and the tool hook.
     _masking_results: dict[str, asyncio.Future[str]] = field(default_factory=dict)
+    # Masked citation source text by source key, so each text is masked only once.
+    masked_sources: dict[str, str] = field(default_factory=dict)
     # Whether each lens's latest answer errored. An error carries over to later
     # stages until the lens answers again.
     _lens_errored: dict[str, bool] = field(default_factory=dict)

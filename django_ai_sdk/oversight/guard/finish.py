@@ -29,7 +29,19 @@ class FinishStage(Masking, Notices):
     """Adds `finish()`, which blocks, masks or passes the complete answer."""
 
     async def finish(self, output: str | None = None) -> FinishResult:
-        """Judge the finished answer before it is stored."""
+        """Judge the finished answer before it is stored. Later calls return the same result.
+
+        The run's after_run hook usually finishes the turn. The code around the run
+        then reads that decision instead of judging again.
+        """
+        if self.finished is not None:
+            return self.finished
+        result = await self._finish(output)
+        if self.active:
+            self.finished = result
+        return result
+
+    async def _finish(self, output: str | None) -> FinishResult:
         if output is not None:
             self.context.output = output
         self.original_output = self.original_output or self.context.output

@@ -1,13 +1,35 @@
 """The non-streaming `Run` adapter, used by WorkflowExecutor and title generation."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from haystack import component
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from pydantic import BaseModel
 
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.common import ChatMessage
+
+
+@component
+class Scripted:
+    """A chat generator that answers `reply` and counts its calls. Run runs it as a Haystack Agent."""
+
+    def __init__(self, reply: str | HaystackChatMessage) -> None:
+        self.reply = reply if isinstance(reply, HaystackChatMessage) else HaystackChatMessage.from_assistant(reply)
+        self.calls = 0
+
+    @component.output_types(replies=list[HaystackChatMessage])
+    def run(self, messages: list[HaystackChatMessage], generation_kwargs: dict[str, Any] | None = None) -> dict:
+        self.calls += 1
+        return {"replies": [self.reply]}
+
+    @component.output_types(replies=list[HaystackChatMessage])
+    async def run_async(
+        self, messages: list[HaystackChatMessage], generation_kwargs: dict[str, Any] | None = None
+    ) -> dict:
+        return self.run(messages, generation_kwargs)
 
 
 def user_message(text="Hello"):
@@ -16,21 +38,19 @@ def user_message(text="Hello"):
 
 class TestWithoutTools:
     async def test_a_bare_completion_is_unchanged(self):
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="hi there")]})
+        generator = Scripted("hi there")
 
         run = Run(generator=generator)
         result = await run.run([user_message()])
 
         assert result == "hi there"
-        generator.run_async.assert_awaited_once()
+        assert generator.calls == 1
 
     async def test_structured_output_is_unchanged(self):
         class Out(BaseModel):
             value: str
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
+        generator = Scripted('{"value": "x"}')
 
         run = Run(generator=generator)
         result = await run.run([user_message()], response_format=Out)
@@ -43,8 +63,7 @@ class TestWithoutTools:
 
         # E.g. the token limit spent on reasoning: a reply without text.
         reply = HaystackChatMessage.from_assistant(None, meta={"finish_reason": "length"})
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [reply]})
+        generator = Scripted(reply)
 
         assert await Run(generator=generator).run([user_message()], response_format=Out) is None
 
@@ -64,8 +83,7 @@ class TestAgentRunToolsDefault:
         await config.asave()
         agent = RuntimeAgent(config)
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="A Title")]})
+        generator = Scripted("A Title")
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,
@@ -77,9 +95,8 @@ class TestAgentRunToolsDefault:
         tools.assert_not_awaited()
 
     async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(self):
-        """Agent.run(tools=True) must not build a shadow agent: the loop goes
-        through ToolAgent.build_agent, the same path build_subagent uses for a
-        streamed delegation - governed, not an ungoverned bare Agent."""
+        """Agent.run(tools=True) is governed like a streamed delegation: the
+        loop gets the agent's own steps and default_hooks, as build_subagent does."""
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -91,6 +108,7 @@ class TestAgentRunToolsDefault:
 
         generator = MagicMock()
         fake_agent = MagicMock()
+        fake_agent.clone.return_value = fake_agent  # oversight attaches its hooks to a copy
         fake_agent.run_async = AsyncMock(
             return_value={"messages": [HaystackChatMessage.from_assistant("done")]}
         )
@@ -100,7 +118,7 @@ class TestAgentRunToolsDefault:
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[tool])) as tools,
             patch.object(RuntimeAgent, "get_llm", return_value=generator),
             patch(
-                "django_ai_sdk.agents.tool_agent.HaystackAgent", return_value=fake_agent
+                "django_ai_sdk.adapters.run.Agent", return_value=fake_agent
             ) as agent_cls,
         ):
             result = await agent.run([user_message("do it")], response_format=None, tools=True)
@@ -142,12 +160,13 @@ class TestAgentRunToolsDefault:
 
         agent = TightAgent()
         fake_agent = MagicMock()
+        fake_agent.clone.return_value = fake_agent  # oversight attaches its hooks to a copy
         fake_agent.run_async = AsyncMock(return_value={"messages": []})
 
         with (
             patch.object(TightAgent, "get_tools", AsyncMock(return_value=[MagicMock()])),
             patch(
-                "django_ai_sdk.agents.tool_agent.HaystackAgent", return_value=fake_agent
+                "django_ai_sdk.adapters.run.Agent", return_value=fake_agent
             ) as agent_cls,
         ):
             await agent.run([user_message("hi")], response_format=None, tools=True)
@@ -176,13 +195,12 @@ class TestStructuredCallsDoNotResolveTools:
         await config.asave()
         agent = RuntimeAgent(config)
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
+        generator = Scripted('{"value": "x"}')
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,
             patch.object(RuntimeAgent, "get_llm", return_value=generator),
-            patch("django_ai_sdk.adapters.base.logger") as log,
+            patch("django_ai_sdk.adapters.run.logger") as log,
         ):
             result = await agent.run([user_message()], response_format=Out, tools=True)
 

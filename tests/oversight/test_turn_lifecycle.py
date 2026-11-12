@@ -42,8 +42,10 @@ class TestConcurrency:
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 class TestChatLifecycle:
-    async def test_an_adapter_that_fails_after_the_gate_still_records_the_turn(self):
-        agent = make_agent(["never"], Storage())
+    async def test_an_adapter_that_fails_before_the_run_still_records_the_turn(self):
+        # The gate runs inside the run, so a failed adapter fails before it.
+        storage = Storage()
+        agent = make_agent(["never"], storage)
 
         async def broken(thread_id=None, user=None):  # noqa: ANN001, ANN202
             raise RuntimeError("rag warmup failed")
@@ -51,7 +53,8 @@ class TestChatLifecycle:
         agent.get_pipeline_adapter = broken  # ty: ignore[invalid-assignment]
         await chat(agent, "My IBAN is NL91ABNA0417164300")
         turn = await Turn.objects.aget()
-        assert turn.outcome == "masked"
+        assert "RuntimeError" in turn.error
+        assert storage.stored == []
 
     async def test_storing_the_question_failing_still_records_the_turn(self):
         user = await UserFactory.acreate()
@@ -63,10 +66,12 @@ class TestChatLifecycle:
                 "django_ai_sdk.storage.db.DbStorageAdapter.store_chat_message",
                 side_effect=RuntimeError("db down"),
             ),
-            pytest.raises(RuntimeError),
         ):
-            await chat_turns(agent, [("user", "hello")], thread_id=str(thread.id), user=user)
-        assert await Turn.objects.acount() == 1
+            # The run's gate hook stores the question, so the failure ends the stream.
+            parts = await chat_turns(agent, [("user", "hello")], thread_id=str(thread.id), user=user)
+        assert [p for p in parts if p.get("type") == "error"]
+        turn = await Turn.objects.aget()
+        assert "RuntimeError" in turn.error
 
     async def test_a_cut_off_answer_that_fails_to_store_still_closes_the_turn(self):
         from django_ai_sdk.common import ChatMessage, StreamWriter

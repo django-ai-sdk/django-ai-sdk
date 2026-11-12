@@ -60,7 +60,7 @@ Each agent runs under its own policy. A run inside an active turn joins it when 
 
 `run()` judges what the caller sent on copies: only the last user message of the list is masked in place, so what the caller stores is the masked copy. History the server stored itself is judged on its own turn, not again: with a `thread_id` whose thread is stored, under a policy whose gate masks, the stored messages are the history (the thread run endpoints, as chat); a history that is the stored thread as stored stands. Any other history is judged by `TurnGuard.gate_history()` before the question.
 
-A subclass's own `run()` is wrapped when the class is defined: the turn opens around the outermost `run()`, its arguments read as `Agent.run` takes them, and the `super().run()` inside joins. An override that answers without calling `super()` is judged too. `run_turn` in `django_ai_sdk.oversight.agent_run` is what `run()` wraps around the work; `turn` decides between joining and a child turn; `thread_history` is the stored-thread rule chat shares.
+A subclass's own `run()` is wrapped when the class is defined: the turn opens around the outermost `run()`, its arguments read as `Agent.run` takes them, and the `super().run()` inside joins. An override that answers without calling `super()` is judged too. `run_turn` in `django_ai_sdk.oversight.agent_run` wraps an override's work; `run()` itself opens a `turn` and hands it to its run's hooks (`OpenTurn.hooks`); `turn` decides between joining and a child turn; `thread_history` is the stored-thread rule chat shares.
 
 ## Lenses
 
@@ -223,9 +223,9 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `GateResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it refuses) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are in `django_ai_sdk.agents.tool_agent.default_hooks(agent)`, so every tool agent, subagents included, reports to the active guard. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are attached to every run by `django_ai_sdk.oversight.runs.attach`, with the gate, stop and finish hooks, so every Haystack Agent the SDK runs, subagents and hand-built agents included, reports to the active guard. Tool results that are not text (images, files) pass as they are.
 
-A headless `agent.run(..., tools=True)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did. A run without tools reports no token usage, so its turn has no cost.
+A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
 ## Client notices
 

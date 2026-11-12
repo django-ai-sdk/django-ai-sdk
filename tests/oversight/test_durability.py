@@ -317,20 +317,18 @@ class TestStreamEnds:
         turn = await Turn.objects.aget()
         assert (turn.status, turn.outcome, turn.error) == ("closed", "", "disconnected")
 
-    async def test_a_response_never_read_leaves_an_open_turn(self):
+    async def test_a_response_never_read_records_and_stores_nothing(self):
+        # The gate runs inside the run, so an unread response never reached the gate.
         from django_ai_sdk.views.schemas import Message
 
-        agent = make_agent(["Fine."], Storage(), policy="test-durable")
+        storage = Storage()
+        agent = make_agent(["Fine."], storage, policy="test-durable")
         message = Message.model_validate(
             {"role": "user", "parts": [{"type": "text", "text": "I want a refund"}]}
         )
         await agent.as_view([message])
-        turn = await Turn.objects.aget()
-        assert (turn.status, turn.outcome) == ("open", "flagged")
-        await age(turn.id, 60)
-        assert await sweep() == "1 turn swept"
-        turn = await Turn.objects.aget()
-        assert (turn.status, turn.outcome) == ("interrupted", "flagged")
+        assert not await Turn.objects.aexists()
+        assert storage.stored == []
 
 
 @pytest.mark.django_db(transaction=True)

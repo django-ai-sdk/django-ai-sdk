@@ -29,6 +29,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.test import AsyncClient, override_settings
+from haystack import component
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agents import Agent, ToolAgent, ToolAgentConfig
 from django_ai_sdk.common import ChatMessage
@@ -268,6 +269,7 @@ def make_agent(
     return GuardedAgent()
 
 
+@component
 class Generator:
     """A model that answers `reply` and remembers what it was asked."""
 
@@ -275,9 +277,26 @@ class Generator:
         self.reply = reply
         self.asked: list[list[HaystackChatMessage]] = []
 
-    async def run_async(self, messages, **kwargs):
+    @component.output_types(replies=list[HaystackChatMessage])
+    def run(
+        self,
+        messages: list[HaystackChatMessage],
+        generation_kwargs: dict[str, Any] | None = None,
+        tools: Any = None,
+        streaming_callback: Any = None,
+    ) -> dict[str, Any]:
         self.asked.append(list(messages))
         return {"replies": [HaystackChatMessage.from_assistant(self.reply)]}
+
+    @component.output_types(replies=list[HaystackChatMessage])
+    async def run_async(
+        self,
+        messages: list[HaystackChatMessage],
+        generation_kwargs: dict[str, Any] | None = None,
+        tools: Any = None,
+        streaming_callback: Any = None,
+    ) -> dict[str, Any]:
+        return self.run(messages, generation_kwargs, tools, streaming_callback)
 
 
 def agent_with(reply: str, policy: Any = RunPolicy, **attrs: Any) -> tuple[Agent, Generator]:

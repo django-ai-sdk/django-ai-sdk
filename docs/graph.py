@@ -338,7 +338,7 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     own_tools = add_component(
         dot,
         "own_tools",
-        "Agent._run_own_tools()\ntools = await self.get_tools()\nhooks = default_hooks(self)",
+        "Run.run(tools=...)\ntools = await self.get_tools()\nhooks = default_hooks(self)",
         fillcolor="#fce4ec",
         color="#c2185b",
         fontcolor="#c2185b",

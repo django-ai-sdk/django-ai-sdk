@@ -216,15 +216,14 @@ def _tool_hooks(
     max_output_chars: int | None,
     required_tools: list[str] | None,
 ) -> dict[str, list[Any]]:
-    """Add the SDK's tool hooks to `base`: oversight, call budget, output limit, required tools.
+    """Add the SDK's tool hooks to `base`: call budget, output limit, required tools.
 
     `base` may already hold them (from `default_hooks`), so each kind is added
-    once and a limit passed here wins over one already in `base`.
+    once and a limit passed here wins over one already in `base`. Oversight adds
+    its own hooks when the agent runs (see `oversight.runs.attach`).
     """
-    from django_ai_sdk.oversight.hooks import OversightToolHook, OversightToolResultHook
-
     hooks = {point: list(items) for point, items in (base or {}).items()}
-    replaced: tuple[type, ...] = (OversightToolHook, OversightToolResultHook)
+    replaced: tuple[type, ...] = ()
     if max_tool_calls is not None:
         replaced += (ToolCallBudgetHook,)
     if max_output_chars is not None:
@@ -238,13 +237,8 @@ def _tool_hooks(
         and (limit := tool_output_limit(max_output_chars)) is not None
     ):
         after.append(ToolOutputLimitHook(limit))
-    # Oversight: its tool hook goes first, so a refused call is neither budgeted
-    # nor logged. Its result hook masks the full result just before the cut, as
-    # the stream does, so both share one masking per result.
-    limits = [h for h in after if isinstance(h, ToolOutputLimitHook)]
-    others = [h for h in after if not isinstance(h, ToolOutputLimitHook)]
-    hooks["before_tool"] = [OversightToolHook(), *before]
-    hooks["after_tool"] = [*others, OversightToolResultHook(), *limits]
+    hooks["before_tool"] = before
+    hooks["after_tool"] = after
     on_exit = hooks.setdefault("on_exit", [])
     if not any(isinstance(h, RequireToolsHook) for h in on_exit):
         on_exit.append(RequireToolsHook(required_tools))

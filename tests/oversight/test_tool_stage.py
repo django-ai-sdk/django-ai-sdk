@@ -287,12 +287,13 @@ class TestToolsTakenAwayInChat:
         await chat(make_agent([call, "done"], Storage(), tools=[tool]), "look up Jan")
         assert ran == ["Jan"]
 
-    async def test_tools_are_taken_away_per_run_and_the_agent_keeps_them(self):
+    async def test_tools_are_taken_away_per_step_and_the_agent_keeps_them(self):
         from haystack.components.agents import Agent as HaystackAgent
         from haystack.components.generators.chat import MockChatGenerator
         from haystack.tools import Toolset
 
-        from django_ai_sdk.oversight.stream import allowed_tools
+        from django_ai_sdk.oversight.guard import guarding
+        from django_ai_sdk.oversight.runs import GuardedToolset, attach
 
         from tests.oversight.helpers import lookup_tool
 
@@ -300,10 +301,13 @@ class TestToolsTakenAwayInChat:
         send = dataclasses.replace(lookup, name="send")
         tools = [lookup, Toolset([send])]
         agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), tools=tools)
+        offered = attach(agent).tools
+        assert isinstance(offered, GuardedToolset)
         guard = await start("test-guard")
-        assert await allowed_tools(agent, guard) is None
-        guard.restrict = ["send"]
-        assert await allowed_tools(agent, guard) == ["lookup"]
-        guard.restrict = []
-        assert await allowed_tools(agent, guard) == []
+        with guarding(guard):
+            assert [t.name for t in offered] == ["lookup", "send"]
+            guard.restrict = ["send"]
+            assert [t.name for t in offered] == ["lookup"]
+            guard.restrict = []
+            assert list(offered) == []
         assert agent.tools == tools

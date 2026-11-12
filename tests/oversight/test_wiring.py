@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
+from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.agents.state.state import State
 from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
@@ -30,6 +31,7 @@ from django_ai_sdk.oversight.hooks import (
     masked_result,
 )
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
+from django_ai_sdk.oversight.runs import OversightGateHook, OversightRunHook, attach
 from tests.oversight.helpers import (
     RunPolicy,
     Storage,
@@ -47,7 +49,7 @@ pytestmark = pytest.mark.usefixtures("no_reflect_queue")
 
 
 class TestHooks:
-    def test_each_hook_is_installed_once_and_the_config_limit_wins(self):
+    def test_each_hook_is_attached_once_and_the_config_limit_wins(self):
         agent, _ = agent_with("x")
         config = ToolAgentConfig(
             model="m",
@@ -56,7 +58,8 @@ class TestHooks:
             max_tool_calls=3,
             max_tool_output_chars=1234,
         )
-        hooks = ToolAgent(config, generator=MockChatGenerator(responses=["x"]))._hooks()
+        built = ToolAgent(config, generator=MockChatGenerator(responses=["x"])).pipeline()
+        hooks = attach(attach(built.get_component("agent"))).hooks
         before, after = hooks["before_tool"], hooks["after_tool"]
         assert isinstance(before[0], OversightToolHook)
         assert sum(isinstance(h, OversightToolHook) for h in before) == 1
@@ -66,12 +69,17 @@ class TestHooks:
         # Masked before the cut, so the stream and the hook mask the same text.
         [mask] = [h for h in after if isinstance(h, OversightToolResultHook)]
         assert after.index(mask) + 1 == after.index(limit)
+        assert isinstance(hooks["before_run"][0], OversightGateHook)
+        assert isinstance(hooks["after_run"][-1], OversightRunHook)
 
-    def test_every_tool_agent_gets_the_oversight_hooks(self):
-        agent, _ = agent_with("x")
-        hooks = default_hooks(agent)
+    def test_any_haystack_agent_gets_the_oversight_hooks_when_it_runs(self):
+        # Built by hand, not through ToolAgent: attach still adds every check.
+        hooks = attach(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]))).hooks
         assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
         assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
+        assert not any(
+            isinstance(h, OversightToolHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
+        )
 
 
 @pytest.mark.django_db(transaction=True)

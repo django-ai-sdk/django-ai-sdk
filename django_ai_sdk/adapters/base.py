@@ -4,13 +4,12 @@ import ast
 import asyncio
 import json
 import uuid
-from typing import TYPE_CHECKING, Any, cast, overload
+from typing import TYPE_CHECKING, Any, cast
 
 from haystack import Pipeline
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import (
-    ImageContent,
     ReasoningContent,
     StreamingChunk,
     ToolCall,
@@ -19,6 +18,8 @@ from haystack.dataclasses import (
 
 from django_ai_sdk.adapters.citations.grounding import Grounder, rebase, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
+from django_ai_sdk.adapters.run import Run as Run  # re-exported: Run lived here
+from django_ai_sdk.adapters.run import get_user_message, get_user_text
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
 from django_ai_sdk.artifacts.schemas import turn_artifacts
@@ -43,26 +44,23 @@ from django_ai_sdk.events import (
     ToolInputCompleteEvent,
     ToolOutputEvent,
 )
-from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.guard import TurnGuard, guarding
 from django_ai_sdk.oversight.stream import (
     CONTENT_FILTER,
     StreamTurn,
-    allowed_tools,
-    report_reply_usage,
     withdrawn_citations,
 )
 from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from django_ai_sdk.adapters.citations import SourceRegistry
-    from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
+    from django_ai_sdk.oversight.guard import GateResult
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -181,108 +179,6 @@ def get_error_event(info: ErrorInfo) -> ErrorEvent:
     return ErrorEvent(error_code=info.spec.code, ref=info.ref)
 
 
-def get_user_text(message: ChatMessage) -> str:
-    """User text followed by the context line of each attachment."""
-    hints = [a.context for a in message.attachments if a.context]
-    return "\n\n".join([message.content, *hints]) if hints else message.content
-
-
-def get_user_message(message: ChatMessage) -> HaystackChatMessage:
-    """Haystack user message, multimodal when images were inlined for a vision model."""
-    text = get_user_text(message)
-    images = [
-        ImageContent(base64_image=a.data, mime_type=a.media_type)
-        for a in message.attachments
-        if a.data
-    ]
-    if not images:
-        return HaystackChatMessage.from_user(text)
-    return HaystackChatMessage.from_user(content_parts=[text, *images] if text else images)
-
-
-class Run:
-    """
-    Runnable Haystack adapter.
-    """
-
-    model: str | None = None
-    instructions: str | None = None
-
-    def __init__(
-        self,
-        generator: Any,
-        *,
-        model: str | None = None,
-        instructions: str | None = None,
-    ) -> None:
-        self.generator = generator
-        self.model = model
-        self.instructions = instructions
-
-    def get_messages(self, messages: list[ChatMessage]) -> list[HaystackChatMessage]:
-        """Quick conversion."""
-        conversation = [m for m in messages if m.role in ("user", "assistant")]
-        converted: list[HaystackChatMessage] = []
-        for msg in conversation:
-            if msg.role == "user":
-                converted.append(get_user_message(msg))
-            elif msg.role == "assistant":
-                converted.append(HaystackChatMessage.from_assistant(msg.content))  # type: ignore[arg-type]
-        return converted
-
-    @overload
-    async def run(
-        self,
-        messages: list[ChatMessage],
-        system_prompt: str | None = None,
-        *,
-        response_format: None = None,
-    ) -> str | None: ...
-    @overload
-    async def run(
-        self,
-        messages: list[ChatMessage],
-        system_prompt: str | None = None,
-        *,
-        response_format: type[T],
-    ) -> T | None: ...
-
-    async def run(
-        self,
-        messages: list[ChatMessage],
-        system_prompt: str | None = None,
-        response_format: type[T] | None = None,
-    ) -> T | str | None:
-        user_messages = self.get_messages(messages)
-        if system_prompt:
-            user_messages = [
-                HaystackChatMessage.from_system(system_prompt),
-                *user_messages,
-            ]
-
-        if response_format:
-            response = await self.generator.run_async(
-                messages=user_messages,
-                generation_kwargs=schema_kwargs(self.generator, response_format),
-            )
-            reply = response["replies"][0]
-            report_reply_usage(reply)
-            if not reply.text:
-                # no answer to validate
-                logger.warning(
-                    "No {} in the reply (finish_reason={})",
-                    response_format.__name__,
-                    reply.meta.get("finish_reason"),
-                )
-                return None
-            return response_format.model_validate_json(reply.text)
-
-        response = await self.generator.run_async(messages=user_messages)
-        reply = response["replies"][0]
-        report_reply_usage(reply)
-        return reply.text
-
-
 class Stream:
     """
     Adapter for Haystack Pipelines that emits streaming events.
@@ -306,6 +202,8 @@ class Stream:
     _citations_call_id: str | None = None
     # Oversight: the turn's guard, handed over by Agent.as_view. None streams unguarded.
     guard: TurnGuard | None = None
+    # Oversight: judges and stores the question, called by the run's gate hook.
+    gate: Callable[[], Awaitable[GateResult]] | None = None
     # The oversight side of the turn being streamed.
     _turn: StreamTurn | None = None
 
@@ -649,12 +547,15 @@ class Stream:
         return asyncio.create_task(coro)
 
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
-        return await agent.run_async(
-            messages=messages,
-            streaming_callback=callback,
-            hook_context=self.hook_context,
-            # Oversight: offer only the tools the gate left.
-            tools=await allowed_tools(agent, self.guard),
+        from django_ai_sdk.oversight.runs import run_attached
+
+        turn = self._turn.run if self._turn is not None else None
+        if turn is None and self.gate is not None:
+            # No policy: the gate only stores the question.
+            await self.gate()
+        # Oversight: the run's hooks gate the question, check tools and finish the answer.
+        return await run_attached(
+            agent, messages, turn=turn, streaming_callback=callback, hook_context=self.hook_context
         )
 
     async def get_events(
@@ -872,6 +773,8 @@ class Stream:
             self.citation_registry,
             self._artifact_ids,
             queue,
+            gate=self.gate,
+            to_haystack=lambda: self.get_messages(messages),
         )
         # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""
@@ -914,7 +817,7 @@ class Stream:
                     yield sent
 
             try:
-                replies = await self.get_pipeline_result(pipeline_task, stream_writer)
+                await self.get_pipeline_result(pipeline_task, stream_writer)
             except Exception as pipeline_error:
                 info = describe_error(pipeline_error)
                 logger.opt(exception=pipeline_error).error(
@@ -934,8 +837,15 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
-            # Oversight: check the whole answer, then pass, mask or withhold it.
-            events, finished = await turn.afinish(replies, self.model_name)
+            if turn.refusal is not None:
+                # Oversight: the gate refused the question. Nothing is stored.
+                _finalize_called = True
+                for event in turn.refusal_events():
+                    yield event
+                return
+
+            # Oversight: pass, mask or withhold the answer the run finished.
+            events, finished = await turn.afinish()
             for event in events:
                 yield event
             finish_reason = CONTENT_FILTER if finished.blocked else None

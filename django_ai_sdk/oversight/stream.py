@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils.translation import gettext_lazy
 from haystack.dataclasses import StreamingChunk, ToolCallResult
-from haystack.tools import Toolset
 
 from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
 from django_ai_sdk.events import (
@@ -32,12 +31,12 @@ from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import FinishResult
 from django_ai_sdk.oversight.guard.notices import notice_base
 from django_ai_sdk.oversight.hooks import masked_result
+from django_ai_sdk.oversight.runs import TurnRun, mask_sources
 from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
-from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.citations.grounding import Grounder
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage, StreamWriter
     from django_ai_sdk.events import StreamEvent
     from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.guard.gate import GateResult
 
 # The finish reason sent when oversight withholds an answer.
 CONTENT_FILTER = "content-filter"
@@ -126,36 +126,6 @@ def _observe_event(guard: TurnGuard, event: StreamEvent) -> None:
         guard.add_tool_call(ToolCall(id=event.tool_call_id, name="", result=output, error=failed))
 
 
-def report_usage(guard: TurnGuard, replies: list[Any]) -> None:
-    """Add each reply's token usage to the turn."""
-    for message in replies:
-        meta = getattr(message, "meta", None) or {}
-        prompt, completion = token_counts(meta.get("usage"))
-        if prompt is not None or completion is not None:
-            guard.add_usage(meta.get("model"), prompt, completion)
-
-
-def observe_replies(guard: TurnGuard, replies: list[Any]) -> None:
-    """Report a non-streaming run's usage and sources to the guard.
-
-    The tool hooks already reported its tool calls and results.
-    """
-    from django_ai_sdk.adapters.citations.registry import current_registry
-
-    report_usage(guard, replies)
-    registry = current_registry.get()
-    if registry is not None:
-        guard.set_sources(registry.all, seeded=registry.seeded)
-
-
-def report_reply_usage(reply: Any) -> None:
-    """Add a side model call's token usage to the current turn, if any."""
-    from django_ai_sdk.oversight.guard import current_guard
-
-    if (guard := current_guard()) is not None:
-        report_usage(guard, [reply])
-
-
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
     """Run a side task of a turn, such as suggestions, citations or a title, on an Agent or a Run."""
     from django_ai_sdk.agents.base import Agent
@@ -164,26 +134,6 @@ async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any)
         # Oversight: off on purpose. The turn itself is judged, not its side tasks.
         kwargs["oversight"] = False
     return await runner.run(messages, **kwargs)
-
-
-async def allowed_tools(agent: Any, guard: TurnGuard | None) -> list[str] | None:
-    """Return the names of a Haystack agent's tools `guard` still allows. None keeps all.
-
-    Pass it as `run_async(tools=...)`, so the built agent and its Toolsets stay as they are.
-    """
-    if guard is None or guard.restrict is None or not getattr(agent, "tools", None):
-        return None
-    # Toolsets like MCP load their tools on warm up. The run warms up again at no cost.
-    await agent.warm_up_async()
-    tools = agent.tools
-    items = [tools] if isinstance(tools, Toolset) else list(tools)
-    names = [
-        tool.name
-        for item in items
-        for tool in (item.get_selectable_tools() if isinstance(item, Toolset) else [item])
-    ]
-    # Haystack refuses a selection when the agent offers no tools at all.
-    return [name for name in names if guard.allows_tool(name)] if names else None
 
 
 def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[StreamEvent]:
@@ -201,10 +151,11 @@ def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[
 class StreamTurn:
     """The oversight side of one streamed chat turn.
 
-    The Stream sends the `start()` events, passes every event through
-    `pass_event`, then calls `afinish` with the pipeline's replies, or
-    `end_early` when the turn ends before that, and always `aclose`. With an
-    inert guard every call passes the stream through unchanged.
+    The run's hooks decide (see `oversight.runs`); this shows what they decided.
+    The Stream hands `run` to the run, sends the `start()` events, passes every
+    event through `pass_event`, then calls `afinish`, or `refusal_events()` when the
+    gate refused, or `end_early` when the turn ends before that, and always
+    `aclose`. With an inert guard every call passes the stream through unchanged.
     """
 
     def __init__(
@@ -215,8 +166,13 @@ class StreamTurn:
         registry: SourceRegistry | None,
         artifact_ids: list[str],
         queue: asyncio.Queue[Any],
+        *,
+        gate: Callable[[], Awaitable[GateResult]] | None = None,
+        to_haystack: Callable[[], list[Any]] | None = None,
     ) -> None:
         self.guard = guard
+        # What the run's hooks gate and finish. None streams unguarded.
+        self.run = TurnRun(guard, gate=gate, to_haystack=to_haystack) if guard.active else None
         self.writer = writer
         self.registry = registry
         # Artifacts stored during this answer, deleted if the answer is withheld.
@@ -229,8 +185,6 @@ class StreamTurn:
         self.sent: list[dict[str, Any]] = []
         # Tool events of a held answer, sent after the check.
         self.held: list[StreamEvent] = []
-        # Masked source text by key, so each text is masked only once.
-        self._masked_sources: dict[str, str] = {}
         # Ids of refused tool calls, whose arguments are neither stored nor released.
         self.refused: set[str] = set()
         guard.message_id = message_id
@@ -256,15 +210,42 @@ class StreamTurn:
         """Return the notices raised before the answer started, and mask the seeded sources."""
         if not self.guard.active:
             return []
+        await self.mask_sources()
+        return self._pending()
+
+    def _pending(self) -> list[StreamEvent]:
+        """Send the notices raised since the last event, such as the gate's."""
         events: list[StreamEvent] = [self._send(notice) for notice in self.guard.notices]
         self.guard.notices.clear()
-        await self.mask_sources()
         return events
+
+    @property
+    def refusal(self) -> GateResult | None:
+        """The gate's refusal, when the run's gate hook refused the question."""
+        return self.run.gated if self.run is not None and self.run.refused else None
+
+    def refusal_events(self) -> list[StreamEvent]:
+        """The rest of the reply when the gate refused: the policy's message, stored nowhere."""
+        refusal = self.refusal
+        assert refusal is not None
+        self.finished = True
+        notice = {**(refusal.notice or {}), "message": refusal.message}
+        return [
+            *self._pending(),
+            self._send(notice),
+            TextChunkEvent(content=refusal.message),
+            TextEndEvent(),
+            MessageEndEvent(finish_reason=CONTENT_FILTER),
+            StreamEndEvent(),
+        ]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
         """Report `event` to the guard and return what to send now."""
         if not self.guard.active:
             return [event]
+        pending = self._pending()
+        if pending:
+            return [*pending, *self.pass_event(event)]
         if isinstance(event, TextChunkEvent):
             self.guard.add_text(event.content)
         elif not isinstance(event, ReasoningChunkEvent):
@@ -288,33 +269,16 @@ class StreamTurn:
         return result
 
     async def mask_sources(self) -> None:
-        """Mask source text in the citation registry, like tool results.
+        """Mask the citation sources before any card shows them."""
+        if self.registry is not None:
+            await mask_sources(self.guard, self.registry)
 
-        The citations card, the stored citations artifact and the lenses all read
-        the registry, so none of them should see unmasked text.
-        """
-        for source in self.registry.all if self.registry is not None else []:
-            text = source.content or ""
-            if not text or self._masked_sources.get(source.key) == text:
-                continue
-            # mask_result keys on the text too, so a changed source is masked again.
-            masked = await self.guard.mask_result(f"source:{source.key}", text)
-            source.content = masked
-            self._masked_sources[source.key] = masked
-
-    async def afinish(
-        self, replies: list[Any], model: str | None
-    ) -> tuple[list[StreamEvent], FinishResult]:
-        """Check the whole answer, then pass, mask or withhold it. Returns the events to send."""
+    async def afinish(self) -> tuple[list[StreamEvent], FinishResult]:
+        """Pass, mask or withhold the answer as the run's finish decided. Returns the events to send."""
         guard, writer = self.guard, self.writer
         if not guard.active:
             return [], FinishResult()
-        report_usage(guard, replies)
-        # The model the stream ran, when the replies do not name one.
-        guard.add_usage(model, None, None)
-        if self.registry is not None:
-            await self.mask_sources()
-            guard.set_sources(self.registry.all, seeded=self.registry.seeded)
+        # The after_run hook finished the turn; this reads that decision.
         finished = await guard.finish(writer.text if writer else guard.context.output)
         self.finished = True
         if writer and finished.replaced:
@@ -329,7 +293,9 @@ class StreamTurn:
                 writer.drop_tool_details()
             await self._drop_artifacts()
         self._drop_refused_inputs()
-        events: list[StreamEvent] = [self._send(finished.notice)] if finished.notice else []
+        events: list[StreamEvent] = self._pending()
+        if finished.notice:
+            events.append(self._send(finished.notice))
         if self.sent and writer:
             writer.message.metadata["oversight"] = stored_notices(self.sent)
         events += _released(self.held, withheld=finished.blocked)
@@ -408,11 +374,7 @@ __all__ = [
     "CONTENT_FILTER",
     "RefusalStream",
     "StreamTurn",
-    "allowed_tools",
     "close_unguardable",
-    "observe_replies",
-    "report_reply_usage",
-    "report_usage",
     "run_side_task",
     "withdrawn_citations",
 ]

@@ -14,6 +14,7 @@ from django_ai_sdk.agents import (
 )
 from django_ai_sdk.agents.subagent import (
     FINAL_PROMPT,
+    FinalResponseHook,
     SUBAGENT_META_KEY,
     SubagentStreamFilter,
     _tool_chunks_only,
@@ -143,8 +144,8 @@ class TestToolAgentBuild:
         config = ToolAgentConfig(model=MOCK_MODEL, system_prompt="s", tools=[])
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
         before = pipeline.get_component("agent").hooks.get("before_tool") or []
-        # Only oversight's, which is always there and inert without a guard.
-        assert [type(h).__name__ for h in before] == ["OversightToolHook"]
+        # Oversight adds its own when the agent runs.
+        assert before == []
 
     def test_custom_hooks_are_merged_with_budget_hook(self):
         gen = MockChatGenerator(responses=["hi"])
@@ -157,8 +158,7 @@ class TestToolAgentBuild:
         )
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
         hooks = pipeline.get_component("agent").hooks["before_tool"]
-        assert len(hooks) == 3
-        assert type(hooks[0]).__name__ == "OversightToolHook"
+        assert len(hooks) == 2
         assert any(isinstance(h, LogToolCallsHook) for h in hooks)
         assert any(type(h).__name__ == "ToolCallBudgetHook" for h in hooks)
 
@@ -390,6 +390,8 @@ class TestSubagentStreaming:
     @pytest.mark.asyncio
     async def test_stream_filter_forwards_task_and_filters_callback(self):
         inner = AsyncMock()
+        inner.clone = MagicMock(return_value=inner)  # oversight attaches its hooks to a copy
+        inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
         )
@@ -419,6 +421,8 @@ class TestSubagentStreaming:
     @pytest.mark.asyncio
     async def test_stream_filter_leaves_out_pending_calls_and_system_prompt(self):
         inner = AsyncMock()
+        inner.clone = MagicMock(return_value=inner)  # oversight attaches its hooks to a copy
+        inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
         )
@@ -1281,46 +1285,55 @@ class TestToolCallBudgetHook:
 
 
 class TestSubagentSynthesis:
-    def _filter(self, result, generator):
-        agent = MagicMock()
-        agent.run.return_value = result
-        agent.chat_generator = generator
-        return SubagentStreamFilter(agent, name="Research Planner")
+    """FinalResponseHook asks for a response when the loop ended without one."""
+
+    def _state(self, messages):
+        from haystack.components.agents.state.state import State
+
+        state = State(schema={"messages": {"type": list[ChatMessage]}})
+        state.set("messages", messages)
+        return state
 
     def test_synthesis_runs_when_no_report_was_written(self):
         generator = MagicMock()
         generator.run.return_value = {
             "replies": [ChatMessage.from_assistant("Bordeaux: 220,000 evacuated.")]
         }
-        result = {"messages": _research_messages(skipped=True)}
+        state = self._state(_research_messages(skipped=True))
 
-        out = self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(state)
 
-        assert out["last_message"].text == "Bordeaux: 220,000 evacuated."
+        out = state.data["messages"]
+        assert out[-1].text == "Bordeaux: 220,000 evacuated."
         # Called with the gathered conversation and no tools.
         sent = generator.run.call_args.kwargs["messages"]
         assert "tools" not in generator.run.call_args.kwargs
         assert sent[-1].text == FINAL_PROMPT
-        assert subagent_response(out["messages"]).startswith("Bordeaux: 220,000 evacuated.")
+        assert subagent_response(out).startswith("Bordeaux: 220,000 evacuated.")
 
     def test_synthesis_is_skipped_when_a_report_exists(self):
         generator = MagicMock()
-        result = {"messages": _research_messages(report="All good.")}
 
-        self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(self._state(_research_messages(report="All good.")))
 
         generator.run.assert_not_called()
 
     def test_failed_synthesis_falls_through_to_the_digest(self):
         generator = MagicMock()
         generator.run.side_effect = RuntimeError("provider down")
-        result = {"messages": _research_messages(skipped=True)}
+        state = self._state(_research_messages(skipped=True))
 
-        out = self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(state)
 
         # The run still returns, and the work is still recoverable.
-        digest = subagent_response(out["messages"])
+        digest = subagent_response(state.data["messages"])
         assert "France and Spain battle wildfires" in digest
+
+    def test_build_subagent_runs_it_before_oversight_finishes(self):
+        from django_ai_sdk.oversight.runs import OversightRunHook, with_oversight
+
+        after = with_oversight({"after_run": [FinalResponseHook(MagicMock())]})["after_run"]
+        assert [type(h) for h in after] == [FinalResponseHook, OversightRunHook]
 
 
 class TestUnstreamedResults:
@@ -1328,6 +1341,7 @@ class TestUnstreamedResults:
         generator = MagicMock()
         generator.run.return_value = {"replies": [ChatMessage.from_assistant("done")]}
         agent = MagicMock()
+        agent.clone.return_value = agent  # oversight attaches its hooks to a copy
         agent.chat_generator = generator
         messages = _research_messages(skipped=True)
         agent.run.return_value = {"messages": messages}
@@ -1361,6 +1375,7 @@ class TestUnstreamedResults:
             return {"messages": _research_messages(report="done")}
 
         agent = MagicMock()
+        agent.clone.return_value = agent
         agent.chat_generator = generator
         agent.run.side_effect = fake_run
         received = []

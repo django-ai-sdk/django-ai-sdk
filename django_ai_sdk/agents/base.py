@@ -22,6 +22,7 @@ from django_ai_sdk.common import (
     Prompt,
     as_chat_messages,
     last_user_message,
+    last_user_text,
     prompt,
 )
 from django_ai_sdk.conversation.utils import (
@@ -46,6 +47,7 @@ from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
+from django_ai_sdk.tracing import bind as bind_trace
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
@@ -60,7 +62,8 @@ if TYPE_CHECKING:
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
-    from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.agent_run import OpenTurn
+    from django_ai_sdk.oversight.guard import GateResult, TurnGuard
     from django_ai_sdk.oversight.policy import Policy
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -893,86 +896,65 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 `Blocked.message` holds the text to show the user.
         """
 
-        from django_ai_sdk.oversight.agent_run import run_turn
+        from django_ai_sdk.oversight.agent_run import turn
 
-        async def work(messages: list[ChatMessage]) -> T | str | None:
-            return await self._run(messages, system_prompt, response_format, thread_id, user, tools)
-
-        return await run_turn(
-            self,
-            work,
-            as_chat_messages(messages),
-            channel=channel,
-            user=user,
-            thread_id=thread_id,
-            oversight=oversight,
-        )
+        # Bind the thread so headless runs are traced to it.
+        with bind_trace(thread_id=thread_id):
+            async with turn(
+                self,
+                channel=channel,
+                user=user,
+                thread_id=thread_id,
+                messages=as_chat_messages(messages),
+                oversight=oversight,
+            ) as current:
+                result = await self._run(
+                    current, system_prompt, response_format, thread_id, user, tools
+                )
+                if result is None:
+                    current.error = "no result"
+                    return None
+                return await current.finish(result)
 
     async def _run(
         self,
-        messages: list[ChatMessage],
+        current: OpenTurn,
         system_prompt: str | Prompt | None,
         response_format: type[T] | None,
         thread_id: str | None,
         user: AbstractBaseUser | AnonymousUser | None,
         tools: bool,
     ) -> T | str | None:
+        """Run the turn on the run adapter. The SDK's own Run runs it as a Haystack Agent.
+
+        With `tools`, the loop is governed by this agent's own `max_agent_steps`,
+        `max_tool_calls` and hooks, the same assembly `build_subagent` uses for a
+        streamed delegation. Oversight runs inside it as hooks.
+        """
+        from django_ai_sdk.adapters.run import Run
+        from django_ai_sdk.agents.tool_agent import default_hooks
+
         resolved = self.response_format if response_format is self._UNSET else response_format
         adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
-
-        # Only the SDK's own plain Run is ours to add a tool loop to. A custom
-        # get_run_adapter() override returns something else on purpose — it is
-        # left alone, calling its own .run() unchanged, rather than having a
-        # tool loop forced onto it.
-        from django_ai_sdk.adapters.base import Run
-
-        if tools and resolved is None and isinstance(adapter, Run):
-            return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
-
+        if not isinstance(adapter, Run):
+            # A custom adapter runs outside Haystack, so the turn is gated around it.
+            await current.gate()
+            return await adapter.run(
+                messages=current.messages, system_prompt=rendered_prompt, response_format=resolved
+            )
+        if not tools or resolved is not None:
+            return await adapter.run(
+                current.messages, rendered_prompt, response_format=resolved, turn=current
+            )
         return await adapter.run(
-            messages=messages,
-            system_prompt=rendered_prompt,
-            response_format=resolved,
-        )
-
-    async def _run_own_tools(
-        self,
-        adapter: Any,
-        messages: list[ChatMessage],
-        system_prompt: str,
-        thread_id: str | None,
-        user: AbstractBaseUser | AnonymousUser | None,
-    ) -> str | None:
-        """Run this agent's own tools to completion, headless (no streaming).
-
-        Governed by this agent's own `max_agent_steps`/`max_tool_calls`/hooks —
-        the same assembly `build_subagent` uses for a streamed delegation — so a
-        headless one-shot run and a streamed subagent are never governed
-        differently.
-        """
-        from django_ai_sdk.agents.tool_agent import ToolAgent, default_hooks
-
-        haystack_agent = ToolAgent.build_agent(
-            getattr(adapter, "generator", None) or self.get_llm(),
-            await self.get_tools(thread_id=thread_id or "", user=user),
-            system_prompt,
+            current.messages,
+            rendered_prompt,
+            tools=await self.get_tools(thread_id=thread_id or "", user=user),
             max_agent_steps=self.max_agent_steps,
             hooks=default_hooks(self),
+            turn=current,
         )
-        from django_ai_sdk.oversight.guard import current_guard
-        from django_ai_sdk.oversight.stream import allowed_tools, observe_replies
-
-        # Oversight: offer only the tools the gate left; the tool hooks report the calls.
-        guard = current_guard()
-        result = await haystack_agent.run_async(
-            messages=adapter.get_messages(messages),
-            tools=await allowed_tools(haystack_agent, guard),
-        )
-        replies = result.get("messages", [])
-        if guard is not None:
-            observe_replies(guard, replies)
-        return replies[-1].text if replies else None
 
     async def get_run_adapter(
         self,
@@ -1233,7 +1215,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         storage_adapter: BaseStorageAdapter | None,
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> Any:
-        """Run an open chat turn: history, gate, storage, then the stream."""
+        """Run an open chat turn: pick the history, then stream. The run gates and stores the question."""
         from django_ai_sdk.oversight.agent_run import gate_conversation, thread_history
 
         # Prefer the stored thread over the client's history. The client's copy may
@@ -1257,44 +1239,34 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
             )
 
-        # Oversight: judge the history and question before they are stored or sent
-        # to the model.
-        if guard.active:
-            gate = await gate_conversation(guard, messages, vouched=vouched is not None)
-            if gate.blocked:
-                from django_ai_sdk.oversight.stream import RefusalStream
+        async def admit() -> GateResult:
+            """Judge the history and question, then store the question and title the thread.
 
-                await guard.close()
-                return await stream_response(
-                    RefusalStream(gate.message, gate.notice), messages, self.protocol_handler
-                )
-            if gate.notice:
-                guard.notices.append(gate.notice)
+            Oversight: the run's gate hook calls this before the model reads anything,
+            so a refused question is never stored or sent to the model.
+            """
+            from django_ai_sdk.oversight.guard import GateResult
 
-        # Store only the last user message (the new one just sent)
-        # Many protocols send full conversation history, but we only want to store new messages
-        if storage_adapter and thread_id:
-            question = last_user_message(messages)
-            if question is not None:
-                logger.debug(f"Storing last user message: {len(question.content)} characters")
-                # FIXME: we need a better way on how to create a id for the user messages
-                question.id = str(uuid.uuid4())
-                await storage_adapter.store_chat_message(question)
-                guard.user_message_id = question.id
-            else:
-                logger.debug("No user messages found to store")
-
-        if self.title_generation and thread and not thread.title:
-            # A failed title must not fail the reply.
-            # Oversight: off on purpose. The title uses the question after the gate.
-            try:
-                title = await generate_thread_title(
-                    agent=self, messages=messages, thread_id=thread.id, user=user
-                )
-                if title:
-                    await ThreadService.update_thread(thread.id, title=title, user=user)
-            except Exception:
-                logger.exception("Thread title generation failed")
+            gate = GateResult(input=last_user_text(messages))
+            if guard.active:
+                gate = await gate_conversation(guard, messages, vouched=vouched is not None)
+                if gate.blocked:
+                    return gate
+                if gate.notice:
+                    guard.notices.append(gate.notice)
+            await self._store_question(messages, storage_adapter, thread_id, guard)
+            if self.title_generation and thread and not thread.title:
+                # A failed title must not fail the reply.
+                # Oversight: off on purpose. The title uses the question after the gate.
+                try:
+                    title = await generate_thread_title(
+                        agent=self, messages=messages, thread_id=thread.id, user=user
+                    )
+                    if title:
+                        await ThreadService.update_thread(thread.id, title=title, user=user)
+                except Exception:
+                    logger.exception("Thread title generation failed")
+            return gate
 
         async def build_adapter() -> Streamable:
             from django_ai_sdk.oversight.guard import closing_turn
@@ -1320,15 +1292,25 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                         await registry.seed_from_thread(thread_id)
                         registry.seed(await self.get_citation_sources(thread_id, user))
                         adapter.citation_agent = get_citation_agent(self)
-            from django_ai_sdk.adapters.base import Stream
+                from django_ai_sdk.adapters.base import Stream
 
-            if isinstance(adapter, Stream):
-                # Oversight: hand the turn over. The Stream guards, finishes and closes it.
-                adapter.guard = guard
-            elif guard.active:
+                if isinstance(adapter, Stream) and adapter.agent_component is not None:
+                    # Oversight: hand the turn over. The run's hooks gate, check and
+                    # finish it; the Stream shows the result and closes it.
+                    adapter.guard = guard
+                    adapter.gate = admit
+                    return adapter
+                # Other adapters run outside a Haystack Agent: gate before they start.
+                gate = await admit()
+            if gate.blocked:
+                from django_ai_sdk.oversight.stream import RefusalStream
+
+                await guard.close()
+                return RefusalStream(gate.message, gate.notice)
+            if guard.active:
                 from django_ai_sdk.oversight.stream import close_unguardable
 
-                # Other adapters cannot report tool calls or the answer to the guard.
+                # They cannot report tool calls or the answer to the guard.
                 adapter = await close_unguardable(guard) or adapter
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
@@ -1349,6 +1331,29 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             storage_adapter=storage_adapter,
             warmup=warmup(),
         )
+
+    @staticmethod
+    async def _store_question(
+        messages: list[ChatMessage],
+        storage_adapter: BaseStorageAdapter | None,
+        thread_id: str | None,
+        guard: TurnGuard,
+    ) -> None:
+        """Store only the last user message, the one just sent.
+
+        Many protocols send the full conversation, but only the new message is stored.
+        """
+        if not (storage_adapter and thread_id):
+            return
+        question = last_user_message(messages)
+        if question is None:
+            logger.debug("No user messages found to store")
+            return
+        logger.debug(f"Storing last user message: {len(question.content)} characters")
+        # FIXME: we need a better way on how to create a id for the user messages
+        question.id = str(uuid.uuid4())
+        await storage_adapter.store_chat_message(question)
+        guard.user_message_id = question.id
 
     async def _resolve_attachments(
         self,
