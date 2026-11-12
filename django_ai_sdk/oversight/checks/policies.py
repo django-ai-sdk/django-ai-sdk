@@ -19,6 +19,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
 
     Unanswered lenses are only reported for policies in `in_use`.
     """
+    from django_ai_sdk.oversight.notifiers import configured_notifiers
     from django_ai_sdk.oversight.policy import build
     from django_ai_sdk.oversight.registry import (
         get_duplicate_policies,
@@ -26,6 +27,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
         get_policies,
     )
 
+    notifiers = {notifier.name for notifier in configured_notifiers()}
     messages: list[Any] = []
     # Collected across policies and reported as one warning.
     unanswered = Unanswered()
@@ -50,21 +52,48 @@ def policy_checks(in_use: set[str]) -> list[Any]:
                 Error(f"Oversight policy {name!r} does not resolve: {exc}", id=f"{PREFIX}.E002")
             )
             continue
-        for rule in resolved.rules.values():
-            unknown = rule.lenses() - set(resolved.lenses)
-            if unknown:
-                messages.append(
-                    Error(
-                        f"Rule {rule.name!r} in policy {name!r} reads unknown lenses {sorted(unknown)}",
-                        id=f"{PREFIX}.E003",
-                    )
-                )
+        messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
         # Unanswered lenses only matter for policies in use.
         messages.extend(lens_checks(name, resolved, unanswered if name in in_use else None))
         if name in in_use:
             messages.extend(stream_mode_checks(name, resolved))
     if unanswered.lenses:
         messages.append(unanswered_warning(unanswered))
+    return messages
+
+
+def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool) -> list[Any]:
+    """Find Notify rules that would send to no one.
+
+    A name in `to` that no notifier has is an error. An enforced Notify while no
+    notifier is configured is a warning, for policies in use.
+    """
+    from django_ai_sdk.oversight.actions import Notify
+    from django_ai_sdk.oversight.types import Mode
+
+    messages: list[Any] = []
+    for rule in resolved.active_rules():
+        for action in rule.then:
+            if not isinstance(action, Notify):
+                continue
+            unknown = sorted(set(action.to) - notifiers)
+            if notifiers and unknown:
+                messages.append(
+                    Error(
+                        f"Rule {rule.name!r} in policy {name!r} notifies {unknown}, which no "
+                        "notifier in AI_SDK_OVERSIGHT['NOTIFIERS'] is named.",
+                        hint=f"The notifiers are {sorted(notifiers)}.",
+                        id=f"{PREFIX}.E014",
+                    )
+                )
+            if not notifiers and in_use and rule.mode is Mode.ENFORCE:
+                messages.append(
+                    Warning(
+                        f"Enforced rule {rule.name!r} in policy {name!r} notifies, but "
+                        "AI_SDK_OVERSIGHT['NOTIFIERS'] is empty: nobody is told.",
+                        id=f"{PREFIX}.W015",
+                    )
+                )
     return messages
 
 
@@ -128,15 +157,6 @@ def lens_checks(name: str, resolved: Any, unanswered: Unanswered | None) -> list
                     f"{', '.join(health['unreachable'])}: a Patterns judge before them is "
                     "already sure when it finds nothing.",
                     id=f"{PREFIX}.W004",
-                )
-            )
-        if health["stages_missing_subject"]:
-            stages = ", ".join(str(s) for s in health["stages_missing_subject"])
-            messages.append(
-                Warning(
-                    f"Lens {lens.name!r} in policy {name!r} reads the {lens.subject} at "
-                    f"{stages}, which never reads it: it never runs there.",
-                    id=f"{PREFIX}.W006",
                 )
             )
     for rule in resolved.rules.values():

@@ -379,6 +379,13 @@ class Lens:
                 f"Lens {self.name!r} declares {misplaced}, which a {self.kind} lens answering "
                 f"{self.answer.kind} does not read."
             )
+        if skipped := [str(s) for s in self.stages if self.subject not in STAGE_SUBJECTS[s]]:
+            raise ImproperlyConfigured(
+                f"Lens {self.name!r} reads the {self.subject} at {', '.join(skipped)}, "
+                "which never reads it."
+            )
+        if not 0 <= self.sample <= 1:
+            raise ImproperlyConfigured(f"Lens {self.name!r}: `sample` must be 0 to 1.")
         self.answer.validate(self)
 
     def _misplaced(self) -> list[str]:
@@ -597,6 +604,10 @@ class JudgeLens(Lens):
         super().validate()
         if not self.judges:
             raise ImproperlyConfigured(f"Judge lens {self.name!r} has no `judges`.")
+        if not 0 <= self.min_confidence <= 1:
+            raise ImproperlyConfigured(
+                f"Judge lens {self.name!r}: `min_confidence` must be 0 to 1."
+            )
 
     def steps(self) -> list[Any]:
         return self.usable_judges()

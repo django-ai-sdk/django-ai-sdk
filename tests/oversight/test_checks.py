@@ -279,6 +279,25 @@ class TestChecks:
             [],
         )
 
+    def test_a_notify_that_reaches_no_one_is_flagged(self):
+        from django_ai_sdk.oversight.actions import Notify
+        from django_ai_sdk.oversight.checks.policies import policy_checks
+
+        lens = JudgeLens(name="j", judges=[Patterns([r"x"])])
+        when = L("j").is_true
+        typo = policy("fc-notify-typo", [lens], [Rule("r", when=when, then=Notify(["siem"]))])
+        loud = policy("fc-notify-none", [lens], [Rule("r", when=when, then=Notify(), mode=ENFORCE)])
+
+        def found(id: str, in_use: set[str], **configured: Any) -> list[str]:
+            with override_settings(AI_SDK_OVERSIGHT=configured):
+                return [m.msg for m in policy_checks(in_use) if m.id.endswith(id)]
+
+        notifiers = {"NOTIFIERS": ["django_ai_sdk.oversight.notifiers.LogNotifier"]}
+        assert any(repr(typo) in msg for msg in found(".E014", set(), **notifiers))
+        assert not any(repr(loud) in msg for msg in found(".E014", set(), **notifiers))
+        assert any(repr(loud) in msg for msg in found(".W015", {loud}))
+        assert not found(".W015", {loud}, **notifiers)
+
     def test_a_policy_name_declared_twice_is_an_error(self, registry_snapshot: Any):
         class First(Policy):
             name = "test-twice"
@@ -322,7 +341,9 @@ def test_the_manual_lists_every_check_id():
     from django_ai_sdk.checks import SETTINGS_CHECK
 
     root = Path(__file__).resolve().parents[2]
-    code = "".join(p.read_text(encoding="utf-8") for p in (root / "django_ai_sdk/oversight").rglob("*.py"))
+    code = "".join(
+        p.read_text(encoding="utf-8") for p in (root / "django_ai_sdk/oversight").rglob("*.py")
+    )
     raised = set(re.findall(r'id=f"\{PREFIX\}\.([EW]\d{3})"', code)) | {SETTINGS_CHECK}
     manual = (root / "docs/content/manual/oversight.md").read_text(encoding="utf-8")
     section = manual.split("\n## System checks\n", 1)[1].split("\n## ", 1)[0]

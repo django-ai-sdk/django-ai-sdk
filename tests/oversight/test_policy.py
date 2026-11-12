@@ -166,8 +166,10 @@ class TestPolicies:
         resolved = build("test-child")
         assert set(resolved.lenses) == {"mentions_x", "topic"}
         assert set(resolved.rules) == {"block_x", "note_b"}
-        assert resolved.sources["rule:block_x.mode"] == "pack:test-parent"
-        assert resolved.sources["rule:note_b.mode"] == "code"
+        # Each value names the policy that declared it.
+        assert resolved.sources["rule:block_x"] == "test-parent"
+        assert resolved.sources["lens:topic"] == "test-child"
+        assert build("default").sources["lens:prompt_injection"] == "security"
         assert resolved.capture is Capture.MASKED
 
     def test_inherited_rules_start_in_report_mode(self):
@@ -328,7 +330,7 @@ class TestPolicyFields:
         resolved = build("test-held-child")
         assert resolved.stream_mode == "live"
         assert resolved.retention == {"content": 7, "metadata": 730}
-        assert resolved.sources["policy.stream_mode"] == "pack:test-held-parent"
+        assert resolved.sources["policy.stream_mode"] == "test-held-parent"
 
     def test_an_unknown_stream_mode_is_refused(self):
         from unittest.mock import patch
@@ -389,6 +391,25 @@ class TestDeclarationsThatCannotWork:
 
         with pytest.raises(ImproperlyConfigured, match="only an entities lens"):
             build("test-masks-parent")
+
+    def test_a_rule_reading_a_lens_the_policy_lacks_does_not_resolve(self):
+        @register_policy
+        class Typo(Policy):
+            name = "test-unknown-lens"
+            extends = ["test-parent"]  # noqa: RUF012
+            rules = [Rule("r", when=L("mentions_y").is_true, then=Alert())]  # noqa: RUF012
+
+        @register_policy
+        class MaskTypo(Policy):
+            name = "test-unknown-mask-lens"
+            extends = ["test-parent"]  # noqa: RUF012
+            rules = [  # noqa: RUF012
+                Rule("r", when=L("mentions_x").is_true, then=Mask(lenses=["nope"]))
+            ]
+
+        for name in ("test-unknown-lens", "test-unknown-mask-lens"):
+            with pytest.raises(ImproperlyConfigured, match="unknown lenses"):
+                build(name)
 
     def test_a_choice_default_must_be_one_of_its_labels(self):
         class OddDefault(Policy):
@@ -504,22 +525,25 @@ class TestDeclarations:
         with pytest.raises(ValueError):
             Stage("watch")
 
-    def test_a_lens_at_a_stage_that_never_reads_its_subject_is_misplaced(self):
-        from django_ai_sdk.oversight.checks.lenses import stages_missing_subject
+    def test_a_lens_at_a_stage_that_never_reads_its_subject_is_refused(self):
+        misplaced = [
+            {"subject": Subject.OUTPUT, "stages": [Stage.TOOL]},
+            {"stages": [Stage.FINISH]},
+            {"subject": Subject.TOOL_CALL, "stages": [Stage.REFLECT]},
+        ]
+        for kwargs in misplaced:
+            with pytest.raises(ImproperlyConfigured, match="never reads it"):
+                JudgeLens(name="a", judges=["judge"], **kwargs).validate()
+        JudgeLens(
+            name="d", judges=["judge"], subject=Subject.OUTPUT, stages=[Stage.REFLECT]
+        ).validate()
+        JudgeLens(name="e", judges=["judge"], subject=Subject.TOOL_CALL).validate()
 
-        lens = JudgeLens
-        assert stages_missing_subject(
-            lens(name="a", subject=Subject.OUTPUT, stages=[Stage.TOOL])
-        ) == [Stage.TOOL]
-        assert stages_missing_subject(lens(name="b", stages=[Stage.FINISH])) == [Stage.FINISH]
-        assert stages_missing_subject(
-            lens(name="c", subject=Subject.TOOL_CALL, stages=[Stage.REFLECT])
-        ) == [Stage.REFLECT]
-        assert (
-            stages_missing_subject(lens(name="d", subject=Subject.OUTPUT, stages=[Stage.REFLECT]))
-            == []
-        )
-        assert stages_missing_subject(lens(name="e", subject=Subject.TOOL_CALL)) == []
+    def test_sample_and_min_confidence_are_fractions(self):
+        with pytest.raises(ImproperlyConfigured, match="sample"):
+            JudgeLens(name="a", judges=["judge"], sample=2).validate()
+        with pytest.raises(ImproperlyConfigured, match="min_confidence"):
+            JudgeLens(name="a", judges=["judge"], min_confidence=-0.1).validate()
 
     def test_exfiltration_is_judged_on_the_whole_answer_only(self):
         from django_ai_sdk.oversight.packs.security import Exfiltration, PIITool, SecretsTool
@@ -550,6 +574,14 @@ class TestDeclarations:
         rule = Rule("mask_args", when=L("args").is_true, then=Mask(), mode=Mode.ENFORCE)
         with pytest.raises(ImproperlyConfigured, match="tool call"):
             validate_rule(rule, {"args": lens})
+
+    def test_a_mask_over_a_sources_lens_is_refused(self):
+        from django_ai_sdk.oversight.registry import validate_rule
+
+        lens = PatternLens(name="src", subject=Subject.SOURCES, keywords=["x"])
+        rule = Rule("mask_src", when=L("src").is_true, then=Mask(), mode=Mode.ENFORCE)
+        with pytest.raises(ImproperlyConfigured, match="only the question and the answer"):
+            validate_rule(rule, {"src": lens})
 
     def test_reset_registry_forgets_cached_resolutions(self, registry_snapshot: Any):
         from django_ai_sdk.oversight import resolve

@@ -1,4 +1,4 @@
-"""Lens health for the system checks: which judges a lens reaches, and where it never runs."""
+"""Lens health for the system checks: which judges a lens reaches, and which never run."""
 
 from __future__ import annotations
 
@@ -13,11 +13,10 @@ from django_ai_sdk.oversight.judges.base import (
     spec_label,
 )
 from django_ai_sdk.oversight.judges.patterns import Patterns
-from django_ai_sdk.oversight.lenses import STAGE_SUBJECTS, JudgeLens
+from django_ai_sdk.oversight.lenses import JudgeLens
 
 if TYPE_CHECKING:
     from django_ai_sdk.oversight.lenses import Lens
-    from django_ai_sdk.oversight.types import Stage
 
 
 def reachable_judges(lens: JudgeLens) -> list[tuple[Any, Judge | None]]:
@@ -45,7 +44,6 @@ def lens_health(lens: Lens) -> dict[str, Any]:
     - skipped: optional judge aliases that are not defined.
     - unjudged: optional aliases were skipped, and no judge but patterns is left.
     - unreachable: judges after a `Patterns` judge that is sure when it finds nothing.
-    - stages_missing_subject: stages that never read the lens's subject (`STAGE_SUBJECTS`).
     - undefined: required judge aliases that are not defined.
     """
     health: dict[str, Any] = {
@@ -53,7 +51,6 @@ def lens_health(lens: Lens) -> dict[str, Any]:
         "undefined": [],
         "unjudged": False,
         "unreachable": [],
-        "stages_missing_subject": stages_missing_subject(lens),
     }
     if not isinstance(lens, JudgeLens):
         return {**health, "runnable": True}
@@ -74,8 +71,3 @@ def lens_health(lens: Lens) -> dict[str, Any]:
         "unjudged": bool(skipped) and all(isinstance(judge, Patterns) for judge in built),
         "unreachable": [spec_label(spec) for spec in lens.usable_judges()[len(reached) :]],
     }
-
-
-def stages_missing_subject(lens: Lens) -> list[Stage]:
-    """Return the stages of `lens` that never read its subject."""
-    return [stage for stage in lens.stages if lens.subject not in STAGE_SUBJECTS[stage]]

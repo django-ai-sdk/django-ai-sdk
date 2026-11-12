@@ -109,12 +109,9 @@ class Outcome(StrEnum):
     ALLOWED = "allowed"
 
 
-OUTCOME_ORDER = tuple(Outcome)
-
-
 def worst_outcome(*outcomes: Outcome) -> Outcome:
     """Return the worst of `outcomes`, or ALLOWED when there are none."""
-    return min(outcomes, key=lambda o: rank(OUTCOME_ORDER, o), default=Outcome.ALLOWED)
+    return min(outcomes, key=lambda o: rank(tuple(Outcome), o), default=Outcome.ALLOWED)
 
 
 class TextSpan(BaseModel):

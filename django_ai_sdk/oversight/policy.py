@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.actions import Mask
 from django_ai_sdk.oversight.conf import (
     FAIL_MODES,
     STREAM_MODES,
@@ -36,12 +37,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 logger = get_logger(__name__)
-
-CAPTURE_ORDER = (Capture.NONE, Capture.METADATA, Capture.MASKED, Capture.FULL)
-
-# Fields whose source `ResolvedPolicy.sources` records, per kind.
-LENS_FIELDS = {"enabled", "sample", "judges", "min_confidence", "stages"}
-RULE_FIELDS = {"mode", "when", "then", "message", "notice"}
 
 
 class Policy:
@@ -65,7 +60,7 @@ class Policy:
     # Days to keep this policy's turns, e.g. {"content": 90, "metadata": 730}.
     # Missing keys come from the RETENTION setting.
     retention: dict[str, int] = {}  # noqa: RUF012
-    # Source label shown for this policy's values on the policy screen.
+    # Where this policy's values come from: "code" or "pack:<name>".
     origin: str = "code"
 
 
@@ -118,8 +113,8 @@ class ResolvedPolicy:
     stream_mode: str = "auto"
     fail_mode: str = "closed"
     retention: dict[str, int] = field(default_factory=dict)
-    # Where each value came from, e.g. "lens:pii.sample" -> "pack:security", "code",
-    # or "settings" when the CAPTURE setting capped the policy's capture.
+    # The policy that declared each lens, rule and policy value, e.g. "lens:pii" -> "security",
+    # or "policy.capture" -> "settings" when the CAPTURE setting capped it.
     sources: dict[str, str] = field(default_factory=dict)
     # "code" or "pack:<name>".
     origin: str = "code"
@@ -177,19 +172,16 @@ def build(name: str) -> ResolvedPolicy:
     """
     resolved = _from_code(name, ())
     ceiling = Capture(setting("CAPTURE"))
-    if rank(CAPTURE_ORDER, resolved.capture) > rank(CAPTURE_ORDER, ceiling):
+    if rank(tuple(Capture), resolved.capture) > rank(tuple(Capture), ceiling):
         resolved.capture = ceiling
         resolved.sources["policy.capture"] = "settings"
     return resolved
 
 
-def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy, parent_name: str) -> None:
+def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy) -> None:
     resolved.lenses.update(parent.lenses)
     resolved.rules.update(parent.rules)
-    for key, value in parent.sources.items():
-        if not value.startswith("pack:"):
-            value = f"pack:{parent_name}"
-        resolved.sources[key] = value
+    resolved.sources.update(parent.sources)
     # Only carry over values the parent set itself. Values from settings already match.
     for key in ("capture", "stream_mode", "fail_mode"):
         if parent.sources.get(f"policy.{key}"):
@@ -217,47 +209,41 @@ def _from_code(name: str, chain: tuple[str, ...]) -> ResolvedPolicy:
         extends=list(policy.extends),
     )
     for parent_name in policy.extends:
-        _inherit(resolved, _from_code(parent_name, (*chain, name)), parent_name)
-    origin = cls.origin
+        _inherit(resolved, _from_code(parent_name, (*chain, name)))
     for lens in policy_lenses(cls):
         resolved.lenses[lens.name] = copy.copy(lens)
-        _mark(resolved, f"lens:{lens.name}", _tunable(lens), origin)
+        resolved.sources[f"lens:{lens.name}"] = name
     for rule in cls.rules:
         resolved.rules[rule.name] = copy.copy(rule)
-        _mark(resolved, f"rule:{rule.name}", RULE_FIELDS, origin)
+        resolved.sources[f"rule:{rule.name}"] = name
     for rule in resolved.rules.values():
         # Check again with inherited lenses, which registration could not see.
+        masked = {
+            lens for action in rule.then if isinstance(action, Mask) for lens in action.lenses
+        }
+        unknown = sorted((rule.lenses() | masked) - set(resolved.lenses))
         try:
+            if unknown:
+                raise ImproperlyConfigured(f"Rule {rule.name!r} reads unknown lenses {unknown}.")
             validate_rule(rule, resolved.lenses)
         except ImproperlyConfigured as exc:
             raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
     if policy.capture is not None:
         resolved.capture = Capture(policy.capture)
-        resolved.sources["policy.capture"] = origin
+        resolved.sources["policy.capture"] = name
     try:
         if policy.stream_mode is not None:
             resolved.stream_mode = _choice("stream_mode", policy.stream_mode, STREAM_MODES)
-            resolved.sources["policy.stream_mode"] = origin
+            resolved.sources["policy.stream_mode"] = name
         if policy.fail_mode is not None:
             resolved.fail_mode = _choice("fail_mode", policy.fail_mode, FAIL_MODES)
-            resolved.sources["policy.fail_mode"] = origin
+            resolved.sources["policy.fail_mode"] = name
     except ValueError as exc:
         raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
     if policy.retention:
         resolved.retention = {**resolved.retention, **validate_retention(policy.retention)}
-        resolved.sources["policy.retention"] = origin
+        resolved.sources["policy.retention"] = name
     return resolved
-
-
-def _mark(resolved: ResolvedPolicy, target: str, fields: Iterable[str], source: str) -> None:
-    """Record `source` for every recorded field of a lens or rule, keyed "lens:<name>"."""
-    for name in fields:
-        resolved.sources[f"{target}.{name}"] = source
-
-
-def _tunable(lens: Lens) -> set[str]:
-    """The recorded fields `lens` has: only a judge lens has judges and min_confidence."""
-    return {name for name in LENS_FIELDS if hasattr(lens, name)}
 
 
 # The system check reports bad settings (conf.problems), but does not stop a turn.
@@ -286,12 +272,10 @@ def default_fail_mode() -> str:
 
 
 __all__ = [
-    "CAPTURE_ORDER",
     "Policy",
     "ResolvedPolicy",
     "build",
     "default_fail_mode",
-    "default_stream_mode",
     "pick",
     "policy_lenses",
 ]
