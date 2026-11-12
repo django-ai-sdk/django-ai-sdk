@@ -12,7 +12,12 @@ from django_ai_sdk.oversight.actions import Alert, Queue
 from django_ai_sdk.oversight.conditions import L
 from django_ai_sdk.oversight.lenses import Entities, JudgeLens, Score
 from django_ai_sdk.oversight.policy import Policy
-from django_ai_sdk.oversight.presets import EmptyRetrievalLens, RefusalLens, ToolErrorsLens
+from django_ai_sdk.oversight.presets import (
+    EmptyRetrievalLens,
+    LanguageLens,
+    RefusalLens,
+    ToolErrorsLens,
+)
 from django_ai_sdk.oversight.registry import register_policy
 from django_ai_sdk.oversight.rules import Rule
 from django_ai_sdk.oversight.types import Stage, Subject
@@ -88,17 +93,6 @@ class Helpfulness(JudgeLens):
     sample = 0.25
 
 
-class LanguageMismatch(JudgeLens):
-    name = "language_mismatch"
-    label = "Language mismatch"
-    question = "Is the answer in a different language than the question?"
-    yes = "Answers in a different language than the question."
-    no = "Same language."
-    subject = Subject.EXCHANGE
-    # LanguageLens is a check lens, not a judge, so it cannot lead this chain.
-    judges = ["classifier?"]  # noqa: RUF012
-
-
 @register_policy
 class QualityPack(Policy):
     name = "quality"
@@ -112,7 +106,7 @@ class QualityPack(Policy):
         AnswerRelevance,
         Helpfulness,
         RefusalLens,
-        LanguageMismatch,
+        LanguageLens,
         EmptyRetrievalLens,
         ToolErrorsLens,
     ]
@@ -154,7 +148,6 @@ __all__ = [
     "ContextRelevance",
     "Groundedness",
     "Helpfulness",
-    "LanguageMismatch",
     "QualityPack",
     "TakenFrom",
 ]

@@ -187,7 +187,7 @@ async def _reflect(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
         for item in guard.answered
         if should_retry(item.answer.error, [step.error for step in item.answer.trail])
     }
-    answered, matched = await ajudge_turn(
+    answered, matched, _masks = await ajudge_turn(
         resolved,
         guard.context,
         retry,

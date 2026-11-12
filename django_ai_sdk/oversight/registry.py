@@ -39,6 +39,9 @@ _duplicates: dict[str, list[str]] = {}
 # Validators a check lens may name, by name.
 _validators: dict[str, Callable[..., Any]] = {}
 
+# Subjects a Mask can rewrite: the question, the answer, or both.
+MASKABLE = frozenset({"input", "output", "exchange"})
+
 
 def _path(cls: type) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
@@ -107,10 +110,11 @@ def validate_policy(cls: type[Policy]) -> None:
 def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
     """Raise ImproperlyConfigured when `rule` does nothing, or a Mask reads a lens that cannot mask.
 
-    Only an Entities lens says where to mask. A Mask over a Flag, Choice or Score
-    lens could never mask anything. Tool-call arguments are never rewritten, so a
-    tool-call lens cannot be masked either. Lenses missing from `lenses` (inherited,
-    not resolved yet) are checked when the policy resolves.
+    Only an Entities lens says where to mask, and only the question and the answer
+    are masked. A Mask over a Flag, Choice or Score lens, or over a lens on sources
+    or tool calls, could never mask anything. Lenses missing from `lenses` are
+    skipped here: an inherited one is not known until the policy resolves, which
+    refuses a rule naming a lens the policy does not have.
     """
     if not rule.then:
         raise ImproperlyConfigured(f"Rule {rule.name!r} does nothing: give it `then`.")
@@ -119,11 +123,16 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
             continue
         for name in sorted(set(action.lenses) or rule.lenses()):
             lens = lenses.get(name)
-            if lens is not None and lens.subject == "tool_call":
+            if lens is not None and lens.subject not in MASKABLE:
+                hint = (
+                    "a tool call's arguments are never masked: block the call (Block) or take "
+                    "the tool away (RestrictTools). Tool results are masked by the gate's mask "
+                    "rules."
+                    if lens.subject == "tool_call"
+                    else "only the question and the answer are masked."
+                )
                 raise ImproperlyConfigured(
-                    f"Rule {rule.name!r} masks what tool-call lens {name!r} found, but a tool "
-                    "call's arguments are never masked: block the call (Block) or take the "
-                    "tool away (RestrictTools). Tool results are masked by the gate's mask rules."
+                    f"Rule {rule.name!r} masks what {lens.subject} lens {name!r} found, but {hint}"
                 )
             if lens is not None and lens.answer.kind != "entities":
                 raise ImproperlyConfigured(

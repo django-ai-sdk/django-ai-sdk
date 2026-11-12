@@ -23,6 +23,7 @@ from django_ai_sdk.oversight.judges.base import (
     NO_VERDICT,
     TITLE_CHARS,
     TOO_LONG,
+    UNSTATED_CONFIDENCE,
     Judge,
     masked_clip,
     secret_setting,
@@ -61,8 +62,6 @@ MAX_SOURCES = 8
 TOOL_ARGUMENTS_CHARS = 4_000
 # Characters of a judge's rationale to keep.
 RATIONALE_CHARS = 1_000
-# Confidence used when a verdict gives none, or gives one that isn't a number.
-UNSTATED_CONFIDENCE = 0.5
 # Longer than a classifier's timeout, because a judge writes its reasons.
 JUDGE_TIMEOUT = 45.0
 
@@ -176,56 +175,49 @@ class LLMJudge(Judge):
         self.base_url = base_url
         self.api_key_env = api_key_env
         self.generation_kwargs = generation_kwargs or {}
-        if timeout is not None:
-            self.timeout = timeout
-        self.name = name or f"judge:{model or 'default'}"
-        self._generator: Any = None
+        super().__init__(name=name or f"judge:{model or 'default'}", timeout=timeout)
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "model": self.model or "", "base_url": self.base_url}
 
     def missing(self) -> str:
+        # Abstain when the key is unset. A placeholder key would fail like an outage
+        # and reflect would retry it forever.
         if self.api_key_env and not secret_setting(self.api_key_env):
             return f"{self.api_key_env} is not set"
         return ""
 
     def get_generator(self) -> Any:
-        if self._generator is None:
-            factory = self.llm
-            if isinstance(factory, str):
-                factory = import_string(factory)
-            kwargs: dict[str, Any] = {"model": self.model} if self.model else {}
-            if self.base_url:
-                from haystack.utils import Secret
+        """A new generator per answer. Its async client is bound to the loop that opens it."""
+        factory = self.llm
+        if isinstance(factory, str):
+            factory = import_string(factory)
+        kwargs: dict[str, Any] = {"model": self.model} if self.model else {}
+        if self.base_url:
+            from haystack.utils import Secret
 
-                # A local server usually needs no key, but the OpenAI client requires one.
-                key = secret_setting(self.api_key_env) if self.api_key_env else ""
-                kwargs |= {
-                    "api_base_url": self.base_url,
-                    "api_key": Secret.from_token(key or "none"),
-                }
-                if factory is None:
-                    from django_ai_sdk.generators import openai_chat
-
-                    factory = openai_chat
+            # A local server usually needs no key, but the OpenAI client requires one.
+            key = secret_setting(self.api_key_env) if self.api_key_env else ""
+            kwargs |= {
+                "api_base_url": self.base_url,
+                "api_key": Secret.from_token(key or "none"),
+            }
             if factory is None:
-                from django_ai_sdk.generators import openai_responses_chat
+                from django_ai_sdk.generators import openai_chat
 
-                factory = openai_responses_chat
-            self._generator = factory(**kwargs)
-        return self._generator
+                factory = openai_chat
+        if factory is None:
+            from django_ai_sdk.generators import openai_responses_chat
+
+            factory = openai_responses_chat
+        return factory(**kwargs)
 
     async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
         from haystack.dataclasses import ChatMessage as HaystackChatMessage
 
         from django_ai_sdk.generators.schema import schema_kwargs
 
-        if not isinstance(lens, JudgeLens):
-            return None  # A model judge answers judge lenses only.
-        if self.missing():
-            # Abstain when the key is unset. A placeholder key would fail like an outage
-            # and reflect would retry it forever.
-            return None
+        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         if too_long(
             lens,
             view,
@@ -233,7 +225,7 @@ class LLMJudge(Judge):
             output_chars=OUTPUT_CHARS,
             tool_chars=TOOL_ARGUMENTS_CHARS,
         ):
-            return Answer(error=TOO_LONG, answerer=self.label())
+            return Answer(error=TOO_LONG)
         generator = self.get_generator()
         answer_model = lens.answer_model()
         try:
@@ -259,7 +251,7 @@ class LLMJudge(Judge):
         parsed = parse_json_reply(reply.text or "")
         model_name = str((reply.meta or {}).get("model") or self.model or "")
         if parsed is None:
-            return Answer(error=NO_VERDICT, answerer=self.label(), model=model_name)
+            return Answer(error=NO_VERDICT, model=model_name)
         prompt_tokens, completion_tokens = token_counts((reply.meta or {}).get("usage"))
         return Answer(
             value=parsed.get("value"),

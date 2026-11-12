@@ -1,17 +1,20 @@
 """Checks on AI_SDK_OVERSIGHT and the deployment.
 
-Covers the settings schema, judge aliases, the default policy, plain content, the
-task backend and pruning.
+Covers the settings schema, judge aliases, the default policy, unmasked content
+(CAPTURE "full"), the task backend and pruning.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.checks import Error, Warning
 
 from django_ai_sdk.oversight.checks import PREFIX
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
 
 
 def judge_checks() -> list[Any]:
@@ -86,7 +89,7 @@ def task_backend_checks() -> list[Any]:
     return []
 
 
-# How long `oversight_prune` may go without running before W007.
+# How long expired rows may stay before W007.
 PRUNE_DUE = timedelta(days=2)
 
 
@@ -97,7 +100,6 @@ def retention_checks(databases: Any) -> list[Any]:
     """
     from django.utils import timezone
 
-    from django_ai_sdk.checks import per_database
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
     due = timezone.now() - PRUNE_DUE
@@ -116,6 +118,23 @@ def retention_checks(databases: Any) -> list[Any]:
             "expires_at on each row.",
             id=f"{PREFIX}.W007",
         )
-        for alias, late in per_database(databases, overdue)
+        for alias, late in _per_database(databases, overdue)
         if late
     ]
+
+
+def _per_database[T](
+    databases: Iterable[str] | None, read: Callable[[str], T]
+) -> Iterator[tuple[str, T]]:
+    """Yield (alias, read(alias)) for each database a check is given.
+
+    A database whose tables are not migrated yet has nothing to check, so it is skipped.
+    """
+    from django.db import DatabaseError
+
+    for alias in databases or ():
+        try:
+            found = read(alias)
+        except DatabaseError:
+            continue
+        yield alias, found

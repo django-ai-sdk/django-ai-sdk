@@ -276,7 +276,7 @@ Under a policy, `run()`:
 
 Each agent runs under its own policy. A run that starts inside another turn joins that turn when it resolves the same policy, or none: one request is one record. There is no second gate (the outer gate already judged the question); the nested run's tool calls are checked and recorded in the outer turn; and its output reaches the outer agent as a tool result, masked like any other, and the outer turn's finish judges the answer built from it.
 
-A run under another policy (the nested agent's own, or an explicit `run(oversight=...)`) opens a child turn instead: its own gate, tool checks, finish and record, linked to the outer turn. Subagents follow the same rule. A delegation to a subagent whose policy is the parent's, or none, joins the parent's turn; one whose policy differs runs as a child turn under it, with the delegated task as its question. When that policy refuses the task or withholds the subagent's answer, the coordinator reads the policy's message as the tool result. A delegation run synchronously (Haystack's `run()` rather than `run_async()`) cannot open a turn, so when it would need one it is refused.
+A run under another policy (the nested agent's own, or an explicit `run(oversight=...)`) opens a child turn instead: its own gate, tool checks, finish and record, linked to the outer turn. Subagents follow the same rule. A delegation to a subagent whose policy is the parent's, or none, joins the parent's turn; one whose policy differs runs as a child turn under it, with the delegated task as its question. That subagent reads only the checked task, not the coordinator's conversation and tool results, which its policy never judged. When that policy refuses the task or withholds the subagent's answer, the coordinator reads the policy's message as the tool result. A delegation run synchronously (Haystack's `run()` rather than `run_async()`) cannot open a turn, so when it would need one it is refused.
 
 A turn that has closed is never joined: a task started inside it that outlives it opens turns of its own.
 
@@ -310,11 +310,11 @@ For whoever works on the SDK itself: these are the places the SDK calls into cor
 | SDK file, function | What it guards | Oversight entry point |
 | --- | --- | --- |
 | `agents/base.py`, `Agent.run()` | Every `run()`: the gate, the tool checks and finish around the work. An overridden `run()` is wrapped in `__init_subclass__` (`agent_run.guard_run_override`), so the outermost `run()` is the turn. | `oversight.agent_run.run_turn` |
-| `agents/base.py`, `Agent.as_view()` | A chat turn: the history (`thread_history`, `gate_history`) and the question (`gate()`), before anything is stored or sent. A refusal streams as `RefusalStream`; otherwise the guard is handed to the `Stream` (`adapter.guard`). | `oversight.guard.TurnGuard.start(channel="chat")` |
+| `agents/base.py`, `Agent.as_view()` | A chat turn: the history (`thread_history`, `gate_history`) and the question (`gate()`), before anything is stored or sent. A refusal streams as `RefusalStream`; otherwise the guard is handed to the `Stream` (`adapter.guard`). An adapter that is not a `Stream` cannot report tool calls or the answer, so its turn is refused after the gate (`close_unguardable`) unless the policy fails open. | `oversight.guard.TurnGuard.start(channel="chat")` |
 | `adapters/base.py`, `Stream` | The answer: held while an enforced rule may change it at finish (`policy.holds_answer()`), tool results and sources masked as they arrive, `finish()` on the whole answer, and `close()` on every way out. | `oversight.stream.StreamTurn`, which calls `TurnGuard.finish`, `mask_result` and `close` |
 | `agents/tool_agent.py`, `default_hooks()` | Each tool call before it runs, and each result before the model reads it, for every tool agent (subagents and `run(tools=True)` included). | `oversight.hooks.OversightToolHook`, `OversightToolResultHook` |
 | `agents/subagent.py`, `SubagentStreamFilter.run_async()` | A delegation: it joins the coordinator's turn, or opens a child turn under the subagent's policy. A synchronous `run()` that would need one is refused. | `oversight.agent_run.turn` |
-| `conversation/utils.py` (title), `adapters/base.py`, `run_side_task()` (suggestions, citations) | Nothing, on purpose: side calls over a turn already judged run with `oversight=False`. | — |
+| `oversight/stream.py`, `run_side_task()` (title, suggestions, citations) | Nothing, on purpose: side calls over a turn already judged run with `oversight=False`. | — |
 | `contrib/ninja/agents.py`, `contrib/ninja/threads.py`, `contrib/drf/views.py` | The HTTP run endpoints: they call `Agent.run(channel="api")` and answer `Blocked` as `"blocked": true`. | `Agent.run()`, above |
 
 Workflow steps and `turn()` reach oversight through their own seams, described under [Model calls of your own](#model-calls-of-your-own-turn).
@@ -377,7 +377,7 @@ class EvenAmount(CheckLens):             # plain Python
 
 - A `PatternLens` answers `Entities`: which labels it found, with where (`spans`), so a `Mask` can mask them. `patterns` maps a label to regexes, `keywords` a label to whole words, `verify` a label to a check its matches must pass (a checksum). `L(name).is_true` means it found something. Built in: `PIILens` and `SecretsLens` in `oversight.presets`.
 - A `CheckLens` answers with `check(text, view)`. By default that runs its `validators`, `fn(text)` or `fn(text, view)`, and answers a `Flag`: yes when one raises `Violation`, with its message as the reason. Override `check` to answer anything else, as `LengthLens`, `LanguageLens`, `EmptyRetrievalLens` and `ToolErrorsLens` in `oversight.presets` do. `register_validator` names a validator, so a lens in JSON can use it.
-- A `JudgeLens` asks its `judges` ([below](#picking-the-judge)) and answers a `Flag` by default: set `answer` to `Choice`, `Score` or `Entities`. Only a judge lens has a `question`, `guidance` and `min_confidence`; each answer option belongs to the type that reads it: `yes` and `no` to `Flag`, `labels`, `default` and `criteria` to `Choice`, `low`, `middle` and `high` to `Score`, `labels` and `per_source` to `Entities`. A lens's `subject` (what it reads) defaults to the question and its `stages` to where that subject is first there to judge: the question at `gate`, a tool call at `tool`, the answer and the sources at `finish`. Reflect reads all but tool calls (`ai_sdk.oversight.W006` names a lens at a stage that never reads its subject).
+- A `JudgeLens` asks its `judges` ([below](#picking-the-judge)) and answers a `Flag` by default: set `answer` to `Choice`, `Score` or `Entities`. Only a judge lens has a `question`, `guidance` and `min_confidence`; each answer option belongs to the type that reads it: `yes` and `no` to `Flag`, `labels`, `default` and `criteria` to `Choice`, `low`, `middle` and `high` to `Score`, `labels` and `per_source` to `Entities`. A lens's `subject` (what it reads) defaults to the question and its `stages` to where that subject is first there to judge: the question at `gate`, a tool call at `tool`, the answer and the sources at `finish`. Reflect reads all but tool calls. A lens at a stage that never reads its subject is refused (`ai_sdk.oversight.E001`).
 
 ### Start small
 
@@ -401,7 +401,7 @@ class SupportPolicy(Policy):
     ]
 ```
 
-A picked rule is a copy, so `mode` changes it only here. A rule may only read lenses its policy has (`ai_sdk.oversight.E003`). To change a pack lens, subclass it and list the subclass:
+A picked rule is a copy, so `mode` changes it only here. A rule may only read lenses its policy has, or the policy does not resolve (`ai_sdk.oversight.E002`) and its turns are refused. To change a pack lens, subclass it and list the subclass:
 
 ```python
 from django_ai_sdk.oversight.packs import security
@@ -420,7 +420,6 @@ Pick the judges per judge lens, quickest first. No judge is the default: every j
 | `LocalClassifier` | in this process | Yes/no, label and score lenses in milliseconds, with a small open model. Free, sends nothing. |
 | `LLMJudge` | your gateway, or a server of your own (Ollama, vLLM) | Written text, harder calls, and a second opinion where a classifier is unsure. |
 | A classifier service: your `Classifier` | hosted | Yes/no, label and score lenses from a service built for them. |
-| `LexicalSupport` | in this process | Groundedness and context relevance by word overlap: a weak fallback. |
 
 Exact spans to mask (personal data by checksum, secrets by pattern) and facts about the turn (a failed tool, an exfiltration link) are not judgment calls: a pattern lens or a check lens answers them.
 
@@ -482,7 +481,7 @@ class Topic(JudgeLens):
     judges = ["local", "classifier?"]
 ```
 
-It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it steps aside and loads in the background, so the first turns after a deploy go to the next judge; call `django_ai_sdk.oversight.judges.local.load()` at startup to have it ready.
+It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `django_ai_sdk.oversight.judges.local.load()` at startup to have it ready.
 
 `"classifier?"` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define, and nothing degrades silently: `ai_sdk.oversight.W003` lists, in one warning, every lens of the policies in use left without a model judge (skipped on every turn, or answered by its patterns alone), and `ai_sdk.oversight.W008` names enforced rules that therefore never act. A lens that names an alias without `?` that nothing defines is an error (`ai_sdk.oversight.E004`).
 
@@ -493,9 +492,9 @@ A judge is a class with one method, `async answer(lens, view) -> Answer | None`.
 | Attribute | Means |
 | --- | --- |
 | `external` | Who receives turn content when it runs ("My service"). Empty: it runs in this process. An external judge's failure is `unavailable`, which reflect asks again. |
-| `timeout` | Seconds before its answer is abandoned. |
+| `timeout` | Seconds before its answer is abandoned. Every SDK judge also takes `timeout=`. |
 
-`missing()` returns why it cannot run on this deployment (a package or key absent), so it abstains and `ai_sdk.oversight.W005` says why. For the shape of an answer, use what the lens reads: a yes/no is a bool (or a probability of yes, 0.5 and up is yes), a label one of the lens's labels, a score 0 to 1, found things a list of labels with their `spans`. `confidence` is how sure, from 0 to 1, on your judge's own scale.
+`missing()` returns why it cannot run on this deployment (a package or key absent), so it abstains (return `None` from `answer` to abstain otherwise; an answer with neither a value nor an `error` is `no verdict`, and `FAIL_MODE` applies) and `ai_sdk.oversight.W005` says why. For the shape of an answer, use what the lens reads: a yes/no is a bool (or a probability of yes, 0.5 and up is yes), a label one of the lens's labels, a score 0 to 1, found things a list of labels with their `spans`. `confidence` is how sure, from 0 to 1, on your judge's own scale.
 
 Subclass `Judge` (`oversight.judges.base`), or `Classifier` for a model that answers typed questions, hosted or local. Implement `question(lens)` (your API's form of a yes/no, label or score question; `None` for a lens you cannot answer) and `async classify(state, questions, *, timeout=None) -> {name: Answer}`. The base decides what the model reads per lens subject, masks secrets first, refuses a text it would have to cut, sends one stage's questions about the same turn as one call, and rates each source for a "taken from" lens. `TypeSafe` is the worked example.
 
@@ -690,7 +689,7 @@ What deleting does not reach:
 - **Backups** taken before.
 - **Copies already made**: what was sent to remote judges, and what notifiers received.
 - **A thread deleted without its user**: its turns keep `actor_id` until the user goes.
-- **A delete whose forgetting failed**: when custody cannot forget (its store is down), the user is still deleted, the error is logged, and their turns stay as they were. `manage.py oversight_forget_actor <user id>` does it again.
+- **A delete whose forgetting failed**: the user is still deleted, the error is logged, and their turns stay as they were. `manage.py oversight_forget_actor <user id>` does it again.
 - **A thread deleted where signals do not fire** (a queryset `.update()`, raw SQL, another database) keeps its content until `manage.py oversight_forget_thread <thread id>` runs.
 
 Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encrypted.

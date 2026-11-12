@@ -16,7 +16,6 @@ import json
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.judges.base import (
     HISTORY_ITEM_CHARS,
     HISTORY_MESSAGES,
@@ -27,7 +26,6 @@ from django_ai_sdk.oversight.judges.base import (
     clip,
     masked_clip,
     too_long,
-    unavailable,
 )
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.patterns import mask_json, mask_secrets
@@ -38,8 +36,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.types import TurnContext
-
-logger = get_logger(__name__)
 
 # Seconds the first question of a stage waits for others before sending.
 BATCH_DELAY = 0.005
@@ -181,9 +177,9 @@ def batched(deadline_ms: float | None = None) -> Generator[Batch]:
 class Classifier(Judge):
     """Base for judges that classify yes/no, label, score and per-source lenses.
 
-    Subclasses implement `question` and `classify`, and set `external`. A call that
-    raises becomes an unavailable error, so FAIL_MODE applies and reflect retries.
-    See the module docstring for what is read.
+    Subclasses implement `question` and `classify`, and set `external`. When an
+    external one raises, `ask` marks it unavailable, so FAIL_MODE applies and reflect
+    retries. See the module docstring for what is read.
     """
 
     external: ClassVar[str] = "classifier"
@@ -220,21 +216,17 @@ class Classifier(Judge):
         return f"{type(self).__qualname__}:{json.dumps(described, sort_keys=True, default=str)}"
 
     async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
-        if not isinstance(lens, JudgeLens):
-            return None  # A model judge answers judge lenses only.
+        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         if lens.answer.kind == "entities" and lens.per_source:
             return await self.per_source(lens, view)
         question = self.question(lens)
-        if question is None or self.missing():
+        if question is None:
             return None
         if self.too_long(lens, view):
             return Answer(error=TOO_LONG)
-        try:
-            answers = await self._ask(self.state(lens, view), {lens.name: question})
-        except Exception as exc:
-            return self._failed(lens, exc)
+        answers = await self._ask(self.state(lens, view), {lens.name: question})
         # Asked and not answered is a failure, as with the model judge, so fail-closed holds.
-        return answers.get(lens.name) or Answer(error=NO_VERDICT, answerer=self.label())
+        return answers.get(lens.name) or Answer(error=NO_VERDICT)
 
     async def _ask(
         self, state: dict[str, Any], questions: dict[str, Any], *, alone: bool = False
@@ -254,11 +246,6 @@ class Classifier(Judge):
         for result in results:
             merged.update(result)
         return {name: merged[name] for name in questions if name in merged}
-
-    def _failed(self, lens: Lens, exc: Exception) -> Answer:
-        # Log only the type. The message may contain the response body.
-        logger.warning("{} failed on lens {}: {}", self.label(), lens.name, type(exc).__name__)
-        return Answer(error=unavailable(exc))
 
     def text(self, text: str, limit: int) -> str:
         """Mask secrets, then clip to `limit`."""
@@ -352,8 +339,6 @@ class Classifier(Judge):
         """
         if not view.output.strip():
             return Answer(value=lens.answer.parse(lens, []), confidence=1.0, rationale="No answer.")
-        if self.missing():
-            return None
         if self.too_long(lens, view):
             return Answer(error=TOO_LONG)
         labelled = self.labelled_sources(view, earlier=True)
@@ -365,18 +350,13 @@ class Classifier(Judge):
         questions = {label: q for label, q in questions.items() if q is not None}
         if labelled and not questions:
             return None
-        try:
-            if not labelled:
-                facts = self.question(STATES_FACTS)
-                if facts is None:
-                    return None
-                answers = await self._ask(state, {"facts": facts}, alone=True)
-            else:
-                answers = await self._ask(state, questions, alone=True)
-        except Exception as exc:
-            return self._failed(lens, exc)
         if not labelled:
+            facts = self.question(STATES_FACTS)
+            if facts is None:
+                return None
+            answers = await self._ask(state, {"facts": facts}, alone=True)
             return _unsourced(lens, answers.get("facts"))
+        answers = await self._ask(state, questions, alone=True)
 
         found: list[str] = []
         sure: list[float] = []
@@ -398,7 +378,7 @@ class Classifier(Judge):
             notes.append(f"{label} {title}: {yes:.2f}")
             items[source.key or label] = round(yes, 3)
         if not sure:
-            return Answer(error=NO_VERDICT, answerer=self.label())
+            return Answer(error=NO_VERDICT)
         return Answer(
             value=lens.answer.parse(lens, found),
             confidence=min(sure),
@@ -409,9 +389,12 @@ class Classifier(Judge):
 
 
 def _unsourced(lens: Lens, judged: Answer | None) -> Answer | None:
-    """With no sources, a reply that states facts is taken from none."""
+    """With no sources, a reply that states facts is taken from none.
+
+    A missing or failed answer is a failure, so fail-closed holds.
+    """
     if judged is None or judged.error or not isinstance(judged.value, int | float):
-        return None
+        return Answer(error=(judged.error if judged else "") or NO_VERDICT)
     if float(judged.value) < 0.5:
         return None
     return Answer(

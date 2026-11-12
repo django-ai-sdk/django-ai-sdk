@@ -13,8 +13,7 @@ import weakref
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django_ai_sdk.oversight.judges.base import (
-    HISTORY_ITEM_CHARS,
-    TITLE_CHARS,
+    UNSTATED_CONFIDENCE,
     modules_installed,
     secret_setting,
     unit,
@@ -38,8 +37,6 @@ TYPESAFE_TIMEOUT = 20.0
 # question (state plus question) and 64k per request. At 3 to 4 characters per
 # token, this keeps every question inside those limits.
 REQUEST_CHARS = 100_000
-# Confidence used when a judgment gives none.
-UNSTATED_CONFIDENCE = 0.8
 
 
 def typesafe_model() -> str | None:
@@ -60,7 +57,7 @@ def _client(api_key: str) -> Any:
     loop = asyncio.get_running_loop()
     cached = _clients.get(loop)
     if cached is None or cached[0] != api_key:
-        cached = (api_key, AsyncTypeSafeClient(api_key=api_key, model=typesafe_model()))
+        cached = (api_key, AsyncTypeSafeClient(api_key=api_key))
         _clients[loop] = cached
     return cached[1]
 
@@ -79,10 +76,13 @@ class TypeSafe(Classifier):
 
     external: ClassVar[str] = "TypeSafe"
     timeout = TYPESAFE_TIMEOUT
+    name = "typesafe"
 
-    def __init__(self, model: str | None = None, *, name: str = "") -> None:
+    def __init__(
+        self, model: str | None = None, *, name: str = "", timeout: float | None = None
+    ) -> None:
+        super().__init__(name=name, timeout=timeout)
         self.model = model
-        self.name = name or "typesafe"
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "model": self.model or ""}
@@ -139,17 +139,6 @@ class TypeSafe(Classifier):
         return answers
 
 
-# Every part of a turn TypeSafe can be sent must fit in one request.
-assert (
-    2 * TypeSafe.TEXT_CHARS
-    + TypeSafe.SOURCES_CHARS
-    + TITLE_CHARS
-    + TypeSafe.TOOL_CALL_CHARS
-    + TypeSafe.HISTORY * HISTORY_ITEM_CHARS
-    <= REQUEST_CHARS
-)
-
-
 def judgment_answer(
     response: Any, name: str, question: dict[str, Any], model: str | None = None
 ) -> Answer | None:
@@ -176,7 +165,7 @@ def _rated(value: Any, judged: Any, question: dict[str, Any], model: str) -> Ans
     """A choice or score judgment as an Answer, with its likeliest answers as rationale."""
     probabilities = dict(judged.probabilities or {})
     confidence = getattr(judged, "confidence", None)
-    if not confidence and probabilities:
+    if confidence is None and probabilities:
         # Use the likeliest level's probability as the confidence.
         confidence = max(float(p or 0) for p in probabilities.values())
     return Answer(

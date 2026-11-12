@@ -15,7 +15,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable
 
     # Returns what is wrong with a value, or "" when it is fine.
     Validator = Callable[[Any], str]
@@ -174,23 +174,6 @@ class AppSettings:
         ]
 
 
-def per_database[T](
-    databases: Iterable[str] | None, read: Callable[[str], T]
-) -> Iterator[tuple[str, T]]:
-    """Yield (alias, read(alias)) for each database a check is given.
-
-    A database whose tables are not migrated yet has nothing to check, so it is skipped.
-    """
-    from django.db import DatabaseError
-
-    for alias in databases or ():
-        try:
-            found = read(alias)
-        except DatabaseError:
-            continue
-        yield alias, found
-
-
 def task_backend_problem(task: Any) -> str:
     """Why `task` would not run on a worker, or "" when its backend has one.
 
@@ -220,6 +203,5 @@ __all__ = [
     "number",
     "of_type",
     "one_of",
-    "per_database",
     "task_backend_problem",
 ]

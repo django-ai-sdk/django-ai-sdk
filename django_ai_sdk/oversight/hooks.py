@@ -25,7 +25,12 @@ from django_ai_sdk.agents.tool_agent import (
     replace_messages,
     tool_results,
 )
-from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, current_guard
+from django_ai_sdk.oversight.guard import (
+    TOOL_UNAVAILABLE,
+    UNCHECKED_TEXT,
+    current_guard,
+    outlived_turn,
+)
 from django_ai_sdk.oversight.types import ToolCall
 
 if TYPE_CHECKING:
@@ -55,6 +60,8 @@ class OversightToolHook:
 
         The guard only works from async code, so a sync call cannot be checked.
         """
+        if _refused_after_turn(state):
+            return
         step = _tool_step(state)
         if step is None:
             return
@@ -66,6 +73,8 @@ class OversightToolHook:
         _answer_with_stubs(state, messages, {i: str(UNGUARDABLE) for i in range(len(calls))})
 
     async def run_async(self, state: State) -> None:
+        if _refused_after_turn(state):
+            return
         step = _tool_step(state)
         if step is None:
             return
@@ -91,6 +100,16 @@ def _tool_step(state: State) -> tuple[TurnGuard, list[ChatMessage]] | None:
     if guard is None or messages is None:
         return None
     return guard, messages
+
+
+def _refused_after_turn(state: State) -> bool:
+    """Refuse every pending call of a run that outlived its turn. True when it did."""
+    if not outlived_turn():
+        return False
+    if (messages := pending_tool_calls(state)) is not None:
+        calls = messages[-1].tool_calls
+        _answer_with_stubs(state, messages, {i: str(TOOL_UNAVAILABLE) for i in range(len(calls))})
+    return True
 
 
 def _as_tool_call(call: Any) -> ToolCall:
@@ -130,19 +149,15 @@ class OversightToolResultHook:
 
         The sync before-tool hook refuses every call, so any other result ran unchecked.
         """
-        if current_guard() is None:
-            return
-        messages = state.data.get("messages") or []
-        withheld = {
-            index: _with_result(message, result, str(UNCHECKED_TEXT))
-            for index, message, result in tool_results(messages, MASKED_META_KEY)
-            if REFUSED_META_KEY not in message.meta
-        }
-        replace_messages(state, messages, withheld)
+        if current_guard() is not None or outlived_turn():
+            _withhold_results(state)
 
     async def run_async(self, state: State) -> None:
         guard = current_guard()
         if guard is None:
+            # A run that outlived its turn: nothing can check its results.
+            if outlived_turn():
+                _withhold_results(state)
             return
         messages = state.data.get("messages") or []
         changed: dict[int, ChatMessage] = {}
@@ -158,6 +173,17 @@ class OversightToolResultHook:
             )
             changed[index] = _with_result(message, result, masked)
         replace_messages(state, messages, changed)
+
+
+def _withhold_results(state: State) -> None:
+    """Replace every unchecked result that is not a stub with UNCHECKED_TEXT."""
+    messages = state.data.get("messages") or []
+    withheld = {
+        index: _with_result(message, result, str(UNCHECKED_TEXT))
+        for index, message, result in tool_results(messages, MASKED_META_KEY)
+        if REFUSED_META_KEY not in message.meta
+    }
+    replace_messages(state, messages, withheld)
 
 
 def _with_result(message: ChatMessage, result: ToolCallResult, content: Any) -> ChatMessage:

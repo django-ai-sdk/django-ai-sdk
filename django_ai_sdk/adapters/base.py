@@ -45,12 +45,13 @@ from django_ai_sdk.events import (
 )
 from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.guard import current_guard, guarding
+from django_ai_sdk.oversight.guard import TurnGuard, guarding
 from django_ai_sdk.oversight.stream import (
     CONTENT_FILTER,
     StreamTurn,
-    report_usage,
-    restrict_agent_tools,
+    allowed_tools,
+    report_reply_usage,
+    withdrawn_citations,
 )
 from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
@@ -62,7 +63,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
-    from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -266,7 +266,7 @@ class Run:
                 generation_kwargs=schema_kwargs(self.generator, response_format),
             )
             reply = response["replies"][0]
-            _report_usage(reply)
+            report_reply_usage(reply)
             if not reply.text:
                 # no answer to validate
                 logger.warning(
@@ -279,24 +279,8 @@ class Run:
 
         response = await self.generator.run_async(messages=user_messages)
         reply = response["replies"][0]
-        _report_usage(reply)
+        report_reply_usage(reply)
         return reply.text
-
-
-def _report_usage(reply: HaystackChatMessage) -> None:
-    """Add the reply's token usage to the current turn, if any."""
-    if (guard := current_guard()) is not None:
-        report_usage(guard, [reply])
-
-
-async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
-    """Run a side task of a turn, such as suggestions or citations, on an Agent or a Run."""
-    from django_ai_sdk.agents.base import Agent as SdkAgent  # noqa: PLC0415
-
-    if isinstance(runner, SdkAgent):
-        # Oversight: off on purpose. The turn itself is judged, not its side tasks.
-        kwargs["oversight"] = False
-    return await runner.run(messages, **kwargs)
 
 
 class Stream:
@@ -320,9 +304,9 @@ class Stream:
     _grounder: Grounder | None = None
     # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
-    # Oversight: the turn's guard, handed over by Agent.as_view when a policy applies.
+    # Oversight: the turn's guard, handed over by Agent.as_view. None streams unguarded.
     guard: TurnGuard | None = None
-    # The oversight side of the turn being streamed, when there is a guard.
+    # The oversight side of the turn being streamed.
     _turn: StreamTurn | None = None
 
     # Message processing configuration
@@ -624,17 +608,6 @@ class Stream:
         events.append(ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=output))
         return events
 
-    def _withdraw_citations(self) -> list[StreamEvent]:
-        """Clear the citations shown while a now withheld answer streamed."""
-        from django_ai_sdk.artifacts.schemas import CitationsData  # noqa: PLC0415
-
-        if self._grounder:
-            self._grounder.cancel()
-        if not self._citations_call_id:
-            return []
-        empty = CitationsData().model_dump(mode="json", by_alias=True)
-        return [ToolOutputEvent(tool_call_id=self._citations_call_id, tool_output=empty)]
-
     def _tool_input(
         self,
         stream_writer: StreamWriter | None,
@@ -670,14 +643,19 @@ class Stream:
     ) -> asyncio.Task[Any]:
         """Create and schedule the pipeline or agent coroutine as a Task."""
         if self.agent_component:
-            coro = self.agent_component.run_async(
-                messages=haystack_messages,
-                streaming_callback=streaming_callback,
-                hook_context=self.hook_context,
-            )
+            coro = self._run_agent(self.agent_component, haystack_messages, streaming_callback)
         else:
             coro = self.pipeline.run_async({"messages": haystack_messages})
         return asyncio.create_task(coro)
+
+    async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
+        return await agent.run_async(
+            messages=messages,
+            streaming_callback=callback,
+            hook_context=self.hook_context,
+            # Oversight: offer only the tools the gate left.
+            tools=await allowed_tools(agent, self.guard),
+        )
 
     async def get_events(
         self,
@@ -887,17 +865,13 @@ class Stream:
 
         pipeline_task: asyncio.Task[Any] | None = None
         # Oversight: the guard learns the message id and streams the calls it refuses.
-        turn = self._turn = (
-            StreamTurn(
-                self.guard,
-                message_id,
-                stream_writer,
-                self.citation_registry,
-                self._artifact_ids,
-                queue,
-            )
-            if self.guard is not None
-            else None
+        turn = self._turn = StreamTurn(
+            self.guard or TurnGuard(),
+            message_id,
+            stream_writer,
+            self.citation_registry,
+            self._artifact_ids,
+            queue,
         )
         # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""
@@ -905,11 +879,10 @@ class Stream:
         try:
             yield MessageStartEvent(message_id=message_id)
             # Oversight: send the notices raised before the answer started.
-            for event in await turn.start() if turn else []:
+            for event in await turn.start():
                 yield event
             # take snapshots of current contextvars
-            # The task copies the context, so tools see this turn's citation registry
-            # and artifact list.
+            # The task copies the context: tools see this turn's registry and artifacts.
             registry_token = current_registry.set(self.citation_registry)
             artifacts_token = turn_artifacts.set(self._artifact_ids)
             try:
@@ -921,8 +894,6 @@ class Stream:
                     # Oversight: tools and generators started here see the guard.
                     guarding(self.guard),
                 ):
-                    if turn is not None:
-                        restrict_agent_tools(self.agent_component, turn.guard)
                     pipeline_task = self.get_task(haystack_messages, streaming_callback)
             finally:
                 current_registry.reset(registry_token)
@@ -935,11 +906,11 @@ class Stream:
                 self._grounder = Grounder(
                     registry,
                     self.citation_agent,
-                    on_block=None if turn and turn.hold else lambda: queue.put_nowait(_CITED),
+                    on_block=None if turn.hold else lambda: queue.put_nowait(_CITED),
                 )
 
             async for event in self.get_events(queue, stream_writer):
-                for sent in turn.pass_event(event) if turn else [event]:
+                for sent in turn.pass_event(event):
                     yield sent
 
             try:
@@ -956,31 +927,23 @@ class Stream:
                 turn_error = type(pipeline_error).__name__
                 if stream_writer:
                     stream_writer.add_chunk(get_error_chunk(pipeline_error, info))
-                    if turn:
-                        turn.end_early()
+                    turn.end_early()
                     self.message_result = await stream_writer.finalize("error")
                     _finalize_called = True
                 yield get_error_event(info)
                 yield StreamEndEvent()
                 return
 
-            finish_reason = None
-            withheld = False
-            # No follow-up suggestions for a masked or withheld answer.
-            changed = False
             # Oversight: check the whole answer, then pass, mask or withhold it.
-            if turn is not None:
-                events, finished = await turn.afinish(replies, self.model_name)
-                for event in events:
-                    yield event
-                withheld, changed = finished.blocked, finished.replaced
-                if withheld:
-                    finish_reason = CONTENT_FILTER
+            events, finished = await turn.afinish(replies, self.model_name)
+            for event in events:
+                yield event
+            finish_reason = CONTENT_FILTER if finished.blocked else None
 
             # the text is done
             yield TextEndEvent()
-            if withheld:
-                for event in self._withdraw_citations():
+            if finished.blocked:
+                for event in withdrawn_citations(self._grounder, self._citations_call_id):
                     yield event
             else:
                 async for event in self.get_citations_artifact(stream_writer):
@@ -990,7 +953,8 @@ class Stream:
 
             yield MessageEndEvent(finish_reason=finish_reason)
 
-            if not (withheld or changed) and (suggestion := await self.get_suggestions(messages)):
+            # No follow-up suggestions for a masked or withheld answer.
+            if not finished.replaced and (suggestion := await self.get_suggestions(messages)):
                 yield suggestion
 
         except Exception as critical_error:
@@ -1008,8 +972,7 @@ class Stream:
             turn_error = type(critical_error).__name__
             if stream_writer and not _finalize_called:
                 stream_writer.add_chunk(get_error_chunk(critical_error, info))
-                if turn:
-                    turn.end_early()
+                turn.end_early()
                 self.message_result = await stream_writer.finalize("error")
                 _finalize_called = True
             yield get_error_event(info)
@@ -1025,11 +988,12 @@ class Stream:
                     await asyncio.wait_for(asyncio.shield(pipeline_task), timeout=1.0)
                 except (TimeoutError, asyncio.CancelledError, Exception):
                     pass
-            if stream_writer and not _finalize_called:
-                if turn:
+            try:
+                if stream_writer and not _finalize_called:
                     turn.end_early()
-                self.message_result = await stream_writer.finalize("cancelled")
-            if turn is not None:
+                    self.message_result = await stream_writer.finalize("cancelled")
+            finally:
+                # Close the turn even when storing failed, so its masking is cancelled.
                 await turn.aclose(turn_error)
 
         yield StreamEndEvent()

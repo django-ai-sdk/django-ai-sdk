@@ -34,7 +34,7 @@ def check_oversight(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 
 
 def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """Production-only checks: plain content, unmeetable deadlines, no task worker."""
+    """Production-only checks: unmasked content, unmeetable deadlines, no task worker."""
     from django_ai_sdk.oversight.checks.policies import deadline_checks
     from django_ai_sdk.oversight.checks.settings import capture_checks, task_backend_checks
     from django_ai_sdk.oversight.conf import is_enabled, setting

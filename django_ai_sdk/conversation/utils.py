@@ -44,14 +44,15 @@ async def generate_thread_title(
                 messages=user_messages, system_prompt=system_prompt, response_format=None
             )
         else:
-            # Oversight: off on purpose. The chat turn is judged, not its title.
-            title = await agent.run(
-                messages=user_messages,
+            from django_ai_sdk.oversight.stream import run_side_task  # noqa: PLC0415
+
+            title = await run_side_task(
+                agent,
+                user_messages,
                 system_prompt=system_prompt,
                 thread_id=thread_id,
                 user=user,
                 response_format=None,
-                oversight=False,
             )
     except Exception:
         logger.warning("Thread title generation failed", exc_info=True)

@@ -961,13 +961,14 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             hooks=default_hooks(self),
         )
         from django_ai_sdk.oversight.guard import current_guard
-        from django_ai_sdk.oversight.stream import observe_replies, restrict_agent_tools
+        from django_ai_sdk.oversight.stream import allowed_tools, observe_replies
 
-        # Oversight: remove the tools the gate took away; the tool hooks report the calls.
+        # Oversight: offer only the tools the gate left; the tool hooks report the calls.
         guard = current_guard()
-        if guard is not None:
-            restrict_agent_tools(haystack_agent, guard)
-        result = await haystack_agent.run_async(messages=adapter.get_messages(messages))
+        result = await haystack_agent.run_async(
+            messages=adapter.get_messages(messages),
+            tools=await allowed_tools(haystack_agent, guard),
+        )
         replies = result.get("messages", [])
         if guard is not None:
             observe_replies(guard, replies)
@@ -1319,16 +1320,16 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                         await registry.seed_from_thread(thread_id)
                         registry.seed(await self.get_citation_sources(thread_id, user))
                         adapter.citation_agent = get_citation_agent(self)
-            if guard.active:
-                from django_ai_sdk.adapters.base import Stream
+            from django_ai_sdk.adapters.base import Stream
 
-                if isinstance(adapter, Stream):
-                    # Oversight: hand the turn over. The Stream guards, finishes and
-                    # closes it.
-                    adapter.guard = guard
-                else:
-                    # Other adapters cannot report the rest, so close after the gate.
-                    await guard.close()
+            if isinstance(adapter, Stream):
+                # Oversight: hand the turn over. The Stream guards, finishes and closes it.
+                adapter.guard = guard
+            elif guard.active:
+                from django_ai_sdk.oversight.stream import close_unguardable
+
+                # Other adapters cannot report tool calls or the answer to the guard.
+                adapter = await close_unguardable(guard) or adapter
             logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
             return adapter
 

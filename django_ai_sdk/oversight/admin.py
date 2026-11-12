@@ -69,3 +69,5 @@ class ReviewItemAdmin(ScopedAdmin):
     # The reviewer's note is content, which the admin does not show.
     list_display = ("created_at", "queue", "rule", "status", "agree")
     list_filter = ("queue", "status")
+    # The note is content, and who closed it is kept out like who asked.
+    exclude = ("note", "resolved_by_id")

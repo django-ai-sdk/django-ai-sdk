@@ -9,6 +9,7 @@ alias optional: a lens skips it when the deployment did not define it.
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -44,6 +45,10 @@ TOO_LONG = "too long"
 # Error for a judge that was asked and returned nothing usable. FAIL_MODE decides.
 NO_VERDICT = "no verdict"
 
+# Confidence for a judgment that states none. Below the default min_confidence,
+# so a made-up confidence never ends the chain.
+UNSTATED_CONFIDENCE = 0.5
+
 # Limits every judge family shares: earlier messages shown, characters per earlier
 # message, and characters of a source title or tool name.
 HISTORY_MESSAGES = 6
@@ -76,6 +81,12 @@ class Judge(ABC):
     timeout: float = DEFAULT_TIMEOUT
     name: str = ""
 
+    def __init__(self, *, name: str = "", timeout: float | None = None) -> None:
+        if name:
+            self.name = name
+        if timeout is not None:
+            self.timeout = timeout
+
     @abstractmethod
     async def answer(self, lens: Lens, view: TurnContext) -> Answer | None: ...
 
@@ -83,7 +94,7 @@ class Judge(ABC):
         return self.name or type(self).__name__.lower()
 
     def missing(self) -> str:
-        """Why this judge can't run here, or "" when it can. It abstains when set."""
+        """Why this judge can't run here, or "" when it can. `ask` abstains when set."""
         return ""
 
     def describe(self) -> dict[str, Any]:
@@ -97,14 +108,17 @@ async def ask(judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext
     """Ask one judge with a timeout. Any failure comes back as an Answer with `error`.
 
     `judge` may be a spec for `resolve`. A spec that fails to build is an error answer,
-    so the lens keeps its other answers. An external judge that raises is marked
-    unavailable. A task cancelled from outside re-raises; one that cancels itself is
-    an error answer.
+    so the lens keeps its other answers. A judge whose `missing()` is set abstains.
+    An external judge that raises is marked unavailable. An answer without a value
+    or an error is NO_VERDICT, so FAIL_MODE applies; return None to abstain. A task
+    cancelled from outside re-raises; one that cancels itself is an error answer.
     """
     started = time.perf_counter()
     label = spec_label(judge)
     try:
         judge = resolve(judge)
+        if judge.missing():
+            return None
     except Exception as exc:
         logger.warning("Judge {} for lens {} does not build: {}", label, lens.name, exc)
         return Answer(answerer=label, error=type(exc).__name__)
@@ -149,6 +163,8 @@ async def ask(judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext
             answer = answer.model_copy(
                 update={"value": None, "error": f"unparsable: {type(exc).__name__}"}
             )
+    elif answer.value is None and not answer.error:
+        answer = answer.model_copy(update={"error": NO_VERDICT})
     answer.answerer = answer.answerer or judge.label()
     if answer.latency_ms is None:
         answer.latency_ms = _ms(started)
@@ -267,21 +283,22 @@ def alias_defined(alias: str) -> bool:
     return alias in alias_table()
 
 
-def _build_alias(
-    alias: str, aliases: Mapping[str, Any], seen: frozenset[str] = frozenset()
-) -> Judge:
-    if alias in seen:
-        raise ImproperlyConfigured(f"Judge alias {alias!r} names itself")
-    if alias not in aliases:
-        raise ImproperlyConfigured(
-            f"No judge alias {alias!r}; add it to AI_SDK_OVERSIGHT['JUDGES']"
-        )
-    target = aliases[alias]
-    if isinstance(target, str):
-        return _build_alias(target, aliases, seen | {alias})
-    judge = resolve(target)
+def _build_alias(alias: str, aliases: Mapping[str, Any]) -> Judge:
+    target: Any = alias
+    seen: set[str] = set()
+    while isinstance(target, str):
+        if target in seen:
+            raise ImproperlyConfigured(f"Judge alias {target!r} names itself")
+        if target not in aliases:
+            raise ImproperlyConfigured(
+                f"No judge alias {target!r}; add it to AI_SDK_OVERSIGHT['JUDGES']"
+            )
+        seen.add(target)
+        target = aliases[target]
+    # Copy a shared instance, so renaming it doesn't rename it for other aliases.
+    judge = copy.copy(target) if isinstance(target, Judge) else resolve(target)
     if not (isinstance(target, dict) and target.get("name")):
-        # Name it after the alias lenses use. Each answer records the model anyway.
+        # Name it after the alias the lens used. Each answer records the model anyway.
         judge.name = alias
     return judge
 
@@ -305,8 +322,10 @@ __all__ = [
     "HISTORY_ITEM_CHARS",
     "HISTORY_MESSAGES",
     "TITLE_CHARS",
+    "NO_VERDICT",
     "TOO_LONG",
     "UNAVAILABLE",
+    "UNSTATED_CONFIDENCE",
     "Judge",
     "alias_defined",
     "alias_of",

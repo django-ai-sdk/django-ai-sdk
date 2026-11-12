@@ -60,11 +60,10 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     mark INTERRUPTED. At close the row is updated (or inserted if missing), the
     remaining answers and matches are added, and the content is written.
 
-    A forgotten scope (`oversight.custody`) stores no new content and no judge text.
+    A turn forgotten while open (`content.forget_turns`) stores no content and no judge text.
     """
     from django.db import transaction
 
-    from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
     policy = guard.resolved
@@ -83,33 +82,28 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     texts = without_nul(texts)
     added = answer_rows[saved_answered:]
     matched = guard.matched[saved_matched:]
-    scope = custody.scope_for(guard.thread_id, guard.id)
     columns = _turn_columns(guard, closing=closing, created=created)
 
     with transaction.atomic():
+        # Lock first: a forget then waits for this close, or has flagged the row. The
+        # row is read here, since reflect may have changed labels or severity since.
+        turn = (
+            Turn.objects.select_for_update().filter(pk=guard.id).first() if guard._written else None
+        )
         row = None
-        if content is not None:
+        if content is not None and not (turn is not None and turn.content_forgotten):
             # Judge text is stored only inside the content, never on its own.
-            stored = None
-            try:
-                stored = custody.store(scope, {**content, "texts": texts} if texts else content)
-            except custody.Forgotten:
-                pass
-            if stored is not None:
-                row = TurnContent.objects.create(
-                    scope=scope,
-                    stored=stored,
-                    capture=str(policy.capture),
-                    expires_at=now + timedelta(days=policy.retention["content"]),
-                )
+            row = TurnContent.objects.create(
+                stored={**content, "texts": texts} if texts else content,
+                capture=str(policy.capture),
+                expires_at=now + timedelta(days=policy.retention["content"]),
+            )
         if closing:
             columns["content"] = row
-        # The actor is written once, so a forget while the turn was open stays done.
-        updated = {key: value for key, value in columns.items() if key != "actor_id"}
-        written = guard._written and Turn.objects.filter(pk=guard.id).update(**updated)
-        if written:
-            # Lock and re-read, since reflect may have changed labels or severity since.
-            turn = Turn.objects.select_for_update().get(pk=guard.id)
+        if turn is not None:
+            # The actor is written once, so a forget while the turn was open stays done.
+            updated = {key: value for key, value in columns.items() if key != "actor_id"}
+            Turn.objects.filter(pk=guard.id).update(**updated)
         else:
             turn = Turn.objects.create(id=guard.id, created_at=created, **columns)
         _record_judgments(

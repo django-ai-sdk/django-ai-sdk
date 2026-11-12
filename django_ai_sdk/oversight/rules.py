@@ -67,7 +67,7 @@ class Rule:
     def from_dict(cls, node: dict[str, Any]) -> Rule:
         return cls(
             node["name"],
-            when=condition_from_dict(node["when"]),
+            when=node["when"],
             then=[action_from_dict(a) for a in node.get("then") or []],
             mode=node.get("mode", Mode.REPORT),
             message=node.get("message", ""),

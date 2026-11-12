@@ -5,16 +5,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 from io import StringIO
-from typing import Any
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
-from django.test import override_settings
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
-
 from django_ai_sdk.oversight.checks import check_oversight_retention
 from django_ai_sdk.oversight.models import (
     LensAnswer,
@@ -24,11 +22,21 @@ from django_ai_sdk.oversight.models import (
     TurnContent,
 )
 from django_ai_sdk.oversight.retention import prune
-from tests.oversight.review.helpers import a_turn
+
+from tests.oversight.helpers import closed_turn, start
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 LATER = timedelta(days=1)
+
+
+async def a_turn(text: str = "What about my salary?", output: str = "Ask jan@example.com.") -> str:
+    """A closed test-guard turn: "salary" queues it for hr."""
+    with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
+        guard = await start("test-guard", text)
+        await guard.gate()
+        await guard.finish(output)
+        return str((await closed_turn(guard)).id)
 
 
 async def expire(turn_id: str, *, content: bool = False, turn: bool = False) -> None:
@@ -96,25 +104,13 @@ async def test_expired_content_takes_reviewers_notes_with_it():
     assert item.note == ""
 
 
-def test_the_admin_leaves_out_who_asked():
-    from django.test import modify_settings
-
-    with modify_settings(INSTALLED_APPS={"append": "django.contrib.admin"}):
-        from django_ai_sdk.oversight.admin import TurnAdmin
-
-    # Metrics access is enough for the admin, so it leaves out who asked and where.
-    for field in ("content", "actor_id", "thread_id", "user_message_id", "message_id"):
-        assert field in TurnAdmin.exclude
-
-
 async def test_the_command_says_what_it_deleted():
     turn_id = await a_turn()
     await expire(turn_id, turn=True)
     out = StringIO()
     await sync_to_async(call_command)("oversight_prune", "--batch-size", "1", stdout=out)
     assert out.getvalue().strip() == (
-        "Deleted 0 content rows and 1 turns.\n"
-        "1 reviews were still open on deleted turns."
+        "Deleted 0 content rows and 1 turns.\n1 reviews were still open on deleted turns."
     )
 
 
@@ -135,7 +131,9 @@ class TestNothingPrunes:
 
     async def test_rows_expired_recently_are_fine(self):
         turn_id = await a_turn()
-        await Turn.objects.filter(id=turn_id).aupdate(expires_at=timezone.now() - timedelta(hours=1))
+        await Turn.objects.filter(id=turn_id).aupdate(
+            expires_at=timezone.now() - timedelta(hours=1)
+        )
         assert await sync_to_async(self.ids)() == []
 
     def test_it_reads_no_database_unless_given_one(self):

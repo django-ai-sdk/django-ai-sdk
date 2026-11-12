@@ -132,12 +132,13 @@ class TestFailModeAtEachStage:
             [gate_flag(answerer)],
             [Rule("r", when=L("g").is_true, then=action, mode=ENFORCE)],
         )
-        gate = await (await start(name)).gate()
-        assert gate.blocked if kind == "block" else gate.restrict == []
+        refusing = await start(name)
+        gate = await refusing.gate()
+        assert gate.blocked if kind == "block" else refusing.restrict == []
         with opened():
             guard = await start(name)
             passed = await guard.gate()
-        assert not passed.blocked and passed.restrict is None
+        assert not passed.blocked and guard.restrict is None
         row = await LensAnswer.objects.aget(turn=await closed_turn(guard), lens="g")
         assert row.error
 

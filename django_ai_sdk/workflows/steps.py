@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -199,7 +198,7 @@ class AgentStep(Step):
                 **response_format,
             )
         except Blocked as blocked:
-            done = "refused" if blocked.stage == Stage.GATE else "withheld"
+            done = "refused" if blocked.stage == "gate" else "withheld"
             return StepOutcome(status="failed", detail=f"{done} by oversight: {blocked.message}")
         if result is None:
             return StepOutcome(status="failed", detail="the agent returned nothing")

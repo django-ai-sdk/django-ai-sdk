@@ -3,7 +3,7 @@
 Anything that can quote the turn is stored with its content. That includes
 judges' reasons, names a judge wrote itself for an `Entities` lens, per-item scores keyed
 by source URL. Capture decides what is kept, and
-forgetting the thread destroys it (`oversight.custody`).
+forgetting the turn (`forget_turns`) or its expiry destroys it.
 """
 
 from __future__ import annotations
@@ -29,10 +29,12 @@ from django_ai_sdk.utils import map_strings
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
+    from django.db.models import QuerySet
+
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.guard.asking import Answered
     from django_ai_sdk.oversight.lenses import Lens
-    from django_ai_sdk.oversight.models import Turn
+    from django_ai_sdk.oversight.models import Turn, TurnContent
 
 
 # Content sections that are added after close.
@@ -258,8 +260,13 @@ def without_nul(value: Any) -> Any:
 
 
 def load_content(turn: Turn) -> dict[str, Any] | None:
-    """Load the turn's content. None when it has none."""
-    return turn.content.stored if turn.content is not None else None
+    """Load the turn's content. None when it has none or it expired (prune deletes it later)."""
+    row = turn.content
+    return None if row is None or _expired(row) else row.stored
+
+
+def _expired(row: TurnContent) -> bool:
+    return row.expires_at is not None and row.expires_at <= timezone.now()
 
 
 def load_contents(turns: list[Turn]) -> dict[Any, dict[str, Any] | None]:
@@ -280,19 +287,18 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
     """Add answer texts to the turn's content.
 
     The row is locked so two writers at once both land.
-    Returns False without writing when the content is gone, cannot be read, or
-    was forgotten since.
+    Returns False without writing when the content is gone, expired, or was
+    forgotten since.
     """
     from django.db import transaction
 
-    from django_ai_sdk.oversight import custody
     from django_ai_sdk.oversight.models import TurnContent
 
     if turn.content_id is None:
         return False
     with transaction.atomic():
         row = TurnContent.objects.select_for_update().filter(pk=turn.content_id).first()
-        content = row.stored if row is not None else None
+        content = row.stored if row is not None and not _expired(row) else None
         if row is None or content is None:
             return False
         content = {
@@ -300,12 +306,36 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
             "texts": {**(content.get("texts") or {}), **(texts or {})},
         }
         content = {k: v for k, v in content.items() if v != {} or k not in SIDE_SECTIONS}
-        try:
-            stored = custody.store(row.scope, content)
-        except custody.Forgotten:
-            return False
-        TurnContent.objects.filter(pk=row.pk).update(stored=stored)
+        TurnContent.objects.filter(pk=row.pk).update(stored=content)
     return True
+
+
+def forget_thread(thread_id: Any) -> None:
+    """Forget the content of every turn in the thread (`forget_turns`)."""
+    from django_ai_sdk.oversight.models import Turn
+
+    forget_turns(Turn.objects.filter(thread_id=str(thread_id)))
+
+
+def forget_turns(turns: QuerySet[Turn]) -> None:
+    """Delete the turns' content and blank reviewers' notes on them. The turns stay.
+
+    Run it in a transaction. The turns are locked first: a turn closing now either
+    waits and then finds itself flagged `content_forgotten`, or has stored its
+    content already and it is deleted here.
+    """
+    from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
+
+    locked = list(
+        turns.select_for_update().order_by("pk").values_list("pk", "content_id", "status")
+    )
+    ids = [pk for pk, _, _ in locked]
+    # SET_NULL clears the turns' content link.
+    TurnContent.objects.filter(pk__in=[c for _, c, _ in locked if c is not None]).delete()
+    ReviewItem.objects.filter(turn_id__in=ids).exclude(note="").update(note="")
+    open_ids = [pk for pk, _, status in locked if status == Turn.Status.OPEN]
+    if open_ids:
+        Turn.objects.filter(pk__in=open_ids).update(content_forgotten=True)
 
 
 def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext:
@@ -336,6 +366,8 @@ __all__ = [
     "as_source",
     "capture_content",
     "context_from_turn",
+    "forget_thread",
+    "forget_turns",
     "found_literals",
     "load_content",
     "load_contents",
