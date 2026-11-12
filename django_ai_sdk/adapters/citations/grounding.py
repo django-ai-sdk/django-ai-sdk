@@ -314,7 +314,7 @@ async def cite(answer: str, registry: SourceRegistry, agent: Agent | Run) -> lis
     logger.info("Citing a block with {} of {} sources", len(sources), len(registry))
     if not sources:
         return []
-    from django_ai_sdk.adapters.base import run_side_task  # noqa: PLC0415
+    from django_ai_sdk.oversight.stream import run_side_task  # noqa: PLC0415
 
     asked = [ChatMessage(role="user", content=render(answer, sources))]
     reply = await run_side_task(agent, asked, system_prompt=CITATION_PROMPT, response_format=None)

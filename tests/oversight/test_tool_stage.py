@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -97,8 +98,8 @@ class TestTools:
     async def test_the_gate_can_take_every_tool_away(self):
         agent = make_agent(["ok"], Storage())
         guard = await TurnGuard.start(agent, channel="test", input="something sneaky")
-        gate = await guard.gate()
-        assert gate.restrict == []
+        await guard.gate()
+        assert guard.restrict == []
         reason = await guard.tool_call(ToolCall(name="anything"))
         assert reason
 
@@ -285,3 +286,24 @@ class TestToolsTakenAwayInChat:
         assert ran == []
         await chat(make_agent([call, "done"], Storage(), tools=[tool]), "look up Jan")
         assert ran == ["Jan"]
+
+    async def test_tools_are_taken_away_per_run_and_the_agent_keeps_them(self):
+        from haystack.components.agents import Agent as HaystackAgent
+        from haystack.components.generators.chat import MockChatGenerator
+        from haystack.tools import Toolset
+
+        from django_ai_sdk.oversight.stream import allowed_tools
+
+        from tests.oversight.helpers import lookup_tool
+
+        lookup, _ = lookup_tool()
+        send = dataclasses.replace(lookup, name="send")
+        tools = [lookup, Toolset([send])]
+        agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), tools=tools)
+        guard = await start("test-guard")
+        assert await allowed_tools(agent, guard) is None
+        guard.restrict = ["send"]
+        assert await allowed_tools(agent, guard) == ["lookup"]
+        guard.restrict = []
+        assert await allowed_tools(agent, guard) == []
+        assert agent.tools == tools

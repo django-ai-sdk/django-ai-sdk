@@ -368,12 +368,11 @@ class TestRebase:
         assert rebased.sources[0].cited is False
 
     def test_a_withheld_answer_clears_the_citations_shown(self):
-        stream = Stream.__new__(Stream)
-        stream._grounder, stream._citations_call_id = None, "artifact-1"
-        (event,) = stream._withdraw_citations()
+        from django_ai_sdk.oversight.stream import withdrawn_citations
+
+        (event,) = withdrawn_citations(None, "artifact-1")
         assert (event.tool_call_id, event.tool_output["citations"]) == ("artifact-1", [])
-        stream._citations_call_id = None
-        assert stream._withdraw_citations() == []
+        assert withdrawn_citations(None, None) == []
 
 
 @pytest.mark.django_db

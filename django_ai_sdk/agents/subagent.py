@@ -344,8 +344,11 @@ class SubagentStreamFilter:
                 input=task or "",
             ) as child:
                 question = await child.gate()
+                # A child turn judged only the task, so the subagent reads only the
+                # task, not the coordinator's conversation and tool results.
+                context = [] if child.guard is not None else messages
                 result = await self._delegate(
-                    messages, streaming_callback, question if task is not None else None, **kwargs
+                    context, streaming_callback, question if task is not None else None, **kwargs
                 )
                 response = subagent_response(result.get("messages"))
                 answer = await child.finish(response)

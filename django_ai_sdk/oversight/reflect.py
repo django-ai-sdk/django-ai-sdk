@@ -52,6 +52,9 @@ REFLECT_LEASE = timedelta(minutes=10)
 # Claims allowed per turn before it is marked failed.
 REFLECT_ATTEMPTS = 3
 
+# A rule's mask on the stored answer: the match, and its (spans, template).
+MaskGroup = tuple[Matched, tuple[list[Any], str]]
+
 
 def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
     """Return the latest usable answer per lens."""
@@ -96,9 +99,9 @@ async def areflect(turn_id: str) -> int:
             # The policy did not load. Give the claim back so a later run can try.
             await arelease_reflect(turn_id, lease)
             return 0
-        policy, view, answered, matched, found = judged
+        policy, view, answered, matched, found, masks = judged
         kept = await sync_to_async(_commit_reflection)(
-            turn, policy, view, answered, matched, found, lease=lease
+            turn, policy, view, answered, matched, found, masks, lease=lease
         )
     except BaseException:
         # Nothing was written. Give the claim back so a retry can reflect.
@@ -169,6 +172,7 @@ def _commit_reflection(
     answered: list[Answered],
     matched: list[Matched],
     found: dict[str, str],
+    masks: list[MaskGroup],
     *,
     lease: Any,
 ) -> bool:
@@ -191,7 +195,7 @@ def _commit_reflection(
             logger.warning("Reflect lost its lease on turn {}; another run reflects it", turn.id)
             return False
         save_answers(turn, policy, answered, matched, view=view, found=found)
-        events = _after_effects(turn, view, answered, matched)
+        events = _after_effects(turn, view, matched, masks)
         Turn.objects.filter(pk=turn.pk).update(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
@@ -225,7 +229,12 @@ def mark_reflect_failed(turns: QuerySet) -> int:
 
 async def _judge(
     turn: Turn,
-) -> tuple[ResolvedPolicy, TurnContext, list[Answered], list[Matched], dict[str, str]] | None:
+) -> (
+    tuple[
+        ResolvedPolicy, TurnContext, list[Answered], list[Matched], dict[str, str], list[MaskGroup]
+    ]
+    | None
+):
     """Run reflect's lenses and rules on `turn`. None when its policy does not load."""
     from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
     from django_ai_sdk.oversight.resolve import aget_policy
@@ -262,7 +271,7 @@ async def _judge(
     done = {
         rule async for rule in RuleMatch.objects.filter(turn=turn).values_list("rule", flat=True)
     }
-    answered, matched = await ajudge_turn(
+    answered, matched, masks = await ajudge_turn(
         policy,
         view,
         retry,
@@ -271,7 +280,7 @@ async def _judge(
         content=content,
         has_text=has_text,
     )
-    return policy, view, answered, matched, found
+    return policy, view, answered, matched, found, masks
 
 
 async def ajudge_turn(
@@ -284,10 +293,10 @@ async def ajudge_turn(
     content: dict[str, Any] | None = None,
     has_text: bool = True,
     sample: bool = True,
-) -> tuple[list[Answered], list[Matched]]:
+) -> tuple[list[Answered], list[Matched], list[MaskGroup]]:
     """Ask reflect's lenses on `view` and match its rules. The dry run calls this too.
 
-    `retry` names the inline lenses to ask again, `done` the rules that already
+    Also returns the masks for the stored answer (see `_reflect_masks`). `retry` names the inline lenses to ask again, `done` the rules that already
     matched. `outcome` is the turn's outcome so far. `sample=False` asks every
     reflect lens, ignoring sample rates.
     """
@@ -307,8 +316,7 @@ async def ajudge_turn(
     # Rules treat a failed answer as unknown, not as "no".
     failed = {name for name, answer in view.answers.items() if answer.error}
     matched = evaluate_rules(policy, view.answers, Stage.REFLECT, done=done, errored=failed)
-    _reflect_masks(view, answered, matched)
-    return answered, matched
+    return answered, matched, _reflect_masks(view, answered, matched)
 
 
 def reflect_lenses(
@@ -341,7 +349,7 @@ def reflect_lenses(
 
 def _reflect_masks(
     view: TurnContext, answered: list[Answered], matched: list[Matched]
-) -> list[tuple[Matched, tuple[list[Any], str]]]:
+) -> list[MaskGroup]:
     """Return (match, group) for each mask in the stored answer. Drop masks that change nothing.
 
     A mask that cannot locate what it found masks the whole answer, where finish
@@ -399,7 +407,7 @@ def _judgeable(
 
 
 def _after_effects(
-    turn: Turn, view: TurnContext, answered: list[Answered], matched: list[Matched]
+    turn: Turn, view: TurnContext, matched: list[Matched], groups: list[MaskGroup]
 ) -> list[tuple[dict[str, Any], list[str]]]:
     """Apply what reflect's rules can still do: mask the stored answer and notify the user.
 
@@ -409,7 +417,6 @@ def _after_effects(
     from django_ai_sdk.oversight.guard import rule_notes
     from django_ai_sdk.oversight.notifiers import match_events
 
-    groups = _reflect_masks(view, answered, matched)
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
     events = match_events(

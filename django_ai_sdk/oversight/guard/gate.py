@@ -44,8 +44,6 @@ class GateResult:
     # The question as the model should see it, masked if a rule says so.
     input: str = ""
     masked: bool = False
-    # Tool names taken away. None keeps every tool, [] removes all.
-    restrict: list[str] | None = None
     # The `data-oversight` payload for the client, if there is anything to say.
     notice: dict[str, Any] | None = None
 
@@ -94,7 +92,7 @@ class GateStage(Masking, Notices):
         self.matched.extend(matched)
         masks = self._masks(matched, Subject.INPUT)
         # Tools taken away by gate_history stay taken away.
-        block, result.restrict = acted_on(matched, self.restrict)
+        block, self.restrict = acted_on(matched, self.restrict)
         if block is not None:
             result.blocked = True
             result.message = block
@@ -103,7 +101,6 @@ class GateStage(Masking, Notices):
             result.masked = masked != self.context.input
             self.context.input = masked
         result.input = self.context.input
-        self.restrict = result.restrict
         result.notice = self._notice(Stage.GATE, matched, result.blocked, result.message)
         return result
 
@@ -137,12 +134,13 @@ class GateStage(Masking, Notices):
         result = GateResult(input=self.context.input)
         if not self.active:
             return result
+        # Set again below once judging has masked it.
+        self.set_history(messages)
         if self._unloaded:
             return self._refuse_gate(result, str(Block.DEFAULT_MESSAGE))
         lenses = self.resolved.active_lenses(Stage.GATE, Subject.INPUT)
         items = _history_items(messages, history=history) if lenses else []
         if not items:
-            self.set_history(messages)
             return result
         unread, items = items[:-MAX_HISTORY_JUDGED], items[-MAX_HISTORY_JUDGED:]
         limit = setting("MAX_INPUT_CHARS")
@@ -180,7 +178,6 @@ class GateStage(Masking, Notices):
         )
         self.set_history(messages)
         if result.blocked:
-            result.restrict = self.restrict
             result.notice = self._notice(Stage.GATE, recorded, True, result.message)
             # gate() will not run after a refusal, so write the turn ahead here.
             await self.write_ahead()

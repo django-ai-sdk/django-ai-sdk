@@ -264,6 +264,14 @@ class TestOverriddenRun:
         agent, _ = self.agent([])
         assert await agent.run([ChatMessage(role="user", content="/whois")]) == "Ask [EMAIL]."
 
+    async def test_a_tuple_of_messages_cannot_skip_the_gate(self):
+        ran: list[str] = []
+        agent, _ = self.agent(ran)
+        with pytest.raises(Blocked):
+            await agent.run((ChatMessage(role="user", content=f"/whois {INJECTION}"),))
+        assert ran == []
+        assert await agent.run(({"role": "user", "content": "/whois"},)) == "Ask [EMAIL]."
+
     async def test_the_base_run_inside_joins_one_turn(self):
         ran: list[str] = []
         agent, generator = self.agent(ran)
