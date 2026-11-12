@@ -6,8 +6,9 @@ A policy that is off registers with its parents and options only.
 
 A definition that no longer validates (for example, a parent was removed in a deploy)
 is unregistered, so turns that name it are refused instead of running without it. If
-the database cannot be read, the registered policies stay. Any change rechecks every
-authored policy, because a changed parent can break its children.
+the database cannot be read, the registered policies stay, for as long as it cannot be
+read. Any change rechecks every authored policy, because a changed parent can break its
+children.
 """
 
 from __future__ import annotations
@@ -32,8 +33,9 @@ class AuthoredPolicyLoader:
     """Policy loader for authored policies. One instance per process."""
 
     def __init__(self) -> None:
-        # (row count, newest change) from the last read. Unchanged means nothing to do.
-        self.stamp: tuple[int, Any] | None = None
+        # name -> updated_at of every row at the last read. Unchanged means nothing to do.
+        # Each row is compared, so a save that commits late or with a skewed clock counts.
+        self.stamp: dict[str, Any] | None = None
         # name -> when the loaded definition was saved
         self.loaded: dict[str, Any] = {}
         # name -> why it failed to load
@@ -44,12 +46,9 @@ class AuthoredPolicyLoader:
         await sync_to_async(self._load)()
 
     def _load(self) -> None:
-        from django.db.models import Count, Max
-
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
-        stamp_row = AuthoredPolicy.objects.aggregate(count=Count("id"), newest=Max("updated_at"))
-        stamp = (stamp_row["count"], stamp_row["newest"])
+        stamp = dict(AuthoredPolicy.objects.values_list("name", "updated_at"))
         if stamp == self.stamp:
             return
         # Register parents before children so a child can find its authored parent.
@@ -83,6 +82,10 @@ class AuthoredPolicyLoader:
             logger.error("Authored policy {!r} does not load: {}", name, exc)
             self._unregister(name, keep_broken=True)
             return
+        # Replace the old class explicitly: the registry keeps the first of two classes
+        # with one name.
+        if is_authored(get_policy_class(name)):
+            unregister_policy(name)
         register_policy(cls)
         self.loaded[name] = row.updated_at
         self.broken.pop(name, None)

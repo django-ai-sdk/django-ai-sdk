@@ -60,7 +60,7 @@ class Policy:
     # Days to keep this policy's turns, e.g. {"content": 90, "metadata": 730}.
     # Missing keys come from the RETENTION setting.
     retention: dict[str, int] = {}  # noqa: RUF012
-    # Where this policy's values come from: "code" or "pack:<name>".
+    # Where this policy's values come from: "code", "pack:<name>" or "authored".
     origin: str = "code"
 
 
@@ -116,7 +116,7 @@ class ResolvedPolicy:
     # The policy that declared each lens, rule and policy value, e.g. "lens:pii" -> "security",
     # or "policy.capture" -> "settings" when the CAPTURE setting capped it.
     sources: dict[str, str] = field(default_factory=dict)
-    # "code" or "pack:<name>".
+    # "code", "pack:<name>" or "authored".
     origin: str = "code"
     extends: list[str] = field(default_factory=list)
 

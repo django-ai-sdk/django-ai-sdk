@@ -94,10 +94,11 @@ await AuthoringService.save_policy("refunds", PolicyIn(**definition), user=reque
 An authored policy is checked as code's are (every lens has what answers it, every rule acts, a Mask points at an Entities lens, no cycle), and on top of that it may not:
 
 - **take a code policy's name**: code wins, and the save is refused;
-- **change an inherited lens or rule**: after the build, every lens and rule of every parent must be exactly as that parent builds it, so neither a lens or rule of the same name, nor a preset that takes its default name (`pii`, `secrets`, …), nor a later parent can replace one. A lens or rule declared in code stays code's, mode included;
+- **change an inherited lens or rule**: a lens or rule of its own may not take a name it inherits, a preset's default name (`pii`, `secrets`, …) included, and after the build every lens and rule of every parent must be exactly as that parent builds it, so a later parent cannot replace an earlier one's either. A lens or rule declared in code stays code's, mode included;
+- **keep more than a parent**: a higher `capture`, a longer `retention` (compared with what each parent builds, the `RETENTION` setting included for a kind it does not set), or `fail_mode: "open"` over a parent that fails closed;
 - **configure a lens beyond a safe set**: inline only keywords (a pattern lens, or a `Patterns` judge, of whole words) and the built-in lenses `pii` (by kind), `secrets`, `refusal`, `length` and `language`, with plain arguments; a check lens names validators the developers registered (`register_validator`). No regex, no code, no import path: a pattern an author writes would run on every turn and could backtrack for seconds. A model judge, a classifier or a regex comes as an alias in `AI_SDK_OVERSIGHT["JUDGES"]`, which the deployment sets;
 - **leave out what `MUST_EXTEND` names**;
-- **read a lens it does not have**, or **grow beyond** 50 lenses, 100 rules or 256 KiB.
+- **read a lens it does not have**, or **grow beyond** 20 parents, 50 lenses, 100 rules or 256 KiB.
 
 ## Turning things on and off
 
@@ -107,9 +108,9 @@ Toggles change only what the policy itself declares:
 - **a lens of its own** is turned off (`enabled: false`) or on;
 - **the whole policy** is turned off (`active: false`): its own lenses and rules stop, and **the policies it extends keep running**. An agent that names it then runs under its parents alone.
 
-A rule or lens it inherits cannot be toggled: 400. Each toggle is checked like a save, and applies like one.
+A rule or lens it inherits cannot be toggled: 400. Each toggle is checked like a save, and applies like one. A save or toggle locks the row, so concurrent changes apply one after the other, and is refused (400) when an authored policy that extends it, at any depth, would no longer load.
 
-Deleting the policy is different from turning it off: its name is gone, so turns that name it are refused (unless `FAIL_MODE` is `"open"`). A policy cannot be deleted while another authored policy extends it, an agent names it in code, or it is `DEFAULT_POLICY`.
+Deleting the policy is different from turning it off: its name is gone, so turns that name it are refused (unless `FAIL_MODE` is `"open"`). A policy cannot be deleted while another authored policy extends it (one that does not load counts too), an agent names it in code, or it is `DEFAULT_POLICY`.
 
 ## Try before saving
 
@@ -121,7 +122,7 @@ An `AuthoredPolicy` row per policy holds its definition, whether it is `active`,
 
 ## When a change applies
 
-A save applies at once in the process that made it. Every other process reads the authored policies at most once per `AI_SDK_OVERSIGHT["RUNTIME_CACHE_SECONDS"]` (default `10`), so for a few seconds two workers may run different definitions. When the database cannot be read, a process keeps what it registered last.
+A save applies at once in the process that made it. Every other process reads the authored policies at most once per `AI_SDK_OVERSIGHT["RUNTIME_CACHE_SECONDS"]` (default `10`), so for a few seconds two workers may run different definitions. When the database cannot be read, a process keeps what it registered last, with no time limit: a policy saved, changed, turned off or deleted meanwhile applies in that process only once it reads the database again. Each failed read is logged as a warning ("An oversight policy loader failed"), so alert on that log.
 
 A saved policy that no longer loads (a deploy removed a code policy it extends, or its parent dropped a lens it reads) is taken out of the registry, not skipped: turns that name it are refused (unless `FAIL_MODE` is `"open"`), the reason is logged, and `GET .../policies/{name}/` shows it in `error`.
 

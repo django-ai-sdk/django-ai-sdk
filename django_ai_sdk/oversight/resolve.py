@@ -8,8 +8,10 @@ Apps that register whole policies at runtime (the authoring app) add a loader wi
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
+import weakref
 from typing import TYPE_CHECKING
 
 from django_ai_sdk.logger import get_logger
@@ -29,6 +31,11 @@ _broken: dict[str, str] = {}
 # Each loader registers or unregisters its app's policies when awaited.
 _loaders: list[Callable[[], Awaitable[None]]] = []
 _loaded_at = -math.inf
+# One lock per event loop: async_to_sync runs each call in a loop of its own, and a lock
+# is bound to the loop that first waits on it.
+_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
@@ -42,20 +49,26 @@ def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
 async def aload_policies() -> None:
     """Run every loader, at most once per RUNTIME_CACHE_SECONDS.
 
-    Failures are logged, and already registered policies stay.
+    Failures are logged, and already registered policies stay. Lookups that arrive
+    while it runs wait for it, so a burst reads the database once.
     """
     global _loaded_at
-    if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
+    if not _loaders or _fresh():
         return
-    started = time.monotonic()
-    for loader in list(_loaders):
-        try:
-            await loader()
-        except Exception:
-            logger.opt(exception=True).warning("An oversight policy loader failed")
-    # Marked after the loaders, so a lookup meanwhile loads too instead of resolving
-    # against a registry that is not filled yet.
-    _loaded_at = started
+    async with _locks.setdefault(asyncio.get_running_loop(), asyncio.Lock()):
+        if _fresh():
+            return
+        started = time.monotonic()
+        for loader in list(_loaders):
+            try:
+                await loader()
+            except Exception:
+                logger.opt(exception=True).warning("An oversight policy loader failed")
+        _loaded_at = started
+
+
+def _fresh() -> bool:
+    return time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS"))
 
 
 async def aget_policy(name: str) -> ResolvedPolicy | None:
@@ -71,7 +84,7 @@ async def aget_policy(name: str) -> ResolvedPolicy | None:
         return cached[0]
     resolved = _build(name)
     # Cache failures too, so a broken policy logs once, not once per turn.
-    _cache[name] = (resolved, frozenset(code_ancestors(name)))
+    _cache[name] = (resolved, frozenset(ancestors(name)))
     return resolved
 
 
@@ -97,7 +110,7 @@ def broken_reason(name: str) -> str:
     return _broken.get(name, "")
 
 
-def code_ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
+def ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
     """Every policy `name` extends, nearest first. build() reports cycles.
 
     `parents` replaces the `extends` of `name`, for a policy not registered yet.
@@ -134,7 +147,7 @@ __all__ = [
     "add_policy_loader",
     "aget_policy",
     "aload_policies",
+    "ancestors",
     "broken_reason",
-    "code_ancestors",
     "invalidate",
 ]

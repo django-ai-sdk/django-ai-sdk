@@ -122,6 +122,27 @@ class TestSaving:
         with pytest.raises(UserError, match="refunds-eu"):
             await AuthoringService.delete_policy("refunds", user=await author())
 
+    async def test_a_child_that_does_not_load_still_counts(self):
+        await save()
+        # Saved by hand, so it never loaded: the table counts, not the registry.
+        await AuthoredPolicy.objects.acreate(name="refunds-nl", extends=["refunds", "gone"])
+        with pytest.raises(UserError, match="refunds-nl"):
+            await AuthoringService.delete_policy("refunds", user=await author())
+
+    async def test_a_change_that_breaks_a_policy_below_is_refused(self):
+        await save()
+        await save("refunds-eu", extends=["refunds"], lenses=[], rules=[])
+        # Two levels down, reading the refund lens of refunds.
+        rules = [{**refunds()["rules"][0], "name": "nl_refunds"}]
+        await save("refunds-nl", extends=["refunds-eu"], lenses=[], rules=rules)
+        user = await author()
+        with pytest.raises(UserError, match="'refunds-nl' would not load"):
+            await AuthoringService.set_active("refunds", False, user=user)
+        with pytest.raises(UserError, match="'refunds-nl' would not load"):
+            await save(lenses=[], rules=[])
+        assert (await AuthoredPolicy.objects.aget(name="refunds")).active
+        assert (await gate("refunds-nl", "I want a refund")).blocked
+
 
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
@@ -228,6 +249,25 @@ class TestWhatADefinitionMayNotDo:
     async def test_grow_without_bound(self):
         lenses = [{**refunds()["lenses"][0], "name": f"l{i}"} for i in range(51)]
         assert "at most 50 lenses" in await self.refused(lenses=lenses, rules=[])
+        extends = ["au-base"] * 21
+        assert "at most 20 policies to extend" in await self.refused(extends=extends)
+
+    async def test_capture_more_than_a_parent(self):
+        meta = {"capture": "metadata"}
+        await save("meta", extends=["au-base"], lenses=[], rules=[], options=meta)
+        refused = await self.refused("child", extends=["meta"], options={"capture": "masked"})
+        assert "capture 'masked' keeps more than 'meta'" in refused
+
+    async def test_keep_turns_longer_than_a_parent(self):
+        short = {"retention": {"content": 30}}
+        await save("short", extends=["au-base"], lenses=[], rules=[], options=short)
+        longer = {"retention": {"content": 60}}
+        refused = await self.refused("child", extends=["short"], options=longer)
+        assert "content retention of 60 days is longer than the 30 days 'short' keeps" in refused
+        # A parent that sets none keeps what the RETENTION setting says: 90 days of content.
+        refused = await self.refused(options={"retention": {"content": 91}})
+        assert "longer than the 90 days 'au-base' keeps" in refused
+        await save("child", extends=["short"], options={"retention": {"content": 7}})
 
 
 @pytest.mark.usefixtures("no_reflect_queue")
@@ -261,6 +301,25 @@ class TestOtherProcesses:
         await AuthoringService.delete_policy("refunds", user=await author())
         await other.load()
         assert get_policy_class("refunds") is None
+
+    async def test_a_save_that_commits_out_of_order_is_seen(self):
+        from datetime import timedelta
+
+        from django_ai_sdk.oversight.authoring.loader import AuthoredPolicyLoader
+
+        first = await save()
+        await save("later", extends=["au-base"], lenses=[], rules=[])
+        other = AuthoredPolicyLoader()
+        await other.load()
+        # A save that commits after a newer one, stamped by a clock that runs behind.
+        rules = [{**refunds()["rules"][0], "mode": "report"}]
+        assert first.updated_at is not None
+        await AuthoredPolicy.objects.filter(name="refunds").aupdate(
+            rules=rules, updated_at=first.updated_at - timedelta(seconds=1)
+        )
+        await other.load()
+        cls = get_policy_class("refunds")
+        assert cls is not None and cls.rules[0].mode == "report"
 
     async def test_a_policy_that_no_longer_loads_is_refused_not_skipped(self):
         await save()
@@ -348,3 +407,35 @@ async def test_a_code_policy_that_does_not_load_cannot_be_stood_in_for(registry_
     with pytest.raises(UserError, match="declared in code that does not load"):
         await save("care", extends=["au-base"], lenses=[], rules=[])
     assert "care" in get_invalid_policies()
+    # A row saved before the code broke: it never takes over, not on a later load either.
+    from django_ai_sdk.oversight.authoring.loader import loader
+
+    await AuthoredPolicy.objects.acreate(name="care", extends=["au-base"])
+    await loader.load()
+    loader.stamp = None
+    await loader.load()
+    assert get_policy_class("care") is None
+    assert "care" in get_invalid_policies()
+
+
+@pytest.mark.usefixtures("postgres_only", "no_reflect_queue")
+@pytest.mark.django_db(transaction=True)
+class TestWritesRacingOnPostgres:
+    def test_a_save_and_a_toggle_both_land(self):
+        from asgiref.sync import async_to_sync
+
+        from tests.oversight.helpers import race
+
+        user = async_to_sync(author)()
+        for round_ in range(3):
+            async_to_sync(save)()
+            label = f"Refunds {round_}"
+            race(
+                lambda: async_to_sync(AuthoringService.save_policy)(
+                    "refunds", PolicyIn(**refunds(label=label)), user=user
+                ),
+                lambda: async_to_sync(AuthoringService.set_active)("refunds", False, user=user),
+            )
+            row = AuthoredPolicy.objects.get(name="refunds")
+            assert (row.label, row.active) == (label, False)
+            row.delete()

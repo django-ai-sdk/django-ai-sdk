@@ -86,7 +86,7 @@ class TestLoaders:
         finally:
             _loaders.remove(broken)
 
-    async def test_a_withdrawn_policy_is_unknown_at_once(self, registry_snapshot):
+    async def test_an_unregistered_policy_is_unknown_at_once(self, registry_snapshot):
         register_policy(draft("gone"))
         assert await aget_policy("gone") is not None
         unregister_policy("gone")

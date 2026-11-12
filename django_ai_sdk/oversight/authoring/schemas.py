@@ -7,13 +7,15 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from django_ai_sdk.oversight.types import Mode
+
 
 class PolicyIn(BaseModel):
     """A policy definition. Saving it replaces the policy's definition."""
 
     label: str = Field("", max_length=200)
     description: str = Field("", max_length=5_000)
-    extends: list[str] = Field(default_factory=list, max_length=20)
+    extends: list[str] = Field(default_factory=list)
     # e.g. {"kind": "judge", "name", "question", "judges": ["judge"], ...}
     lenses: list[dict[str, Any]] = Field(default_factory=list)
     # e.g. {"name", "when": {"lens": "x", "op": "is_true"}, "then": [{"kind": "block"}], ...}
@@ -34,7 +36,7 @@ class ActiveIn(BaseModel):
 class RuleModeIn(BaseModel):
     """Set the mode of one of the policy's own rules."""
 
-    mode: str = Field(..., pattern="^(off|report|enforce)$")
+    mode: Mode
 
 
 class LensEnabledIn(BaseModel):
