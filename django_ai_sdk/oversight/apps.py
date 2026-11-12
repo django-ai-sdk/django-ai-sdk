@@ -4,6 +4,7 @@ system checks and the deletion signals."""
 from __future__ import annotations
 
 from django.apps import AppConfig
+from django.core.checks import Tags
 from django.core.checks import register as register_check
 from django.utils.module_loading import autodiscover_modules
 
@@ -23,9 +24,14 @@ class OversightConfig(AppConfig):
         autodiscover_modules("oversight")
 
         from django_ai_sdk.oversight import signals
-        from django_ai_sdk.oversight.checks import check_oversight, check_oversight_deploy
+        from django_ai_sdk.oversight.checks import (
+            check_oversight,
+            check_oversight_deploy,
+            check_oversight_retention,
+        )
 
         register_check(check_oversight)
         register_check(check_oversight_deploy, deploy=True)
-        # Deleting a thread forgets what oversight holds about it.
+        register_check(check_oversight_retention, Tags.database, deploy=True)
+        # Deleting a thread or a user forgets what oversight holds about it.
         signals.connect()

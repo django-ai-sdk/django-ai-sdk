@@ -48,3 +48,5 @@ class RuleMatchAdmin(ReadOnlyAdmin):
 class ReviewItemAdmin(ReadOnlyAdmin):
     list_display = ("created_at", "queue", "rule", "status")
     list_filter = ("queue", "status")
+    # The note is content, and who closed it is kept out like who asked.
+    exclude = ("note", "resolved_by_id")

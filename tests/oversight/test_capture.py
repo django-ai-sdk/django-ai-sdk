@@ -12,8 +12,6 @@ import json
 import pytest
 from asgiref.sync import sync_to_async
 from django.test import override_settings
-from haystack.dataclasses import ChatMessage as HaystackChatMessage
-
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight import (
     Entities,
@@ -40,6 +38,8 @@ from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
 from django_ai_sdk.oversight.persist import split_answer
 from django_ai_sdk.oversight.reflect import areflect
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, TextSpan, ToolCall
+from haystack.dataclasses import ChatMessage as HaystackChatMessage
+
 from tests.oversight.helpers import (
     FnLens,
     Storage,
@@ -341,3 +341,36 @@ class TestTheRecordsValue:
         columns, kept = split_answer(lens, "reflect", answer, keep=masker_for_capture("full"))
         assert [step["value"] for step in columns["trail"]] == [[FOUND]]
         assert kept == {"value": [NAME, "Piet"], "trail": [[NAME]]}
+
+
+class TestDeployCheck:
+    @staticmethod
+    def capture_ids() -> list[str]:
+        from django_ai_sdk.oversight.checks import check_oversight_deploy
+
+        # The test settings run tasks inline (W014): only what capture says counts here.
+        return [m.id for m in check_oversight_deploy() if m.id != "ai_sdk.oversight.W014"]
+
+    def test_full_capture_warns(self):
+        with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
+            assert self.capture_ids() == ["ai_sdk.oversight.W001"]
+
+    def test_masked_capture_says_nothing(self):
+        assert self.capture_ids() == []
+
+
+def test_the_admin_shows_no_content_and_nobody():
+    from django.contrib import admin
+    from django.contrib.auth.models import AnonymousUser
+    from django.test import RequestFactory, modify_settings
+
+    with modify_settings(INSTALLED_APPS={"append": "django.contrib.admin"}):
+        from django_ai_sdk.oversight.admin import ReviewItemAdmin, TurnAdmin
+
+        request = RequestFactory().get("/")
+        request.user = AnonymousUser()
+        turn = TurnAdmin(Turn, admin.site).get_fields(request)
+        review = ReviewItemAdmin(ReviewItem, admin.site).get_fields(request)
+    for field in ("content", "actor_id", "thread_id", "user_message_id", "message_id"):
+        assert field not in turn
+    assert "note" not in review and "resolved_by_id" not in review

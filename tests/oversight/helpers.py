@@ -29,12 +29,6 @@ from typing import Any
 from unittest.mock import patch
 
 from django.test import AsyncClient, override_settings
-from haystack.components.generators.chat import MockChatGenerator
-from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.dataclasses import ToolCall as HaystackToolCall
-from haystack.tools import Tool
-from pydantic import BaseModel
-
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agents import Agent, ToolAgent, ToolAgentConfig
 from django_ai_sdk.common import ChatMessage
@@ -63,6 +57,11 @@ from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.types import Answer, Stage, Subject
 from django_ai_sdk.permissions import AllowAll
+from haystack.components.generators.chat import MockChatGenerator
+from haystack.dataclasses import ChatMessage as HaystackChatMessage
+from haystack.dataclasses import ToolCall as HaystackToolCall
+from haystack.tools import Tool
+from pydantic import BaseModel
 
 # Policies
 
@@ -403,9 +402,8 @@ async def closed_turn(guard: TurnGuard) -> Turn:
 
 async def kept(turn: Turn | None = None) -> dict[str, Any]:
     """What the record keeps of `turn`'s content (the only turn's, when None), read back
-    through custody: the same whether it is kept as it is or encrypted."""
+    with `load_content`."""
     from asgiref.sync import sync_to_async
-
     from django_ai_sdk.oversight.content import load_content
 
     query = Turn.objects.select_related("content")

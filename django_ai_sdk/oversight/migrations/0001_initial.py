@@ -102,6 +102,7 @@ class Migration(migrations.Migration):
                 ("reflect_attempts", models.PositiveSmallIntegerField(default=0)),
                 ("reflect_lease_until", models.DateTimeField(blank=True, null=True)),
                 ("reflected_at", models.DateTimeField(blank=True, null=True)),
+                ("content_forgotten", models.BooleanField(default=False)),
             ],
             options={
                 "db_table": "django_ai_sdk_oversight_turns",
@@ -117,7 +118,6 @@ class Migration(migrations.Migration):
                         default=uuid.uuid4, editable=False, primary_key=True, serialize=False
                     ),
                 ),
-                ("scope", models.CharField(db_index=True, max_length=100)),
                 ("capture", models.CharField(max_length=16)),
                 ("stored", models.JSONField(blank=True, null=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
@@ -155,6 +155,13 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "django_ai_sdk_oversight_matches",
                 "ordering": ["created_at"],
+                "constraints": [
+                    models.UniqueConstraint(
+                        condition=models.Q(("stage", "reflect")),
+                        fields=("turn", "rule"),
+                        name="oversight_one_reflect_match_per_rule",
+                    )
+                ],
             },
         ),
         migrations.AddField(
@@ -182,7 +189,6 @@ class Migration(migrations.Migration):
                     "status",
                     models.CharField(
                         choices=[("open", "Open"), ("done", "Done"), ("dismissed", "Dismissed")],
-                        db_index=True,
                         default="open",
                         max_length=16,
                     ),
@@ -195,6 +201,7 @@ class Migration(migrations.Migration):
                 (
                     "turn",
                     models.ForeignKey(
+                        db_index=False,
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="reviews",
                         to="django_ai_sdk_oversight.turn",
@@ -242,6 +249,7 @@ class Migration(migrations.Migration):
                 (
                     "turn",
                     models.ForeignKey(
+                        db_index=False,
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="answers",
                         to="django_ai_sdk_oversight.turn",

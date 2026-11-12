@@ -34,7 +34,7 @@ def check_oversight(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 
 
 def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
-    """Production-only checks: plain content, unmeetable deadlines, no task worker."""
+    """Production-only checks: unmasked content, unmeetable deadlines, no task worker."""
     from django_ai_sdk.oversight.checks.policies import deadline_checks
     from django_ai_sdk.oversight.checks.settings import capture_checks, task_backend_checks
     from django_ai_sdk.oversight.conf import is_enabled, setting
@@ -44,4 +44,16 @@ def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     return [*capture_checks(), *deadline_checks(), *task_backend_checks()]
 
 
-__all__ = ["PREFIX", "check_oversight", "check_oversight_deploy"]
+def check_oversight_retention(
+    app_configs: Any = None, databases: Any = None, **kwargs: Any
+) -> list[Any]:
+    """Warn when expired rows are never deleted. Reads the databases it is given."""
+    from django_ai_sdk.oversight.checks.settings import retention_checks
+    from django_ai_sdk.oversight.conf import is_enabled, setting
+
+    if setting.broken or not is_enabled():
+        return []
+    return retention_checks(databases)
+
+
+__all__ = ["PREFIX", "check_oversight", "check_oversight_deploy", "check_oversight_retention"]
