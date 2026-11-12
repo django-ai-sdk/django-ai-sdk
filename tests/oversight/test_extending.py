@@ -288,17 +288,53 @@ class TestALocalClassifierSaysWhatItCannotRead:
 
 
 class TestLocalClassifierLoading:
-    async def test_until_it_is_loaded_it_steps_aside_and_loads_in_the_background(self):
+    lens = JudgeLens(name="f", question="?")
+
+    async def test_until_it_is_loaded_it_is_unavailable_and_loads_in_the_background(self):
         started = []
+
+        def start(*args):
+            started.append(args)
+            return "loading"
+
         with (
             patch.object(local, "_loaded", lambda *a: None),
-            patch.object(local, "_load_in_background", lambda *a: started.append(a)),
+            patch.object(local, "_load_in_background", start),
         ):
-            answer = await ask(
-                LocalClassifier(), JudgeLens(name="f", question="?"), TurnContext(input="x")
-            )
-        assert answer is None
+            answer = await ask(LocalClassifier(), self.lens, TurnContext(input="x"))
+            # A lens it could never read still goes to the next judge.
+            on_sources = JudgeLens(name="s", subject=Subject.SOURCES)
+            assert await ask(LocalClassifier(), on_sources, TurnContext(input="x")) is None
+        assert answer.error == "unavailable: loading"
         assert started == [(local.ENGLISH, local.QUANTIZED)]
+
+    async def test_a_failed_load_is_logged_unavailable_and_tried_again_later(self):
+        key = ("x/broken", local.QUANTIZED)
+        judge = LocalClassifier(model=key[0])
+        log = MagicMock()
+        with (
+            patch.object(local, "_Runner", side_effect=OSError("no such repo")),
+            patch.object(local, "logger", log),
+            patch.object(local, "modules_installed", lambda *a: True),
+        ):
+
+            async def loaded():
+                for _ in range(200):
+                    if key not in local._loading:
+                        return
+                    await asyncio.sleep(0.01)
+
+            await ask(judge, self.lens, TurnContext(input="x"))
+            await loaded()
+            answer = await ask(judge, self.lens, TurnContext(input="x"))
+            assert answer.error == "unavailable: does not load: OSError"
+            assert log.opt.return_value.warning.called
+            # After LOAD_RETRY_SECONDS it loads again.
+            local._load_errors[key] = ("OSError", 0.0)
+            answer = await ask(judge, self.lens, TurnContext(input="x"))
+            assert answer.error == "unavailable: loading"
+            await loaded()
+        local._load_errors.pop(key, None)
 
 
 class TestConfigurationsDoNotShareABatch:

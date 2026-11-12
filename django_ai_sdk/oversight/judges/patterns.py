@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from django_ai_sdk.oversight.judges.base import Judge
-from django_ai_sdk.oversight.patterns import _compile_patterns, _regex_spans, _scan, _verified
+from django_ai_sdk.oversight.patterns import compile_patterns, regex_spans, scan, verified
 from django_ai_sdk.oversight.types import Answer, TextSpan
 
 if TYPE_CHECKING:
@@ -42,6 +42,7 @@ class Patterns(Judge):
     """
 
     timeout = PATTERNS_TIMEOUT
+    name = "patterns"
 
     def __init__(
         self,
@@ -53,9 +54,11 @@ class Patterns(Judge):
         exclusive: bool = False,
         miss_confidence: float = MISS_CONFIDENCE,
         name: str = "",
+        timeout: float | None = None,
     ) -> None:
+        super().__init__(name=name, timeout=timeout)
         groups = keywords.items() if isinstance(keywords, Mapping) else [("", keywords)]
-        self.patterns = _compile_patterns(patterns, flags)
+        self.patterns = compile_patterns(patterns, flags)
         # One whole-word regex per label, so a label's hits can be counted.
         self.keywords = [
             (label, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + r")\b", flags))
@@ -65,7 +68,6 @@ class Patterns(Judge):
         self.verify = verify or {}
         self.exclusive = exclusive
         self.miss_confidence = miss_confidence
-        self.name = name or "patterns"
 
     def labels(self) -> list[str]:
         """The labels this judge looks for, so a miss can name them."""
@@ -73,18 +75,12 @@ class Patterns(Judge):
 
     def find(self, text: str, default_label: str = "") -> list[TextSpan]:
         """Every span in `text`, scanned in windows. Unlabelled ones get `default_label`."""
-        return _scan(text, lambda chunk: self._find(chunk, default_label))
+        return scan(text, lambda chunk: self._find(chunk, default_label))
 
     def _find(self, text: str, default_label: str) -> list[TextSpan]:
-        if self.verify or self.exclusive:
-            spans = self._checked(text, default_label)
-        else:
-            # By position, as `_checked` gives them, so a Choice picks the same label either way.
-            spans = sorted(
-                _regex_spans(self.patterns, text, default_label), key=lambda span: span.start
-            )
+        spans = self._checked(text, default_label)
         # The keyword label with the most hits comes first, so a Choice picks it.
-        hits = [_regex_spans([pair], text, default_label) for pair in self.keywords]
+        hits = [regex_spans([pair], text, default_label) for pair in self.keywords]
         return spans + [span for found in sorted(hits, key=len, reverse=True) for span in found]
 
     def _checked(self, text: str, default_label: str) -> list[TextSpan]:
@@ -92,7 +88,7 @@ class Patterns(Judge):
         spans: list[TextSpan] = []
         taken: list[tuple[int, int]] = []
         for label, pattern in self.patterns:
-            for start, end in _verified(pattern, self.verify.get(label), text):
+            for start, end in verified(pattern, self.verify.get(label), text):
                 if self.exclusive and any(start < until and since < end for since, until in taken):
                     continue
                 taken.append((start, end))
