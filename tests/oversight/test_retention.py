@@ -10,7 +10,6 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.db import connection
-from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django_ai_sdk.oversight.checks import check_oversight_retention
@@ -23,20 +22,11 @@ from django_ai_sdk.oversight.models import (
 )
 from django_ai_sdk.oversight.retention import prune
 
-from tests.oversight.helpers import closed_turn, start
+from tests.oversight.review.helpers import a_turn
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 LATER = timedelta(days=1)
-
-
-async def a_turn(text: str = "What about my salary?", output: str = "Ask jan@example.com.") -> str:
-    """A closed test-guard turn: "salary" queues it for hr."""
-    with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
-        guard = await start("test-guard", text)
-        await guard.gate()
-        await guard.finish(output)
-        return str((await closed_turn(guard)).id)
 
 
 async def expire(turn_id: str, *, content: bool = False, turn: bool = False) -> None:

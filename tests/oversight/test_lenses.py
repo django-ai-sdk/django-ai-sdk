@@ -43,7 +43,6 @@ from django_ai_sdk.oversight.presets import (
 )
 from django_ai_sdk.oversight.types import (
     Answer,
-    Source,
     Stage,
     Subject,
     TextSpan,
@@ -51,16 +50,7 @@ from django_ai_sdk.oversight.types import (
     TurnContext,
 )
 
-from tests.oversight.helpers import FnLens
-
-
-def view(text: str = "", output: str = "", sources: list[str] | None = None) -> TurnContext:
-    return TurnContext(
-        turn_id="t1",
-        input=text,
-        output=output,
-        sources=[Source(title=f"s{i}", content=c) for i, c in enumerate(sources or [])],
-    )
+from tests.oversight.helpers import FnLens, view
 
 
 async def answer(lens, turn: TurnContext) -> Answer | None:

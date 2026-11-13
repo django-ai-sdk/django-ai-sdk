@@ -29,7 +29,6 @@ from typing import Any
 from unittest.mock import patch
 
 from django.test import AsyncClient, override_settings
-from haystack import component
 from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.agents import Agent, ToolAgent, ToolAgentConfig
 from django_ai_sdk.common import ChatMessage
@@ -56,8 +55,9 @@ from django_ai_sdk.oversight import (
 )
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import Turn
-from django_ai_sdk.oversight.types import Answer, Stage, Subject
+from django_ai_sdk.oversight.types import Answer, Source, Stage, Subject, TurnContext
 from django_ai_sdk.permissions import AllowAll
+from haystack import component
 from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ToolCall as HaystackToolCall
@@ -515,3 +515,12 @@ async def browser(*perms: str) -> AsyncClient:
 def check_ids(messages: Any) -> list[str]:
     """The ids of system check messages, in order."""
     return [message.id for message in messages]
+
+
+def view(text: str = "", output: str = "", sources: list[str] | None = None) -> TurnContext:
+    return TurnContext(
+        turn_id="t1",
+        input=text,
+        output=output,
+        sources=[Source(title=f"s{i}", content=c) for i, c in enumerate(sources or [])],
+    )

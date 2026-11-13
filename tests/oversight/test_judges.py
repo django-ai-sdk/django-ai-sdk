@@ -33,6 +33,7 @@ from tests.oversight.helpers import (
     policy,
     slow_yes,
     start,
+    view,
     yes,
 )
 
@@ -54,15 +55,6 @@ class Says(Judge):
 
 
 CLASSIFIER_IS_TYPESAFE = {"JUDGES": {"classifier": {"class": "TypeSafe"}}}
-
-
-def view(text: str = "", output: str = "", sources: list[str] | None = None) -> TurnContext:
-    return TurnContext(
-        turn_id="t1",
-        input=text,
-        output=output,
-        sources=[Source(title=f"s{i}", content=c) for i, c in enumerate(sources or [])],
-    )
 
 
 class TestEvidence:
@@ -918,7 +910,6 @@ class TestOpenRelease:
         # Lazy, so the turn shows them in the active language; plain text in a
         # policy's recorded configuration.
         from django.utils.functional import Promise
-
         from django_ai_sdk.oversight.actions import Block
         from django_ai_sdk.oversight.policy import build
 
