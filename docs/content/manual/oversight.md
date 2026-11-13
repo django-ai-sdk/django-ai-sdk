@@ -18,7 +18,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 
 ## Settings
 
-`AI_SDK_OVERSIGHT`, one dict, every key optional (`django_ai_sdk.oversight.conf.setting`). A dict value merges one level deep with its default, so `{"DEADLINE_MS": {"gate": 3000}}` keeps the other stages' deadlines. Every key is checked: an unknown key, or a value of the wrong kind, is an error that names the key and what it accepts (`ai_sdk.oversight.E012`).
+`AI_SDK_OVERSIGHT`, one dict, every key optional (`django_ai_sdk.oversight.conf.setting`). A dict value merges one level deep with its default, so `{"DEADLINE_MS": {"gate": 3000}}` keeps the other stages' deadlines. Every key is checked: an unknown key, or a value of the wrong kind, is an error that names the key and what it accepts (`ai_sdk.oversight.E012`), such as `AI_SDK_OVERSIGHT['FAIL_MODE'] must be one of 'closed', 'open'.` The defaults are `django_ai_sdk.oversight.conf.DEFAULTS`.
 
 | Key | Default | Meaning |
 | --- | --- | --- |

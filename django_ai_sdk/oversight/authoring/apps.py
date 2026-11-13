@@ -9,23 +9,32 @@ from __future__ import annotations
 from typing import Any
 
 from django.apps import AppConfig
+from django.conf import settings
 from django.core.checks import Error, Warning
 from django.core.checks import register as register_check
-from pydantic import BaseModel, ConfigDict, StrictStr
-
-from django_ai_sdk.oversight.conf import AppSettings
+from django.core.exceptions import ImproperlyConfigured
 
 PREFIX = "ai_sdk.oversight.authoring"
 
-
-class AuthoringSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+DEFAULTS: dict[str, Any] = {
     # Policies every authored policy must extend, such as ["security"].
-    MUST_EXTEND: list[StrictStr] = []
+    "MUST_EXTEND": [],
+}
 
 
-setting = AppSettings("AI_SDK_OVERSIGHT_AUTHORING", AuthoringSettings)
+def configured() -> Any:
+    """AI_SDK_OVERSIGHT_AUTHORING as the project set it, {} when unset. It may not be a dict."""
+    return getattr(settings, "AI_SDK_OVERSIGHT_AUTHORING", None) or {}
+
+
+def setting(key: str) -> Any:
+    """AI_SDK_OVERSIGHT_AUTHORING[key], or its default."""
+    user_settings = configured()
+    if not isinstance(user_settings, dict):
+        raise ImproperlyConfigured(
+            f"AI_SDK_OVERSIGHT_AUTHORING must be a dict, not a {type(user_settings).__name__}."
+        )
+    return user_settings.get(key, DEFAULTS[key])
 
 
 class AuthoringConfig(AppConfig):
@@ -59,7 +68,7 @@ def check_authoring(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     from django_ai_sdk.oversight.authoring.definitions import is_authored
     from django_ai_sdk.oversight.registry import get_policy_class
 
-    found = setting.errors(PREFIX)
+    found = settings_checks()
     if found:
         return found
     for name in setting("MUST_EXTEND"):
@@ -75,9 +84,43 @@ def check_authoring(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     return found
 
 
+def settings_checks() -> list[Error]:
+    """E012 for AI_SDK_OVERSIGHT_AUTHORING when it is not a dict, and for each unknown key or bad value."""
+    user_settings = configured()
+    if not isinstance(user_settings, dict):
+        return [
+            Error(
+                f"AI_SDK_OVERSIGHT_AUTHORING must be a dict, not a {type(user_settings).__name__}.",
+                hint="Set a dict, or remove it.",
+                id=f"{PREFIX}.E012",
+            )
+        ]
+    errors = [
+        Error(
+            f"AI_SDK_OVERSIGHT_AUTHORING has an unknown key {key!r}.",
+            hint=f"The keys are {', '.join(DEFAULTS)}.",
+            id=f"{PREFIX}.E012",
+        )
+        for key in user_settings
+        if key not in DEFAULTS
+    ]
+    must_extend = user_settings.get("MUST_EXTEND", [])
+    if not isinstance(must_extend, list | tuple) or not all(
+        isinstance(name, str) for name in must_extend
+    ):
+        errors.append(
+            Error(
+                "AI_SDK_OVERSIGHT_AUTHORING['MUST_EXTEND'] must be a list of policy names, "
+                "such as ['security'].",
+                id=f"{PREFIX}.E012",
+            )
+        )
+    return errors
+
+
 def check_authoring_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     """W001. Registered with deploy=True: Django passes no deploy flag to the check."""
-    if setting.broken or setting("MUST_EXTEND"):
+    if not isinstance(configured(), dict) or setting("MUST_EXTEND"):
         return []
     return [
         Warning(

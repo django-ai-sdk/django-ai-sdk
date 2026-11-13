@@ -17,9 +17,18 @@ from django.db import DatabaseError
 from django.utils import timezone
 
 from django_ai_sdk.oversight.agents import code_policy
-from django_ai_sdk.oversight.conf import deadline_ms, is_enabled, setting
+from django_ai_sdk.oversight.conf import (
+    DEFAULTS,
+    FAIL_MODES,
+    STREAM_MODES,
+    configured,
+    deadline_ms,
+    is_enabled,
+    is_retention,
+    setting,
+)
 from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
-from django_ai_sdk.oversight.judges.base import alias_defined, is_optional, resolve
+from django_ai_sdk.oversight.judges.base import Judge, alias_defined, is_optional, resolve
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.notifiers import configured_notifiers
 from django_ai_sdk.oversight.registry import (
@@ -31,7 +40,7 @@ from django_ai_sdk.oversight.registry import (
 )
 from django_ai_sdk.oversight.rules import Notify
 from django_ai_sdk.oversight.tasks import reflect_turn
-from django_ai_sdk.oversight.types import Mode, Stage
+from django_ai_sdk.oversight.types import Capture, Mode, Stage
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -41,22 +50,22 @@ PREFIX = "ai_sdk.oversight"
 
 def check_oversight(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     # E012: otherwise a misspelt key is silently ignored and a wrong value misread.
-    settings = setting.errors(PREFIX)
-    if setting.broken:
-        return settings
+    found = settings_checks()
+    if not isinstance(configured(), dict):
+        return found
     in_use = policies_in_use()
     return [
         *policy_checks(in_use),
         *judge_checks(),
         *default_policy_checks(),
-        *settings,
+        *found,
         *agent_checks(),
     ]
 
 
 def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     """Production-only checks: unmasked content, unmeetable deadlines, no task worker."""
-    if setting.broken or not is_enabled():
+    if not isinstance(configured(), dict) or not is_enabled():
         return []
     return [*capture_checks(), *deadline_checks(), *task_backend_checks()]
 
@@ -65,9 +74,98 @@ def check_oversight_retention(
     app_configs: Any = None, databases: Any = None, **kwargs: Any
 ) -> list[Any]:
     """Warn when expired rows are never deleted or open turns never swept. Reads the databases it is given."""
-    if setting.broken or not is_enabled():
+    if not isinstance(configured(), dict) or not is_enabled():
         return []
     return [*retention_checks(databases), *sweep_checks(databases)]
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _is_positive_or_none(value: Any) -> bool:
+    return value is None or (_is_number(value) and value > 0)
+
+
+def _listed(choices: Iterable[str]) -> str:
+    return ", ".join(repr(str(choice)) for choice in choices)
+
+
+DEADLINE_STAGES = ("gate", "tool", "finish")
+CLIENT_DETAILS = ("actions", "full")
+CAPTURES = tuple(capture.value for capture in Capture)
+
+# What each AI_SDK_OVERSIGHT key accepts: a test, and the words E012 shows when it fails.
+ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
+    "ENABLED": (lambda value: isinstance(value, bool), "True or False"),
+    "DEFAULT_POLICY": (lambda value: isinstance(value, str), 'a policy name, or "" for none'),
+    "CAPTURE": (lambda value: value in CAPTURES, f"one of {_listed(CAPTURES)}"),
+    "STREAM_MODE": (lambda value: value in STREAM_MODES, f"one of {_listed(STREAM_MODES)}"),
+    "JUDGES": (
+        lambda value: (
+            isinstance(value, dict)
+            and all(
+                isinstance(alias, str) and isinstance(spec, str | dict | Judge)
+                for alias, spec in value.items()
+            )
+        ),
+        'a dict of judge specs by alias, such as {"judge": {"class": "LLMJudge"}}',
+    ),
+    "DEADLINE_MS": (
+        lambda value: (
+            isinstance(value, dict)
+            and all(
+                stage in DEADLINE_STAGES and _is_positive_or_none(ms) for stage, ms in value.items()
+            )
+        ),
+        f"a dict of positive milliseconds or None by stage ({_listed(DEADLINE_STAGES)})",
+    ),
+    "MAX_INPUT_CHARS": (_is_positive_or_none, "a positive number of characters, or None"),
+    "CLIENT_DETAIL": (lambda value: value in CLIENT_DETAILS, f"one of {_listed(CLIENT_DETAILS)}"),
+    "FAIL_MODE": (lambda value: value in FAIL_MODES, f"one of {_listed(FAIL_MODES)}"),
+    "RETENTION": (
+        is_retention,
+        'a dict of whole days of at least 1 by "content" and/or "metadata"',
+    ),
+    "NOTIFIERS": (
+        lambda value: isinstance(value, list | tuple),
+        "a list of dotted paths or Notifier instances",
+    ),
+    "RUNTIME_CACHE_SECONDS": (
+        lambda value: _is_number(value) and value >= 0,
+        "a number of seconds of at least 0",
+    ),
+}
+
+
+def settings_checks() -> list[Error]:
+    """E012 for AI_SDK_OVERSIGHT when it is not a dict, and for each unknown key or bad value."""
+    user_settings = configured()
+    if not isinstance(user_settings, dict):
+        return [
+            Error(
+                f"AI_SDK_OVERSIGHT must be a dict, not a {type(user_settings).__name__}.",
+                hint="Set a dict, or remove it.",
+                id=f"{PREFIX}.E012",
+            )
+        ]
+    errors = []
+    for key, value in user_settings.items():
+        if key not in ACCEPTS:
+            errors.append(
+                Error(
+                    f"AI_SDK_OVERSIGHT has an unknown key {key!r}.",
+                    hint=f"The keys are {', '.join(DEFAULTS)}.",
+                    id=f"{PREFIX}.E012",
+                )
+            )
+            continue
+        is_accepted, accepted = ACCEPTS[key]
+        if not is_accepted(value):
+            errors.append(
+                Error(f"AI_SDK_OVERSIGHT[{key!r}] must be {accepted}.", id=f"{PREFIX}.E012")
+            )
+    return errors
 
 
 def policies_in_use() -> set[str]:

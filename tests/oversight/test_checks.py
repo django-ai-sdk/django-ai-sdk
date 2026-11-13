@@ -21,7 +21,7 @@ from django_ai_sdk.oversight import (
 )
 from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.checks import check_oversight, check_oversight_deploy
-from django_ai_sdk.oversight.conf import setting
+from django_ai_sdk.oversight.conf import DEFAULTS
 from django_ai_sdk.oversight.types import Stage, Subject
 from django_ai_sdk.permissions import AllowAll
 
@@ -40,7 +40,9 @@ def check_ids(**settings: Any) -> set[str]:
 
 def keys(**configured: Any) -> str:
     with override_settings(AI_SDK_OVERSIGHT=configured):
-        return " ".join(error.msg for error in setting.errors("x"))
+        from django_ai_sdk.oversight.checks import settings_checks
+
+        return " ".join(error.msg for error in settings_checks())
 
 
 class TestSettingsSchema:
@@ -76,6 +78,14 @@ class TestSettingsSchema:
     )
     def test_a_value_of_the_wrong_kind_is_an_error(self, key, value):
         assert key in keys(**{key: value})
+
+    def test_the_message_says_what_the_key_accepts(self):
+        assert keys(FAIL_MODE="closd") == "AI_SDK_OVERSIGHT['FAIL_MODE'] must be one of 'closed', 'open'."
+
+    def test_every_setting_has_a_rule(self):
+        from django_ai_sdk.oversight.checks import ACCEPTS
+
+        assert list(ACCEPTS) == list(DEFAULTS)
 
     def test_validators_are_registered_in_code_not_settings(self):
         # register_validator is the one way to name a validator.
@@ -275,7 +285,7 @@ class TestChecks:
         assert "ai_sdk.oversight.E010" in check_ids()
 
     def test_the_default_capture_is_masked(self):
-        assert setting.defaults["CAPTURE"] == "masked"
+        assert DEFAULTS["CAPTURE"] == "masked"
 
 
 def test_the_manual_lists_every_check_id():

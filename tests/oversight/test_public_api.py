@@ -35,12 +35,12 @@ def shown(value) -> str:
 
 
 def test_the_settings_table_is_the_defaults():
-    from django_ai_sdk.oversight.conf import setting
+    from django_ai_sdk.oversight.conf import DEFAULTS
 
     manual = MANUAL.read_text(encoding="utf-8")
     table = manual.split("## Settings\n", 1)[1].split("\nOutside the dict:", 1)[0]
     rows = re.findall(r"^\| `([A-Z_]+)` \| `([^|]*)` \|", table, re.MULTILINE)
-    assert [key for key, _ in rows] == list(setting.defaults)
+    assert [key for key, _ in rows] == list(DEFAULTS)
     assert {key: default for key, default in rows} == {
-        key: shown(value) for key, value in setting.defaults.items()
+        key: shown(value) for key, value in DEFAULTS.items()
     }
