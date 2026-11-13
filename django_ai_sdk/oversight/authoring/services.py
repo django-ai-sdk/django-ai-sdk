@@ -103,7 +103,7 @@ class AuthoringService(OversightAccess):
     async def save_policy(cls, name: str, change: PolicyIn, *, user: UserType) -> PolicyOut:
         """Create `name`, or replace its definition. Raises UserError if it is invalid."""
         await cls.has_perms(user, AUTHOR)
-        definition = change.definition()
+        definition = change.model_dump()
 
         def replace(row: AuthoredPolicy) -> None:
             for key, value in definition.items():
@@ -161,7 +161,7 @@ class AuthoringService(OversightAccess):
         await cls.has_perms(user, AUTHOR)
         await aload_policies()
         if run.definition is not None:
-            definition = run.definition.definition()
+            definition = run.definition.model_dump()
         else:
             saved = await AuthoredPolicy.objects.filter(name=name).afirst()
             if saved is None:
@@ -255,7 +255,7 @@ def _delete(name: str) -> bool:
 
 def _with(items: list[dict[str, Any]], name: str, what: str, values: dict[str, Any]) -> list:
     """`items` with `values` set on the one named `name`. UserError when it is not there."""
-    if not any(item.get("name") == name for item in items or []):
+    if not any(item.get("name") == name for item in items):
         raise UserError(f"No {what} {name!r} of its own: a {what} it extends changes only in code.")
     return [{**item, **values} if item.get("name") == name else item for item in items]
 

@@ -114,7 +114,7 @@ class TurnReads(OversightAccess):
         [row] = await rows_of([turn], {turn.id} if shown else set(), scoped_reviews)
         texts = (content or {}).get("texts") or {}
         resolved = await aget_policy(turn.policy)
-        detail = TurnDetail(
+        return TurnDetail(
             **row.model_dump(),
             content=visible_content(content),
             content_state=state,
@@ -127,7 +127,6 @@ class TurnReads(OversightAccess):
             thread_id=turn.thread_id if shown else "",
             message_id=turn.message_id if shown else "",
         )
-        return detail
 
 
 def _filtered(qs: QuerySet, f: TurnFilter) -> QuerySet:
