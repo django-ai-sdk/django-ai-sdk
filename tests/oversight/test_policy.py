@@ -403,19 +403,9 @@ class TestDeclarationsThatCannotWork:
         with pytest.raises(ImproperlyConfigured, match="default"):
             validate_policy(OddDefault)
 
-    def test_an_option_the_answer_type_does_not_read_is_refused(self):
-        with pytest.raises(ImproperlyConfigured, match="labels"):
-            JudgeLens(name="f", labels=["a"], judges=["judge"]).validate()
+    def test_an_attribute_the_lens_kind_does_not_have_is_refused(self):
         with pytest.raises(ImproperlyConfigured, match="has no attribute"):
             PatternLens(name="p", keywords=["x"], judges=["judge"])
-
-        class Asks(PatternLens):
-            name = "asks"
-            keywords = ["x"]  # noqa: RUF012
-            question = "Is it x?"
-
-        with pytest.raises(ImproperlyConfigured, match="question"):
-            Asks().validate()
 
     def test_a_score_is_read_on_the_scale_the_judge_was_told(self):
         lens = JudgeLens(name="s", answer=Score)
@@ -522,10 +512,11 @@ class TestDeclarations:
             JudgeLens(name="a", judges=["judge"], min_confidence=-0.1).validate()
 
     def test_exfiltration_is_judged_on_the_whole_answer_only(self):
-        from django_ai_sdk.oversight.packs.security import Exfiltration, PIITool, SecretsTool
+        from django_ai_sdk.oversight.packs.security import Exfiltration, SecurityPack
 
         assert Exfiltration().stages == (Stage.FINISH,)
-        assert PIITool().stages == SecretsTool().stages == (Stage.TOOL,)
+        pii_tool, secrets_tool = pick(SecurityPack.lenses, "pii_tool", "secrets_tool")
+        assert pii_tool.stages == secrets_tool.stages == (Stage.TOOL,)
 
     def test_only_entities_spans_are_masked_in_what_capture_keeps(self):
         text = "What about my salary, Jan?"

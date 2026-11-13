@@ -55,8 +55,6 @@ class PIILens(PatternLens):
     kinds: list[str] = list(DEFAULT_PII_KINDS)  # noqa: RUF012
     verify = PII_VERIFY
     flags = 0
-    # A card number can also look like a phone number: the first kind wins.
-    exclusive = True
 
     def pattern_table(self) -> PatternTable:
         # No kinds means the default kinds.

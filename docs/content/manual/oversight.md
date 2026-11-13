@@ -79,11 +79,11 @@ Every lens:
 | `enabled` | `True` | Off: the lens never runs. |
 | `needs_grounding` | `False` | Only asked when the turn has sources or tool results to judge against. |
 
-Each kind adds its own, and only its own: an attribute declared on a lens whose kind or answer type does not read it is refused when the policy is checked.
+Each kind adds its own:
 
 | Kind | Answers | Own attributes |
 | --- | --- | --- |
-| `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words; the label with the most hits comes first), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords), `exclusive` (each stretch of text gets one label, the first pattern's). What patterns find is a fact: hit and miss both have confidence `1`. |
+| `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords). Each stretch of text gets one label, the first pattern's. What patterns find is a fact: hit and miss both have confidence `1`. |
 | `CheckLens` | `Flag` by default | `validators`: functions `fn(text)` or `fn(text, view)`, or names registered with `register_validator`; each raises `Violation(message)` to say yes, and the messages are the answer's reason. `check(text, view)` runs them; override it to answer another type, returning the value, an `Answer` (with a reason or confidence) or `None` to abstain. A sync `check` runs in a thread. `timeout` (`30` s). |
 | `JudgeLens` | `Flag` by default | `judges`: tried in order (instances, aliases, optional aliases such as `"judge?"`, or `{"class": ..., **kwargs}`); `min_confidence` (`0.75`: an answer below it asks the next judge); `question` (asked verbatim); `guidance` (scale anchors, edge cases); `reads_question` (`True`: a tool-call lens also reads the question that led to the call). |
 
@@ -121,7 +121,7 @@ Local (`external = ""`: nothing leaves the process):
 
 | Class | Answers |
 | --- | --- |
-| `Patterns(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, exclusive=False, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked (`ai_sdk.oversight.W004`). |
+| `Patterns(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked (`ai_sdk.oversight.W004`). |
 | `LocalClassifier(model=ENGLISH, *, file="onnx/model_quantized.onnx", positive="", timeout=None)` | An ONNX model from the Hugging Face Hub, run by onnxruntime in this process (the `local` extra, no torch). Zero-shot by default: yes/no (entails the lens's `yes`), label (the criterion it entails most, as "This text is about <criterion>." unless it starts with "This text") and score lenses, about 20 ms each on a CPU. `ENGLISH` (87 MB) and `MULTILINGUAL` (340 MB) are MIT-licensed NLI models; `positive=` makes a model trained for one question (a prompt-injection detector) answer yes/no lenses. Reads one text, the question or the answer, of at most 1,600 characters: lenses on sources or tool calls, lenses that need grounding and "taken from" go to the next judge. Until its model is loaded it answers `unavailable` and loads it in the background, so the next judge is asked, `FAIL_MODE` applies and reflect asks again; a failed load is logged and tried again a minute later. `judges.local.load()` loads it at startup. |
 
 Remote (`external` names who receives the turn's content; secrets are masked first):

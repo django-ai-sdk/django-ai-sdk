@@ -20,8 +20,7 @@ The rules:
    `keywords` and `verify` on PatternLens; `validators` on CheckLens; `judges`,
    `min_confidence` and what a judge reads (`question`, `guidance`,
    `reads_question`) on JudgeLens. An answer option (`yes`, `labels`, `low`, ...)
-   belongs to the answer types that read it. Declaring one that does not apply is
-   ImproperlyConfigured when the lens is checked.
+   belongs to the answer types that read it.
 3. `answer` picks the answer type: `Flag` (yes or no), `Choice` (one of
    `labels`), `Score` (0 to 1) or `Entities` (which `labels` occur, and where).
 4. A PatternLens answers Entities: what it found, with spans. `L(name).is_true`
@@ -62,7 +61,6 @@ from django_ai_sdk.oversight.judges.base import (
     alias_defined,
     alias_of,
     is_optional,
-    resolve,
 )
 from django_ai_sdk.oversight.judges.patterns import Patterns
 from django_ai_sdk.oversight.types import Answer, Stage, Subject
@@ -73,7 +71,7 @@ if TYPE_CHECKING:
     from django.utils.functional import Promise
 
     from django_ai_sdk.oversight.patterns import PatternTable, Verifier
-    from django_ai_sdk.oversight.types import TextSpan, TurnContext
+    from django_ai_sdk.oversight.types import TurnContext
 
 # The subjects each stage reads. A lens never runs at a stage that skips its subject.
 STAGE_SUBJECTS: dict[Stage, frozenset[Subject]] = {
@@ -374,11 +372,6 @@ class Lens:
             raise ImproperlyConfigured(f"{type(self).__name__} lens without a `name`.")
         if not (isinstance(self.answer, type) and issubclass(self.answer, AnswerType)):
             raise ImproperlyConfigured(f"Lens {self.name!r}: {self.answer!r} is not an answer.")
-        if misplaced := self._misplaced():
-            raise ImproperlyConfigured(
-                f"Lens {self.name!r} declares {misplaced}, which a {self.kind} lens answering "
-                f"{self.answer.kind} does not read."
-            )
         if skipped := [str(s) for s in self.stages if self.subject not in STAGE_SUBJECTS[s]]:
             raise ImproperlyConfigured(
                 f"Lens {self.name!r} reads the {self.subject} at {', '.join(skipped)}, "
@@ -387,16 +380,6 @@ class Lens:
         if not 0 <= self.sample <= 1:
             raise ImproperlyConfigured(f"Lens {self.name!r}: `sample` must be 0 to 1.")
         self.answer.validate(self)
-
-    def _misplaced(self) -> list[str]:
-        """Lens attributes declared here that this class or its answer type does not read."""
-        mechanism = LENS_KINDS.get(self.kind, Lens)
-        own = {*vars(Lens), *vars(mechanism), *self.answer.options}
-        declared = set(self.__dict__)
-        for cls in type(self).__mro__:
-            if cls not in (Lens, mechanism, object):
-                declared.update(vars(cls))
-        return sorted((declared & LENS_ATTRIBUTES) - own)
 
     def steps(self) -> list[Any]:
         """What answers the lens, in order: judges, or specs for `judges.base.ask`."""
@@ -412,14 +395,9 @@ class Lens:
         Other names may quote the turn, so the record keeps only declared labels. A
         person's answer on the lens names what they typed, not a kind.
         """
-        for step in self.steps():
-            try:
-                judge = resolve(step)
-            except Exception:  # noqa: BLE001 - a judge that does not build answered nothing
-                continue
-            if isinstance(judge, Patterns) and judge.label() == answer.answerer:
-                return True
-        return False
+        return any(
+            isinstance(step, Patterns) and step.label() == answer.answerer for step in self.steps()
+        )
 
     def describe(self) -> dict[str, Any]:
         """JSON-safe summary of the lens, for checks and logs."""
@@ -451,8 +429,6 @@ class PatternLens(Lens):
     keywords: PatternTable = {}  # noqa: RUF012
     verify: Mapping[str, Verifier] = {}  # noqa: RUF012
     flags: int = re.IGNORECASE
-    # Give each stretch of text one label: the first pattern to match it keeps it.
-    exclusive: bool = False
 
     @cached_property
     def finder(self) -> Patterns:
@@ -461,17 +437,12 @@ class PatternLens(Lens):
             keywords=self.keywords,
             verify=self.verify,
             flags=self.flags,
-            exclusive=self.exclusive,
             miss_confidence=1.0,
         )
 
     def pattern_table(self) -> PatternTable:
         """The patterns to compile. A preset adds its own here."""
         return self.patterns
-
-    def find(self, text: str) -> list[TextSpan]:
-        """Every span the lens finds in `text`."""
-        return self.finder.find(text, self.name)
 
     def validate(self) -> None:
         super().validate()
@@ -636,19 +607,6 @@ class JudgeLens(Lens):
 
 
 LENS_KINDS: dict[str, type[Lens]] = {cls.kind: cls for cls in (PatternLens, CheckLens, JudgeLens)}
-# Every attribute some lens class reads. One declared on a lens that does not read
-# it is refused (rule 2).
-LENS_ATTRIBUTES = (
-    frozenset(
-        name
-        for cls in (Lens, *LENS_KINDS.values())
-        for name, value in vars(cls).items()
-        if not name.startswith("_")
-        and not callable(value)
-        and not isinstance(value, property | cached_property)
-    )
-    | OPTIONS
-)
 
 
 def lens_from_dict(node: Mapping[str, Any]) -> Lens:
