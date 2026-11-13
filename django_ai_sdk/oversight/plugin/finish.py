@@ -11,14 +11,57 @@ from haystack.dataclasses import ChatRole
 from django_ai_sdk.oversight.agent_run import withhold_unfit
 from django_ai_sdk.oversight.guard import current_guard
 from django_ai_sdk.oversight.plugin.gate import REPLACED_META_KEY, stand_in
-from django_ai_sdk.oversight.plugin.turn import OversightHook, _context, turn_of
+from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from haystack.components.agents.state.state import State
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.oversight.guard import TurnGuard
+
+
+class Answer:
+    """What finish judges in a run, and where a masked or withheld answer goes.
+
+    By default: all the text the model wrote in the run, as a stream shows it.
+    A replaced answer takes the place of the last reply.
+    """
+
+    def text(self, produced: list[HaystackChatMessage]) -> str:
+        return "".join(m.text or "" for m in produced if m.is_from(ChatRole.ASSISTANT))
+
+    def replace(
+        self, messages: list[HaystackChatMessage], first: int, output: str
+    ) -> list[HaystackChatMessage]:
+        for index in range(len(messages) - 1, first - 1, -1):
+            message = messages[index]
+            if message.is_from(ChatRole.ASSISTANT) and message.text and not message.tool_calls:
+                meta = {**message.meta, REPLACED_META_KEY: True}
+                replaced = HaystackChatMessage.from_assistant(output, meta=meta)
+                return [*messages[:index], replaced, *messages[index + 1 :]]
+        return [*messages, stand_in(output)]
+
+
+class WholeRun(Answer):
+    """The text `read` makes of the run's messages, such as what a coordinator reads of a subagent.
+
+    A replaced answer takes the place of every message the run produced, so
+    `read` finds only the finished text.
+    """
+
+    def __init__(self, read: Callable[[list[HaystackChatMessage]], str]) -> None:
+        self.read = read
+
+    def text(self, produced: list[HaystackChatMessage]) -> str:
+        return self.read(produced)
+
+    def replace(
+        self, messages: list[HaystackChatMessage], first: int, output: str
+    ) -> list[HaystackChatMessage]:
+        return [*messages[:first], stand_in(output)]
 
 
 class UsageHook(OversightHook):
@@ -35,7 +78,7 @@ class UsageHook(OversightHook):
 
     async def run_async(self, state: State) -> None:
         _record_usage(state)
-        turn = turn_of(_context(state))
+        turn = request_in(state).turn
         if turn is None or not turn.owns:
             return
         from django_ai_sdk.adapters.citations.registry import current_registry
@@ -48,37 +91,30 @@ class UsageHook(OversightHook):
 class FinishHook(OversightHook):
     """Judge the answer the run wrote, then pass, mask or withhold it in the run's messages.
 
-    The answer is all text the model wrote in this run, as a stream shows it. The
-    hook_context may change that: `answer(messages)` picks the text, and a
-    replaced answer then replaces every message the run produced. With `schema`
-    (a Pydantic model), a masked answer that no longer fits it is withheld.
+    The TurnRequest's `answer` says which text that is (see `Answer`). With its
+    `schema` (a Pydantic model), a masked answer that no longer fits is withheld.
     """
 
     allowed_hook_points = ["after_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        context = _context(state)
-        turn = turn_of(context)
+        request = request_in(state)
+        turn = request.turn
         if turn is None or not turn.owns or turn.refused:
             return
         guard = turn.guard
+        answer = request.answer or Answer()
         messages = list(state.data.get("messages") or [])
-        produced = messages[turn.first :]
-        answer = context.get("answer")
-        text = answer(produced) if answer else _assistant_text(produced)
+        text = answer.text(messages[turn.first :])
         if not text:
             guard.note_error("no result")
             return
         finished = await guard.finish(text)
-        if (schema := context.get("schema")) is not None:
-            withhold_unfit(guard, finished, schema)
-        if not finished.replaced:
-            return
-        if answer is not None:
-            messages = [*messages[: turn.first], stand_in(finished.output)]
-        else:
-            messages = _replaced(messages, turn.first, finished.output)
-        state.set("messages", messages, handler_override=replace_values)
+        if request.schema is not None:
+            withhold_unfit(guard, finished, request.schema)
+        if finished.replaced:
+            messages = answer.replace(messages, turn.first, finished.output)
+            state.set("messages", messages, handler_override=replace_values)
 
 
 async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
@@ -112,21 +148,4 @@ def _model(state: State) -> str | None:
     return None
 
 
-def _assistant_text(messages: list[HaystackChatMessage]) -> str:
-    return "".join(m.text or "" for m in messages if m.is_from(ChatRole.ASSISTANT))
-
-
-def _replaced(
-    messages: list[HaystackChatMessage], first: int, output: str
-) -> list[HaystackChatMessage]:
-    """Put the finished `output` in place of the run's last written answer."""
-    for index in range(len(messages) - 1, first - 1, -1):
-        message = messages[index]
-        if message.is_from(ChatRole.ASSISTANT) and message.text and not message.tool_calls:
-            meta = {**message.meta, REPLACED_META_KEY: True}
-            replaced = HaystackChatMessage.from_assistant(output, meta=meta)
-            return [*messages[:index], replaced, *messages[index + 1 :]]
-    return [*messages, stand_in(output)]
-
-
-__all__ = ["FinishHook", "UsageHook", "mask_sources"]
+__all__ = ["Answer", "FinishHook", "UsageHook", "WholeRun", "mask_sources"]

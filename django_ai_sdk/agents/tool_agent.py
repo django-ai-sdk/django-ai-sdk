@@ -200,21 +200,16 @@ class RequireToolsHook:
 
 
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
-    """The hooks every Haystack Agent built for `agent` runs: tool limits, then oversight.
+    """The tool hooks every Haystack Agent built for `agent` runs: logging and its limits.
 
-    This is the one place an SDK agent's Haystack runs get their oversight hooks
-    (see `oversight.plugin`). They open no turn for an agent that turned oversight
-    off, but a run may still pass a policy of its own.
+    Oversight's hooks join at run time (see `oversight.plugin.run_agent`).
     """
-    hooks = _tool_hooks(
+    return _tool_hooks(
         {"before_tool": [LogToolCallsHook()]},
         max_tool_calls=agent.max_tool_calls,
         max_output_chars=None,
         required_tools=getattr(agent, "required_tools", None),
     )
-    from django_ai_sdk.oversight.plugin import with_oversight
-
-    return with_oversight(hooks, agent)
 
 
 def _tool_hooks(
@@ -251,13 +246,6 @@ def _tool_hooks(
     if not any(isinstance(h, RequireToolsHook) for h in on_exit):
         on_exit.append(RequireToolsHook(required_tools))
     return hooks
-
-
-def _offered(tools: list[Any], hooks: dict[str, list[Any]] | None) -> Any:
-    """The tools to build an Agent with: under oversight, only those its turn allows."""
-    from django_ai_sdk.oversight.plugin import GuardedToolset, has_oversight
-
-    return GuardedToolset.wrap(tools) if has_oversight(hooks) else tools
 
 
 class ToolAgentConfig(BaseModel):
@@ -339,7 +327,7 @@ class ToolAgent:
         """
         kwargs: dict[str, Any] = {
             "chat_generator": generator,
-            "tools": _offered(tools, hooks),
+            "tools": tools,
             "system_prompt": system_prompt,
         }
         if user_prompt is not None:

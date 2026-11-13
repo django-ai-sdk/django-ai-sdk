@@ -889,7 +889,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         from django_ai_sdk.adapters.run import Run
         from django_ai_sdk.agents.tool_agent import default_hooks
         from django_ai_sdk.oversight.history import history_for, thread_storage
-        from django_ai_sdk.oversight.plugin import keep_masked
+        from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
 
         resolved = self.response_format if response_format is self._UNSET else response_format
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
@@ -924,16 +924,17 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 if with_tools
                 else None,
                 max_agent_steps=self.max_agent_steps if with_tools else None,
-                # Oversight: its hooks gate, check and finish the run (see oversight.plugin).
                 hooks=default_hooks(self),
-                hook_context={
-                    "channel": channel,
-                    "user": user,
-                    "thread_id": thread_id,
-                    "oversight": oversight,
-                    "history_vouched": vouched,
-                    "on_gated": admit,
-                },
+                # Oversight: the run's hooks gate, check and finish this turn (see oversight.plugin).
+                request=TurnRequest(
+                    agent=self,
+                    channel=channel,
+                    user=user,
+                    thread_id=thread_id,
+                    oversight=oversight,
+                    history_vouched=vouched,
+                    on_gated=admit,
+                ),
             )
 
     async def get_run_adapter(

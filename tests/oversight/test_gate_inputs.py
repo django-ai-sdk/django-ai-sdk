@@ -362,8 +362,9 @@ class TestStoredHistory:
             attachments=[Attachment(document_id="d1", context="file by a@b.nl")],
         )
         await agent.run([question], thread_id=str(thread.id), user=user)
-        assert question.attachments[0].context == "file by [EMAIL]"
         assert "a@b.nl" not in asked_text(model)
+        # Only the content is stored: the attachment's context is rebuilt each turn.
+        assert question.content == "What is in it?"
 
     async def test_takes_stored_history_only_under_masking(self):
         from django_ai_sdk.oversight.history import takes_stored_history

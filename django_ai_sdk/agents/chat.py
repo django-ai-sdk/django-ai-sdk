@@ -36,7 +36,7 @@ async def chat_turn(
 ) -> Any:
     """Pick the history, then stream. The run's hooks open the turn and gate it."""
     from django_ai_sdk.oversight.history import history_for
-    from django_ai_sdk.oversight.plugin import keep_masked
+    from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
 
     # Prefer the stored thread over the client's history. The client's copy may
     # be unmasked or made up. If there is no usable stored copy, the client's
@@ -107,15 +107,15 @@ async def chat_turn(
         if isinstance(adapter, Stream) and adapter.agent_component is not None:
             # Oversight: the run's hooks open, gate, check and finish the turn
             # (see oversight.plugin); the Stream shows what they decided.
-            adapter.hook_context = {
-                **context,
-                "agent": agent,
-                "channel": "chat",
-                "user": user,
-                "thread_id": thread_id,
-                "history_vouched": vouched,
-                "on_gated": admit,
-            }
+            request = TurnRequest(
+                agent=agent,
+                channel="chat",
+                user=user,
+                thread_id=thread_id,
+                history_vouched=vouched,
+                on_gated=admit,
+            )
+            adapter.hook_context = request.context(**context)
             return adapter
         adapter.hook_context = context or None
         return await _unguardable(agent, adapter, messages, admit, user, thread_id)

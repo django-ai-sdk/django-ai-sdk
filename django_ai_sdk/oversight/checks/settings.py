@@ -91,6 +91,9 @@ def task_backend_checks() -> list[Any]:
 
 # How long expired rows may stay before W007.
 PRUNE_DUE = timedelta(days=2)
+# How long a turn may stay open before W017. A run that crashed outside run_agent, or
+# whose process died, leaves its turn open until oversight_sweep marks it interrupted.
+SWEEP_DUE = timedelta(days=1)
 
 
 def retention_checks(databases: Any) -> list[Any]:
@@ -119,6 +122,33 @@ def retention_checks(databases: Any) -> list[Any]:
             id=f"{PREFIX}.W007",
         )
         for alias, late in _per_database(databases, overdue)
+        if late
+    ]
+
+
+def sweep_checks(databases: Any) -> list[Any]:
+    """Warn when turns open longer than SWEEP_DUE are still open: nothing sweeps.
+
+    Runs under `manage.py check --deploy --database <alias>`.
+    """
+    from django.utils import timezone
+
+    from django_ai_sdk.oversight.models import Turn
+
+    due = timezone.now() - SWEEP_DUE
+
+    def stale(alias: str) -> bool:
+        return Turn.objects.using(alias).filter(status="open", created_at__lt=due).exists()
+
+    return [
+        Warning(
+            f"Oversight turns in database {alias!r} stay open for more than a day: "
+            "oversight_sweep does not run.",
+            hint="Schedule `manage.py oversight_sweep`, for example every 10 minutes. A turn "
+            "whose run crashed or whose process died stays open until it is swept.",
+            id=f"{PREFIX}.W017",
+        )
+        for alias, late in _per_database(databases, stale)
         if late
     ]
 

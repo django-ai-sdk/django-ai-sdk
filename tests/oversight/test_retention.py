@@ -136,6 +136,16 @@ class TestNothingPrunes:
         )
         assert await sync_to_async(self.ids)() == []
 
+    async def test_a_turn_open_for_more_than_a_day_warns_until_swept(self):
+        # W017: a run that crashed outside run_agent leaves its turn open until the sweep.
+        turn_id = await a_turn()
+        await Turn.objects.filter(id=turn_id).aupdate(
+            status="open", created_at=timezone.now() - timedelta(days=2)
+        )
+        assert await sync_to_async(self.ids)() == ["ai_sdk.oversight.W017"]
+        await Turn.objects.filter(id=turn_id).aupdate(status="interrupted")
+        assert await sync_to_async(self.ids)() == []
+
     def test_it_reads_no_database_unless_given_one(self):
         assert check_oversight_retention() == []
 

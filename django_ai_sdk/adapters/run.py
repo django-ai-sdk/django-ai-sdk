@@ -14,6 +14,7 @@ from django_ai_sdk.logger import get_logger
 if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.oversight.plugin import TurnRequest
 
 logger = get_logger(__name__)
 
@@ -24,16 +25,11 @@ def get_user_text(message: ChatMessage) -> str:
     return "\n\n".join([message.content, *hints]) if hints else message.content
 
 
-def set_user_text(message: ChatMessage, text: str) -> None:
-    """Put back `text`, joined as `get_user_text` joins it: the content, then each context line."""
+def user_content(message: ChatMessage, text: str) -> str | None:
+    """The content part of `text`, joined as `get_user_text` joins it. None if it no longer splits."""
     hints = [a for a in message.attachments if a.context]
     parts = text.rsplit("\n\n", len(hints)) if hints else [text]
-    if len(parts) != len(hints) + 1:
-        message.content = text
-        return
-    message.content = parts[0]
-    for attachment, part in zip(hints, parts[1:], strict=True):
-        attachment.context = part
+    return parts[0] if len(parts) == len(hints) + 1 else None
 
 
 def get_user_message(message: ChatMessage) -> HaystackChatMessage:
@@ -89,7 +85,7 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        hook_context: dict[str, Any] | None = None,
+        request: TurnRequest | None = None,
     ) -> str | None: ...
     @overload
     async def run(
@@ -101,7 +97,7 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        hook_context: dict[str, Any] | None = None,
+        request: TurnRequest | None = None,
     ) -> T | None: ...
 
     async def run(
@@ -113,22 +109,22 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        hook_context: dict[str, Any] | None = None,
+        request: TurnRequest | None = None,
     ) -> T | str | None:
         """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
 
-        `hooks` come from `default_hooks(agent)`, oversight's among them, and
-        `hook_context` names the turn. Raises `Blocked` when the turn's gate
-        refused the question or its finish withheld the answer.
+        `request` names the turn (see `oversight.plugin`); the run's oversight
+        hooks join in `run_agent`. Raises `Blocked` when the turn's gate refused
+        the question or its finish withheld the answer.
         """
-        from django_ai_sdk.oversight.plugin import GuardedToolset, has_oversight, run_agent, turn_of
+        from django_ai_sdk.oversight.plugin import TurnRequest, run_agent
 
-        context = {**(hook_context or {}), "schema": response_format}
+        request = request or TurnRequest()
+        request.schema = response_format
         options: dict[str, Any] = {"hooks": hooks}
         if max_agent_steps is not None:
             options["max_agent_steps"] = max_agent_steps
-        offered = GuardedToolset.wrap(tools) if has_oversight(hooks) else tools
-        agent = Agent(chat_generator=self.generator, tools=offered, **options)
+        agent = Agent(chat_generator=self.generator, tools=tools, **options)
         converted = self.get_messages(messages)
         if system_prompt:
             # A message, not the Agent's system_prompt, which Haystack renders as a template.
@@ -138,9 +134,9 @@ class Run:
             if response_format
             else {}
         )
-        result = await run_agent(agent, converted, hook_context=context, **schema)
-        if (turn := turn_of(context)) is not None:
-            turn.raise_if_blocked()
+        result = await run_agent(agent, converted, hook_context=request.context(), **schema)
+        if request.turn is not None:
+            request.turn.raise_if_blocked()
         replies = result.get("messages") or []
         text = replies[-1].text if replies else None
         if not response_format:
@@ -156,4 +152,4 @@ class Run:
         return response_format.model_validate_json(text)
 
 
-__all__ = ["Run", "get_user_message", "get_user_text", "set_user_text"]
+__all__ = ["Run", "get_user_message", "get_user_text", "user_content"]

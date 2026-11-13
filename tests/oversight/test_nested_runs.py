@@ -211,6 +211,21 @@ class TestSubagents:
             await component.run_async(messages=context, task="who")
         assert handed == [[], context]
 
+    async def test_a_child_turns_tool_calls_stay_in_the_child_turn(self):
+        # Its own policy judged them. The coordinator's turn gets only what came back:
+        # its tool hooks check the delegation call and mask the answer at the hand-off.
+        ran: list[str] = []
+        lenient = await TurnGuard.start(
+            make_agent([], None, policy="test-lenient"), channel="chat", input="x"
+        )
+        component = await delegation(secret_subagent(ran, call("send", text="hello"), "done"))
+        with guarding(lenient):
+            await component.run_async(messages=[HaystackChatMessage.from_user("x")], task="send")
+        assert ran == ["hello"]
+        assert lenient.context.tool_calls == []
+        child = await Turn.objects.aget(parent_turn_id=lenient.id)
+        assert child.policy == "test-guard"
+
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")

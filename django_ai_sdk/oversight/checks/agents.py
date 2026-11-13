@@ -1,7 +1,10 @@
-"""Checks on agent classes: the policy each names, and chat adapters that never finish."""
+"""Checks on agent classes: the policy each names, and runs or chats it cannot check."""
 
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
 from typing import Any
 
 from django.core.checks import Error, Warning
@@ -79,7 +82,57 @@ def agent_checks() -> list[Any]:
                 )
             )
         messages.extend(_adapter_checks(cls))
+        messages.extend(_run_override_checks(cls))
     return messages
+
+
+def _run_override_checks(cls: type) -> list[Any]:
+    """Warn when a run() override never calls super().run(): its model calls go unchecked.
+
+    The policy's checks are hooks on the Haystack run that `Agent.run` starts. An
+    override that answers some messages itself and passes the rest to super().run()
+    is fine; one that never calls it replaces the checked run.
+    """
+    from django_ai_sdk.agents.base import Agent
+    from django_ai_sdk.oversight.agents import code_policy
+
+    policy, _ = code_policy(cls)  # "" when the agent opts out
+    if not policy:
+        return []
+    replacing = [
+        klass.__qualname__
+        for klass in cls.__mro__
+        if klass is not Agent
+        and issubclass(klass, Agent)
+        and "run" in vars(klass)
+        and not _calls_super_run(vars(klass)["run"])
+    ]
+    return [
+        Warning(
+            f"Agent {cls.__qualname__} runs through {name}.run(), which never calls "
+            f"super().run(): policy {policy!r} does not check the model calls it makes.",
+            hint="Call super().run() for the model call, or open a turn() around your own.",
+            id=f"{PREFIX}.W016",
+        )
+        for name in replacing[:1]
+    ]
+
+
+def _calls_super_run(method: Any) -> bool:
+    """Whether `method`'s source calls super().run(). True when the source cannot be read."""
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+    except (OSError, TypeError, SyntaxError):
+        return True  # Can't tell: no warning.
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+        and isinstance(node.func.value, ast.Call)
+        and isinstance(node.func.value.func, ast.Name)
+        and node.func.value.func.id == "super"
+        for node in ast.walk(tree)
+    )
 
 
 def _adapter_checks(cls: type) -> list[Any]:

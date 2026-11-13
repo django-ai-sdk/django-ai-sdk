@@ -21,6 +21,7 @@ from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.types import Stage, Subject
 from haystack.components.generators.chat import MockChatGenerator
 
+from django_ai_sdk.oversight.stream import HELD_OUTPUT, WITHHELD_OUTPUT
 from tests.factories.db import UserFactory
 from tests.oversight.helpers import (
     ENFORCE,
@@ -74,7 +75,7 @@ class TestAutoHoldsTheAnswer:
         assert "NL91ABNA0417164300" not in json.dumps(storage.stored[0].tool_calls)
         # The card that showed the tool running is closed, saying why it stays empty.
         outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
-        assert list(outputs[-1]) == ["withheld"]
+        assert outputs[-1] == {"result": str(WITHHELD_OUTPUT)}
 
     async def test_a_held_answer_shows_its_tools_running_then_what_they_found(self):
         held_policy("test-held-yes", withhold=False)
@@ -86,7 +87,7 @@ class TestAutoHoldsTheAnswer:
         shown = next(
             i
             for i, p in enumerate(parts)
-            if p.get("type") == "tool-output-available" and "held" in p["output"]
+            if p.get("type") == "tool-output-available" and p["output"] == {"result": str(HELD_OUTPUT)}
         )
         before, after = parts[: shown + 1], parts[shown + 1 :]
         # While it works: the tool's name and progress, none of what it was given or found.

@@ -31,7 +31,7 @@ from django_ai_sdk.oversight.guard import (
     current_guard,
     outlived_turn,
 )
-from django_ai_sdk.oversight.plugin.turn import OversightHook
+from django_ai_sdk.oversight.plugin.turn import OversightHook, turn_of
 from django_ai_sdk.oversight.types import ToolCall
 
 if TYPE_CHECKING:
@@ -118,8 +118,9 @@ def _as_tool_call(call: Any, state: State) -> ToolCall:
 
 
 def _agent_name(state: State) -> str:
-    """The subagent whose run this is (hook_context `agent_name`), recorded with its tool calls."""
-    return (state.data.get("hook_context") or {}).get("agent_name") or ""
+    """The agent of a run that joined an outer turn, recorded with its tool calls (see Turn)."""
+    turn = turn_of(state.data.get("hook_context"))
+    return turn.agent_name if turn is not None else ""
 
 
 def _answer_with_stubs(

@@ -329,6 +329,43 @@ class TestChecks:
         with patch("django_ai_sdk.agents.registry.registry.all", lambda: {"a": OptedOut()}):
             assert agent_checks() == []
 
+    def test_a_run_override_that_never_calls_super_warns(self):
+        from django_ai_sdk.oversight.checks.agents import agent_checks
+
+        class OwnModel(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            oversight = "test-guard"
+
+            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
+                return await my_model(messages)  # noqa: F821
+
+        class Shortcut(OwnModel):
+            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
+                return "hi" if messages == ["hi"] else await super().run(messages, **kwargs)
+
+        class Passes(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            oversight = "test-guard"
+
+            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
+                return "hi" if messages == ["hi"] else await super().run(messages, **kwargs)
+
+        def ids(agent: Agent) -> list[str]:
+            with patch("django_ai_sdk.agents.registry.registry.all", lambda: {"a": agent}):
+                return [m.id for m in agent_checks()]
+
+        assert ids(OwnModel()) == ["ai_sdk.oversight.W016"]
+        # super().run() here reaches OwnModel.run, which still replaces the checked run.
+        assert ids(Shortcut()) == ["ai_sdk.oversight.W016"]
+        assert ids(Passes()) == []
+
+        class OptedOut(OwnModel):
+            oversight = False
+
+        assert ids(OptedOut()) == []
+
     def test_the_default_capture_is_masked(self):
         assert setting.defaults["CAPTURE"] == "masked"
 

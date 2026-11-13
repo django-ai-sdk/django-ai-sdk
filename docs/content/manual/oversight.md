@@ -223,7 +223,7 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `GateResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it refuses) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the turn, gate, stop, usage and finish hooks. `default_hooks(agent)` installs it on every Haystack Agent the SDK builds, and `install()` on one built by hand, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the turn, gate, stop, usage and finish hooks. `run_agent` installs it on every Haystack Agent the SDK runs (`install()`), so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
 
 A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
@@ -403,6 +403,8 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.W013` | An agent with a policy streams chat through a `get_pipeline_adapter()` annotated to return something other than the SDK's `Stream`: its chats are refused, or run unchecked if the policy fails open. |
 | `ai_sdk.oversight.W014` | Deploy check: the `TASKS` backend runs reflect and notifications inline in the request (`ImmediateBackend`), never runs them (`DummyBackend`), or does not load. |
 | `ai_sdk.oversight.W015` | A policy in use has an enforced `Notify` rule, but `NOTIFIERS` is empty: nobody is told. |
+| `ai_sdk.oversight.W016` | An agent with a policy overrides `run()` and never calls `super().run()`: the model calls it makes are not checked. Call `super().run()`, or open a `turn()` around your own model calls. |
+| `ai_sdk.oversight.W017` | Deploy check, against a database (`check --deploy --database default`): turns have been open for more than a day, so `oversight_sweep` does not run. |
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 

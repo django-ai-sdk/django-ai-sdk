@@ -30,7 +30,15 @@ from django_ai_sdk.events import (
 from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
-from django_ai_sdk.oversight.plugin import close_turn, mask_sources, masked_result, turn_of
+from django_ai_sdk.oversight.plugin import (
+    REQUEST_KEY,
+    TurnRequest,
+    close_turn,
+    mask_sources,
+    masked_result,
+    request_of,
+    turn_of,
+)
 from django_ai_sdk.oversight.types import Outcome, Stage
 
 if TYPE_CHECKING:
@@ -51,8 +59,8 @@ _INERT = TurnGuard()
 CONTENT_FILTER = "content-filter"
 
 # While an answer is held, tool cards show that a tool ran but not its input or
-# output. After the check they get the real data, or WITHHELD_OUTPUT.
-HELD_OUTPUT = gettext_lazy("Shown once the answer is checked.")
+# output: just this line. After the check they get the real data, or WITHHELD_OUTPUT.
+HELD_OUTPUT = gettext_lazy("Checking the answer first. The result shows here once it passes.")
 WITHHELD_OUTPUT = gettext_lazy("Not shown: oversight withheld this answer.")
 
 
@@ -136,8 +144,8 @@ class StreamTurn:
     """The oversight side of one streamed chat turn.
 
     The run's hooks open and decide the turn (see `oversight.plugin`); this shows
-    what they decided. The Stream runs the agent with `context` as its
-    hook_context, sends the `start()` events, passes every event through
+    what they decided. The Stream runs the agent with `context`, which holds the
+    run's TurnRequest, as its hook_context, sends the `start()` events, passes every event through
     `pass_event`, then calls `afinish`, or `refusal_events()` when the gate
     refused, or `end_early` when the turn ends before that, and always `aclose`,
     which closes the turn once the answer is stored. Until the run opened a turn,
@@ -179,7 +187,12 @@ class StreamTurn:
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
-        context.update(message_id=message_id, keep_open=True, on_tool_results=refused_results)
+        # A copy, so the adapter's request is never shared between streams.
+        request = dataclasses.replace(request_of(context) or TurnRequest())
+        request.message_id = message_id
+        request.keep_open = True
+        request.on_tool_results = refused_results
+        context[REQUEST_KEY] = request
 
     @property
     def guard(self) -> TurnGuard:
@@ -344,14 +357,14 @@ def _held_progress(event: StreamEvent) -> StreamEvent | None:
     if isinstance(event, ToolInputCompleteEvent):
         return event.model_copy(update={"tool_input": {}})
     if isinstance(event, ToolOutputEvent):
-        return event.model_copy(update={"tool_output": {"result": {"held": str(HELD_OUTPUT)}}})
+        return event.model_copy(update={"tool_output": {"result": str(HELD_OUTPUT)}})
     return None
 
 
 def _released(held: list[StreamEvent], *, withheld: bool) -> list[StreamEvent]:
     """Return the held tool events to send after the check, or WITHHELD outputs."""
     if withheld:
-        output = {"result": {"withheld": str(WITHHELD_OUTPUT)}}
+        output = {"result": str(WITHHELD_OUTPUT)}
         return [
             event.model_copy(update={"tool_output": output})
             for event in held

@@ -113,6 +113,7 @@ class TestAgentRunToolsDefault:
             return_value={"messages": [HaystackChatMessage.from_assistant("done")]}
         )
         tool = MagicMock()
+        fake_agent.tools = [tool]
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[tool])) as tools,
@@ -125,8 +126,9 @@ class TestAgentRunToolsDefault:
 
         assert result == "done"
         tools.assert_awaited_once()
-        # Under oversight the model is offered only the tools the turn still allows.
-        assert agent_cls.call_args.kwargs["tools"].items == [tool]
+        assert agent_cls.call_args.kwargs["tools"] == [tool]
+        # run_agent installs oversight: the model is offered only the tools the turn allows.
+        assert fake_agent.clone.call_args.kwargs["tools"].items == [tool]
         # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
         # generic constant.
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 6

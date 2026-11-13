@@ -97,14 +97,6 @@ def _tool_line(tool_call: Any) -> str:
     return f"{tool_call.tool_name}({args})"
 
 
-def _sources(messages: list[ChatMessage]) -> str:
-    """List what the subagent actually called, so the coordinator can cite it."""
-    lines = [_tool_line(call) for message in messages for call in (message.tool_calls or [])]
-    if not lines:
-        return ""
-    return "Sources consulted:\n" + "\n".join(f"- {line}" for line in lines)
-
-
 def _digest(messages: list[ChatMessage]) -> str:
     """The gathered material itself, for when no response was ever written."""
 
@@ -139,13 +131,19 @@ def _digest(messages: list[ChatMessage]) -> str:
 
 
 def subagent_response(messages: list[ChatMessage] | None) -> str:
-    """Build the tool output the coordinator receives for a delegation."""
+    """Build the tool output the coordinator receives for a delegation.
+
+    The subagent's written response, or else what its tools found. The response
+    names its own sources, and the digest lists each call with its result.
+    """
     messages = messages or []
-    parts = [_final_response(messages) or _digest(messages), _sources(messages)]
-    response = "\n\n".join(part for part in parts if part)
-    return response or (
-        "The sub-task could not be completed and produced no usable findings. "
-        "Tell the user the work is unfinished."
+    return (
+        _final_response(messages)
+        or _digest(messages)
+        or (
+            "The sub-task could not be completed and produced no usable findings. "
+            "Tell the user the work is unfinished."
+        )
     )
 
 
@@ -267,6 +265,7 @@ class FinalResponseHook:
 
 
 def _with_final_response(hooks: dict[str, list[Any]], generator: Any) -> dict[str, list[Any]]:
+    """`hooks` with a FinalResponseHook. Oversight's after_run hooks join after it, at run time."""
     return {**hooks, "after_run": [*hooks.get("after_run", []), FinalResponseHook(generator)]}
 
 
@@ -389,7 +388,7 @@ class SubagentStreamFilter:
         **kwargs: Any,
     ) -> dict[str, Any]:
         from django_ai_sdk.oversight.guard import current_guard
-        from django_ai_sdk.oversight.plugin import run_agent
+        from django_ai_sdk.oversight.plugin import TurnRequest, WholeRun, run_agent
 
         outer = current_guard()
         seen: set[str] = set()
@@ -397,16 +396,14 @@ class SubagentStreamFilter:
             result = await run_agent(
                 self._agent,
                 _handoff_context(messages),
-                hook_context={
-                    "agent": self._subagent,
-                    # Its tool calls are recorded under its name.
-                    "agent_name": self.name,
-                    "channel": outer.channel if outer is not None else "subagent",
-                    "user": self._user,
-                    "thread_id": self._thread_id or None,
+                hook_context=TurnRequest(
+                    agent=self._subagent,
+                    channel=outer.channel if outer is not None else "subagent",
+                    user=self._user,
+                    thread_id=self._thread_id or None,
                     # The coordinator reads this, so finish judges it.
-                    "answer": subagent_response,
-                },
+                    answer=WholeRun(subagent_response),
+                ).context(),
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,

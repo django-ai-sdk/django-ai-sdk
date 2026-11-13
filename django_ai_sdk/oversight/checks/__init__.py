@@ -47,13 +47,13 @@ def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 def check_oversight_retention(
     app_configs: Any = None, databases: Any = None, **kwargs: Any
 ) -> list[Any]:
-    """Warn when expired rows are never deleted. Reads the databases it is given."""
-    from django_ai_sdk.oversight.checks.settings import retention_checks
+    """Warn when expired rows are never deleted or open turns never swept. Reads the databases it is given."""
+    from django_ai_sdk.oversight.checks.settings import retention_checks, sweep_checks
     from django_ai_sdk.oversight.conf import is_enabled, setting
 
     if setting.broken or not is_enabled():
         return []
-    return retention_checks(databases)
+    return [*retention_checks(databases), *sweep_checks(databases)]
 
 
 __all__ = ["PREFIX", "check_oversight", "check_oversight_deploy", "check_oversight_retention"]

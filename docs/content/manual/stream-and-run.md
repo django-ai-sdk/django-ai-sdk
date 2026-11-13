@@ -103,7 +103,7 @@ return await adapter.run(
     tools=await self.get_tools(thread_id=thread_id or "", user=user) if with_tools else None,
     max_agent_steps=self.max_agent_steps if with_tools else None,
     hooks=default_hooks(self),
-    hook_context={"channel": channel, "user": user, "thread_id": thread_id, ...},
+    request=TurnRequest(agent=self, channel=channel, user=user, thread_id=thread_id, ...),
 )
 ```
 
@@ -115,8 +115,8 @@ not a generic constant. A class with `max_agent_steps = 4` gets 4 steps
 whether it's delegated to live or run headless by itself; one function,
 `default_hooks()`, is the single place that assembly exists.
 
-The return is just the last message's text — no digest, no sources-consulted
-list, no synthesis-pass recovery if the loop got cut short. That machinery
+The return is just the last message's text — no digest, no synthesis-pass
+recovery if the loop got cut short. That machinery
 (`subagent_response()`) exists specifically for the coordinator/subagent
 handoff, where a lost result means a lost answer to the user mid-conversation.
 A headless run has no ongoing conversation to lose context from — the caller
@@ -131,7 +131,8 @@ first real caller.
 
 Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
 turn, and oversight runs inside the Haystack Agent as hooks
-from `default_hooks(self)` (`django_ai_sdk.oversight.plugin`): the run opens its
+(`django_ai_sdk.oversight.plugin`), which `run_agent` installs on every run. The
+`TurnRequest` says whose turn it is. The run opens its
 turn (`TurnOpenHook`), the gate judges the history and the question before the
 first model call (`GateHook`), every tool call is checked before it runs
 (`OversightToolHook`), every result is masked before the model reads it

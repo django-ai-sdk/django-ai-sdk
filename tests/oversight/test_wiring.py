@@ -77,8 +77,8 @@ class TestHooks:
         hooks = install(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]))).hooks
         assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
         assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
-        # default_hooks is where an SDK agent's runs get them.
-        assert any(
+        # install, in run_agent, is the one place they join: not default_hooks.
+        assert not any(
             isinstance(h, OversightToolHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
         )
 

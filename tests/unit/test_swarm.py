@@ -18,6 +18,7 @@ from django_ai_sdk.agents.subagent import (
     SUBAGENT_META_KEY,
     SubagentStreamFilter,
     _tool_chunks_only,
+    _with_final_response,
     build_subagent,
     subagent_response,
     subagent_tool_name,
@@ -862,10 +863,8 @@ class TestSwarmEndToEnd:
         assert result["tool_call_counts"]["boat_expert"] == 1
         delegated = [m for m in result["messages"] if m.tool_call_results]
         assert delegated, "coordinator should have received the subagent output"
-        # The report, plus the source list the handoff always appends.
-        handed_back = delegated[0].tool_call_results[0].result
-        assert handed_back.startswith("Aye! Keel lore.")
-        assert "boat_expert(task='Explain keels')" in handed_back
+        # The subagent's own report, as it wrote it.
+        assert delegated[0].tool_call_results[0].result == "Aye! Keel lore."
 
     @pytest.mark.asyncio
     async def test_coordinator_streams_subagent_tool_calls(self):
@@ -956,8 +955,7 @@ class TestSwarmEndToEnd:
             tool_calls=[ToolCall(tool_name="noop", arguments={"x": 1}, id="c1")]
         )
         fallback = subagent_response([tool_only])
-        assert isinstance(fallback, str) and fallback
-        assert "Sources consulted" in fallback
+        assert "could not be completed" in fallback
 
 
 def _stream_with_handoffs(*handoff_tools: str) -> Stream:
@@ -1215,16 +1213,10 @@ class TestSubagentReport:
         # The budget stub is not gathered material.
         assert "Tool budget reached" not in output
 
-    def test_successful_run_returns_report_plus_sources(self):
+    def test_successful_run_returns_just_the_report(self):
+        # The report names its own sources; no digest when there is one.
         output = subagent_response(_research_messages(report="Bordeaux: 220,000 evacuated."))
-
-        assert output.startswith("Bordeaux: 220,000 evacuated.")
-        assert "Sources consulted:" in output
-        assert "search_web(query='bordeaux')" in output
-        assert "fetch_page(url='https://ap.example')" in output
-        # No digest when there is a real report.
-        assert "cut short" not in output
-        assert "France and Spain battle wildfires" not in output
+        assert output == "Bordeaux: 220,000 evacuated."
 
     def test_digest_budget_is_shared_across_results(self, settings):
         settings.AI_SDK_SUBAGENT_DIGEST_LIMIT = 20
@@ -1330,10 +1322,23 @@ class TestSubagentSynthesis:
         assert "France and Spain battle wildfires" in digest
 
     def test_build_subagent_runs_it_before_oversight_finishes(self):
-        from django_ai_sdk.oversight.plugin import FinishHook, TurnCloseHook, UsageHook, with_oversight
+        # Otherwise finish judges the digest of a run cut short, and no response is ever written.
+        from django_ai_sdk.agents.tool_agent import default_hooks
+        from haystack.components.agents import Agent as HaystackAgent
 
-        after = with_oversight({"after_run": [FinalResponseHook(MagicMock())]})["after_run"]
-        assert [type(h) for h in after] == [FinalResponseHook, UsageHook, FinishHook, TurnCloseHook]
+        from django_ai_sdk.oversight.plugin import FinishHook, TurnCloseHook, UsageHook, install
+
+        built = HaystackAgent(
+            chat_generator=MockChatGenerator(responses=["x"]),
+            hooks=_with_final_response(default_hooks(MagicMock()), MagicMock()),
+        )
+        after = install(built).hooks["after_run"]
+        assert [type(h) for h in after][-4:] == [
+            FinalResponseHook,
+            UsageHook,
+            FinishHook,
+            TurnCloseHook,
+        ]
 
 
 class TestUnstreamedResults:

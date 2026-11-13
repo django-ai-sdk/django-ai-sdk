@@ -78,11 +78,12 @@ class TestChatLifecycle:
         from django_ai_sdk.common import ChatMessage, StreamWriter
 
         from django_ai_sdk.events import TextChunkEvent
+        from django_ai_sdk.oversight.plugin import TurnRequest
 
         # Report-only: the answer streams live, so the client can leave mid-answer.
         agent = make_agent(["Hi."], Storage(), policy="test-report-only")
         adapter = await agent.get_pipeline_adapter()
-        adapter.hook_context = {"agent": agent, "channel": "chat"}
+        adapter.hook_context = TurnRequest(agent=agent, channel="chat").context()
         events = adapter.stream([ChatMessage(role="user", content="hello")])
         async for event in events:  # until the run opened its turn and the answer streams
             if isinstance(event, TextChunkEvent):

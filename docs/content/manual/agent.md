@@ -103,7 +103,7 @@ Declaring `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent in
   3. **Build it.** `build_subagent(subagent_cls, thread_id, user)` → `(HaystackAgent, Agent)` (the SDK agent, whose policy guards the delegation), or `None` for a cyclic graph (see below).
   4. **Name the tool.** `subagent_tool_name(subagent_cls)` slugifies the display name. A collision appends a short suffix derived from the colliding class's `agent_id` (`research_planner_7f3a2c`) — guaranteed not to collide again, unlike an incrementing counter; the same pattern `get_rag_tools()` already uses for a memory-tool-name collision.
   5. **Wrap it** as a `ComponentTool` scoped to a single `task` string parameter — delegation, not remote tool invocation.
-- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](../stream-and-run/#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one, and oversight attaches its own hooks when the subagent runs.
+- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](../stream-and-run/#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one, and oversight's hooks join after it when the subagent runs (`run_agent` installs them), so finish judges the written response.
 - The subagent's response becomes the tool output via `outputs_to_string` — see [Handoff output](#handoff-output) for what that contains and how a cut-short run is recovered. The coordinator remains the single source of streamed *text*, but the subagent's tool calls/results stream to the client via `stream_subagent_tools` (default on) and are persisted into the conversation history — `SubagentStreamFilter` forwards only tool chunks, in the order they happen.
 - The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
 
@@ -115,13 +115,12 @@ run out of budget or steps *after* doing the work: reading only the last message
 would hand back a "you have reached the maximum of N tool calls" notice and throw
 every result away.
 
-`subagent_response()` (`django_ai_sdk/agents/subagent.py`) returns, in order:
+`subagent_response()` (`django_ai_sdk/agents/subagent.py`) returns one of:
 
-1. **The response** — the subagent's final written answer.
-2. **Sources consulted** — one `tool(args)` line per call it made, names and
-   arguments only, never bodies. Always appended, so the coordinator can cite
-   even when the response forgot to.
-3. **A digest** — only when there is no response: the gathered tool results
+1. **The response** — the subagent's final written answer, which names its own
+   sources.
+2. **A digest** — only when there is no response: each call it made with the
+   gathered result,
    themselves, under `"The run was cut short before a response was
    finished."` so the coordinator presents them as partial rather than as a
    finished answer. Capped by `AI_SDK_SUBAGENT_DIGEST_LIMIT` (default `6000`

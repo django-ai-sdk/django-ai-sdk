@@ -11,7 +11,7 @@ from haystack.dataclasses import ChatRole, TextContent
 
 from django_ai_sdk.common import ChatMessage, last_user_message
 from django_ai_sdk.oversight.agent_run import gate_conversation
-from django_ai_sdk.oversight.plugin.turn import OversightHook, _context, turn_of
+from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
@@ -27,22 +27,20 @@ class GateHook(OversightHook):
     """Judge the run's history and question, then mask them in place or refuse the run.
 
     The history is every earlier user and assistant message, judged unless the
-    hook_context says the stored thread vouches for it (`history_vouched`). A
+    TurnRequest says the stored thread vouches for it (`history_vouched`). A
     refusal ends the run before the first model call, with the policy's message
     as the answer. Otherwise the gate's notice waits on the guard for the stream,
-    and the hook_context's `on_gated(turn)` runs, so a caller can store the
-    question only once it passed.
+    and the request's `on_gated(turn)` runs, so a caller can store the question
+    only once it passed.
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        context = _context(state)
-        turn = turn_of(context)
+        request = request_in(state)
+        turn = request.turn
         if turn is not None and turn.owns:
-            gate = turn.gated = await _gate(
-                state, turn.guard, vouched=bool(context.get("history_vouched"))
-            )
+            gate = turn.gated = await _gate(state, turn.guard, vouched=request.history_vouched)
             if gate.blocked:
                 answer_with(state, gate.message, stop="blocked")
                 return
@@ -51,8 +49,8 @@ class GateHook(OversightHook):
             await _mask_seeded_sources(turn.guard)
         if turn is not None:
             turn.first = len(state.data.get("messages") or [])
-        if (on_gated := context.get("on_gated")) is not None:
-            await on_gated(turn)
+        if request.on_gated is not None:
+            await request.on_gated(turn)
 
 
 async def _gate(state: State, guard: Any, *, vouched: bool) -> GateResult:
@@ -77,12 +75,19 @@ async def _gate(state: State, guard: Any, *, vouched: bool) -> GateResult:
 
 
 def keep_masked(messages: list[ChatMessage], turn: Turn | None) -> None:
-    """Mask the caller's last user message as the gate masked it, so the caller stores that copy."""
-    from django_ai_sdk.adapters.run import set_user_text
+    """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
+
+    Only its content is stored. When the masked text no longer splits back into
+    the content and the attachments' context, the content is withheld rather
+    than stored with what may be unmasked.
+    """
+    from django_ai_sdk.adapters.run import user_content
+    from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
 
     gated = turn.gated if turn is not None else None
     if gated is not None and gated.masked and (question := last_user_message(messages)):
-        set_user_text(question, gated.input)
+        content = user_content(question, gated.input)
+        question.content = content if content is not None else str(UNCHECKED_TEXT)
 
 
 async def _mask_seeded_sources(guard: Any) -> None:
