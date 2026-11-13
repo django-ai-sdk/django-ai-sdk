@@ -12,7 +12,7 @@ The line between the two is fixed: **a lens or rule declared in code changes onl
 
 What a definition holds:
 
-- **What it extends**: code's policies, the packs (`security`, `safety`, `quality`) and other authored policies.
+- **What it extends**: code's policies and the packs (`security`, `safety`, `quality`). Never another authored policy: copy its rules, or have a developer move the base into code.
 - **Lenses of its own**: a judge lens answered by aliases the deployment set up (`"judge"`, `"classifier?"`), a pattern lens of keywords, a check lens of validators the developers registered, or a built-in lens (`pii`, `secrets`, `refusal`, `length`, `language`).
 - **Rules of its own**: a condition over its lenses (inherited ones included) and actions: `block`, `mask`, `restrict_tools`, `queue`, `notify`, `alert`.
 - **Options**: `capture`, `stream_mode`, `fail_mode`, `retention`.
@@ -28,7 +28,7 @@ INSTALLED_APPS = [
 ]
 
 AI_SDK_OVERSIGHT_AUTHORING = {
-    # Every authored policy keeps the protective rules of these, directly or through a parent.
+    # Every authored policy keeps the protective rules of these, directly or through a code parent.
     "MUST_EXTEND": ["security"],
 }
 ```
@@ -94,6 +94,7 @@ await AuthoringService.save_policy("refunds", PolicyIn(**definition), user=reque
 An authored policy is checked as code's are (every lens has what answers it, every rule acts, a Mask points at an Entities lens, no cycle), and on top of that it may not:
 
 - **take a code policy's name**: code wins, and the save is refused;
+- **extend an authored policy**: only code's policies and the packs;
 - **change an inherited lens or rule**: a lens or rule of its own may not take a name it inherits, a preset's default name (`pii`, `secrets`, …) included, and after the build every lens and rule of every parent must be exactly as that parent builds it, so a later parent cannot replace an earlier one's either. A lens or rule declared in code stays code's, mode included;
 - **keep more than a parent**: a higher `capture`, a longer `retention` (compared with what each parent builds, the `RETENTION` setting included for a kind it does not set), or `fail_mode: "open"` over a parent that fails closed;
 - **configure a lens beyond a safe set**: inline only keywords (a pattern lens, or a `Patterns` judge, of whole words) and the built-in lenses `pii` (by kind), `secrets`, `refusal`, `length` and `language`, with plain arguments; a check lens names validators the developers registered (`register_validator`). No regex, no code, no import path: a pattern an author writes would run on every turn and could backtrack for seconds. A model judge, a classifier or a regex comes as an alias in `AI_SDK_OVERSIGHT["JUDGES"]`, which the deployment sets;
@@ -108,9 +109,9 @@ Toggles change only what the policy itself declares:
 - **a lens of its own** is turned off (`enabled: false`) or on;
 - **the whole policy** is turned off (`active: false`): its own lenses and rules stop, and **the policies it extends keep running**. An agent that names it then runs under its parents alone.
 
-A rule or lens it inherits cannot be toggled: 400. Each toggle is checked like a save, and applies like one. A save or toggle locks the row, so concurrent changes apply one after the other, and is refused (400) when an authored policy that extends it, at any depth, would no longer load.
+A rule or lens it inherits cannot be toggled: 400. Each toggle is checked like a save, and applies like one. A save or toggle locks the row, so concurrent changes apply one after the other.
 
-Deleting the policy is different from turning it off: its name is gone, so turns that name it are refused (unless `FAIL_MODE` is `"open"`). A policy cannot be deleted while another authored policy extends it (one that does not load counts too), an agent names it in code, or it is `DEFAULT_POLICY`.
+Deleting the policy is different from turning it off: its name is gone, so turns that name it are refused (unless `FAIL_MODE` is `"open"`). A policy cannot be deleted while an agent names it in code, or while it is `DEFAULT_POLICY`.
 
 ## Try before saving
 

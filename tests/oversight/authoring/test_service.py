@@ -135,33 +135,6 @@ class TestSaving:
         assert (await gate("refunds", "hello")).blocked
         assert not await AuthoringService.delete_policy("refunds", user=await author())
 
-    async def test_a_policy_still_extended_cannot_be_deleted(self):
-        await save()
-        await save("refunds-eu", extends=["refunds"], lenses=[], rules=[])
-        with pytest.raises(UserError, match="refunds-eu"):
-            await AuthoringService.delete_policy("refunds", user=await author())
-
-    async def test_a_child_that_does_not_load_still_counts(self):
-        await save()
-        # Saved by hand, so it never loaded: the table counts, not the registry.
-        await AuthoredPolicy.objects.acreate(name="refunds-nl", extends=["refunds", "gone"])
-        with pytest.raises(UserError, match="refunds-nl"):
-            await AuthoringService.delete_policy("refunds", user=await author())
-
-    async def test_a_change_that_breaks_a_policy_below_is_refused(self):
-        await save()
-        await save("refunds-eu", extends=["refunds"], lenses=[], rules=[])
-        # Two levels down, reading the refund lens of refunds.
-        rules = [{**refunds()["rules"][0], "name": "nl_refunds"}]
-        await save("refunds-nl", extends=["refunds-eu"], lenses=[], rules=rules)
-        user = await author()
-        with pytest.raises(UserError, match="'refunds-nl' would not load"):
-            await AuthoringService.set_active("refunds", False, user=user)
-        with pytest.raises(UserError, match="'refunds-nl' would not load"):
-            await save(lenses=[], rules=[])
-        assert (await AuthoredPolicy.objects.aget(name="refunds")).active
-        assert (await gate("refunds-nl", "I want a refund")).blocked
-
 
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
@@ -271,22 +244,23 @@ class TestWhatADefinitionMayNotDo:
         extends = ["au-base"] * 21
         assert "at most 20 policies to extend" in await self.refused(extends=extends)
 
+    async def test_extend_an_authored_policy(self):
+        await save()
+        refused = await self.refused("child", extends=["au-base", "refunds"], lenses=[], rules=[])
+        assert "['refunds'] are authored" in refused
+
     async def test_capture_more_than_a_parent(self):
-        meta = {"capture": "metadata"}
-        await save("meta", extends=["au-base"], lenses=[], rules=[], options=meta)
-        refused = await self.refused("child", extends=["meta"], options={"capture": "masked"})
-        assert "capture 'masked' keeps more than 'meta'" in refused
+        refused = await self.refused(extends=["au-metadata"], options={"capture": "masked"})
+        assert "capture 'masked' keeps more than 'au-metadata'" in refused
 
     async def test_keep_turns_longer_than_a_parent(self):
-        short = {"retention": {"content": 30}}
-        await save("short", extends=["au-base"], lenses=[], rules=[], options=short)
         longer = {"retention": {"content": 60}}
-        refused = await self.refused("child", extends=["short"], options=longer)
-        assert "content retention of 60 days is longer than the 30 days 'short' keeps" in refused
+        refused = await self.refused(extends=["au-short"], options=longer)
+        assert "content retention of 60 days is longer than the 30 days 'au-short' keeps" in refused
         # A parent that sets none keeps what the RETENTION setting says: 90 days of content.
         refused = await self.refused(options={"retention": {"content": 91}})
         assert "longer than the 90 days 'au-base' keeps" in refused
-        await save("child", extends=["short"], options={"retention": {"content": 7}})
+        await save(extends=["au-short"], options={"retention": {"content": 7}})
 
 
 @pytest.mark.usefixtures("no_reflect_queue")
@@ -354,28 +328,22 @@ class TestOtherProcesses:
         assert "au-base" in loader.broken["refunds"]
         assert (await gate("refunds", "hello")).blocked
 
-
-OFF_X = {
-    "lenses": [{"kind": "pattern", "name": "never", "stages": ["gate"], "keywords": ["zzzq"]}],
-    "rules": [
-        {
-            "name": "block_x",
-            "when": {"lens": "never", "op": "is_true"},
-            "then": [{"kind": "alert"}],
-            "mode": "off",
-        }
-    ],
-}
+    async def test_a_row_extending_an_authored_policy_does_not_load(self, fresh_loader):
+        await save()
+        # Saved by hand, before authored policies could only extend code.
+        await AuthoredPolicy.objects.acreate(name="refunds-eu", extends=["refunds"])
+        await fresh_loader.load()
+        assert get_policy_class("refunds-eu") is None
+        assert "authored" in fresh_loader.broken["refunds-eu"]
 
 
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 class TestCodeKeepsItsRules:
     async def test_a_second_parent_cannot_replace_a_code_rule(self):
-        """The later parent would win in the build, so `block_x` would be p1's: off."""
-        await save("p1", extends=[], **OFF_X)
+        """The later parent would win in the build, so `block_x` would be au-off-x's: off."""
         with pytest.raises(UserError, match="'block_x' of 'au-base' is replaced"):
-            await save("child", extends=["au-base", "p1"], lenses=[], rules=[])
+            await save("child", extends=["au-base", "au-off-x"], lenses=[], rules=[])
         assert (await gate("au-base", "a xylophone")).blocked
 
     async def test_a_preset_cannot_replace_a_lens_by_its_default_name(self, registry_snapshot):
