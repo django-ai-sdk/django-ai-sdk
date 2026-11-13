@@ -378,6 +378,10 @@ class TestAttributesBelongWhereTheyAreRead:
         with pytest.raises(ImproperlyConfigured, match="judges"):
             CheckLens(name="x", validators=[even], judges=["judge"])
 
+    def test_an_option_of_another_answer_type(self):
+        with pytest.raises(ValueError, match="labels"):
+            JudgeLens(name="f", judges=["judge"], labels=["a"])
+
     def test_options_left_out_take_the_answer_types_defaults(self):
         flag = JudgeLens(name="f", judges=["judge"])
         assert (flag.yes, flag.no) == ("Yes.", "No.")

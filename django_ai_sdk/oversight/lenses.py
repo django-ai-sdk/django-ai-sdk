@@ -344,6 +344,12 @@ class Lens:
                     f"Unknown answer {self.answer!r}; one of {sorted(ANSWER_TYPES)}"
                 )
             self.answer = ANSWER_TYPES[self.answer]
+        if misplaced := sorted(
+            key for key in OPTIONS - set(self.answer.options) if hasattr(self, key)
+        ):
+            raise ValueError(
+                f"Lens {self.name!r} answers {self.answer.kind}, which does not read {misplaced}"
+            )
         self.subject = Subject(self.subject)
         self.stages = tuple(Stage(s) for s in self.stages) or DEFAULT_STAGES[self.subject]
         # An answer option the lens leaves out takes its answer type's default.
