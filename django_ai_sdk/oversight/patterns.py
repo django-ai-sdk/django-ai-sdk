@@ -18,11 +18,6 @@ from typing import Any
 
 from django_ai_sdk.oversight.types import TextSpan
 
-# Long texts are scanned in overlapping windows to bound each regex's cost.
-# The overlap catches matches that cross a window edge.
-MAX_SCAN_CHARS = 50_000
-_SCAN_OVERLAP_CHARS = 1_000
-
 # A label's regexes: one pattern or a list. A plain list, or a label of "", means
 # the lens's own name.
 PatternTable = Mapping[str, str | Collection[str]] | Collection[str]
@@ -155,21 +150,6 @@ def regex_spans(
     ]
 
 
-def scan(text: str, find: Callable[[str], list[TextSpan]]) -> list[TextSpan]:
-    """Run `find` over `text` in windows. Span offsets refer to the full `text`."""
-    if len(text) <= MAX_SCAN_CHARS:
-        return find(text)
-    found: dict[tuple[int, int, str], TextSpan] = {}
-    step = MAX_SCAN_CHARS - _SCAN_OVERLAP_CHARS
-    for offset in range(0, len(text), step):
-        for span in find(text[offset : offset + MAX_SCAN_CHARS]):
-            moved = span.model_copy(update={"start": span.start + offset, "end": span.end + offset})
-            found.setdefault((moved.start, moved.end, moved.label), moved)
-        if offset + MAX_SCAN_CHARS >= len(text):
-            break
-    return list(found.values())
-
-
 def verified(
     pattern: re.Pattern[str], valid: Verifier | None, text: str
 ) -> Iterator[tuple[int, int]]:
@@ -263,7 +243,6 @@ def mask_all(text: str, groups: Iterable[tuple[Iterable[TextSpan], str]]) -> str
 __all__ = [
     "COUNTRY_PII_KINDS",
     "DEFAULT_PII_KINDS",
-    "MAX_SCAN_CHARS",
     "PII_PATTERNS",
     "PII_VERIFY",
     "REFUSAL_PATTERNS",
@@ -278,6 +257,5 @@ __all__ = [
     "mask_json",
     "mask_secrets",
     "regex_spans",
-    "scan",
     "verified",
 ]

@@ -155,7 +155,7 @@ def compiled_in(value, found):
     if isinstance(value, re.Pattern):
         found.add(value)
     elif isinstance(value, Patterns):
-        compiled_in([value.patterns, value.keywords], found)
+        compiled_in(value.patterns, found)
     elif isinstance(value, dict):
         for item in value.values():
             compiled_in(item, found)

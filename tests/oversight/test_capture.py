@@ -301,13 +301,13 @@ class TestWhatTheClientSees:
 class TestTheRecordsValue:
     def test_an_entities_value_keeps_labels_and_counts_names(self):
         from django_ai_sdk.oversight.packs.quality import TakenFrom
-        from django_ai_sdk.oversight.packs.security import PIIInput
+        from django_ai_sdk.oversight.presets import PIILens
 
         titles = Answer(value=[f"Dossier {EMAIL} (BSN {BSN})"], answerer="typesafe")
         assert stored_value(TakenFrom(), titles) == [FOUND]
         # Patterns report kinds; a person, like a judge, may type anything.
-        assert stored_value(PIIInput(), Answer(value=["email"], answerer="patterns")) == ["email"]
-        assert stored_value(PIIInput(), Answer(value=["email"], answerer="human")) == [FOUND]
+        assert stored_value(PIILens(), Answer(value=["email"], answerer="patterns")) == ["email"]
+        assert stored_value(PIILens(), Answer(value=["email"], answerer="human")) == [FOUND]
         labelled = JudgeLens(name="kind", answer=Entities, labels=["hr", "pay"])
         assert stored_value(labelled, Answer(value=["hr", NAME], answerer="judge")) == ["hr", FOUND]
         assert stored_value(JudgeLens(name="f"), Answer(value=True)) is True
