@@ -27,7 +27,7 @@ from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 
-from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
+from django_ai_sdk.oversight.authoring.apps import setting
 from django_ai_sdk.oversight.checks import policy_errors
 from django_ai_sdk.oversight.judges.base import alias_defined, alias_of, is_optional
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
@@ -46,6 +46,17 @@ MAX_EXTENDS = 20
 MAX_LENSES = 50
 MAX_RULES = 100
 MAX_BYTES = 256 * 1024
+# What a lens may configure inline, and the arguments each takes on top of a lens's
+# own. None of them take code or a regex, because authored config runs on every turn
+# and a bad regex could backtrack for seconds. A regex or a model needs an alias.
+INLINE_ARGS: dict[str, frozenset[str]] = {
+    "keywords": frozenset({"keywords"}),
+    "pii": frozenset({"kinds"}),
+    "secrets": frozenset(),
+    "refusal": frozenset(),
+    "length": frozenset({"max_chars"}),
+    "language": frozenset(),
+}
 RULE_KEYS = frozenset({"name", "when", "then", "mode", "message", "notice", "description"})
 POLICY_OPTIONS = frozenset({"capture", "stream_mode", "fail_mode", "retention"})
 # What any authored lens may set, and what each kind adds. Nothing here takes a
@@ -296,6 +307,7 @@ def _fail_on(problems: list[str]) -> None:
 
 
 __all__ = [
+    "INLINE_ARGS",
     "MAX_BYTES",
     "MAX_EXTENDS",
     "MAX_LENSES",

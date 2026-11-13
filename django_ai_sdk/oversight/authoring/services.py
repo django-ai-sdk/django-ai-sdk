@@ -16,8 +16,9 @@ from asgiref.sync import sync_to_async
 from django.db import IntegrityError, transaction
 
 from django_ai_sdk.errors import UserError
-from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
+from django_ai_sdk.oversight.authoring.apps import setting
 from django_ai_sdk.oversight.authoring.definitions import (
+    INLINE_ARGS,
     DefinitionError,
     check_definition,
     is_authored,

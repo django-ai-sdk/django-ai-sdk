@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from django.core import checks
 
-from django_ai_sdk.oversight.authoring.checks import check_authoring, check_authoring_deploy
+from django_ai_sdk.oversight.authoring.apps import check_authoring, check_authoring_deploy
 from tests.oversight.helpers import check_ids as ids
 
 
