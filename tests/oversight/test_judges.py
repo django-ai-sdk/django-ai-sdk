@@ -834,12 +834,12 @@ class TestTakenFrom:
 
     def test_an_answer_from_no_source_goes_to_review(self):
         rule = L("taken_from").present & ~L("taken_from").is_true
-        assert rule.evaluate({"taken_from": Answer(value=[], confidence=0.9)})
+        assert rule.decide({"taken_from": Answer(value=[], confidence=0.9)})
         # One source TypeSafe can't settle makes the answer unsure: reason to look, not to skip.
-        assert rule.evaluate({"taken_from": Answer(value=[], confidence=0.1)})
-        assert not rule.evaluate({"taken_from": Answer(value=["Leave · §1"], confidence=0.9)})
-        assert not rule.evaluate({"taken_from": Answer(error="unavailable: Timeout")})
-        assert not rule.evaluate({})
+        assert rule.decide({"taken_from": Answer(value=[], confidence=0.1)})
+        assert not rule.decide({"taken_from": Answer(value=["Leave · §1"], confidence=0.9)})
+        assert not rule.decide({"taken_from": Answer(error="unavailable: Timeout")})
+        assert not rule.decide({})
 
 
 class TestJudgeFence:

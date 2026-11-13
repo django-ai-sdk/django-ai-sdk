@@ -192,10 +192,10 @@ class TestPatternLens:
 
     def test_is_true_means_it_found_something(self):
         found, none = Answer(value=["email"]), Answer(value=[])
-        assert L("x").is_true.evaluate({"x": found})
-        assert not L("x").is_true.evaluate({"x": none})
-        assert L("x").is_false.evaluate({"x": none})
-        assert not L("x").is_false.evaluate({"x": found})
+        assert L("x").is_true.decide({"x": found})
+        assert not L("x").is_true.decide({"x": none})
+        assert L("x").is_false.decide({"x": none})
+        assert not L("x").is_false.decide({"x": found})
 
 
 class TestPatternsInTheWild:

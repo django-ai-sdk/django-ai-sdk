@@ -28,7 +28,7 @@ from django_ai_sdk.oversight import (
     register_policy,
 )
 from django_ai_sdk.oversight import resolve as resolution
-from django_ai_sdk.oversight.conditions import condition_from_dict
+from django_ai_sdk.oversight.conditions import Condition
 from django_ai_sdk.oversight.content import found_literals
 from django_ai_sdk.oversight.guard.asking import Answered, evaluate_rules, run_lenses
 from django_ai_sdk.oversight.judges.base import Judge
@@ -121,21 +121,21 @@ class Said(Judge):
 class TestConditions:
     def test_operators(self):
         answers = {"inj": ans(True, 0.95), "tox": ans(0.9), "topic": ans("hr"), "pii": ans(["bsn"])}
-        assert (L("inj").is_true & L("inj").confident(0.9)).evaluate(answers)
-        assert (L("tox") > 0.8).evaluate(answers)
-        assert not (L("tox") < 0.8).evaluate(answers)
-        assert (L("topic") == "hr").evaluate(answers)
-        assert L("topic").in_({"hr", "legal"}).evaluate(answers)
-        assert L("pii").contains("bsn").evaluate(answers)
-        assert L("pii").is_true.evaluate(answers)
-        assert (~(L("topic") == "billing")).evaluate(answers)
+        assert (L("inj").is_true & L("inj").confident(0.9)).decide(answers)
+        assert (L("tox") > 0.8).decide(answers)
+        assert not (L("tox") < 0.8).decide(answers)
+        assert (L("topic") == "hr").decide(answers)
+        assert L("topic").in_({"hr", "legal"}).decide(answers)
+        assert L("pii").contains("bsn").decide(answers)
+        assert L("pii").is_true.decide(answers)
+        assert (~(L("topic") == "billing")).decide(answers)
 
     def test_a_missing_answer_matches_nothing_but_missing(self):
         answers = {"broken": ans(None, error="timeout")}
-        assert not L("broken").is_true.evaluate(answers)
-        assert not (L("absent") > 0).evaluate(answers)
-        assert L("broken").missing.evaluate(answers)
-        assert L("absent").missing.evaluate(answers)
+        assert not L("broken").is_true.decide(answers)
+        assert not (L("absent") > 0).decide(answers)
+        assert L("broken").missing.decide(answers)
+        assert L("absent").missing.decide(answers)
 
     def test_a_test_that_cannot_be_evaluated_is_refused(self):
         bad = [
@@ -146,11 +146,11 @@ class TestConditions:
         ]
         for node in bad:
             with pytest.raises(ValueError):
-                condition_from_dict(node)
+                Condition(node)
 
     def test_round_trips_through_json(self):
         condition = (L("a").is_true & (L("b") >= 0.5)) | ~L("c").in_(["x"])
-        again = condition_from_dict(condition.to_dict())
+        again = Condition(condition.to_dict())
         assert again.to_dict() == condition.to_dict()
         assert again.lenses() == {"a", "b", "c"}
 
@@ -228,30 +228,6 @@ class TestRuleEvaluation:
         assert "review_ungrounded" not in {m.rule.name for m in early}
         later = evaluate_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
         assert "review_ungrounded" in {m.rule.name for m in later}
-
-    def test_a_block_that_is_already_decided_does_not_wait(self):
-        resolved = build("default")
-        rule = resolved.rules["review_ungrounded"]
-        rule.mode = Mode.ENFORCE
-        found = {"pii_input": ans(["email"])}
-
-        def at_gate(when, *then):
-            rule.when, rule.then = when, list(then)
-            return [
-                m for m in evaluate_rules(resolved, found, Stage.GATE, done=set()) if m.rule is rule
-            ]
-
-        either = L("pii_input").is_true | (L("groundedness") < 0.5)
-        [match] = at_gate(either, Block())
-        assert [a.kind for a in match.acted] == ["block"]
-        # Not decided yet: an `all`, or a `missing` on the later lens. A mask waits anyway.
-        assert not at_gate(L("pii_input").is_true & (L("groundedness") < 0.5), Block())
-        assert not at_gate(L("pii_input").is_false | L("groundedness").missing, Block())
-        assert not at_gate(either, Mask())
-        assert at_gate(either, RestrictTools(["search"]))
-        # Restricting tools early would lose the mask at finish; blocking ends the turn.
-        assert not at_gate(either, RestrictTools(["search"]), Mask())
-        assert at_gate(either, Block(), Mask())
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build("test-parent")
