@@ -509,29 +509,6 @@ class WorkflowDefaultPermission(BasePermission):
         return queryset
 
 
-def has_model_perm(user: UserType, perm: str) -> bool:
-    """Return whether `user` has the model permission `perm` ("app_label.codename").
-
-    This may query the database. Async code should use `ahas_model_perm`.
-    """
-    if user is None or not bool(user.is_authenticated):
-        return False
-    has_perm = getattr(user, "has_perm", None)
-    return has_perm is not None and bool(has_perm(perm))
-
-
-async def ahas_model_perm(user: UserType, perm: str) -> bool:
-    """Async version of `has_model_perm`."""
-    if user is None or not bool(user.is_authenticated):
-        return False
-    ahas_perm = getattr(user, "ahas_perm", None)
-    if ahas_perm is not None:
-        return bool(await ahas_perm(perm))
-    from asgiref.sync import sync_to_async
-
-    return await sync_to_async(has_model_perm)(user, perm)
-
-
 def user_pk(user: UserType) -> Any:
     """The user's primary key, or None for anonymous. Safe as a query value."""
     if user is None or not user.is_authenticated:
