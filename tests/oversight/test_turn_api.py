@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 import pytest
-from django_ai_sdk.oversight.plugin.turn import open_turn
+from django_ai_sdk.oversight.plugin import open_turn
 
 from tests.oversight.helpers import make_agent, opened
 

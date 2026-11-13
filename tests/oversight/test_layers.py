@@ -114,7 +114,7 @@ def module_name(path: Path) -> str:
 
 
 def module_exists(module: str) -> bool:
-    # Names compared exactly, so `plugin.Turn` is no module next to `plugin/turn.py` on macOS.
+    # Names compared exactly, so `Foo` is no module next to `foo.py` on macOS.
     path = ROOT.joinpath(*module.split("."))
     names = {p.name for p in path.parent.iterdir()} if path.parent.is_dir() else set()
     return f"{path.name}.py" in names or (path.name in names and (path / "__init__.py").exists())

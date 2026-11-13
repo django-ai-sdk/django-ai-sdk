@@ -144,5 +144,5 @@ def sample_rag_documents():
 def installs_as_is():
     """Run a mocked Haystack Agent as it is: oversight would run a copy of a real one."""
     installed = MagicMock(side_effect=lambda agent: agent)
-    with patch("django_ai_sdk.oversight.plugin.agent._overseen", installed):
+    with patch("django_ai_sdk.oversight.plugin.apply_oversight", installed):
         yield installed

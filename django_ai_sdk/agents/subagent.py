@@ -306,7 +306,7 @@ class SubagentStreamFilter:
     def _request(self) -> TurnRequest:
         """The delegation's turn, under the subagent's policy, in the coordinator's channel."""
         from django_ai_sdk.oversight.guard import current_guard
-        from django_ai_sdk.oversight.plugin import TurnRequest, WholeRun
+        from django_ai_sdk.oversight.plugin import TurnRequest
 
         outer = current_guard()
         return TurnRequest(
@@ -315,7 +315,7 @@ class SubagentStreamFilter:
             user=self._user,
             thread_id=self._thread_id or None,
             # The coordinator reads this, so finish judges it.
-            answer=WholeRun(subagent_response),
+            read=subagent_response,
         )
 
     def _span(self) -> Any:

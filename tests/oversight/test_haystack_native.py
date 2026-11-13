@@ -18,13 +18,13 @@ from django_ai_sdk.common import ChatMessage as SdkMessage
 from django_ai_sdk.oversight.guard import TurnGuard, current_guard, guarding
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.plugin import (
-    GateHook,
     TurnRequest,
     needs_own_turn,
-    oversight_hooks,
+    build_oversight_hooks,
     run_agent,
     run_agent_sync,
 )
+from django_ai_sdk.oversight.plugin.hooks import GateHook
 from django_ai_sdk.permissions import AllowAll
 from haystack import Pipeline, component
 from haystack.components.agents import Agent as HaystackAgent
@@ -366,7 +366,7 @@ def test_a_sync_run_without_a_policy_runs():
 
 
 def test_the_hooks_save_and_load_with_the_agent():
-    agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), hooks=oversight_hooks())
+    agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), hooks=build_oversight_hooks())
     again = HaystackAgent.from_dict(agent.to_dict())
     assert [type(h) for h in again.hooks["before_run"]] == [GateHook]
 

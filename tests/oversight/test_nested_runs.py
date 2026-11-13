@@ -82,7 +82,7 @@ class TestNestedRuns:
         assert not model.asked
 
     async def test_the_child_turn_links_to_its_parent(self):
-        from django_ai_sdk.oversight.plugin.turn import open_turn
+        from django_ai_sdk.oversight.plugin import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()
@@ -93,7 +93,7 @@ class TestNestedRuns:
         assert opened_own and alone.parent_turn_id == ""
 
     async def test_the_child_turn_keeps_the_outer_person_and_removed_tools(self):
-        from django_ai_sdk.oversight.plugin.turn import open_turn
+        from django_ai_sdk.oversight.plugin import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()

@@ -207,7 +207,7 @@ class TestRecordingFailures:
     def test_a_masked_result_that_no_longer_fits_is_recorded_blocked(self):
         from pydantic import BaseModel
 
-        from django_ai_sdk.oversight.plugin.finish import withhold_unfit
+        from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
         from django_ai_sdk.oversight.guard.stages import StageResult
 
         class Count(BaseModel):

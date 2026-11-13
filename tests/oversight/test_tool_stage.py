@@ -259,7 +259,7 @@ class TestToolResultMasking:
 
     async def test_a_result_a_gate_block_refuses_is_withheld_and_a_dict_is_masked(self):
         from django_ai_sdk.oversight.guard.notices import REFUSED_TEXT
-        from django_ai_sdk.oversight.plugin import masked_result
+        from django_ai_sdk.oversight.plugin.hooks import masked_result
 
         guard = await start("test-guard")
         await guard.gate()
@@ -292,7 +292,7 @@ class TestToolsTakenAwayInChat:
         from haystack.components.agents.state.state import State
 
         from django_ai_sdk.oversight.guard import guarding
-        from django_ai_sdk.oversight.plugin import OversightStopHook
+        from django_ai_sdk.oversight.plugin.hooks import OversightStopHook
 
         from tests.oversight.helpers import lookup_tool
 

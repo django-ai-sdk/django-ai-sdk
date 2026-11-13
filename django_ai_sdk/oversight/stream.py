@@ -31,7 +31,7 @@ from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
 from django_ai_sdk.oversight.guard.stages import StageResult
-from django_ai_sdk.oversight.plugin import TurnRequest, mask_sources, masked_result
+from django_ai_sdk.oversight.plugin.hooks import TurnRequest, mask_sources, masked_result
 from django_ai_sdk.oversight.types import Outcome, Stage
 
 if TYPE_CHECKING:
