@@ -53,7 +53,9 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="workflowsettings",
             name="slug",
-            field=models.SlugField(default="", max_length=100),
+            # db_index=False: on PostgreSQL the later unique AlterField creates the
+            # `_like` index itself; adding it here too fails with DuplicateTable.
+            field=models.SlugField(default="", max_length=100, db_index=False),
             preserve_default=False,
         ),
         migrations.RunPython(backfill_slugs, migrations.RunPython.noop),
