@@ -207,7 +207,7 @@ class TestNothingQuotesAForgottenThread:
                 "django_ai_sdk.oversight.content.forget_thread",
                 side_effect=RuntimeError("db down"),
             ),
-            patch("django_ai_sdk.oversight.signals.logger") as logger,
+            patch("django_ai_sdk.oversight.apps.logger") as logger,
         ):
             await thread.adelete()
         assert not await Thread.objects.filter(id=thread_id).aexists()
@@ -288,8 +288,8 @@ class TestDeletedUsers:
         pk = user.pk
         turn_id = await a_threadless_turn(user)
         with (
-            patch("django_ai_sdk.oversight.signals.batched", side_effect=RuntimeError("db down")),
-            patch("django_ai_sdk.oversight.signals.logger") as logger,
+            patch("django_ai_sdk.oversight.content.batched", side_effect=RuntimeError("db down")),
+            patch("django_ai_sdk.oversight.apps.logger") as logger,
         ):
             await user.adelete()
         assert not await get_user_model().objects.filter(pk=pk).aexists()
@@ -305,8 +305,8 @@ class TestDeletedUsers:
         pk = str(user.pk)
         turn_id = await a_threadless_turn(user)
         with (
-            patch("django_ai_sdk.oversight.signals.batched", side_effect=RuntimeError("db down")),
-            patch("django_ai_sdk.oversight.signals.logger"),
+            patch("django_ai_sdk.oversight.content.batched", side_effect=RuntimeError("db down")),
+            patch("django_ai_sdk.oversight.apps.logger"),
         ):
             await user.adelete()
         assert (await Turn.objects.aget(id=turn_id)).actor_id == pk
@@ -321,7 +321,7 @@ class TestDeletedUsers:
     async def test_threadless_content_is_forgotten_a_batch_at_a_time(self):
         user = await UserFactory.acreate()
         turns = [await a_threadless_turn(user) for _ in range(5)]
-        with patch("django_ai_sdk.oversight.signals.FORGET_BATCH", 2):
+        with patch("django_ai_sdk.oversight.content.FORGET_BATCH", 2):
             forgotten, deletes = await sync_to_async(forget_counting_deletes)(str(user.pk))
         assert forgotten == 5
         assert not await TurnContent.objects.filter(turn__id__in=turns).aexists()
@@ -341,7 +341,7 @@ def forget_counting_deletes(actor_id: str) -> tuple[int, int]:
     """`forget_actor(actor_id)`, and how many DELETEs of content rows it sent."""
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
-    from django_ai_sdk.oversight.signals import forget_actor
+    from django_ai_sdk.oversight.content import forget_actor
 
     with CaptureQueriesContext(connection) as queries, transaction.atomic():
         forgotten = forget_actor(actor_id)

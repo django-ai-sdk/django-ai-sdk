@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from functools import cache
+from itertools import batched
 from typing import TYPE_CHECKING, Any
 
 from django.utils import timezone
@@ -48,6 +49,8 @@ FOUND = "[found]"
 
 # Found text shorter than this is not masked, since it would hit ordinary words.
 MIN_LITERAL = 3
+# How many threadless turns `forget_actor` forgets per delete statement.
+FORGET_BATCH = 500
 
 
 def as_source(item: Any) -> Source:
@@ -325,6 +328,28 @@ def forget_turns(turns: QuerySet[Turn]) -> None:
         Turn.objects.filter(pk__in=open_ids).update(content_forgotten=True)
 
 
+def forget_actor(actor_id: str) -> int:
+    """Clear `actor_id` from the turns it asked, after forgetting those turns' own content.
+
+    A turn in a thread keeps its content until that thread is deleted (a user's own
+    threads go with them). A turn without a thread is forgotten here (`forget_turns`),
+    FORGET_BATCH turns at a time. The answers, matches and reviews stay. Run it in a
+    transaction. Returns how many turns named the actor.
+
+    Safe to run again: `manage.py oversight_forget_actor <id>` does, for a user whose
+    delete could not reach the record (the failure is logged).
+    """
+    from django_ai_sdk.oversight.models import Turn
+
+    if not actor_id:
+        return 0
+    turns = Turn.objects.filter(actor_id=actor_id)
+    threadless = turns.filter(thread_id="").values_list("pk", flat=True).iterator(FORGET_BATCH)
+    for batch in batched(threadless, FORGET_BATCH):
+        forget_turns(Turn.objects.filter(pk__in=batch))
+    return turns.update(actor_id="")
+
+
 def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext:
     """Rebuild a TurnContext from the record, for reflect and review queues."""
     content = content or {}
@@ -354,6 +379,7 @@ __all__ = [
     "capture_content",
     "context_from_turn",
     "expired",
+    "forget_actor",
     "forget_thread",
     "forget_turns",
     "found_literals",

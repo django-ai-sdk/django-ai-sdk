@@ -312,7 +312,7 @@ What was forgotten reads back as gone. A turn whose thread or user was deleted, 
 
 `django_ai_sdk.oversight.content.forget_turns(turns)` takes a queryset of turns, locks them, deletes their `TurnContent` rows (the turns stay, `content` cleared), blanks reviewers' notes on them and sets `content_forgotten` on those still open, so they store no content when they close. `forget_thread(thread_id)` forgets every turn in a thread. Both run in the caller's transaction.
 
-Deleting a thread calls `forget_thread`. Deleting a user forgets each turn they asked without a thread, 500 turns at a time, then clears `actor_id` on all their turns (`signals.forget_actor`). A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
+Deleting a thread calls `forget_thread`. Deleting a user forgets each turn they asked without a thread, 500 turns at a time, then clears `actor_id` on all their turns (`content.forget_actor`). A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
 
 ## Retention
 
