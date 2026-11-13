@@ -235,7 +235,7 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 4. Stores the newest user message when a thread is active
 5. Builds the pipeline adapter and returns a `StreamingHttpResponse`
 
-`run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel="run", oversight=<the agent's own>)` is one turn under the agent's policy too, and raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`; an override of `run()` is handed `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn; it returns `oversight` by default. The turn opens inside `super().run()`: an override that calls it is checked, one that calls its own model instead is not, and the system check `ai_sdk.W016` says so. Run such a model call through `run_agent()`.
+`run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel="run", oversight=<the agent's own>)` is one turn under the agent's policy too, and raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`; an override of `run()` is handed `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn; it returns `oversight` by default. The turn opens inside `super().run()`: an override that calls it is checked, one that calls its own model instead is not. Run such a model call through `run_agent()`.
 
 ```python
 response = await agent.as_view(payload.messages, thread_id=..., user=request.user)

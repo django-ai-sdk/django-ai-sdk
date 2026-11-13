@@ -284,7 +284,7 @@ A turn that has closed is never joined: a task started inside it that outlives i
 
 ### Overriding `run()`
 
-The policy's checks are hooks on the Haystack run that `Agent.run()` starts. A subclass's own `run()` is checked where it calls `super().run()`: that run gates the question, checks its tool calls and finishes its answer. An override that answers some messages itself (a command, a canned reply) and passes the rest to `super().run()` is fine, but what it answers itself is not judged. An override that never calls `super().run()` replaces the checked run: its model calls go unchecked, and `ai_sdk.oversight.W016` warns about it.
+The policy's checks are hooks on the Haystack run that `Agent.run()` starts. A subclass's own `run()` is checked where it calls `super().run()`: that run gates the question, checks its tool calls and finishes its answer. An override that answers some messages itself (a command, a canned reply) and passes the rest to `super().run()` is fine, but what it answers itself is not judged. An override that never calls `super().run()` replaces the checked run: its model calls go unchecked.
 
 ### Model calls of your own: `run_agent()`
 
@@ -497,7 +497,7 @@ class Topic(JudgeLens):
 
 It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `django_ai_sdk.oversight.judges.local.load()` at startup to have it ready.
 
-`"classifier?"` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define, and nothing degrades silently: `ai_sdk.oversight.W003` lists, in one warning, every lens of the policies in use left without a model judge (skipped on every turn, or answered by its patterns alone), and `ai_sdk.oversight.W008` names enforced rules that therefore never act. A lens that names an alias without `?` that nothing defines is an error (`ai_sdk.oversight.E004`).
+`"classifier?"` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.E007` warns about an enforced rule that therefore never acts. A lens that names an alias without `?` that nothing defines is an error (`ai_sdk.oversight.E004`).
 
 ### Your own judge
 
@@ -541,7 +541,7 @@ It answers `Flag`, `Choice` and `Score` lenses, and judges an `Entities` lens wi
 
 ### How a lens decides
 
-A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `Patterns` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked (`ai_sdk.oversight.W004`).
+A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `Patterns` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked.
 
 ## Personal data and secrets
 
@@ -714,7 +714,7 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
 - **Some paths are not guarded.** These are the doors oversight does not watch for you:
   - a model called outside a turn;
   - `stream_response()` called from your own view: only `as_view()` opens a turn;
-  - a `get_pipeline_adapter()` that returns an adapter other than the SDK's `Stream` over an Agent: under a policy it is refused, unless the policy fails open, and then nothing is checked (`ai_sdk.oversight.W013` warns when its return annotation says so);
+  - a `get_pipeline_adapter()` that returns an adapter other than the SDK's `Stream` over an Agent: under a policy it is refused, unless the policy fails open, and then nothing is checked;
   - an overridden `run()` that calls its own model instead of `super().run()`: run it through `run_agent()`;
   - `run(oversight=False)`, and an agent with no policy and no `DEFAULT_POLICY`;
   - a synchronous delegation that needs a turn of its own: it is refused ([Nested runs and subagents](#nested-runs-and-subagents)).

@@ -34,8 +34,8 @@ The rules:
    counts. A pattern pre-filter is just the first judge: it answers the lens's
    question, so a `Patterns` hit is sure (1) and a miss is not (0.5).
 7. A judge alias ending in "?" is optional: the lens skips it when the deployment
-   does not define it, and system check W003 names every lens left without a
-   model judge.
+   does not define it, and system check E007 warns about an enforced rule
+   left without a judge.
 
 Inline, pass the same attributes as keyword arguments::
 

@@ -238,14 +238,17 @@ class TestCascade:
         assert (missed.value, missed.answerer) == (True, "judge")
         assert [(a.answerer, a.confidence) for a in missed.trail] == [("patterns", 0.5)]
 
-    def test_a_patterns_judge_sure_of_its_miss_leaves_the_rest_unasked(self):
-        from django_ai_sdk.oversight.checks.lenses import lens_health
+    async def test_a_patterns_judge_sure_of_its_miss_leaves_the_rest_unasked(self):
+        asked = []
+
+        def judged(lens, v):
+            asked.append(v)
+            return Answer(value=True, confidence=0.9)
 
         sure = Patterns(["x"], miss_confidence=0.9)
-        lens = JudgeLens(name="f", judges=[sure, Says(yes, name="judge")])
-        assert lens_health(lens)["unreachable"] == ["judge"]
-        unsure = JudgeLens(name="f", judges=[Patterns(["x"]), Says(yes, name="judge")])
-        assert lens_health(unsure)["unreachable"] == []
+        lens = JudgeLens(name="f", judges=[sure, Says(judged, name="judge")])
+        missed = await answer_lens(lens, view("y"), Stage.GATE)
+        assert (missed.value, missed.answerer, asked) == (False, "patterns", [])
 
     async def test_it_escalates_an_unsure_answer_and_keeps_the_trail(self):
         unsure = Says(lambda lens, v: Answer(value=False, confidence=0.4), name="cheap")
