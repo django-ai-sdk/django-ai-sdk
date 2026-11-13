@@ -10,14 +10,13 @@ from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ChatRole, TextContent
 
 from django_ai_sdk.common import ChatMessage, last_user_message
-from django_ai_sdk.oversight.agent_run import gate_conversation
 from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
 
     from django_ai_sdk.oversight.guard import GateResult, TurnGuard
-    from django_ai_sdk.oversight.plugin.turn import Turn
+    from django_ai_sdk.oversight.plugin.turn import TurnRequest
 
 # The meta key on the assistant message that stands in for a refused or replaced answer.
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
@@ -30,7 +29,7 @@ class GateHook(OversightHook):
     TurnRequest says the stored thread vouches for it (`history_vouched`). A
     refusal ends the run before the first model call, with the policy's message
     as the answer. Otherwise the gate's notice waits on the guard for the stream,
-    and the request's `on_gated(turn)` runs, so a caller can store the question
+    and the request's `on_gated(request)` runs, so a caller can store the question
     only once it passed.
     """
 
@@ -38,24 +37,30 @@ class GateHook(OversightHook):
 
     async def run_async(self, state: State) -> None:
         request = request_in(state)
-        turn = request.turn
-        if turn is not None and turn.owns:
-            gate = turn.gated = await _gate(state, turn.guard, vouched=request.history_vouched)
+        if (guard := request.guard) is not None:
+            gate = request.gated = await _gate(state, guard, vouched=request.history_vouched)
             if gate.blocked:
                 answer_with(state, gate.message, stop="blocked")
                 return
             if gate.notice:
-                turn.guard.notices.append(gate.notice)
-            await _mask_seeded_sources(turn.guard)
-        if turn is not None:
-            turn.first = len(state.data.get("messages") or [])
+                guard.notices.append(gate.notice)
+            await _mask_seeded_sources(guard)
+        request.first = len(state.data.get("messages") or [])
         if request.on_gated is not None:
-            await request.on_gated(turn)
+            await request.on_gated(request)
 
 
 async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
-    """Judge the history, then the question, masking each in the run's messages."""
+    """Judge the history, then the question, masking each in the run's messages.
+
+    A history the stored thread `vouched` for is not judged again, but attachment
+    context always is: it is rebuilt from the document each turn and the model reads it.
+    """
     messages = list(state.data.get("messages") or [])
+    # The question as the run rendered it, such as a subagent's task from its
+    # user_prompt: the turn opened on the messages before Haystack rendered it.
+    question = next((m.text or "" for m in reversed(messages) if m.is_from(ChatRole.USER)), "")
+    guard.original_input = guard.context.input = question
     said = [
         i
         for i, m in enumerate(messages)
@@ -64,9 +69,15 @@ async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
     judged = [
         ChatMessage(role=messages[i].role.value, content=messages[i].text or "") for i in said
     ]
-    gate = await gate_conversation(guard, judged, vouched=vouched)
+    if judged:
+        checked = await guard.gate_history(judged, history=not vouched)
+        if checked.blocked:
+            return checked
+    gate = await guard.gate()
     if gate.blocked:
         return gate
+    if gate.masked and (question := last_user_message(judged)) is not None:
+        question.content = gate.input
     for index, copy in zip(said, judged, strict=True):
         if copy.content != messages[index].text:
             messages[index] = with_text(messages[index], copy.content)
@@ -74,7 +85,7 @@ async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
     return gate
 
 
-def keep_masked(messages: list[ChatMessage], turn: Turn | None) -> None:
+def keep_masked(messages: list[ChatMessage], request: TurnRequest) -> None:
     """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
 
     Only its content is stored. When the masked text no longer splits back into
@@ -84,7 +95,7 @@ def keep_masked(messages: list[ChatMessage], turn: Turn | None) -> None:
     from django_ai_sdk.adapters.run import user_content
     from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
 
-    gated = turn.gated if turn is not None else None
+    gated = request.gated
     if gated is not None and gated.masked and (question := last_user_message(messages)):
         content = user_content(question, gated.input)
         question.content = content if content is not None else str(UNCHECKED_TEXT)

@@ -10,6 +10,8 @@ import hashlib
 import inspect
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ImproperlyConfigured
+
 from django_ai_sdk.oversight.conf import setting
 
 if TYPE_CHECKING:
@@ -75,6 +77,29 @@ def _code_choice(chosen: Any) -> tuple[str, str]:
     return policy_name(chosen), "agent"
 
 
+def validate_oversight(cls: type) -> None:
+    """Check `cls.oversight` is a Policy subclass, a policy name, False or None.
+
+    Any other value would silently leave the agent unguarded, so fail at import.
+    Registering a Policy subclass here lets the system checks see it.
+    """
+    value = cls.__dict__.get("oversight")
+    if value is None or value is False or (isinstance(value, str) and value):
+        return
+    if isinstance(value, type):
+        from django_ai_sdk.oversight.policy import Policy
+
+        if issubclass(value, Policy):
+            from django_ai_sdk.oversight.registry import policy_name
+
+            policy_name(value)
+            return
+    raise ImproperlyConfigured(
+        f"{cls.__qualname__}.oversight must be a Policy subclass, a policy's name, False "
+        f"or None, not {value!r}."
+    )
+
+
 def fingerprint(agent: Agent) -> str:
     """A short hash of the agent's model, prompt, tools and integrations."""
     parts: list[str] = []
@@ -97,4 +122,5 @@ __all__ = [
     "code_policy",
     "fingerprint",
     "policy_needs_await",
+    "validate_oversight",
 ]

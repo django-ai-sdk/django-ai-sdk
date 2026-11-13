@@ -1,6 +1,6 @@
 """The tool hooks: check each tool call before it runs, mask each result before the model reads it.
 
-They check against the current turn (see turn.py) and do nothing without one.
+They check against the current turn and do nothing without one.
 Every call and result is recorded in the turn.
 
 If any call in a step is refused, the whole step is answered with stubs, because
@@ -31,7 +31,7 @@ from django_ai_sdk.oversight.guard import (
     current_guard,
     outlived_turn,
 )
-from django_ai_sdk.oversight.plugin.turn import OversightHook, turn_of
+from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 from django_ai_sdk.oversight.types import ToolCall
 
 if TYPE_CHECKING:
@@ -118,9 +118,11 @@ def _as_tool_call(call: Any, state: State) -> ToolCall:
 
 
 def _agent_name(state: State) -> str:
-    """The agent of a run that joined an outer turn, recorded with its tool calls (see Turn)."""
-    turn = turn_of(state.data.get("hook_context"))
-    return turn.agent_name if turn is not None else ""
+    """The agent of a run that joined an outer turn, recorded with its tool calls."""
+    request = request_in(state)
+    if request.guard is not None or request.agent is None:
+        return ""
+    return str(getattr(request.agent, "name", "") or type(request.agent).__name__)
 
 
 def _answer_with_stubs(

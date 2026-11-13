@@ -117,7 +117,7 @@ def _run_override_checks(cls: type) -> list[Any]:
         Warning(
             f"Agent {cls.__qualname__} runs through {name}.run(), which never calls "
             f"super().run(): policy {policy!r} does not check the model calls it makes.",
-            hint="Call super().run() for the model call, or open a turn() around your own.",
+            hint="Call super().run() for the model call.",
             id=f"{PREFIX}.W016",
         )
     ]

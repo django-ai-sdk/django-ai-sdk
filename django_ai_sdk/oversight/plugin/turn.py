@@ -1,13 +1,11 @@
-"""The turn, carried by the run: opened in before_run, closed in after_run.
+"""The run's turn: what the caller asks of it, and what oversight decided.
 
-The run's `hook_context` carries a `TurnRequest`: which agent, channel, person
-and thread the turn is for, and what the caller wants done along the way. The
-hooks put the `Turn` on it, so the caller reads what oversight decided once the
-run returns (see `turn_of`).
+`run_agent` opens the turn before the run, or joins the one it runs inside, and
+closes it after, also when the run raises. The run's `hook_context` carries the
+`TurnRequest`, so the hooks read and fill in the same object the caller holds.
 
-Haystack skips after_run when a run raises or is cancelled. An installed agent
-(see `install`) runs each run in a task of its own and closes the turn then,
-with the error, so a failed run's turn never stays current for the caller.
+A turn inside another one joins it when its policy is the same (or there is
+none). Another policy opens a child turn, linked to the outer one.
 """
 
 from __future__ import annotations
@@ -15,29 +13,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from django.utils.translation import gettext_lazy
 from haystack.core.serialization import default_from_dict, default_to_dict
 
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight.agent_run import needs_turn, open_turn
-from django_ai_sdk.oversight.guard import (
-    TurnGuard,
-    current_guard,
-    enter,
-    leave,
-    outlived_turn,
-)
+from django_ai_sdk.oversight.guard import TurnGuard, current_guard, outlived_turn
+from django_ai_sdk.oversight.guard.state import merge_restrict
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
-    import contextvars
     from collections.abc import Awaitable, Callable
 
     from haystack.components.agents.state.state import State
     from pydantic import BaseModel
 
+    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.guard import FinishResult, GateResult
-    from django_ai_sdk.oversight.plugin.finish import Answer
+    from django_ai_sdk.oversight.plugin.finish import WholeRun
     from django_ai_sdk.oversight.policy import Policy
 
 # Where the run's hook_context holds its TurnRequest.
@@ -57,48 +48,16 @@ class _UnnamedAgent:
 
 UNNAMED_AGENT = _UnnamedAgent()
 
-# The answer of a sync run whose policy needs a turn, which only an async run opens.
-UNGUARDABLE_RUN = gettext_lazy("This could not be checked, so it was not run.")
-
-
-@dataclass
-class Turn:
-    """The turn a run belongs to. `owns` is False when it joined an outer turn or has no policy."""
-
-    guard: TurnGuard
-    owns: bool
-    gated: GateResult | None = None
-    # Index of the first message the run produced, after the gate.
-    first: int = 0
-    token: contextvars.Token[TurnGuard | None] | None = None
-    # The agent of a run that joined an outer turn, named on each tool call it records.
-    agent_name: str = ""
-
-    @property
-    def refused(self) -> bool:
-        return self.gated is not None and self.gated.blocked
-
-    @property
-    def finished(self) -> FinishResult | None:
-        return self.guard.finished if self.owns else None
-
-    def raise_if_blocked(self) -> None:
-        """Raise `Blocked` when the gate refused the question or finish withheld the answer."""
-        if self.refused:
-            assert self.gated is not None
-            raise Blocked(self.gated.message, stage=str(Stage.GATE), turn_id=self.guard.id)
-        if (finished := self.finished) is not None and finished.blocked:
-            raise Blocked(finished.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
-
 
 @dataclass
 class TurnRequest:
-    """What the oversight hooks need to know about a run. Pass it as `hook_context=request.context()`.
+    """A run's turn: what the caller wants of it, then what oversight decided.
 
-    The hooks set `turn` once the run started.
+    Pass it to `run_agent(request=...)`. Once the run started, `guard` is the
+    turn it opened, or None when it joined an outer turn or has no policy.
     """
 
-    # The SDK agent whose policy the run is under, unless TurnOpenHook names one.
+    # The SDK agent whose policy the run is under.
     agent: Any = None
     channel: str = "run"
     user: Any = None
@@ -108,9 +67,9 @@ class TurnRequest:
     # The stored thread vouches for the history, so the gate does not judge it again.
     history_vouched: bool = False
     # Called once the gate passed the question, such as to store it.
-    on_gated: Callable[[Turn | None], Awaitable[None]] | None = None
+    on_gated: Callable[[TurnRequest], Awaitable[None]] | None = None
     # What finish judges and replaces. All the text the model wrote by default.
-    answer: Answer | None = None
+    answer: WholeRun | None = None
     # A Pydantic model the answer must still fit once masked.
     schema: type[BaseModel] | None = None
     # The id of the message that will store the answer.
@@ -119,7 +78,28 @@ class TurnRequest:
     keep_open: bool = False
     # Called with the stubs of refused tool calls, which never reach the ToolInvoker.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
-    turn: Turn | None = None
+    guard: TurnGuard | None = None
+    gated: GateResult | None = None
+    # Index of the first message the run produced, after the gate.
+    first: int = 0
+
+    @property
+    def refused(self) -> bool:
+        return self.gated is not None and self.gated.blocked
+
+    @property
+    def finished(self) -> FinishResult | None:
+        return self.guard.finished if self.guard is not None else None
+
+    def raise_if_blocked(self) -> None:
+        """Raise `Blocked` when the gate refused the question or finish withheld the answer."""
+        if self.guard is None:
+            return
+        if self.refused:
+            assert self.gated is not None
+            raise Blocked(self.gated.message, stage=str(Stage.GATE), turn_id=self.guard.id)
+        if (finished := self.finished) is not None and finished.blocked:
+            raise Blocked(finished.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
 
     def context(self, **extra: Any) -> dict[str, Any]:
         """A hook_context holding this request, beside `extra` for other hooks."""
@@ -147,158 +127,131 @@ class OversightHook:
         return default_from_dict(cls, data)
 
 
-class TurnOpenHook(OversightHook):
-    """Open the run's turn under `agent`'s policy, or join the turn it runs inside (see `open_turn`).
-
-    Without `agent`, the run's TurnRequest names it.
-    """
-
-    allowed_hook_points = ["before_run"]  # noqa: RUF012
-
-    def __init__(self, agent: Any = None) -> None:
-        self.agent = agent
-
-    def to_dict(self) -> dict[str, Any]:
-        cls = type(self.agent) if self.agent is not None else None
-        return default_to_dict(self, agent=f"{cls.__module__}.{cls.__qualname__}" if cls else None)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TurnOpenHook:
-        from haystack.core.serialization import import_class_by_name
-
-        path = data.get("init_parameters", {}).get("agent")
-        return cls(import_class_by_name(path)() if path else None)
-
-    def run(self, state: State) -> None:
-        """A sync run cannot open a turn: it joins the current one, or refuses to run."""
-        from django_ai_sdk.oversight.plugin.gate import answer_with
-
-        request = request_in(state)
-        outer = current_guard()
-        agent = self._agent_of(request, outer)
-        request.turn = Turn(
-            outer or TurnGuard(), owns=False, agent_name=self._joining(request, outer)
-        )
-        if agent is not None and needs_turn(agent, request.oversight):
-            answer_with(state, str(UNGUARDABLE_RUN), stop="unguardable")
-
-    async def run_async(self, state: State) -> None:
-        request = request_in(state)
-        outer = current_guard()
-        if request.oversight is False:
-            # Unguarded on purpose: it does not join the outer turn either.
-            request.turn = Turn(TurnGuard(), owns=False, token=enter(None))
-            return
-        agent = self._agent_of(request, outer)
-        if agent is None:
-            request.turn = Turn(outer or TurnGuard(), owns=False)
-            return
-        guard, opened = await open_turn(
-            agent,
-            channel=request.channel,
-            user=request.user,
-            thread_id=request.thread_id,
-            input=_question(state),
-            oversight=request.oversight,
-        )
-        if not opened:
-            name = self._joining(request, outer)
-            request.turn = Turn(outer or guard, owns=False, agent_name=name)
-            return
-        guard.message_id = request.message_id or guard.message_id
-        guard.on_tool_results = request.on_tool_results
-        request.turn = Turn(guard, owns=True, token=enter(guard))
-
-    def _agent_of(self, request: TurnRequest, outer: TurnGuard | None) -> Any:
-        """The agent whose policy the run is under. Named by nothing, outside a turn:
-        the unnamed agent, under DEFAULT_POLICY. Inside one, the run joins it."""
-        agent = self.agent or request.agent
-        return UNNAMED_AGENT if agent is None and outer is None else agent
-
-    def _joining(self, request: TurnRequest, outer: TurnGuard | None) -> str:
-        """The name of the agent joining `outer`, or "" when there is no outer turn."""
-        agent = self.agent or request.agent
-        if outer is None or agent is None:
-            return ""
-        return str(getattr(agent, "name", "") or type(agent).__name__)
-
-
-class TurnCloseHook(OversightHook):
-    """Close and record the run's turn, last thing in the run, unless the request keeps it open."""
-
-    allowed_hook_points = ["after_run"]  # noqa: RUF012
-
-    async def run_async(self, state: State) -> None:
-        request = request_in(state)
-        turn = request.turn
-        _leave(turn)
-        if turn is not None and turn.owns and not request.keep_open:
-            await turn.guard.close()
-
-
 class OversightStopHook(OversightHook):
-    """Stop a run whose turn has closed, before it spends another model call."""
+    """Before each model call: stop a run whose turn has closed, and offer only the tools it allows."""
 
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
         if outlived_turn():
             state.set("stop_run", "turn closed")
+        elif (guard := current_guard()) is not None:
+            # Haystack hands this same list to the model and the ToolInvoker for
+            # the step, so filtering it in place takes the tools away. The tool
+            # hook refuses a call to a removed tool anyway.
+            tools = state.data["tools"]
+            tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
 
     async def run_async(self, state: State) -> None:
         self.run(state)
 
 
-def request_of(context: dict[str, Any] | None) -> TurnRequest | None:
-    """The TurnRequest in a hook_context, if it has one."""
-    return (context or {}).get(REQUEST_KEY)
-
-
-def turn_of(context: dict[str, Any] | None) -> Turn | None:
-    """The turn a run with this hook_context belongs to, once it started."""
-    request = request_of(context)
-    return request.turn if request is not None else None
-
-
 def request_in(state: State) -> TurnRequest:
     """The run's TurnRequest. A run started without one gets the defaults."""
-    context = state.data.get("hook_context")
-    if context is None:
-        context = {}
-        state.set("hook_context", context)
-    return context.setdefault(REQUEST_KEY, TurnRequest())
+    return (state.data.get("hook_context") or {}).get(REQUEST_KEY) or TurnRequest()
 
 
-async def close_turn(context: dict[str, Any] | None, *, error: str = "") -> None:
-    """Close the run's own turn, if it is still open, recording `error`."""
-    turn = turn_of(context)
-    if turn is not None and turn.owns:
-        await turn.guard.close(error=error)
+def agent_of(request: TurnRequest) -> Any:
+    """The agent whose policy the run is under. Named by nothing, outside a turn:
+    the unnamed agent, under DEFAULT_POLICY. Inside one, the run joins it."""
+    if request.agent is None and current_guard() is None:
+        return UNNAMED_AGENT
+    return request.agent
 
 
-def _question(state: State) -> str:
-    for message in reversed(state.data.get("messages") or []):
-        if message.is_from("user"):
-            return message.text or ""
-    return ""
+async def open_turn(
+    agent: Any,
+    *,
+    channel: str,
+    user: Any = None,
+    thread_id: str | None = None,
+    messages: list[ChatMessage] | None = None,
+    input: str | None = None,
+    oversight: type[Policy] | str | Literal[False] | None = None,
+) -> tuple[TurnGuard, bool]:
+    """Start a turn of `agent`. Returns its guard, and whether it opened a turn of its own.
+
+    It opens none without a policy, or inside a turn of the same policy, which
+    it joins. Inside a turn of another policy it opens a child turn, which is
+    still the outer turn's person and keeps the tools the outer turn took away.
+    """
+    outer = current_guard()
+    guard = await TurnGuard.start(
+        agent,
+        channel=channel,
+        user=user,
+        thread_id=thread_id,
+        messages=messages,
+        input=input,
+        oversight=oversight,
+    )
+    if not guard.active or joins_turn(outer, guard.resolved.name):
+        return guard, False
+    if outer is not None:
+        guard.parent_turn_id = outer.id
+        guard.actor_id = guard.actor_id or outer.actor_id
+        if outer.restrict is not None:
+            guard.restrict = merge_restrict(guard.restrict, outer.restrict)
+    return guard, True
 
 
-def _leave(turn: Turn | None) -> None:
-    if turn is not None and turn.token is not None:
-        leave(turn.token)
-        turn.token = None
+def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
+    """Whether a run under `policy_name` joins the open turn `outer` instead of its own."""
+    return outer is not None and outer.policy is not None and outer.policy.name == policy_name
+
+
+def needs_own_turn(request: TurnRequest) -> bool:
+    """Whether the run needs a turn of its own here, which only an async run opens.
+
+    Sync code cannot await `get_oversight()`, so an agent that overrides it is
+    assumed to need one, and so is a policy name that does not resolve.
+    """
+    from django_ai_sdk.oversight.agents import code_policy, policy_needs_await
+    from django_ai_sdk.oversight.conf import is_enabled
+    from django_ai_sdk.oversight.registry import policy_name
+
+    agent, oversight = agent_of(request), request.oversight
+    if agent is None or oversight in (False, "") or not is_enabled():
+        return False
+    try:
+        if oversight:
+            name = policy_name(oversight)
+        elif policy_needs_await(agent):
+            return True
+        else:
+            name = code_policy(agent)[0]
+    except Exception:
+        return True
+    return bool(name) and not joins_turn(current_guard(), name)
+
+
+async def opens_own_turn(request: TurnRequest) -> bool:
+    """Whether the run of `request.agent` opens a turn of its own here. True when its policy cannot be told."""
+    from django_ai_sdk.oversight.agents import acode_policy
+    from django_ai_sdk.oversight.conf import is_enabled
+    from django_ai_sdk.oversight.registry import policy_name
+
+    agent, oversight = request.agent, request.oversight
+    if agent is None or oversight in (False, "") or not is_enabled():
+        return False
+    try:
+        name = policy_name(oversight) if oversight else ""
+        name = name or (await acode_policy(agent, channel=request.channel, user=request.user))[0]
+    except Exception:
+        return True
+    return bool(name) and not joins_turn(current_guard(), name)
 
 
 __all__ = [
     "REQUEST_KEY",
+    "UNNAMED_AGENT",
     "OversightHook",
     "OversightStopHook",
-    "Turn",
-    "TurnCloseHook",
-    "TurnOpenHook",
     "TurnRequest",
-    "close_turn",
+    "agent_of",
+    "joins_turn",
+    "needs_own_turn",
+    "open_turn",
+    "opens_own_turn",
     "request_in",
-    "request_of",
-    "turn_of",
 ]

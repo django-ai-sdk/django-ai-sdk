@@ -278,7 +278,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         llm = cls.__dict__.get("llm")
         if callable(llm) and not isinstance(llm, staticmethod):
             cls.llm = staticmethod(llm)  # ty: ignore[invalid-assignment]
-        from django_ai_sdk.oversight.agent_run import validate_oversight
+        from django_ai_sdk.oversight.agents import validate_oversight
 
         validate_oversight(cls)
         # Don't register the base Agent class itself, or classes that
@@ -876,7 +876,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         A run inside another turn joins that turn when the policy is the same (or
         there is none). Otherwise it opens a child turn. The checks are Haystack
         hooks on the run (see `oversight.plugin`), so an override of `run()` that
-        calls its own model is not checked: open a `turn()` for that.
+        calls its own model is not checked.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
@@ -895,8 +895,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
         given = as_chat_messages(messages)
 
-        async def admit(turn: Any) -> None:
-            keep_masked(given, turn)
+        async def admit(request: TurnRequest) -> None:
+            keep_masked(given, request)
 
         # Bind the thread so headless runs are traced to it.
         with bind_trace(thread_id=thread_id):
@@ -925,7 +925,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 else None,
                 max_agent_steps=self.max_agent_steps if with_tools else None,
                 hooks=default_hooks(self),
-                # Oversight: the run's hooks gate, check and finish this turn (see oversight.plugin).
+                # Oversight: the run gates, checks and finishes this turn (see oversight.plugin).
                 request=TurnRequest(
                     agent=self,
                     channel=channel,

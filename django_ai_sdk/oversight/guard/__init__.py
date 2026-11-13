@@ -80,17 +80,6 @@ def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]
     return scoped(_current, guard if guard is not None and guard.active else None)
 
 
-def enter(guard: TurnGuard | None) -> contextvars.Token[TurnGuard | None]:
-    """Make `guard` current until `leave()`, or no guard for None. For hooks, which
-    cannot hold a `with` block."""
-    return _current.set(guard)
-
-
-def leave(token: contextvars.Token[TurnGuard | None]) -> None:
-    """Undo `enter()`. Call it from the same context."""
-    _current.reset(token)
-
-
 @contextlib.asynccontextmanager
 async def closing_turn(
     guard: TurnGuard, *, keep_open: bool = False, error: Callable[[], str] = str
@@ -336,10 +325,8 @@ __all__ = [
     "TurnGuard",
     "closing_turn",
     "current_guard",
-    "enter",
     "guarding",
     "is_unguarded",
-    "leave",
     "outlived_turn",
     "rule_notes",
     "unguarded",
