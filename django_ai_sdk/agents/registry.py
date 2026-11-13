@@ -4,11 +4,14 @@ import threading
 import uuid
 from typing import TYPE_CHECKING, TypeVar
 
+from django_ai_sdk.logger import get_logger
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from .base import Agent
 
+
+logger = get_logger(__name__)
 
 T = TypeVar("T", bound="Agent")
 
@@ -167,7 +170,7 @@ class AgentRegistry:
                     import_string(path)
                 except ImportError:
                     # Class may not exist or path is wrong
-                    pass
+                    logger.exception(f"Could not import agent {path!r} from AI_SDK_AGENTS")
 
         # Instantiate all registered agents
         if instantiate:

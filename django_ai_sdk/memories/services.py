@@ -132,6 +132,8 @@ async def _fail_orphaned_processing_document(
             error = tb_lines[-1] if tb_lines else task_error.type
         else:
             error = "Task finished without updating the document"
+    elif task_status is not None and task_status.status == "READY":
+        return  # still queued: a backlog is not a dead worker
     else:
         reference_time = (task_status.started_at if task_status else None) or entry_doc.updated_at
         stale_after = reference_time + timedelta(seconds=STALE_PROCESSING_DEADLINE_SECONDS)
@@ -263,10 +265,13 @@ class MemoryService(PermissionsMixin):
     ) -> list[MemoryUserOut]:
         """List all users of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
-        await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
-        qs = memory.memory_users.all().select_related("user")[
-            offset : offset + limit if limit is not None else None
-        ]
+        # Names and emails: for managers, not every viewer of a public memory.
+        await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
+        qs = (
+            memory.memory_users.all()
+            .select_related("user")
+            .order_by("id")[offset : offset + limit if limit is not None else None]
+        )
         return [_memory_user_out(o) async for o in qs]
 
     @classmethod
@@ -364,7 +369,7 @@ class MemoryService(PermissionsMixin):
     ) -> list[MemoryGroupOut]:
         """List all groups of a memory."""
         memory = await _aget_or_not_found(Memory.objects, id=memory_id)
-        await cls.has_perms(user, Operation.VIEW_MEMORY, memory)
+        await cls.has_perms(user, Operation.UPDATE_MEMORY, memory)
         return [
             MemoryGroupOut(
                 group_id=mg.group_id,
@@ -388,7 +393,7 @@ class MemoryService(PermissionsMixin):
             queryset=Memory.objects.filter(is_hidden=False),
         )
 
-        qs = qs.annotate(document_count=Count("entries")).order_by("-created_at")[
+        qs = qs.annotate(document_count=Count("entries", distinct=True)).order_by("-created_at")[
             offset : offset + limit if limit is not None else None
         ]
 
@@ -576,13 +581,12 @@ class MemoryService(PermissionsMixin):
         )
 
         task_result = await process_document_upload.aenqueue(str(entry_doc.id), memory_id)
+        # The id is stored even when the worker already moved the row past PENDING.
+        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(task_id=task_result.id)
         await EntryDocument.objects.filter(
             id=entry_doc.id,
             processing_status=EntryDocument.ProcessingStatus.PENDING,
-        ).aupdate(
-            task_id=task_result.id,
-            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
-        )
+        ).aupdate(processing_status=EntryDocument.ProcessingStatus.PROCESSING)
 
         return DocumentUploadResponse(
             id=str(entry_doc.id), status="processing", task_id=str(task_result.id)
@@ -887,7 +891,10 @@ class MemoryService(PermissionsMixin):
                 file_hash=file_hash,
             )
             .exclude(
-                processing_status=EntryDocument.ProcessingStatus.FAILED,
+                processing_status__in=(
+                    EntryDocument.ProcessingStatus.FAILED,
+                    EntryDocument.ProcessingStatus.CANCELLED,
+                )
             )
             .afirst()
         )
@@ -907,13 +914,12 @@ class MemoryService(PermissionsMixin):
         )
 
         task_result = await thread_file_task().aenqueue(str(entry_doc.id), str(memory.id), agent_id)
+        # The id is stored even when the worker already moved the row past PENDING.
+        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(task_id=task_result.id)
         await EntryDocument.objects.filter(
             id=entry_doc.id,
             processing_status=EntryDocument.ProcessingStatus.PENDING,
-        ).aupdate(
-            task_id=task_result.id,
-            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
-        )
+        ).aupdate(processing_status=EntryDocument.ProcessingStatus.PROCESSING)
 
         return DocumentUploadResponse(
             id=str(entry_doc.id), status="processing", task_id=str(task_result.id)
@@ -1131,13 +1137,12 @@ class MemoryService(PermissionsMixin):
 
         task = thread_file_task() if thread is not None else process_document_upload
         task_result = await task.aenqueue(str(entry_doc.id), str(memory.id), agent_id)
+        # The id is stored even when the worker already moved the row past PENDING.
+        await EntryDocument.objects.filter(id=entry_doc.id).aupdate(task_id=task_result.id)
         await EntryDocument.objects.filter(
             id=entry_doc.id,
             processing_status=EntryDocument.ProcessingStatus.PENDING,
-        ).aupdate(
-            task_id=task_result.id,
-            processing_status=EntryDocument.ProcessingStatus.PROCESSING,
-        )
+        ).aupdate(processing_status=EntryDocument.ProcessingStatus.PROCESSING)
         # Re-read to return the actual persisted state — the conditional aupdate above
         # may have been skipped if the worker already advanced past PENDING.
         await entry_doc.arefresh_from_db(

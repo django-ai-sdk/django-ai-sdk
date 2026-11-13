@@ -210,6 +210,20 @@ def _handoff_context(messages: list[ChatMessage]) -> list[ChatMessage]:
     ]
 
 
+def _handoff_result_ids(handoff: list[ChatMessage]) -> set[str]:
+    """Tool results the coordinator already streamed; never re-emit them."""
+    return {r.origin.id or "" for m in handoff for r in m.tool_call_results or []}
+
+
+def _drop_handoff(result: dict[str, Any], handoff: list[ChatMessage]) -> None:
+    """Leave only the subagent's own messages, so its response and sources
+    don't report the coordinator's earlier work as its own."""
+    messages = result.get("messages") or []
+    start = 1 if messages and messages[0].is_from(ChatRole.SYSTEM) else 0
+    if handoff and messages[start : start + len(handoff)] == handoff:
+        result["messages"] = messages[:start] + messages[start + len(handoff) :]
+
+
 def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[StreamingChunk]:
     """Chunks for tool results the run produced without streaming them."""
     chunks = []
@@ -322,11 +336,12 @@ class SubagentStreamFilter:
             return _answered(str(UNGUARDABLE))
         from django_ai_sdk.oversight.plugin import install
 
-        seen: set[str] = set()
+        handoff = _handoff_context(messages)
+        seen = _handoff_result_ids(handoff)
         with self._span():
             # Oversight: the sync tool hooks refuse every call inside a turn.
             result = install(self._agent, self._subagent).run(
-                messages=_handoff_context(messages),
+                messages=handoff,
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
                 ),
@@ -334,6 +349,7 @@ class SubagentStreamFilter:
                 **kwargs,
             )
         self._flush(result, seen, streaming_callback)
+        _drop_handoff(result, handoff)
         return result
 
     def _flush(
@@ -387,11 +403,12 @@ class SubagentStreamFilter:
         from django_ai_sdk.oversight.plugin import TurnRequest, WholeRun, run_agent
 
         outer = current_guard()
-        seen: set[str] = set()
+        handoff = _handoff_context(messages)
+        seen = _handoff_result_ids(handoff)
         with self._span():
             result = await run_agent(
                 self._agent,
-                _handoff_context(messages),
+                handoff,
                 hook_context=TurnRequest(
                     agent=self._subagent,
                     channel=outer.channel if outer is not None else SUBAGENT_CHANNEL,
@@ -405,6 +422,7 @@ class SubagentStreamFilter:
                 **kwargs,
             )
         await self._aflush(result, seen, streaming_callback)
+        _drop_handoff(result, handoff)
         return result
 
     async def _aflush(

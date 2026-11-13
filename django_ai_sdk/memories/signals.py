@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from django_ai_sdk.agents.services import AgentService
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.memories.models import Entry, Memory
+from django_ai_sdk.memories.models import Entry, EntryDocument, Memory
 from django_ai_sdk.rags.utils import queryset_to_rag_documents
 
 if TYPE_CHECKING:
@@ -66,3 +67,13 @@ async def on_entry_deleted(sender: type[Model], instance: Entry, **kwargs: objec
             logger.info(f"Removed document from RAG for {memory_id}")
         else:
             await forget_index_signature(memory_id)
+
+
+@receiver(post_delete, sender=EntryDocument)
+def on_entry_document_deleted(
+    sender: type[Model], instance: EntryDocument, **kwargs: object
+) -> None:
+    """Delete the stored file with its row: Django leaves a FileField's file behind."""
+    file = instance.file
+    if file:
+        transaction.on_commit(lambda: file.delete(save=False))

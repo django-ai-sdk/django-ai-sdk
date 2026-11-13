@@ -82,6 +82,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("No memories found."))
             return
 
+        failed = 0
         for inst in agents:
             name = inst.__class__.__name__
             self.stdout.write(f"[{name}] Warming up {len(memory_ids)} memory/memories...")
@@ -93,5 +94,8 @@ class Command(BaseCommand):
                 except Exception as e:
                     self.stdout.write(self.style.ERROR(f"  [{name}] memory {mid[:8]} FAILED: {e}"))
                     logger.exception("Warmup failed for {} memory {}", name, mid)
+                    failed += 1
 
+        if failed:
+            raise CommandError(f"Warmup failed for {failed} memory index(es).")
         self.stdout.write(self.style.SUCCESS("Warmup complete."))

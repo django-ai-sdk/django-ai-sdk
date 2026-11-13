@@ -22,8 +22,6 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import ValidationError
-
 from django_ai_sdk.logger import get_logger
 
 if TYPE_CHECKING:
@@ -69,6 +67,6 @@ async def build_artifact(
         if data is None:
             return None
         return data, await spec.artifact.store(data, thread_id, user)
-    except (ValidationError, ValueError) as e:
+    except Exception as e:  # noqa: BLE001 — a broken builder must not fail the answer
         logger.warning("No {} after tool call: {}", spec.artifact.tool_name(), e)
         return None

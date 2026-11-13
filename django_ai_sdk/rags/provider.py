@@ -21,6 +21,21 @@ def _knowledge_unavailable(cache_key: str, exc: Exception) -> AiSdkError:
     return AiSdkError(f"RAG {cache_key} failed: {exc}", ErrorCode.KNOWLEDGE_UNAVAILABLE)
 
 
+def _close(rag: Any) -> None:
+    """Release the store of a RAG dropped from the cache.
+
+    A local Qdrant store holds its folder's lock until closed; left open, the
+    instance that replaces it cannot open the same folder.
+    """
+    close = getattr(getattr(rag, "_cached_document_store", None), "close", None)
+    if close is None:
+        return
+    try:
+        close()
+    except Exception as exc:  # noqa: BLE001 — the RAG is gone either way
+        logger.warning(f"Could not close a dropped RAG's document store: {exc}")
+
+
 class RAGProvider:
     """
     RAG provider for RAG pipelines.
@@ -217,7 +232,7 @@ class RAGProvider:
 
         # Clear this entry from cache
         if cache_key in self._cache:
-            del self._cache[cache_key]
+            _close(self._cache.pop(cache_key))
 
         # Warm up again (rebuilds indexes and caches)
         await self.warmup(agent, memory_id, force_rebuild)
@@ -294,8 +309,13 @@ class RAGProvider:
 
             # Evict LRU entries when over the cap; clean up their locks too
             while len(self._cache) > self._MAX_CACHE_SIZE:
-                evicted_key, _ = self._cache.popitem(last=False)
-                self._warmup_locks.pop(evicted_key, None)
+                evicted_key, evicted = self._cache.popitem(last=False)
+                _close(evicted)
+                # A held lock stays: dropping it would let a second warmup of the
+                # same key start beside the one that holds it.
+                evicted_lock = self._warmup_locks.get(evicted_key)
+                if evicted_lock is not None and not evicted_lock.locked():
+                    del self._warmup_locks[evicted_key]
                 logger.debug(f"Evicted LRU RAG cache entry: {evicted_key}")
 
             logger.debug(f"RAG created and cached for {cache_key}")

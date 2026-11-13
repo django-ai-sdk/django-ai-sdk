@@ -274,8 +274,9 @@ class MultiQueryBM25Retriever(BaseMultiQueryRetriever):
         self,
         document_store: Any,
         top_k: int = 3,
+        min_score: float | None = None,
     ) -> None:
-        super().__init__(document_store, top_k)
+        super().__init__(document_store, top_k, min_score)
 
         self._retriever = InMemoryBM25Retriever(
             document_store=document_store,

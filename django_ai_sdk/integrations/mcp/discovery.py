@@ -149,6 +149,12 @@ async def discover(
 
         asm = await _fetch_authorization_server_metadata(client, auth_servers, mcp_url)
 
+    # The metadata is the server's own word: its endpoints get POSTed to, with
+    # client credentials, so they must be public too.
+    for endpoint in (asm.token_endpoint, asm.registration_endpoint):
+        if endpoint and not await _is_safe_url(str(endpoint)):
+            raise ValueError(f"Unsafe OAuth endpoint in server metadata: {endpoint}")
+
     result = OAuthDiscovery(
         authorization_endpoint=str(asm.authorization_endpoint),
         token_endpoint=str(asm.token_endpoint),

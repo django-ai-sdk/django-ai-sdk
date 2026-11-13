@@ -145,7 +145,10 @@ async def run_file_pipeline(
             updated_at=timezone.now(),
         )
         if not updated:
-            return  # cancelled after the last checkpoint; leave that status alone
+            # cancelled after the last checkpoint; leave that status alone,
+            # but don't leave an unlinked Entry searchable.
+            await entry.adelete()
+            return
         # Entry post_save signal fires RAG indexing automatically
         return {"entry_id": str(entry.id), "extracted": extracted}
 

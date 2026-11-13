@@ -12,6 +12,7 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.errors import get_error_spec
 from django_ai_sdk.protocols.base import BaseProtocolHandler
 from django_ai_sdk.protocols.utils import format_sse
+from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -53,6 +54,17 @@ class OpenAIStreamChunk(BaseModel):
     choices: list[OpenAIChoice]
 
 
+def _text_content(content: Any) -> str:
+    """OpenAI message content as text: it may be null (tool calls) or a list of parts."""
+    if isinstance(content, list):
+        return " ".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return content or ""
+
+
 class OpenAIProtocolHandler(BaseProtocolHandler):
     """
     Convert StreamEvent to OpenAI-compatible SSE format
@@ -63,7 +75,8 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         self.id: str | None = None
         self.text_buffer: str = ""
         self.tool_calls_buffer: list[dict] = []
-        self.current_tool_call: dict | None = None
+        # Started tool calls waiting for their input, by id: calls can run in parallel.
+        self.pending_tool_calls: dict[str, dict] = {}
 
     def to_chat_messages(
         self,
@@ -74,11 +87,11 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         for msg in protocol_messages:
             if isinstance(msg, dict) and "role" in msg and "content" in msg:
                 messages.append(
-                    ChatMessage(
-                        role=msg["role"],
-                        content=msg["content"],
-                    )
+                    ChatMessage(role=msg["role"], content=_text_content(msg["content"]))
                 )
+            elif hasattr(msg, "parts"):
+                # The built-in views parse every request into parts-based messages.
+                messages.extend(VercelProtocolHandler().to_chat_messages([msg]))
         return messages
 
     def from_chat_messages(self, chat_messages: list[ChatMessage]) -> list[dict]:
@@ -110,7 +123,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         state = copy.copy(self)
         state.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         state.tool_calls_buffer = []
-        state.current_tool_call = None
+        state.pending_tool_calls = {}
 
         # Emit start chunk with role
         start_chunk = state._create_chunk(OpenAIDelta(role="assistant"))
@@ -139,7 +152,7 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                     case "tool_call_start":
                         tool_start = cast("ToolCallStartEvent", event)
                         # Start buffering tool call
-                        state.current_tool_call = {
+                        state.pending_tool_calls[tool_start.tool_call_id] = {
                             "id": tool_start.tool_call_id,
                             "type": "function",
                             "function": {
@@ -150,8 +163,9 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "tool_input_complete":
                         tool_input = cast("ToolInputCompleteEvent", event)
-                        # Add arguments to current tool call
-                        if state.current_tool_call:
+                        # Add arguments to the tool call they belong to
+                        tool_call = state.pending_tool_calls.pop(tool_input.tool_call_id, None)
+                        if tool_call:
                             # TODO: move into a utils, there should be a single way for
                             # formatting tool input arguments
                             args = (
@@ -159,9 +173,8 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                                 if isinstance(tool_input.tool_input, dict)
                                 else str(tool_input.tool_input)
                             )
-                            state.current_tool_call["function"]["arguments"] = args
-                            state.tool_calls_buffer.append(state.current_tool_call)
-                            state.current_tool_call = None
+                            tool_call["function"]["arguments"] = args
+                            state.tool_calls_buffer.append(tool_call)
 
                     case "tool_output":
                         # Tool output happens after the assistant message

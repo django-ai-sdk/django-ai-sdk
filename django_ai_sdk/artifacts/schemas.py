@@ -5,7 +5,7 @@ import re
 from contextvars import ContextVar
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from haystack.tools import Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -97,7 +97,9 @@ class ArtifactSchema(ArtifactModel):
         """
         from django_ai_sdk.artifacts.models import Artifact  # noqa: PLC0415
 
-        cast("type[BaseModel]", cls.model_fields["data"].annotation).model_validate(data)
+        model = cast("type[BaseModel]", cls.model_fields["data"].annotation)
+        # The validated form is what gets stored: default ids filled in, keys by alias.
+        data = model.model_validate(data).model_dump(by_alias=True, exclude_none=True, mode="json")
         data = await cls.resolve(data, thread_id)
         artifact = await Artifact.objects.acreate(
             thread_id=thread_id,
@@ -170,9 +172,9 @@ class QuestionFlowArtifact(ArtifactSchema):
     system_prompt_hint: ClassVar[str] = prompt("""
         Use artifact_question_flow_artifact() when you need to guide the user through
         a multi-step questionnaire or decision tree.
-        Provide a unique `id` slug (e.g. 'onboarding-flow').
-        Each step needs its own `id`, `title`, optional `description`,
-        a list of options (each with unique `id` and `label`, optional `description`/`disabled`),
+        Provide a unique `id` slug (e.g. 'onboarding-flow') and a `title`.
+        Each step needs its own `id`, `question`, optional `description`,
+        a list of options (each with a `label` and unique `value`),
         and optional `selectionMode` ('single' or 'multi', default single).
         Call it once you have all steps ready.
     """)
@@ -260,7 +262,7 @@ class ApprovalCardArtifact(ArtifactSchema):
         Use artifact_approval_card_artifact() when an action requires explicit user confirmation.
         Provide a unique `id` slug (e.g. 'delete-account'), a `title`,
         optional `description`, optional `icon` (lucide icon name in kebab-case e.g. 'trash-2'),
-        optional `metadata` items as `key`/`value` pairs for context,
+        optional `metadata` items as `label`/`value` pairs for context,
         optional `variant` ('destructive' for dangerous actions, else 'default'),
         and optional `confirmLabel`/`cancelLabel` to override button text.
     """)
@@ -671,6 +673,26 @@ class FileArtifact(ArtifactSchema):
         "answer as normal, without repeating file names or links."
     )
     data: FileData
+
+    @classmethod
+    async def resolve(cls, data: dict[str, Any], thread_id: str) -> dict[str, Any]:
+        """Look every file up in the thread: the model's own name and url are not trusted."""
+        from django_ai_sdk.memories.models import EntryDocument  # noqa: PLC0415
+        from django_ai_sdk.memories.tools import get_thread_file  # noqa: PLC0415
+
+        files = []
+        for item in data["files"]:
+            doc_id = item["documentId"]
+            try:
+                doc = await EntryDocument.objects.filter(
+                    id=UUID(doc_id), memory__thread_files__id=thread_id
+                ).afirst()
+            except ValueError:
+                doc = None
+            if doc is None:
+                raise ValueError(f"No file {doc_id!r} in this thread")
+            files.append(get_thread_file(doc, thread_id))
+        return {**data, "files": files}
 
 
 # ── Citations ─────────────────────────────────────────────────────────────────

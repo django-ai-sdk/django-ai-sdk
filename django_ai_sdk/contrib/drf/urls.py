@@ -13,6 +13,7 @@ from rest_framework.routers import DefaultRouter
 
 from django_ai_sdk.contrib.drf.views import (
     AgentViewSet,
+    ApiChatView,
     IntegrationViewSet,
     MemoryViewSet,
     MessageViewSet,
@@ -20,7 +21,6 @@ from django_ai_sdk.contrib.drf.views import (
     ThreadViewSet,
     WorkflowViewSet,
 )
-from django_ai_sdk.views.chat import ChatView
 
 router = DefaultRouter()
 router.register("threads", ThreadViewSet, basename="ai-sdk-thread")
@@ -32,6 +32,6 @@ router.register("workflows", WorkflowViewSet, basename="ai-sdk-workflow")
 router.register("integrations", IntegrationViewSet, basename="ai-sdk-integration")
 
 urlpatterns = [
-    path("threads/<str:thread_id>/chat/", ChatView.as_view(), name="ai-sdk-chat"),
+    path("threads/<str:thread_id>/chat/", ApiChatView.as_view(), name="ai-sdk-chat"),
     *router.urls,
 ]

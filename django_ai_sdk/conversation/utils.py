@@ -54,13 +54,13 @@ async def generate_thread_title(
                 response_format=None,
             )
     except Exception:
-        logger.warning("Thread title generation failed", exc_info=True)
+        logger.opt(exception=True).warning("Thread title generation failed")
         return None
 
     title = (title or "").strip()
     if not title or len(title) > get_title_sanity_limit():
         logger.warning(
-            "Thread title generation produced invalid output (length=%d): %r",
+            "Thread title generation produced invalid output (length={}): {!r}",
             len(title),
             title[:80],
         )

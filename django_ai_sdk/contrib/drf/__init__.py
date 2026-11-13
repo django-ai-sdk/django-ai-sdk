@@ -30,6 +30,7 @@ except ImportError as exc:  # pragma: no cover - exercised without the extra ins
 from django_ai_sdk.contrib.drf.base import ApiPagination, ApiViewSet, exception_handler
 from django_ai_sdk.contrib.drf.views import (
     AgentViewSet,
+    ApiChatView,
     IntegrationViewSet,
     MemoryViewSet,
     MessageViewSet,
@@ -40,6 +41,7 @@ from django_ai_sdk.contrib.drf.views import (
 
 __all__ = [
     "AgentViewSet",
+    "ApiChatView",
     "ApiPagination",
     "ApiViewSet",
     "IntegrationViewSet",

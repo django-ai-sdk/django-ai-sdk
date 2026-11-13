@@ -60,6 +60,9 @@ class BM25QueryExpanderRAG(RAGBase):
             logger.warning("No document store available, cannot add documents")
             return
 
+        ids = {doc.id for doc in documents}
+        self.documents = [*(d for d in self.documents if d.id not in ids), *documents]
+
         haystack_docs = [to_document(doc) for doc in documents]
         self._write_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to BM25 index")
@@ -69,6 +72,9 @@ class BM25QueryExpanderRAG(RAGBase):
         if self._cached_document_store is None:
             logger.warning("No document store available, cannot remove documents")
             return
+
+        # Keep the rebuild source in sync, or a later warmup resurrects them.
+        self.documents = [doc for doc in self.documents if doc.id not in document_ids]
 
         existing = self._cached_document_store.filter_documents()
         remaining = [d for d in existing if d.id not in document_ids]
@@ -147,6 +153,7 @@ class BM25QueryExpanderRAG(RAGBase):
         retriever = MultiQueryBM25Retriever(
             document_store=document_store,
             top_k=self.config.top_k,
+            min_score=self.config.min_score,
         )
 
         pipeline = Pipeline()

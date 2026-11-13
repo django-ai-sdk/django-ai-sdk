@@ -226,6 +226,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             logger.warning("No document store available, cannot add documents")
             return
 
+        # Chunk ids hash the content: drop an edited document's old chunks first.
+        await self.remove_documents([doc.id for doc in documents])
+        self.documents = [*self.documents, *documents]
+
         haystack_docs = [to_document(doc) for doc in documents]
         await self._index_documents(haystack_docs, self._cached_document_store)
         logger.info(f"Added {len(documents)} documents to Qdrant index")
@@ -283,6 +287,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             logger.warning("No document store available, cannot remove documents")
             return
 
+        # Keep the rebuild source in sync, or a later warmup resurrects them.
+        self.documents = [doc for doc in self.documents if doc.id not in document_ids]
+
         # Use delete_by_filter with metadata filtering
         # Build filter for doc_id field in metadata
         from qdrant_client.http.models import FieldCondition, Filter, MatchAny
@@ -291,7 +298,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             should=[FieldCondition(key="meta.doc_id", match=MatchAny(any=document_ids))]
         )
 
-        self._cached_document_store.delete_by_filter(filters=filter_obj)  # ty: ignore[invalid-argument-type]
+        await asyncio.to_thread(
+            self._cached_document_store.delete_by_filter,
+            filters=filter_obj,  # ty: ignore[invalid-argument-type]
+        )
         logger.info(f"Removed {len(document_ids)} documents from Qdrant index")
 
     async def warmup(self, force_rebuild: bool = False) -> None:
@@ -323,9 +333,9 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         if (
             not force_rebuild
             and (storage.is_persistent or storage.is_server)
-            and self._has_existing_index(document_store)
+            and await asyncio.to_thread(self._has_existing_index, document_store)
         ):
-            existing_count = document_store.count_documents()
+            existing_count = await asyncio.to_thread(document_store.count_documents)
             self._cached_document_store = document_store
             self._is_warmed_up = True
             if storage.is_server:
@@ -339,10 +349,14 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                 )
             return
 
-        # If server collection was deleted externally, recreate the store
-        # so _index_documents has a collection to write into.
-        if not force_rebuild and storage.is_server and not self._has_existing_index(document_store):
-            document_store = await asyncio.to_thread(self._create_document_store, recreate=True)
+        # A missing collection is created by the store itself, and an empty one is
+        # written into as it is: recreating it would drop what another process is
+        # indexing right now. Only one that no longer fits the config is rebuilt.
+        if not force_rebuild and storage.is_server:
+            try:
+                await asyncio.to_thread(document_store.count_documents)
+            except ValueError:
+                document_store = await asyncio.to_thread(self._create_document_store, recreate=True)
 
         if storage.is_server:
             collection = storage.extra.get("index", "default")
@@ -363,7 +377,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         )
         await self._index_documents(haystack_docs, document_store)
 
-        indexed_count = document_store.count_documents()
+        indexed_count = await asyncio.to_thread(document_store.count_documents)
         self._cached_document_store = document_store
         self._is_warmed_up = True
         logger.info(
@@ -375,7 +389,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
 
         if self._cached_document_store is not None:
             document_store = self._cached_document_store
-            if not self._has_existing_index(document_store):
+            if not await asyncio.to_thread(self._has_existing_index, document_store):
                 logger.warning("Qdrant collection was deleted externally, rebuilding index...")
                 self._cached_document_store = None
                 self._is_warmed_up = False
@@ -384,7 +398,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         else:
             document_store = await asyncio.to_thread(self._create_document_store, recreate=False)
 
-            if not self._has_existing_index(document_store):
+            if not await asyncio.to_thread(self._has_existing_index, document_store):
                 haystack_docs = self._convert_documents()
                 await self._index_documents(haystack_docs, document_store)
 
@@ -430,15 +444,13 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         document_store = self._cached_document_store
 
         # Wipe and rewrite all chunks so deleted/updated docs don't linger
-        existing_docs = document_store.filter_documents()
-        if existing_docs:
-            document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
+        await asyncio.to_thread(_delete_all, document_store)
 
         # Convert and index using shared helper
         haystack_docs = self._convert_documents()
         await self._index_documents(haystack_docs, document_store)
 
-        indexed_count = document_store.count_documents()
+        indexed_count = await asyncio.to_thread(document_store.count_documents)
         logger.info(
             f"[refresh_documents] Done: {len(documents)} source docs → {indexed_count} chunks"
         )
@@ -484,8 +496,14 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         """
         if self._cached_document_store is None:
             return None
-        docs = self._cached_document_store.get_documents_by_id([chunk_id])
+        docs = await asyncio.to_thread(self._cached_document_store.get_documents_by_id, [chunk_id])
         return docs[0].content if docs else None
+
+
+def _delete_all(document_store: QdrantDocumentStore) -> None:
+    existing_docs = document_store.filter_documents()
+    if existing_docs:
+        document_store.delete_documents(document_ids=[doc.id for doc in existing_docs])
 
 
 @component

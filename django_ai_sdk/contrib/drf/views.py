@@ -8,12 +8,15 @@ DRF views are sync, so they call the services' sync wrappers
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
+from django.http import JsonResponse
 from django.urls import reverse
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from django_ai_sdk import Agent
 from django_ai_sdk.agents import services as agent_services
@@ -21,7 +24,7 @@ from django_ai_sdk.agents.config import get_runtime_agent_bases, get_tool_regist
 from django_ai_sdk.agents.services import AgentCreateData, AgentService, AgentUpdateData
 from django_ai_sdk.contrib.drf import serializers as s
 from django_ai_sdk.contrib.drf.base import ApiViewSet
-from django_ai_sdk.errors import NotFound
+from django_ai_sdk.errors import NotFound, UserError
 from django_ai_sdk.integrations import services as integration_services
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.memories import services as memory_services
@@ -29,6 +32,7 @@ from django_ai_sdk.permissions import Operation, PermissionDenied
 from django_ai_sdk.storage import services as thread_services
 from django_ai_sdk.tracing import services as trace_services
 from django_ai_sdk.views import permissions as object_permissions
+from django_ai_sdk.views.chat import ChatView
 from django_ai_sdk.views.files import (
     source_file_response,
     source_page_response,
@@ -39,8 +43,10 @@ from django_ai_sdk.workflows import services as workflow_services
 from django_ai_sdk.workflows.services import WorkflowService
 
 if TYPE_CHECKING:
-    from django.http import FileResponse, HttpResponse
+    from django.http import FileResponse, HttpRequest, HttpResponse
     from rest_framework.request import Request
+
+    from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
 
@@ -50,6 +56,15 @@ ID = r"[^/]+"
 get_agent = async_to_sync(AgentService.get)
 get_thread_agent = async_to_sync(AgentService.get_agent)
 check_agent_perms = async_to_sync(AgentService.has_perms)
+check_thread_perms = async_to_sync(thread_services.ThreadService.has_perms)
+
+
+def _uploaded_file(request: Request) -> Any:
+    """The request's `file` part; a 400 when it is missing, not a KeyError."""
+    file = request.FILES.get("file")
+    if file is None:
+        raise UserError("No file uploaded")
+    return file
 
 
 def chat_messages(agent: Agent, validated: dict[str, Any]) -> list[Any]:
@@ -57,6 +72,32 @@ def chat_messages(agent: Agent, validated: dict[str, Any]) -> list[Any]:
     return agent.protocol_handler.to_chat_messages(
         [Message.model_validate(m) for m in validated["messages"]]
     )
+
+
+class ApiChatView(ChatView):
+    """The streaming chat view, behind DRF's authentication, permissions and throttles.
+
+    They come from your ``REST_FRAMEWORK`` settings; set ``api_view`` to an ``APIView``
+    subclass to use other classes for the chat alone.
+    """
+
+    api_view: ClassVar[type[APIView]] = APIView
+
+    async def get_user(self, request: HttpRequest) -> UserType:
+        return await sync_to_async(self._authenticate)(request)
+
+    def _authenticate(self, request: HttpRequest) -> UserType:
+        view = self.api_view()
+        drf_request = view.initialize_request(request)
+        view.perform_authentication(drf_request)
+        view.check_permissions(drf_request)
+        view.check_throttles(drf_request)
+        return drf_request.user
+
+    def error_response(self, exc: Exception) -> HttpResponse:
+        if isinstance(exc, APIException):
+            return JsonResponse({"detail": str(exc.detail)}, status=exc.status_code)
+        return super().error_response(exc)
 
 
 class ThreadViewSet(ApiViewSet):
@@ -103,7 +144,7 @@ class ThreadViewSet(ApiViewSet):
 
     def partial_update(self, request: Request, thread_id: str) -> Response:
         """Rename the thread and/or switch it to another agent, moving the memories along."""
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         agent_id = serializer.validated_data.get("agent_id")
         title = serializer.validated_data.get("title")
@@ -140,6 +181,8 @@ class ThreadViewSet(ApiViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = get_thread_agent(thread_id, user=request.user)
+        thread = thread_services.get_thread(thread_id, user=request.user)
+        check_thread_perms(request.user, Operation.CHAT, thread)
         check_agent_perms(request.user, Operation.CHAT, agent=agent)
         messages = chat_messages(agent, serializer.validated_data)
         result, blocked = async_to_sync(AgentService.arun_reply)(
@@ -247,7 +290,7 @@ class ThreadViewSet(ApiViewSet):
     @files.mapping.post
     def upload_file(self, request: Request, thread_id: str) -> Response:
         uploaded = memory_services.upload_thread_file(
-            thread_id, request.FILES["file"], user=request.user
+            thread_id, _uploaded_file(request), user=request.user
         )
         return Response(s.UploadResultSerializer(uploaded).data, status=202)
 
@@ -389,7 +432,8 @@ class RuntimeAgentViewSet(ApiViewSet):
     }
 
     def list(self, request: Request) -> Response:
-        configs = agent_services.list_runtime_agents(user=request.user)
+        limit, offset = self.page(request)
+        configs = agent_services.list_runtime_agents(user=request.user, limit=limit, offset=offset)
         return Response([self._with_permissions(request, config) for config in configs])
 
     def create(self, request: Request) -> Response:
@@ -424,7 +468,7 @@ class RuntimeAgentViewSet(ApiViewSet):
         return Response(self._with_permissions(request, config))
 
     def partial_update(self, request: Request, runtime_id: str) -> Response:
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = cast("AgentUpdateData", dict(serializer.validated_data))
         config = agent_services.update_runtime_agent(runtime_id, data, user=request.user)
@@ -632,7 +676,7 @@ class MemoryViewSet(ApiViewSet):
     @documents.mapping.post
     def upload_document(self, request: Request, memory_id: str) -> Response:
         uploaded = memory_services.upload_document(
-            memory_id, request.FILES["file"], user=request.user
+            memory_id, _uploaded_file(request), user=request.user
         )
         return Response(s.UploadResultSerializer(uploaded).data, status=202)
 
@@ -770,7 +814,7 @@ class WorkflowViewSet(ApiViewSet):
         return Response(s.WorkflowSerializer(record).data)
 
     def partial_update(self, request: Request, workflow_id: str) -> Response:
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         record = workflow_services.update_workflow(

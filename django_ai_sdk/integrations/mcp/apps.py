@@ -24,11 +24,15 @@ class MCPConfig(AppConfig):
     def ready(self) -> None:
         from django.db.models.signals import post_delete, post_save
 
-        from django_ai_sdk.integrations.mcp.models import MCPServerConfig
+        from django_ai_sdk.integrations.mcp.models import MCPServerConfig, forget_oauth_grants
         from django_ai_sdk.integrations.registry import invalidate_db_rows_cache
 
         def _invalidate(**kwargs: object) -> None:
             invalidate_db_rows_cache()
+
+        def _deleted(instance: MCPServerConfig, **kwargs: object) -> None:
+            invalidate_db_rows_cache()
+            forget_oauth_grants(instance.name)
 
         # weak=False: _invalidate is a local closure with nothing else holding a
         # reference to it, so a weak (the default) receiver would be garbage
@@ -40,7 +44,7 @@ class MCPConfig(AppConfig):
             weak=False,
         )
         post_delete.connect(
-            _invalidate,
+            _deleted,
             sender=MCPServerConfig,
             dispatch_uid="mcp_server_config_deleted",
             weak=False,

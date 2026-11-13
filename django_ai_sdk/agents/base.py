@@ -1147,6 +1147,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         protocol_messages: list[Any],
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
+        trigger: str | None = None,
     ) -> Any:
         """
         Convert protocol messages to streaming HTTP response with optional storage.
@@ -1158,6 +1159,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             protocol_messages: Raw protocol messages (e.g., Vercel Message objects)
             thread_id: Optional thread ID for conversation persistence
             user: Optional user for conversation attribution and permission checks
+            trigger: The request's trigger; on "regenerate-message" the user message
+                is already stored and is not stored again
 
         Returns:
             StreamingHttpResponse ready for Django views
@@ -1176,6 +1179,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # Before anything is stored: a refused chat must leave no trace in the thread.
         thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
         if thread:
+            # Reading a thread is not writing to it: the thread's own permissions too.
+            await ThreadService.has_perms(user, Operation.CHAT, thread)
             await check_object_permissions(
                 user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
             )
@@ -1195,7 +1200,16 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         from django_ai_sdk.agents.chat import chat_turn
 
-        return await chat_turn(self, messages, thread, thread_id, storage_adapter, user)
+        return await chat_turn(
+            self,
+            messages,
+            thread,
+            thread_id,
+            storage_adapter,
+            user,
+            # A regenerated question is already stored.
+            store_question=trigger != "regenerate-message",
+        )
 
     async def _resolve_attachments(
         self,

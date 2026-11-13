@@ -403,7 +403,13 @@ class AgentDefaultPermission(BasePermission):
             return await self._membership_allows(user, operation, config)
         if operation not in self.READ | self.WRITE | self.MANAGE:
             return True
-        return user is not None and bool(user.is_authenticated)
+        if user is None or not bool(user.is_authenticated):
+            return False
+        agent = kwargs.get("agent")
+        if operation in self.MANAGE and agent is not None and not agent.is_runtime:
+            # A code-declared agent has no row to be a manager of: staff only.
+            return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+        return True
 
     async def _membership_allows(self, user: UserType, operation: Operation, config: Any) -> bool:
         from django_ai_sdk.agents.models import AgentGroup, AgentUser
@@ -645,7 +651,8 @@ class PermissionsMixin:
             can_read=flags.get("read", False),
             can_write=flags.get("write", False),
             can_manage=flags.get("manage", False),
-            can_delete=flags.get("delete", False),
+            # Only memories have a DELETE tier; elsewhere deleting is a MANAGE operation.
+            can_delete=flags.get("delete", flags.get("manage", False)),
         )
 
     @classmethod

@@ -35,6 +35,8 @@ async def chat_turn(
     thread_id: str | None,
     storage_adapter: BaseStorageAdapter | None,
     user: AbstractBaseUser | AnonymousUser | None,
+    *,
+    store_question: bool = True,
 ) -> Any:
     """Pick the history, then stream. The run's hooks open the turn and gate it."""
     from django_ai_sdk.oversight.history import history_for
@@ -67,7 +69,9 @@ async def chat_turn(
         refused question is never stored.
         """
         keep_masked(messages, turn)
-        question_id = await _store_question(messages, storage_adapter, thread_id)
+        question_id = (
+            await _store_question(messages, storage_adapter, thread_id) if store_question else ""
+        )
         if turn is not None and question_id:
             turn.guard.user_message_id = question_id
         if agent.title_generation and thread and not thread.title:

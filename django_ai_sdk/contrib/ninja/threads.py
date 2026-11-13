@@ -92,7 +92,9 @@ async def get_thread_history(request: HttpRequest, thread_id: str) -> Any:
 async def add_message_to_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     """The chat endpoint: streams the agent's reply (SSE)."""
     agent = await AgentService.get_agent(thread_id, user=request.user)
-    return await agent.as_view(payload.messages, thread_id=thread_id, user=request.user)
+    return await agent.as_view(
+        payload.messages, thread_id=thread_id, user=request.user, trigger=payload.trigger
+    )
 
 
 @routes.patch("/threads/{thread_id}/", response=Success)
@@ -132,6 +134,8 @@ async def delete_all_threads(request: HttpRequest) -> Any:
 async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest) -> Any:
     """Run the thread's agent to completion and return the whole reply at once."""
     agent = await AgentService.get_agent(thread_id, user=request.user)
+    thread = await ThreadService.get_thread(thread_id, user=request.user)
+    await ThreadService.has_perms(request.user, Operation.CHAT, thread)
     await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
     result, blocked = await AgentService.arun_reply(

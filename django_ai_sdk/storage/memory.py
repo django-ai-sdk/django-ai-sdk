@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.permissions import ConflictError
 from django_ai_sdk.storage.base import (
     BaseStorageAdapter,
     StorageAdapterRegistry,
@@ -297,6 +298,9 @@ class MemoryStorageAdapter(BaseStorageAdapter):
         model = metadata.get("model", "") if metadata else ""
         user_id = str(user.pk) if user and user.is_authenticated else None
 
+        if MemoryStore.get_thread(thread_id) is not None:
+            # Replacing it would hand its messages to whoever asked for the id.
+            raise ConflictError("Thread already exists")
         MemoryStore.create_thread(
             thread_id=thread_id,
             title=title,

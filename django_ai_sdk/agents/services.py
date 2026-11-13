@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING, Required, TypedDict
 
 from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.errors import Blocked, NotFound, UserError
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import (
+    ConflictError,
     Operation,
     PermissionDenied,
     PermissionDomain,
@@ -354,7 +356,7 @@ class AgentService(PermissionsMixin):
         User = get_user_model()
         try:
             target_user = await User.objects.aget(id=target_user_id)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValueError, ValidationError):  # ValueError: malformed pk
             raise NotFound(f"User '{target_user_id}' not found")
 
         entry, _ = await AgentUser.objects.aupdate_or_create(
@@ -386,7 +388,7 @@ class AgentService(PermissionsMixin):
             entry = await AgentUser.objects.select_related("user").aget(
                 agent_id=agent_id, user_id=target_user_id
             )
-        except AgentUser.DoesNotExist:
+        except (AgentUser.DoesNotExist, ValueError, ValidationError):
             raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 
         entry.can_manage = can_manage
@@ -410,9 +412,12 @@ class AgentService(PermissionsMixin):
             raise NotFound(f"Agent '{agent_id}' not found")
         await cls.has_perms(user, Operation.UPDATE_AGENT, obj=config, agent=agent)
 
-        deleted, _ = await AgentUser.objects.filter(
-            agent_id=agent_id, user_id=target_user_id
-        ).adelete()
+        try:
+            deleted, _ = await AgentUser.objects.filter(
+                agent_id=agent_id, user_id=target_user_id
+            ).adelete()
+        except (ValueError, ValidationError):  # malformed pk
+            deleted = 0
         if not deleted:
             raise NotFound(f"User '{target_user_id}' not found on agent '{agent_id}'")
 
@@ -560,7 +565,10 @@ class AgentService(PermissionsMixin):
             vision=data.get("vision", False),
             required_tools=data.get("required_tools", []),
         )
-        await config.asave()
+        try:
+            await config.asave()
+        except IntegrityError as exc:  # unique slug, derived from the name
+            raise ConflictError("An agent with this name already exists") from exc
         if user is not None and bool(user.is_authenticated):
             await AgentUser.objects.aupdate_or_create(
                 agent=config,

@@ -10,7 +10,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import openai
 from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist, SuspiciousOperation
@@ -24,9 +24,6 @@ from pydantic import ValidationError
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.permissions import ConflictError, PermissionDenied
 from django_ai_sdk.utils import resolve_setting
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 logger = get_logger(__name__)
 
@@ -288,12 +285,9 @@ _PROVIDER_CLASSIFIERS = (_classify_openai, _classify_anthropic)
 
 def _classify_with_hooks(exc: BaseException) -> str | None:
     """`AI_SDK_ERROR_CLASSIFIERS`: dotted paths to `(exc) -> code | None`."""
-    classifiers: list[Callable[[BaseException], str | None]] = [
-        import_string(path) for path in resolve_setting("AI_SDK_ERROR_CLASSIFIERS", [])
-    ]
-    for classifier in classifiers:
+    for classifier in resolve_setting("AI_SDK_ERROR_CLASSIFIERS", []):
         try:
-            code = classifier(exc)
+            code = import_string(classifier)(exc)
         except Exception:
             # A broken classifier must not take the error report down with it.
             logger.opt(exception=True).error("Error classifier {} failed", classifier)

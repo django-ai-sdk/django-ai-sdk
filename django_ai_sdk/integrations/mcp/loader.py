@@ -83,6 +83,8 @@ class DynamicMCPIntegration(Integration):
             timeout=self._timeout,
             cb_cooldown=resolve_setting("AI_SDK_INTEGRATION_CB_COOLDOWN", 60),
         )
+        # OAuth only: which stored token each cached toolset was built with.
+        self._token_stamps: dict[str, tuple[Any, str]] = {}
         self.label = config.label or name.title()
         self.hint = config.hint
         self.config = config
@@ -156,7 +158,40 @@ class DynamicMCPIntegration(Integration):
         key = self._cache_key(user)
         if key is None:
             return []
+        if isinstance(self.config, OAuthMCPIntegrationConfig):
+            return await self._get_oauth_tools(user, key)
         return await self._cache.get(key, lambda: self._fetch(user))
+
+    async def _get_oauth_tools(
+        self, user: AbstractBaseUser | AnonymousUser | None, key: str
+    ) -> list[Any]:
+        """The cached toolset, rebuilt when its bearer token is no longer the one stored.
+
+        A toolset keeps the token it was built with, and tokens are refreshed,
+        replaced and revoked by other processes too (the refresh cron, the OAuth
+        callback on another worker), whose cache invalidation never reaches this one.
+        """
+        token = await self._get_oauth_token(user)
+        built_with = self._token_stamps.get(key)
+        if built_with is not None and (
+            token is None or built_with != (token.pk, token.access_token) or token.is_expired()
+        ):
+            del self._token_stamps[key]
+            await self._cache.invalidate(key)
+        if token is None:
+            return []
+
+        tools = await self._cache.get(key, lambda: self._fetch(user))
+        # Stamped only after a fetch that worked: a failing refresh must stay behind
+        # the breaker, not be retried by an invalidation on every call.
+        if key not in self._token_stamps and self._cache.status_for(key) == (
+            IntegrationStatus.ACTIVE
+        ):
+            if token.is_expired():  # the fetch refreshed it
+                token = await self._get_oauth_token(user)
+            if token is not None:
+                self._token_stamps[key] = (token.pk, token.access_token)
+        return tools
 
     async def get_status(
         self,
@@ -190,6 +225,12 @@ class DynamicMCPIntegration(Integration):
             return IntegrationStatus.EXPIRED
 
         await self.get_tools(user)
+        # Still expired after the attempt: the refresh failed, only a reconnect helps.
+        token = await self._get_oauth_token(user)
+        if token is None:
+            return IntegrationStatus.DISCONNECTED
+        if token.is_expired():
+            return IntegrationStatus.EXPIRED
         # A non-None token already required a valid user.pk, so _cache_key(user) here
         # can't be None.
         return self._cache.status_for(self._cache_key(user))
@@ -336,13 +377,16 @@ class DynamicMCPIntegration(Integration):
 
         if token_obj.is_expired():
             logger.info("Access token expired for %r — attempting refresh", self.name)
-            token_obj = await refresh_oauth_token(token_obj, self.config)
+            # Shielded: the caller's timeout must not cancel a refresh the IdP has
+            # already processed, or a rotated refresh token is lost for good.
+            token_obj = await asyncio.shield(refresh_oauth_token(token_obj, self.config))
             if token_obj is None:
-                return []
+                # Raised, not []: an empty list would be cached as a success.
+                raise RuntimeError(f"OAuth token refresh failed for {self.name!r}")
 
         access_token = token_obj.get_access_token()
         if not access_token:
-            return []
+            raise RuntimeError(f"OAuth access token for {self.name!r} cannot be read")
 
         logger.info("Connecting to OAuth MCP server %r for user %s", self.name, user.pk)
         return await _connect(
@@ -564,22 +608,23 @@ async def resolve_client_credentials(
 ) -> tuple[str, str]:
     """Return (client_id, client_secret) for an OAuth server.
 
-    A dynamically-registered client (RFC 7591, stored in MCPOAuthClient) takes
-    precedence over static credentials configured on the integration. This is the
-    single source of truth for credential resolution; the OAuth start and refresh
-    paths all go through it.
+    Static credentials configured on the integration win, as they do when the
+    authorize URL is built (get_or_register_client); otherwise the dynamically
+    registered client (RFC 7591, stored in MCPOAuthClient) is used. The token
+    exchange and refresh paths go through it.
     """
     from django_ai_sdk.integrations.mcp.models import MCPOAuthClient
 
-    try:
-        oauth_client = await MCPOAuthClient.objects.aget(server_name=server_name)
-        return oauth_client.client_id, oauth_client.get_client_secret()
-    except MCPOAuthClient.DoesNotExist:
-        logger.debug(
-            "No dynamically registered OAuth client for %r, using static credentials",
-            server_name,
+    if not config.client_id:
+        # A row without a client_id is a registration that never completed.
+        oauth_client = (
+            await MCPOAuthClient.objects.filter(server_name=server_name)
+            .exclude(client_id="")
+            .afirst()
         )
-        return config.client_id, config.client_secret.get_secret_value()
+        if oauth_client is not None:
+            return oauth_client.client_id, oauth_client.get_client_secret()
+    return config.client_id, config.client_secret.get_secret_value()
 
 
 def build_oauth_client(client_id: str, client_secret: str, **kwargs: Any) -> AsyncOAuth2Client:
@@ -617,7 +662,10 @@ async def refresh_oauth_token(
     from django_ai_sdk.integrations.mcp.discovery import discover
 
     try:
-        discovery = await discover(config.url)
+        token_endpoint = (
+            config.token_endpoint
+            or (await discover(config.oauth_discovery_url or config.url)).token_endpoint
+        )
     except Exception as e:
         logger.error(
             "Cannot discover token endpoint for refresh of %r: %s", token_obj.server_name, e
@@ -652,8 +700,8 @@ async def refresh_oauth_token(
     client = build_oauth_client(client_id, client_secret, update_token=_persist)
     try:
         async with client:
-            await client.refresh_token(discovery.token_endpoint, refresh_token=refresh_token)
-    except (*HTTP_ERRORS, OAuthError) as e:
+            await client.refresh_token(token_endpoint, refresh_token=refresh_token)
+    except (*HTTP_ERRORS, OAuthError, ValueError) as e:  # ValueError: non-JSON body
         # Our own exchange may have failed *because* a concurrent refresh already
         # rotated this refresh_token (e.g. the IDP rejected our now-stale one with
         # invalid_grant). Check whether another writer already landed a good token

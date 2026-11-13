@@ -89,6 +89,15 @@ class WorkflowService(PermissionsMixin):
                 user, Operation.VIEW_WORKFLOW, run, raise_on_deny=False
             ):
                 raise WorkflowRun.DoesNotExist
+            if not force and run.status in (
+                WorkflowRun.Status.RUNNING,
+                WorkflowRun.Status.COMPLETED,
+            ):
+                # A second worker on a live run would re-run its failed steps.
+                raise UserError(
+                    f"Run is {run.status} and cannot be resumed. Pass `force` when "
+                    "its worker is known to be gone."
+                )
             if force:
                 await WorkflowRunStep.objects.filter(
                     run=run, status=WorkflowRunStep.Status.RUNNING
