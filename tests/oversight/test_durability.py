@@ -388,12 +388,12 @@ class TestParseAge:
         ],
     )
     def test_ages(self, text: str, expected: timedelta) -> None:
-        from django_ai_sdk.management.sweep import parse_age
+        from django_ai_sdk.oversight.management.commands.oversight_sweep import parse_age
 
         assert parse_age(text) == expected
 
     def test_anything_else_is_refused(self) -> None:
-        from django_ai_sdk.management.sweep import parse_age
+        from django_ai_sdk.oversight.management.commands.oversight_sweep import parse_age
 
         with pytest.raises(ValueError):
             parse_age("-5m")

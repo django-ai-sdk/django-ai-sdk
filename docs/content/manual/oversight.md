@@ -353,8 +353,6 @@ python manage.py check --deploy --database default
 
 `oversight_prune [--batch-size 500]` deletes expired rows ([Retention](#retention)).
 
-`oversight_sweep` builds on `django_ai_sdk.management.sweep.SweepCommand`: subclass it, return the stale rows from `stale(cutoff)` and set `marked` (or override `act`).
-
 ## Notifiers
 
 `AI_SDK_OVERSIGHT["NOTIFIERS"]` lists `LogNotifier()` and `WebhookNotifier(url, *, secret="", timeout=5.0)` (both in `django_ai_sdk.oversight.notifiers`), or your own `Notifier` subclass (implement `async send(event)`), as instances, dotted paths, or `{"class": "<dotted path>", **kwargs}`. Every notifier takes `name` (by default its class name without `Notifier`, lowercased: `log`, `webhook`); `Notify(to=[...])` sends to those names only. A `Notify` action sends `{"id", "type": "oversight.match", "turn_id", "rule", "stage", "severity", "outcome", "agent", "channel"}`: no turn content. `id` is stable (`notifiers.event_id(turn_id, rule, stage)`): a repeated delivery carries the same one.
