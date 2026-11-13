@@ -5,6 +5,7 @@ registered, built and run like a code policy. It gets the same checks as code, p
 these. A definition may not:
 
 - use the name of a code policy, or a name that is not a slug
+- extend another authored policy: only code policies and packs
 - declare a lens or rule named like one it inherits, or extend parents where a later
   one replaces an earlier one's: a lens or rule declared in code never changes at runtime
 - configure a lens beyond `INLINE_ARGS` (no regex, code or import path): keywords,
@@ -126,14 +127,6 @@ def _rule(data: Any) -> Rule:
         raise ValueError(f"rule {data.get('name')!r}: {exc}") from None
 
 
-def in_force(definition: dict[str, Any], *, active: bool) -> dict[str, Any]:
-    """The definition that runs: without its own lenses and rules when it is off.
-
-    Its parents and options stay, so what it extends keeps running.
-    """
-    return definition if active else {**definition, "lenses": [], "rules": []}
-
-
 def build_policy_class(name: str, definition: dict[str, Any]) -> type[Policy]:
     """Build the Policy subclass for `definition`. Raises ValueError on a bad part."""
     options = dict(definition.get("options") or {})
@@ -162,7 +155,7 @@ def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy
     """
     extends = [str(p) for p in definition.get("extends") or []]
     _fail_on(_shape_problems(name, definition, extends))
-    parents, problems = _parents(name, extends)
+    parents, problems = _parents(extends)
     try:
         cls = build_policy_class(name, definition)
     except ValueError as exc:
@@ -202,15 +195,19 @@ def _shape_problems(name: str, definition: dict[str, Any], extends: list[str]) -
     missing = [p for p in extends if get_policy_class(p) is None]
     if missing:
         problems.append(f"no policy {missing} to extend")
+    authored = [p for p in extends if is_authored(get_policy_class(p))]
+    if authored:
+        problems.append(f"{authored} are authored: extend only policies declared in code and packs")
     if name in extends:
         problems.append("a policy cannot extend itself")
     return problems
 
 
-def _parents(name: str, extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
+def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
     """Build each parent, and list a missing MUST_EXTEND or a parent that does not load."""
     problems: list[str] = []
-    required = [p for p in setting("MUST_EXTEND") if p not in ancestors(name, parents=extends)]
+    inherited = {*extends, *(ancestor for parent in extends for ancestor in ancestors(parent))}
+    required = [p for p in setting("MUST_EXTEND") if p not in inherited]
     if required:
         problems.append(f"every authored policy extends {required} (MUST_EXTEND)")
     parents: dict[str, ResolvedPolicy] = {}
@@ -303,6 +300,5 @@ __all__ = [
     "DefinitionError",
     "build_policy_class",
     "check_definition",
-    "in_force",
     "is_authored",
 ]

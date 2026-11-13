@@ -7,8 +7,7 @@ A policy that is off registers with its parents and options only.
 A definition that no longer validates (for example, a parent was removed in a deploy)
 is unregistered, so turns that name it are refused instead of running without it. If
 the database cannot be read, the registered policies stay, for as long as it cannot be
-read. Any change rechecks every authored policy, because a changed parent can break its
-children.
+read. Authored policies extend only code policies, so they load in any order.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.authoring.definitions import (
     DefinitionError,
     check_definition,
-    in_force,
     is_authored,
 )
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy, unregister_policy
@@ -51,32 +49,20 @@ class AuthoredPolicyLoader:
         stamp = dict(AuthoredPolicy.objects.values_list("name", "updated_at"))
         if stamp == self.stamp:
             return
-        # Register parents before children so a child can find its authored parent.
-        pending = {row.name: row for row in AuthoredPolicy.objects.all()}
-        for name in [loaded for loaded in self.loaded if loaded not in pending]:
+        for name in [loaded for loaded in self.loaded if loaded not in stamp]:
             self._unregister(name)
-        progress = True
-        while pending and progress:
-            progress = False
-            for name, row in list(pending.items()):
-                waiting = [
-                    parent for parent in row.extends or [] if parent in pending and parent != name
-                ]
-                if waiting:
-                    continue
-                pending.pop(name)
-                progress = True
-                self._register(row)
-        for name in pending:
-            # Whatever is left is in a cycle, so none of it loads.
-            self.broken[name] = "it extends a policy that extends it"
-            self._unregister(name, keep_broken=True)
+        for row in AuthoredPolicy.objects.all():
+            self._register(row)
         self.stamp = stamp
 
     def _register(self, row: Any) -> None:
         name = row.name
+        definition = row.definition()
+        if not row.active:
+            # Off: its own lenses and rules go, what it extends keeps running.
+            definition |= {"lenses": [], "rules": []}
         try:
-            cls, _ = check_definition(name, in_force(row.definition(), active=row.active))
+            cls, _ = check_definition(name, definition)
         except DefinitionError as exc:
             self.broken[name] = str(exc)
             logger.error("Authored policy {!r} does not load: {}", name, exc)
