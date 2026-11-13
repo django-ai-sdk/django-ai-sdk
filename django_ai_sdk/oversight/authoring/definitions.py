@@ -28,7 +28,7 @@ from typing import Any
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
-from django_ai_sdk.oversight.checks.policies import policy_errors
+from django_ai_sdk.oversight.checks import policy_errors
 from django_ai_sdk.oversight.judges.base import alias_defined, alias_of, is_optional
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
 from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, policy_lenses, validate_policy

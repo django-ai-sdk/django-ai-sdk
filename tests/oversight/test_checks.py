@@ -95,7 +95,7 @@ class TestSettingsSchema:
 
 class TestPolicyAndDeployChecks:
     def test_an_agent_naming_an_unregistered_policy_is_an_error(self):
-        from django_ai_sdk.oversight.checks.agents import agent_checks
+        from django_ai_sdk.oversight.checks import agent_checks
 
         cls = type(
             "Typo",
@@ -224,7 +224,7 @@ class TestChecks:
     def test_an_enforced_rule_no_judge_answers(self):
         from django.core.checks import ERROR, WARNING
 
-        from django_ai_sdk.oversight.checks.policies import policy_checks
+        from django_ai_sdk.oversight.checks import policy_checks
 
         def level(judge: str) -> list[int]:
             name = policy(
@@ -241,7 +241,7 @@ class TestChecks:
 
     def test_a_notify_that_reaches_no_one_is_flagged(self):
         from django_ai_sdk.oversight.rules import Notify
-        from django_ai_sdk.oversight.checks.policies import policy_checks
+        from django_ai_sdk.oversight.checks import policy_checks
 
         lens = JudgeLens(name="j", judges=[Patterns([r"x"])])
         when = L("j").is_true

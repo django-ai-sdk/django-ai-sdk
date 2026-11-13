@@ -124,7 +124,7 @@ class TestOversightValue:
         type("Right", (Agent,), {"_skip_auto_register": True, "oversight": value})
 
     def test_the_check_reports_a_value_set_later_instead_of_crashing(self):
-        from django_ai_sdk.oversight.checks.agents import agent_checks
+        from django_ai_sdk.oversight.checks import agent_checks
 
         cls = type("Later", (Agent,), {"_skip_auto_register": True, "permissions": [AllowAll]})
         cls.oversight = RunPolicy()  # ty: ignore[invalid-assignment]
