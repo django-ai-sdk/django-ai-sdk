@@ -85,6 +85,3 @@ class AuthoredPolicyLoader:
 
 
 loader = AuthoredPolicyLoader()
-
-
-__all__ = ["AuthoredPolicyLoader", "loader"]

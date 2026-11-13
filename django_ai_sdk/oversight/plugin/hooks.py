@@ -31,6 +31,7 @@ from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ChatRole, TextContent
 from pydantic import ValidationError
 
+from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.agents.tool_agent import (
     MASKED_META_KEY,
     REFUSED_META_KEY,
@@ -189,8 +190,6 @@ class GateHook(OversightHook):
     allowed_hook_points = ["before_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        from django_ai_sdk.adapters.citations.registry import current_registry
-
         request = turn_request(state)
         if (guard := request.guard) is not None:
             gate = request.gated = await judge_run_input(
@@ -202,8 +201,7 @@ class GateHook(OversightHook):
             if gate.notice:
                 guard.notices.pending.append(gate.notice)
             # Mask the sources the thread already cited, before any citations card shows them.
-            if (registry := current_registry.get()) is not None:
-                await mask_sources(guard, registry)
+            await mask_sources(guard, current_registry.get())
         request.first = len(state.data.get("messages") or [])
         if request.on_gated is not None:
             await request.on_gated(request)
@@ -401,7 +399,9 @@ class OversightToolResultHook(OversightHook):
                 ToolCall(
                     id=result.origin.id or "",
                     name="" if result.origin.id else result.origin.tool_name,
-                    result=masked if isinstance(masked, str) else _text_of(masked),
+                    result=masked
+                    if isinstance(masked, str)
+                    else "\n".join(p.text for p in masked if isinstance(p, TextContent)),
                     error=bool(result.error),
                     agent=_agent_name(state),
                 )
@@ -455,10 +455,6 @@ async def masked_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
     ]
 
 
-def _text_of(parts: list[Any]) -> str:
-    return "\n".join(part.text for part in parts if isinstance(part, TextContent))
-
-
 class RecordUsageHook(OversightHook):
     """Add the run's model and token usage to the turn it runs in, sync or async."""
 
@@ -496,8 +492,6 @@ class FinishHook(OversightHook):
     allowed_hook_points = ["after_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        from django_ai_sdk.adapters.citations.registry import current_registry
-
         request = turn_request(state)
         guard = request.guard
         if guard is None:
@@ -539,14 +533,14 @@ def withhold_unfit(guard: TurnGuard, finished: StageResult, schema: type[BaseMod
         finished.message = finished.text = str(Block.DEFAULT_MESSAGE)
 
 
-async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
-    """Mask source text in the citation registry, like tool results.
+async def mask_sources(guard: TurnGuard, registry: SourceRegistry | None) -> None:
+    """Mask source text in the citation registry, if there is one, like tool results.
 
     The citations card, the stored citations artifact and the lenses all read
     the registry, so none of them should see unmasked text. The gate, the stream
     and the finish hook call this; each text is masked once.
     """
-    for source in registry.all:
+    for source in registry.all if registry is not None else []:
         text = source.content or ""
         if not text or guard.masks.sources.get(source.key) == text:
             continue

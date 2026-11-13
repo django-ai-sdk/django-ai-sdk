@@ -249,53 +249,51 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
     if guard.policy_unloaded:
         return str(Block.DEFAULT_MESSAGE)
     try:
-        return await _judge_tool_call(guard, call)
+        if not guard.allows_tool(call.name):
+            return str(TOOL_UNAVAILABLE)
+        lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
+        if not lenses:
+            return None
+        view = guard.context.model_copy(update={"tool_call": call})
+        answered = await answer_lenses(
+            lenses, view, Stage.TOOL, deadline_ms=deadline_ms(Stage.TOOL)
+        )
+        guard.keep_answers(answered)
+        # Keep this call's answers out of context.answers so the next call is judged on its own.
+        answers = {o.lens.name: o.answer for o in answered}
+        tool_lenses = {lens.name for lens in lenses}
+        # Failures of other lenses still count. A tool lens failure counts only for this call.
+        errored = {name for name in guard.errored_lenses() if name not in tool_lenses}
+        # Judge every call, not just the first, so a retried call is refused again.
+        matched = [
+            m
+            for m in match_rules(
+                guard.resolved,
+                {**guard.context.answers, **answers},
+                Stage.TOOL,
+                done=set(),
+                errored=errored | errored_lenses(answered),
+                fail_closed=guard.fails_closed,
+            )
+            if m.rule.lenses() & tool_lenses
+        ]
+        # One recorded match per rule, however many calls it refused.
+        recorded = {m.rule.name for m in guard.matched if not m.aside}
+        guard.matched.extend(m for m in matched if m.rule.name not in recorded)
+        # Removed tools stay removed. Later calls are refused and get_tools() leaves them out.
+        block = first_refusal(matched)
+        guard.restrict = restricted_tools(matched, guard.restrict)
+        if block is not None:
+            return block
+        if not guard.allows_tool(call.name):
+            restricting = next(
+                (m for m in matched if any(a.kind == "restrict_tools" for a in m.acted)), None
+            )
+            return tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE)
+        return None
     except Exception:
         refuse = guard.record_stage_error("tool check failed", refuse_turn=False)
         return str(Block.DEFAULT_MESSAGE) if refuse else None
-
-
-async def _judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
-    if not guard.allows_tool(call.name):
-        return str(TOOL_UNAVAILABLE)
-    lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
-    if not lenses:
-        return None
-    view = guard.context.model_copy(update={"tool_call": call})
-    answered = await answer_lenses(lenses, view, Stage.TOOL, deadline_ms=deadline_ms(Stage.TOOL))
-    guard.keep_answers(answered)
-    # Keep this call's answers out of context.answers so the next call is judged on its own.
-    answers = {o.lens.name: o.answer for o in answered}
-    tool_lenses = {lens.name for lens in lenses}
-    # Failures of other lenses still count. A tool lens failure counts only for this call.
-    errored = {name for name in guard.errored_lenses() if name not in tool_lenses}
-    # Judge every call, not just the first, so a retried call is refused again.
-    matched = [
-        m
-        for m in match_rules(
-            guard.resolved,
-            {**guard.context.answers, **answers},
-            Stage.TOOL,
-            done=set(),
-            errored=errored | errored_lenses(answered),
-            fail_closed=guard.fails_closed,
-        )
-        if m.rule.lenses() & tool_lenses
-    ]
-    # One recorded match per rule, however many calls it refused.
-    recorded = {m.rule.name for m in guard.matched if not m.aside}
-    guard.matched.extend(m for m in matched if m.rule.name not in recorded)
-    # Removed tools stay removed. Later calls are refused and get_tools() leaves them out.
-    block = first_refusal(matched)
-    guard.restrict = restricted_tools(matched, guard.restrict)
-    if block is not None:
-        return block
-    if not guard.allows_tool(call.name):
-        restricting = next(
-            (m for m in matched if any(a.kind == "restrict_tools" for a in m.acted)), None
-        )
-        return tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE)
-    return None
 
 
 # Finish.

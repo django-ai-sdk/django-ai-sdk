@@ -304,17 +304,3 @@ def _looser_than_parents(parents: dict[str, ResolvedPolicy], resolved: ResolvedP
 def _fail_on(problems: list[str]) -> None:
     if problems:
         raise DefinitionError(problems)
-
-
-__all__ = [
-    "INLINE_ARGS",
-    "MAX_BYTES",
-    "MAX_EXTENDS",
-    "MAX_LENSES",
-    "MAX_RULES",
-    "ORIGIN",
-    "DefinitionError",
-    "build_policy_class",
-    "check_definition",
-    "is_authored",
-]

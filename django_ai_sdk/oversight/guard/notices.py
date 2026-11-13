@@ -8,6 +8,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.content import stored_value
+from django_ai_sdk.oversight.notifiers import match_events
 from django_ai_sdk.oversight.rules import ACTION_ORDER, USER_FACING, Block, RestrictTools
 from django_ai_sdk.oversight.types import Outcome, Stage, worst_outcome
 
@@ -154,8 +155,6 @@ class TurnNotices:
 
     def notifications(self, matched: list[Matched]) -> list[tuple[dict[str, Any], list[str]]]:
         """Return (event, notifier names) for each enforced Notify action in `matched`."""
-        from django_ai_sdk.oversight.notifiers import match_events
-
         return match_events(
             self.guard.id,
             matched,

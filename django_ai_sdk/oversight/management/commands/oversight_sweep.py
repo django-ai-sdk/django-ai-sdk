@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from django_ai_sdk.oversight.persist import enqueue_reflect
+from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS, claimable_q, mark_reflect_failed
+
 if TYPE_CHECKING:
     from argparse import ArgumentParser
 
@@ -65,12 +68,6 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         from django_ai_sdk.oversight.models import Turn
-        from django_ai_sdk.oversight.persist import enqueue_reflect
-        from django_ai_sdk.oversight.reflect import (
-            REFLECT_ATTEMPTS,
-            claimable_q,
-            mark_reflect_failed,
-        )
 
         limit, dry_run = options["limit"], options["dry_run"]
         if limit < 1:

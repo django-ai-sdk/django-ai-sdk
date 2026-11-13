@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, Any
 from asgiref.sync import sync_to_async
 from django.db import IntegrityError, transaction
 
+from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.errors import UserError
+from django_ai_sdk.oversight.agents import code_policy
 from django_ai_sdk.oversight.authoring.apps import setting
 from django_ai_sdk.oversight.authoring.definitions import (
     INLINE_ARGS,
@@ -32,9 +34,14 @@ from django_ai_sdk.oversight.authoring.schemas import (
     TryIn,
     TryOut,
 )
+from django_ai_sdk.oversight.conf import setting as oversight_setting
+from django_ai_sdk.oversight.judges.base import alias_table
+from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS, get_validators
 from django_ai_sdk.oversight.permissions import OversightAccess, reader_id
-from django_ai_sdk.oversight.registry import get_policy_class, run_policy_loaders
-from django_ai_sdk.oversight.types import Mode
+from django_ai_sdk.oversight.registry import get_policies, get_policy_class, run_policy_loaders
+from django_ai_sdk.oversight.rules import ACTION_KINDS, META_OPS, OPS
+from django_ai_sdk.oversight.testing import dry_run
+from django_ai_sdk.oversight.types import Mode, Stage, Subject
 from django_ai_sdk.permissions import ConflictError, Operation
 
 if TYPE_CHECKING:
@@ -53,12 +60,6 @@ class AuthoringService(OversightAccess):
     @classmethod
     async def catalog(cls, *, user: UserType) -> CatalogOut:
         """List the building blocks a definition may use."""
-        from django_ai_sdk.oversight.judges.base import alias_table
-        from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS, get_validators
-        from django_ai_sdk.oversight.registry import get_policies
-        from django_ai_sdk.oversight.rules import ACTION_KINDS, META_OPS, OPS
-        from django_ai_sdk.oversight.types import Stage, Subject
-
         await cls.has_perms(user, VIEW)
         await run_policy_loaders()
         return CatalogOut(
@@ -155,7 +156,6 @@ class AuthoringService(OversightAccess):
         Judges run for real, so any judge it names is called.
         """
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
-        from django_ai_sdk.oversight.testing import dry_run
 
         await cls.has_perms(user, AUTHOR)
         await run_policy_loaders()
@@ -261,14 +261,9 @@ def _with(items: list[dict[str, Any]], name: str, what: str, values: dict[str, A
 
 def _dependents(name: str) -> list[str]:
     """List what still depends on `name`: agents that name it in code, and DEFAULT_POLICY."""
-    from django_ai_sdk.oversight.conf import setting as oversight_setting
-
     found = []
     if oversight_setting("DEFAULT_POLICY") == name:
         found.append("it is DEFAULT_POLICY")
-    from django_ai_sdk.agents.registry import registry
-    from django_ai_sdk.oversight.agents import code_policy
-
     named = []
     for agent_id, agent in sorted(registry.all().items()):
         try:
@@ -292,6 +287,3 @@ def _out(row: AuthoredPolicy) -> PolicyOut:
         updated_by=row.updated_by_id,
         updated_at=row.updated_at,
     )
-
-
-__all__ = ["AuthoringService"]

@@ -62,6 +62,11 @@ class Answered:
         return self.failed or bool(self.answer.error)
 
     @property
+    def needs_retry(self) -> bool:
+        """True when reflect should ask the lens again (see `should_retry`)."""
+        return should_retry(self.answer.error, [step.error for step in self.answer.trail])
+
+    @property
     def about_turn(self) -> bool:
         """True when this is the turn's own answer: not about other text, nor one tool call.
 
@@ -343,15 +348,3 @@ async def judge_stage(
         errored=guard.errored_lenses(),
         fail_closed=guard.fails_closed,
     )
-
-
-__all__ = [
-    "Matched",
-    "Answered",
-    "answer_lens",
-    "errored_lenses",
-    "judge_stage",
-    "match_rules",
-    "answer_lenses",
-    "should_retry",
-]

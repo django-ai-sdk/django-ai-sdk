@@ -13,6 +13,7 @@ from asgiref.sync import async_to_sync
 from django.contrib import admin
 
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
+from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -37,8 +38,6 @@ class ScopedAdmin(ReadOnlyAdmin):
     turn_path = "turn"
 
     def may_read(self, request: Any) -> bool:
-        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
-
         return async_to_sync(OversightAccess.has_perms)(request.user, METRICS, raise_on_deny=False)
 
     def has_module_permission(self, request: Any) -> bool:
@@ -48,8 +47,6 @@ class ScopedAdmin(ReadOnlyAdmin):
         return super().has_view_permission(request, obj) and self.may_read(request)
 
     def get_queryset(self, request: Any) -> Any:
-        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
-
         turns = OversightAccess.has_queryset_perms(
             request.user, METRICS, queryset=Turn.objects.all()
         )

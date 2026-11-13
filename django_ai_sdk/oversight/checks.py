@@ -30,6 +30,7 @@ from django_ai_sdk.oversight.registry import (
     get_policies,
 )
 from django_ai_sdk.oversight.rules import Notify
+from django_ai_sdk.oversight.tasks import reflect_turn
 from django_ai_sdk.oversight.types import Mode, Stage
 
 if TYPE_CHECKING:
@@ -417,8 +418,6 @@ def task_backend_checks() -> list[Any]:
     """Warn when the task backend runs reflect inline, or never."""
     from django_tasks.backends.dummy import DummyBackend
     from django_tasks.backends.immediate import ImmediateBackend
-
-    from django_ai_sdk.oversight.tasks import reflect_turn
 
     try:
         backend = reflect_turn.get_backend()

@@ -13,9 +13,11 @@ from functools import cache
 from itertools import batched
 from typing import TYPE_CHECKING, Any
 
+from django.db import transaction
 from django.utils import timezone
 
-from django_ai_sdk.oversight.patterns import mask_all, mask_json
+from django_ai_sdk.oversight.lenses import PIILens, SecretsLens
+from django_ai_sdk.oversight.patterns import PII_PATTERNS, mask_all, mask_json
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,
@@ -25,7 +27,7 @@ from django_ai_sdk.oversight.types import (
     ToolCall,
     TurnContext,
 )
-from django_ai_sdk.utils import map_strings
+from django_ai_sdk.utils import map_strings, serialize
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -233,9 +235,6 @@ def _mask_detected(text: str) -> str:
 
 @cache
 def _detectors() -> tuple[Any, ...]:
-    from django_ai_sdk.oversight.lenses import PIILens, SecretsLens
-    from django_ai_sdk.oversight.patterns import PII_PATTERNS
-
     return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
 
 
@@ -245,8 +244,6 @@ def stored_value(lens: Lens, answer: Answer) -> Any:
     For an `Entities` lens, declared labels and the kinds code found stay as they
     are. Any other name becomes FOUND, and the name itself is kept only in the content.
     """
-    from django_ai_sdk.utils import serialize
-
     value = serialize(answer.value)
     if lens.answer.kind != "entities" or not value:
         return value
@@ -280,8 +277,6 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
     Returns False without writing when the content is gone, expired, or was
     forgotten since.
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import TurnContent
 
     if turn.content_id is None:

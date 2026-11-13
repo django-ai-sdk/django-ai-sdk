@@ -14,6 +14,7 @@ from django.utils.translation import gettext_lazy
 from haystack.dataclasses import StreamingChunk, ToolCallResult
 
 from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
+from django_ai_sdk.artifacts.schemas import CitationsData
 from django_ai_sdk.events import (
     DataEvent,
     MessageEndEvent,
@@ -60,6 +61,16 @@ def notice_event(notice: dict[str, Any]) -> DataEvent:
     return DataEvent(data_type="oversight", data=notice)
 
 
+def refusal_reply(message: str) -> list[StreamEvent]:
+    """The policy's message as the whole answer, then the end of the stream."""
+    return [
+        TextChunkEvent(content=message),
+        TextEndEvent(),
+        MessageEndEvent(finish_reason=CONTENT_FILTER),
+        StreamEndEvent(),
+    ]
+
+
 def stored_notices(notices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Turn notices into the form stored on the message. "replace" becomes "replaced": True.
 
@@ -88,10 +99,8 @@ class RefusalStream:
     async def stream(self, messages: list[ChatMessage]) -> AsyncGenerator[StreamEvent, None]:
         yield MessageStartEvent(message_id=str(uuid.uuid4()))
         yield notice_event({**self.notice, "message": self.message})
-        yield TextChunkEvent(content=self.message)
-        yield TextEndEvent()
-        yield MessageEndEvent(finish_reason=CONTENT_FILTER)
-        yield StreamEndEvent()
+        for event in refusal_reply(self.message):
+            yield event
 
 
 async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
@@ -124,8 +133,6 @@ async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any)
 
 def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[StreamEvent]:
     """Stop grounding a withheld answer and clear the citations card shown while it streamed."""
-    from django_ai_sdk.artifacts.schemas import CitationsData
-
     if grounder is not None:
         grounder.cancel()
     if not call_id:
@@ -205,7 +212,7 @@ class StreamTurn:
         """Return the notices raised before the answer started, and mask the seeded sources."""
         if not self.guard.active:
             return []
-        await self.mask_sources()
+        await mask_sources(self.guard, self.registry)
         return self._pending()
 
     def _pending(self) -> list[StreamEvent]:
@@ -225,14 +232,7 @@ class StreamTurn:
         assert refusal is not None
         self.finished = True
         notice = {**(refusal.notice or {}), "message": refusal.message}
-        return [
-            *self._pending(),
-            self._send(notice),
-            TextChunkEvent(content=refusal.message),
-            TextEndEvent(),
-            MessageEndEvent(finish_reason=CONTENT_FILTER),
-            StreamEndEvent(),
-        ]
+        return [*self._pending(), self._send(notice), *refusal_reply(refusal.message)]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
         """Report `event` to the guard and return what to send now."""
@@ -259,13 +259,8 @@ class StreamTurn:
         if masked is not result.result:
             result = ToolCallResult(result=masked, origin=result.origin, error=result.error)
         # Mask new citation sources before any card shows them.
-        await self.mask_sources()
+        await mask_sources(self.guard, self.registry)
         return result
-
-    async def mask_sources(self) -> None:
-        """Mask the citation sources before any card shows them."""
-        if self.registry is not None:
-            await mask_sources(self.guard, self.registry)
 
     async def afinish(self) -> tuple[list[StreamEvent], StageResult]:
         """Pass, mask or withhold the answer as the run's finish decided. Returns the events to send."""

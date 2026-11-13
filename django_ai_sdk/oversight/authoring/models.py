@@ -48,6 +48,3 @@ class AuthoredPolicy(models.Model):
             "rules": list(self.rules or []),
             "options": dict(self.options or {}),
         }
-
-
-__all__ = ["AuthoredPolicy"]

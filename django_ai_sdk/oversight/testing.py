@@ -21,9 +21,10 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.oversight.guard.judging import should_retry
+from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.policy import ResolvedPolicy
+from django_ai_sdk.oversight.reflect import ajudge_turn
 from django_ai_sdk.oversight.registry import broken_reason, get_resolved_policy
 from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
 
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.guard.judging import Matched
 
 
@@ -77,8 +77,6 @@ async def dry_run(
     or ToolCall) are checked in order before the answer. Raises LookupError when a
     named policy does not load.
     """
-    from django_ai_sdk.oversight.guard import TurnGuard
-
     if isinstance(policy, ResolvedPolicy):
         resolved = policy
     else:
@@ -164,13 +162,7 @@ async def _run(
 
 async def _reflect(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
     """Run what reflect would on the open guard: its lenses, and inline lenses to ask again."""
-    from django_ai_sdk.oversight.reflect import ajudge_turn
-
-    retry = {
-        item.lens.name
-        for item in guard.answered
-        if should_retry(item.answer.error, [step.error for step in item.answer.trail])
-    }
+    retry = {item.lens.name for item in guard.answered if item.needs_retry}
     answered, matched, _masks = await ajudge_turn(
         resolved,
         guard.context,

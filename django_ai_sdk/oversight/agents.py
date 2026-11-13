@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.oversight.conf import setting
+from django_ai_sdk.oversight.policy import Policy
+from django_ai_sdk.oversight.registry import policy_name
 
 if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
@@ -57,15 +59,12 @@ def policy_needs_await(agent: Any) -> bool:
     from django_ai_sdk.agents.base import Agent
 
     # The base method only returns `oversight`, which sync code reads itself.
-    overridden = "get_oversight" in getattr(agent, "__dict__", {}) or (
+    return "get_oversight" in getattr(agent, "__dict__", {}) or (
         getattr(type(agent), "get_oversight", Agent.get_oversight) is not Agent.get_oversight
     )
-    return overridden
 
 
 def _code_choice(chosen: Any) -> tuple[str, str]:
-    from django_ai_sdk.oversight.registry import policy_name
-
     if chosen is False:
         return "", "off"
     if chosen is None:
@@ -87,11 +86,7 @@ def validate_oversight(cls: type) -> None:
     if value is None or value is False or (isinstance(value, str) and value):
         return
     if isinstance(value, type):
-        from django_ai_sdk.oversight.policy import Policy
-
         if issubclass(value, Policy):
-            from django_ai_sdk.oversight.registry import policy_name
-
             policy_name(value)
             return
     raise ImproperlyConfigured(
@@ -113,14 +108,3 @@ def fingerprint(agent: Agent) -> str:
     parts.append(",".join(sorted(getattr(t, "__name__", str(t)) for t in tools)))
     parts.append(",".join(sorted(getattr(agent, "integrations", []) or [])))
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:FINGERPRINT_CHARS]
-
-
-__all__ = [
-    "FINGERPRINT_CHARS",
-    "acode_policy",
-    "agent_key",
-    "code_policy",
-    "fingerprint",
-    "policy_needs_await",
-    "validate_oversight",
-]

@@ -12,8 +12,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
+from django.utils.module_loading import import_string
 
 from django_ai_sdk.permissions import (
+    DOMAIN_PERMISSION_DEFAULTS,
     BasePermission,
     Operation,
     PermissionDomain,
@@ -92,10 +94,6 @@ class OversightAccess(PermissionsMixin):
 
         As for agents: a record open to everyone says so with `[AllowAll]`.
         """
-        from django.utils.module_loading import import_string
-
-        from django_ai_sdk.permissions import DOMAIN_PERMISSION_DEFAULTS
-
         return super().get_default_permissions() or [
             import_string(path) for path in DOMAIN_PERMISSION_DEFAULTS[cls.domain]
         ]

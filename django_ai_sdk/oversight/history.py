@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy
+from django_ai_sdk.oversight.conf import is_enabled
 from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
 from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
 
@@ -80,8 +81,6 @@ async def resolve_policy(
     For choosing the history before the run opens its turn. None (no policy, or
     it failed to load) means the history is judged as sent, which is the safe side.
     """
-    from django_ai_sdk.oversight.conf import is_enabled
-
     if oversight in (False, "") or not is_enabled():
         return None
     try:

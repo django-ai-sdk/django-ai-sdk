@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.rules import Notify
 
 if TYPE_CHECKING:
@@ -126,7 +127,12 @@ class WebhookNotifier(Notifier):
         if self.secret:
             timestamp = str(int(time.time()))
             signed = f"{msg_id}.{timestamp}.".encode() + body
-            digest = hmac.new(_key(self.secret), signed, hashlib.sha256).digest()
+            key = (
+                base64.b64decode(self.secret.removeprefix("whsec_"))
+                if self.secret.startswith("whsec_")
+                else self.secret.encode()
+            )
+            digest = hmac.new(key, signed, hashlib.sha256).digest()
             headers["webhook-timestamp"] = timestamp
             headers["webhook-signature"] = "v1," + base64.b64encode(digest).decode()
         return body, headers
@@ -140,16 +146,8 @@ class WebhookNotifier(Notifier):
             response.raise_for_status()
 
 
-def _key(secret: str) -> bytes:
-    if secret.startswith("whsec_"):
-        return base64.b64decode(secret.removeprefix("whsec_"))
-    return secret.encode()
-
-
 def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
     """Build the NOTIFIERS setting's notifiers, or only those named in `names`."""
-    from django_ai_sdk.oversight.conf import setting
-
     notifiers: list[Notifier] = []
     for spec in setting("NOTIFIERS") or []:
         try:

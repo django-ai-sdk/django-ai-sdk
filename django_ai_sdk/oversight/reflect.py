@@ -11,11 +11,14 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
+from django.db import transaction
+from django.db.models import F, Q
 from django.utils import timezone
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.content import context_from_turn, load_content, unmasked_literals
+from django_ai_sdk.oversight.guard import unguarded
 from django_ai_sdk.oversight.guard.judging import (
     Answered,
     Matched,
@@ -23,6 +26,10 @@ from django_ai_sdk.oversight.guard.judging import (
     match_rules,
     should_retry,
 )
+from django_ai_sdk.oversight.guard.masking import collect_masks
+from django_ai_sdk.oversight.guard.notices import notice_base, rule_notes
+from django_ai_sdk.oversight.notifiers import match_events
+from django_ai_sdk.oversight.patterns import mask_all
 from django_ai_sdk.oversight.persist import fit_column, save_answers
 from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.oversight.types import (
@@ -40,7 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from datetime import datetime
 
-    from django.db.models import Q, QuerySet
+    from django.db.models import QuerySet
 
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.models import Turn
@@ -103,7 +110,7 @@ async def areflect(turn_id: str) -> int:
             await arelease_reflect(turn_id, lease)
             return 0
         policy, view, answered, matched, found, masks = judged
-        if turn.reflect_attempts < REFLECT_ATTEMPTS and any(map(_unsettled, answered)):
+        if turn.reflect_attempts < REFLECT_ATTEMPTS and any(item.needs_retry for item in answered):
             # A judge was down or out of time: ask again later rather than settle without it.
             await arelease_reflect(turn_id, lease)
             return 0
@@ -117,19 +124,12 @@ async def areflect(turn_id: str) -> int:
     return len(answered) if kept else 0
 
 
-def _unsettled(item: Answered) -> bool:
-    """True when a later attempt may answer what this one could not (see `should_retry`)."""
-    return should_retry(item.answer.error, [step.error or "" for step in item.answer.trail])
-
-
 def claimable_q(now: datetime, pending_before: datetime | None = None) -> Q:
     """Turns reflect may claim: pending, or running with an expired lease, with attempts left.
 
     `pending_before` keeps only pending turns created before it, so a sweep leaves
     fresh turns to the task queued at close.
     """
-    from django.db.models import Q
-
     from django_ai_sdk.oversight.models import Turn
 
     state = Turn.ReflectState
@@ -146,8 +146,6 @@ async def aclaim_reflect(turn_id: str) -> Any:
     A turn can be claimed when `claimable_q` matches it. The lease end time
     identifies this run's claim.
     """
-    from django.db.models import F
-
     from django_ai_sdk.oversight.models import Turn
 
     now = timezone.now()
@@ -192,8 +190,6 @@ def _commit_reflection(
 
     Notifications are queued to send after the commit.
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import Turn
 
     state = Turn.ReflectState
@@ -212,6 +208,7 @@ def _commit_reflection(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
         if events:
+            # Looked up at call time: tests silence notifications by patching persist.
             from django_ai_sdk.oversight.persist import enqueue_notifications
 
             transaction.on_commit(lambda: enqueue_notifications(events))
@@ -224,8 +221,6 @@ def mark_reflect_failed(turns: QuerySet) -> int:
     Reflect gives up this way after its last failed attempt, and so does the
     `oversight_sweep` for a worker that died on it.
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import Turn
 
     with transaction.atomic():
@@ -311,8 +306,6 @@ async def ajudge_turn(
     matched. `outcome` is the turn's outcome so far. `sample=False` asks every
     reflect lens, ignoring sample rates.
     """
-    from django_ai_sdk.oversight.guard import unguarded
-
     # When the gate blocked the question there is no answer to judge.
     has_answer = bool(view.output.strip()) or outcome != Outcome.BLOCKED
     lenses, late = reflect_lenses(
@@ -375,8 +368,6 @@ def _reflect_masks(
     would have withheld it: masking around it would leave what it found. So
     does one whose lens failed, when the policy fails closed.
     """
-    from django_ai_sdk.oversight.guard.masking import collect_masks
-
     groups, unpointed = collect_masks(
         matched, answered, subject=Subject.OUTPUT, view=view, closed=closed
     )
@@ -434,9 +425,6 @@ def _after_effects(
     Runs inside reflect's transaction. Returns (event, notifier names) pairs to
     send after the commit.
     """
-    from django_ai_sdk.oversight.guard.notices import rule_notes
-    from django_ai_sdk.oversight.notifiers import match_events
-
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
     events = match_events(
@@ -460,9 +448,6 @@ def _update_stored(
     Spans index the text reflect judged, so they only apply when the stored text
     still matches it. The reasoning cannot be masked this way, so it is dropped.
     """
-    from django_ai_sdk.oversight.guard.notices import notice_base
-    from django_ai_sdk.oversight.patterns import mask_all
-
     messages = _messages(turn.message_id, lock=True)
     message = messages.first() if messages is not None else None
     if message is None or not isinstance(message.result, dict):

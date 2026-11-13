@@ -12,6 +12,7 @@ import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from django.db import transaction
 from django.utils import timezone
 
 from django_ai_sdk.logger import get_logger
@@ -25,7 +26,6 @@ from django_ai_sdk.oversight.content import (
     turn_found,
     without_nul,
 )
-from django_ai_sdk.oversight.guard.judging import should_retry
 from django_ai_sdk.oversight.rules import Alert, Notify, Queue
 from django_ai_sdk.oversight.types import (
     Answer,
@@ -37,7 +37,8 @@ from django_ai_sdk.oversight.types import (
     TurnContext,
     most_severe,
 )
-from django_ai_sdk.utils import as_uuid
+from django_ai_sdk.pricing import cost_for
+from django_ai_sdk.utils import as_uuid, serialize
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -62,8 +63,6 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
 
     A turn forgotten while open (`content.forget_turns`) stores no content and no judge text.
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
     policy = guard.resolved
@@ -147,14 +146,18 @@ def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str,
         "model": fit_column(Turn, "model", guard.usage.model),
         "prompt_tokens": guard.usage.prompt_tokens,
         "completion_tokens": guard.usage.completion_tokens,
-        "cost": _cost(guard),
+        "cost": cost_for(
+            guard.usage.model, guard.usage.prompt_tokens, guard.usage.completion_tokens
+        ),
         "latency_ms": round((time.perf_counter() - guard.started_at) * 1000, 1)
         if closing
         else None,
         "error": fit_column(Turn, "error", guard.error),
     }
     columns["outcome"], columns["report_outcome"] = _outcome_columns(guard, closing=closing)
-    if closing and _needs_reflect(guard):
+    # Reflect asks again lenses that missed the deadline or found their service down.
+    unfinished = any(item.needs_retry for item in guard.answered)
+    if closing and (unfinished or policy.has_stage(Stage.REFLECT)):
         columns["reflect_state"] = Turn.ReflectState.PENDING
     return columns
 
@@ -211,7 +214,6 @@ def split_answer(
     per-item scores, and the same for answers on the trail. None keeps none of them.
     """
     from django_ai_sdk.oversight.models import LensAnswer
-    from django_ai_sdk.utils import serialize
 
     value = stored_value(lens, answer)
     trail = [_trail(lens, a) for a in answer.trail]
@@ -259,20 +261,6 @@ def _trail(lens: Lens, answer: Answer) -> dict[str, Any]:
         "cost": answer.cost,
         "latency_ms": answer.latency_ms,
     }
-
-
-def _cost(guard: TurnGuard) -> float | None:
-    from django_ai_sdk.pricing import cost_for
-
-    return cost_for(guard.usage.model, guard.usage.prompt_tokens, guard.usage.completion_tokens)
-
-
-def _needs_reflect(guard: TurnGuard) -> bool:
-    unfinished = any(
-        should_retry(item.answer.error, [step.error for step in item.answer.trail])
-        for item in guard.answered
-    )
-    return unfinished or guard.resolved.has_stage(Stage.REFLECT)
 
 
 def enqueue_notifications(events: list[tuple[dict[str, Any], list[str]]]) -> None:
@@ -325,8 +313,6 @@ def save_answers(
     `matched` in place, because a retried reflect may record twice and a rule
     matches a turn only once (PROD-9).
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import RuleMatch, Turn
 
     if view is not None:
@@ -401,13 +387,3 @@ def _record_judgments(
     alerts = (a.severity for m, a in acted if isinstance(a, Alert | Notify))
     locked.severity = most_severe(locked.severity, floor, *alerts)
     Turn.objects.filter(pk=turn.pk).update(labels=locked.labels, severity=locked.severity)
-
-
-__all__ = [
-    "enqueue_notifications",
-    "enqueue_reflect",
-    "fit_column",
-    "persist_turn",
-    "save_answers",
-    "split_answer",
-]

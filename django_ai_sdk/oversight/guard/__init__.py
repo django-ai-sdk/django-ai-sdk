@@ -40,7 +40,7 @@ from django_ai_sdk.common import last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy, agent_key, fingerprint
-from django_ai_sdk.oversight.conf import is_enabled, setting
+from django_ai_sdk.oversight.conf import is_enabled, setting, validate_retention
 from django_ai_sdk.oversight.content import as_source
 from django_ai_sdk.oversight.guard import stages
 from django_ai_sdk.oversight.guard.judging import Answered, Matched
@@ -464,12 +464,13 @@ class TurnGuard:
         input: str,
     ) -> TurnGuard:
         messages = messages or []
+        user_pk = getattr(user, "pk", None)
         guard = cls(
             active=True,
             policy=policy,
             channel=channel,
             thread_id=str(thread_id or ""),
-            actor_id=_actor_id(user),
+            actor_id="" if user_pk is None else str(user_pk),
             created_at=timezone.now(),
             original_input=input,
         )
@@ -598,8 +599,6 @@ class TurnGuard:
 
 def _refusing_policy(name: str) -> ResolvedPolicy:
     """Return an empty policy named `name`, used to refuse a turn whose policy failed to load."""
-    from django_ai_sdk.oversight.conf import validate_retention
-
     return ResolvedPolicy(
         name=name,
         capture=Capture(setting("CAPTURE")),
@@ -608,18 +607,11 @@ def _refusing_policy(name: str) -> ResolvedPolicy:
     )
 
 
-def _actor_id(user: Any) -> str:
-    """`user`'s primary key as text; "" for no user or an anonymous one."""
-    pk = getattr(user, "pk", None)
-    return "" if pk is None else str(pk)
-
-
 __all__ = [
     "TurnGuard",
     "closing_turn",
     "current_guard",
     "guarding",
-    "is_unguarded",
     "outlived_turn",
     "unguarded",
 ]

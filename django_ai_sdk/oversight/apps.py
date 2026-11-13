@@ -15,6 +15,7 @@ from django.apps import AppConfig
 from django.conf import settings
 from django.core.checks import Tags
 from django.core.checks import register as register_check
+from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 from django.db import transaction
 from django.db.models.signals import post_delete
@@ -110,7 +111,6 @@ def drop_cached_policies(setting: str, **kwargs: Any) -> None:
 def require_apps(app_name: str, *needed: str) -> None:
     """Refuse to start `app_name` without each app in `needed`."""
     from django.apps import apps
-    from django.core.exceptions import ImproperlyConfigured
 
     for name in needed:
         if not apps.is_installed(name):

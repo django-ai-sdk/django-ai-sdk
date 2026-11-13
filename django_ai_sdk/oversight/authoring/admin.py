@@ -18,6 +18,3 @@ class AuthoredPolicyAdmin(ReadOnlyAdmin):
     list_filter = ("active",)
     search_fields = ("name", "label")
     date_hierarchy = "updated_at"
-
-
-__all__ = ["AuthoredPolicyAdmin"]

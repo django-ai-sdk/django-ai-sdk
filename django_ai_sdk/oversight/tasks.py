@@ -7,6 +7,7 @@ from typing import Any
 from asgiref.sync import async_to_sync
 from django_tasks import task
 
+from django_ai_sdk.oversight.notifiers import anotify
 from django_ai_sdk.oversight.reflect import areflect
 
 
@@ -22,8 +23,6 @@ def send_notifications(events: list[list[Any]]) -> None:
 
     Each item in `events` is a pair of [event, notifier names].
     """
-    from django_ai_sdk.oversight.notifiers import anotify
-
     for event, names in events:
         async_to_sync(anotify)(event, names=names)
 

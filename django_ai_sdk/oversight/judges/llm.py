@@ -111,12 +111,8 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
 
 def _evidence(text: str, limit: int) -> str:
     """Mask secrets, clip, then fence untrusted text."""
-    return _fence(masked_clip(text, limit))
-
-
-def _fence(text: str) -> str:
     # Escape our tags so the evidence can't close its block or open a new one.
-    return _TAG.sub(r"&lt;\1", text)
+    return _TAG.sub(r"&lt;\1", masked_clip(text, limit))
 
 
 def _attr(text: str) -> str:

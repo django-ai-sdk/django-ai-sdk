@@ -23,6 +23,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
+from django_ai_sdk.adapters.run import user_content
 from django_ai_sdk.common import last_user_message
 from django_ai_sdk.oversight.agents import acode_policy, code_policy, policy_needs_await
 from django_ai_sdk.oversight.conf import is_enabled
@@ -237,8 +238,6 @@ def keep_masked(messages: list[ChatMessage], request: TurnRequest) -> None:
     the content and the attachments' context, the content is withheld rather
     than stored with what may be unmasked.
     """
-    from django_ai_sdk.adapters.run import user_content
-
     gated = request.gated
     if gated is not None and gated.changed and (question := last_user_message(messages)):
         content = user_content(question, gated.text)
