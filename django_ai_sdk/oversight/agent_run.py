@@ -1,30 +1,26 @@
-"""Run an agent outside chat as one oversight turn. `Agent.run()` uses this.
+"""A turn around model calls that do not run in a Haystack Agent, and the history rules.
 
-Chat goes through the Stream adapter. Every other way to run an agent (the HTTP
-run endpoints, workflow steps, your own code) goes through `run_turn`. That way
-no entry point skips the policy.
+Haystack Agent runs carry their turn themselves (see `oversight.plugin`). `turn()`
+is for everything else: your own model calls, or a custom run adapter. It opens
+the same kind of turn, gates and finishes it explicitly, and joins an outer turn
+under the same rules: the same policy (or none) joins, another opens a child turn.
 
-Each agent runs under its own policy. A run inside another turn joins that turn
-when it resolves the same policy or no policy. With a different policy it opens
-a child turn, with its own gate, tool checks, finish and record, linked to the
-outer turn.
+Which history a turn judges is decided before it starts, with `history_for`.
 """
 
 from __future__ import annotations
 
 import contextlib
-import functools
-import inspect
-import weakref
 from typing import TYPE_CHECKING, Any, Literal
 
 from django.core.exceptions import ImproperlyConfigured
 from pydantic import BaseModel, ValidationError
 
-from django_ai_sdk.common import as_chat_messages, last_user_message, last_user_text
+from django_ai_sdk.common import last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.actions import Block
+from django_ai_sdk.oversight.agents import acode_policy
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
     closing_turn,
@@ -32,72 +28,22 @@ from django_ai_sdk.oversight.guard import (
     guarding,
     unguarded,
 )
-from django_ai_sdk.oversight.guard.gate import GateResult
 from django_ai_sdk.oversight.guard.masks import gate_masking_lenses
 from django_ai_sdk.oversight.guard.state import merge_restrict
 from django_ai_sdk.oversight.types import Stage
-from django_ai_sdk.tracing import bind as bind_trace
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.policy import Policy
-    from django_ai_sdk.oversight.runs import TurnRun
+    from django_ai_sdk.oversight.guard import GateResult
+    from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 logger = get_logger(__name__)
-
-
-async def run_turn(
-    agent: Any,
-    work: Callable[[list[ChatMessage]], Awaitable[Any]],
-    messages: list[ChatMessage],
-    *,
-    channel: str,
-    user: AbstractBaseUser | AnonymousUser | None = None,
-    thread_id: str | None = None,
-    oversight: type[Policy] | str | Literal[False] | None = None,
-) -> Any:
-    """Run `work(messages)` as one turn of `agent`.
-
-    `oversight` picks the policy:
-    - None uses the agent's own, from its code.
-    - A Policy subclass or a policy name replaces it.
-    - "" means the agent has no policy of its own.
-    - False runs the work unguarded, even inside another turn.
-
-    The history is judged before the question, unless a stored thread vouches
-    for it (see `thread_history`). The caller's list is not rewritten. History
-    is judged on copies. Only the last user message is masked in place, so the
-    caller stores the masked question.
-
-    Tool calls are checked while the work runs, and the answer is finished
-    before it is returned. Raises `Blocked` when the gate or the finish stops it.
-    """
-    # Bind the thread so headless runs are traced to it.
-    with bind_trace(thread_id=thread_id):
-        async with turn(
-            agent,
-            channel=channel,
-            user=user,
-            thread_id=thread_id,
-            messages=messages,
-            oversight=oversight,
-        ) as current:
-            await current.gate()
-            result = await work(current.messages)
-            if result is None:
-                current.error = "no result"
-                return None
-            return await current.finish(result)
-
-
-# run() overrides that are already wrapped, so a subclass is not wrapped twice.
-_guarded_runs: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
 
 
 def validate_oversight(cls: type) -> None:
@@ -121,69 +67,6 @@ def validate_oversight(cls: type) -> None:
         f"{cls.__qualname__}.oversight must be a Policy subclass, a policy's name, False "
         f"or None, not {value!r}."
     )
-
-
-def guard_run_override(cls: type) -> None:
-    """Wrap `cls`'s `run()` in a turn, so overriding it cannot skip the policy.
-
-    A `run()` from a mixin counts too. The turn opens around the outermost `run()`.
-    When the override calls `super().run()`, that call resolves the same policy and
-    joins the turn.
-    """
-    from django_ai_sdk.agents.base import Agent
-
-    run = getattr(cls, "run", None)
-    if not callable(run) or run is Agent.run or run in _guarded_runs:
-        return
-
-    @functools.wraps(run)
-    async def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
-        call = _run_arguments(args, kwargs)
-        messages = call.get("messages")
-        if messages is None:
-            # Nothing to judge yet. The base run() opens the turn when it is called.
-            return await run(self, *args, **kwargs)
-
-        async def work(given: list[ChatMessage]) -> Any:
-            if "messages" in kwargs:
-                return await run(self, *args, **{**kwargs, "messages": given})
-            return await run(self, given, *args[1:], **kwargs)
-
-        # Give the override ChatMessages, like the base run() would.
-        return await run_turn(
-            self,
-            work,
-            as_chat_messages(messages),
-            channel=call.get("channel", "run"),
-            user=call.get("user"),
-            thread_id=call.get("thread_id"),
-            oversight=call.get("oversight"),
-        )
-
-    _guarded_runs.add(guarded)
-    cls.run = guarded  # ty: ignore[unresolved-attribute]
-
-
-@functools.cache
-def _run_signature() -> inspect.Signature:
-    """`Agent.run`'s signature, to read an override's call arguments by name."""
-    from django_ai_sdk.agents.base import Agent
-
-    return inspect.signature(Agent.run)
-
-
-def _run_arguments(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Name an override's call arguments as `Agent.run` would."""
-    signature = _run_signature()
-    try:
-        return signature.bind_partial(None, *args, **kwargs).arguments
-    except TypeError:  # the override takes arguments of its own: read only the base ones
-        params = signature.parameters
-        names = [n for n, p in params.items() if p.kind is p.POSITIONAL_OR_KEYWORD]
-        return {
-            **dict(zip(names, (None, *args))),
-            **{k: v for k, v in kwargs.items() if k in params},
-        }
 
 
 class OpenTurn:
@@ -211,90 +94,51 @@ class OpenTurn:
         self.input = input if input is not None else last_user_text(self.messages)
         # An error that did not raise, such as "no result". Recorded at close.
         self.error = ""
-        self._gate: GateResult | None = None
+        self._gated = False
 
     @property
     def id(self) -> str:
         """The turn's id, or "" when no turn opened."""
         return self.guard.id if self.guard is not None else ""
 
-    def hooks(
-        self,
-        to_haystack: Callable[[list[ChatMessage]], list[Any]] | None = None,
-        *,
-        answer: Callable[[list[Any]], str] | None = None,
-    ) -> TurnRun | None:
-        """Hand this turn to a Haystack run, whose hooks gate and finish it. None when no turn opened.
-
-        `to_haystack` builds the run's input from `messages` once the gate masked
-        them. `answer` picks the text to finish, as in `TurnRun`.
-        """
-        if self.guard is None:
-            return None
-        from django_ai_sdk.oversight.runs import TurnRun
-
-        return TurnRun(
-            self.guard,
-            gate=self.check,
-            to_haystack=(lambda: to_haystack(self.messages)) if to_haystack else None,
-            answer=answer,
-        )
-
-    async def check(self) -> GateResult:
-        """Judge the history and the question once. Never raises.
-
-        The gate hook of a run calls this; `gate()` reads the same result.
-        """
-        if self._gate is not None:
-            return self._gate
-        guard = self.guard
-        if guard is None:
-            self._gate = GateResult(input=self.input)
-            return self._gate
-        vouched = None
-        if self.messages:
-            self.messages = _working_copy(self.messages)
-            storage = await _thread_storage(self.agent, self.thread_id)
-            vouched = await thread_history(guard, storage, self.messages) if storage else None
-            if vouched is not None:
-                self.messages = vouched
-        self._gate = await gate_conversation(guard, self.messages, vouched=vouched is not None)
-        if not self._gate.blocked:
-            self.input = self._gate.input
-        return self._gate
-
     async def gate(self) -> str:
         """Judge the history and the question before the model reads them.
 
         Returns the question, masked if a rule said so. `messages` then holds the
-        history and question to send. Raises `Blocked`, also when a run's gate
-        hook already refused it.
+        history and question to send. Raises `Blocked`.
         """
-        gate = await self.check()
-        if gate.blocked and self.guard is not None:
-            raise _blocked(self.guard, Stage.GATE, gate.message)
+        if self._gated:
+            return self.input
+        self._gated = True
+        guard = self.guard
+        if guard is None:
+            return self.input
+        vouched = None
+        if self.messages:
+            self.messages = _working_copy(self.messages)
+            storage = await _thread_storage(self.agent, self.thread_id)
+            vouched = (
+                await thread_history(guard.resolved, storage, self.messages) if storage else None
+            )
+            if vouched is not None:
+                self.messages = vouched
+        gate = await gate_conversation(guard, self.messages, vouched=vouched is not None)
+        if gate.blocked:
+            raise _blocked(guard, Stage.GATE, gate.message)
+        self.input = gate.input
         return self.input
 
     async def finish(self, result: Any) -> Any:
         """Return the answer as the policy allows it, or raise `Blocked`.
 
         A string comes back as a string. A Pydantic model comes back as the same
-        model, rebuilt from its masked JSON. When a run's hook already finished
-        the turn, this applies that decision.
+        model, rebuilt from its masked JSON.
         """
         if self.guard is None:
             return result
-        await self.gate()
+        if not self._gated:
+            await self.gate()
         return await _finish(self.guard, result)
-
-    def unparsable(self) -> Blocked:
-        """The refusal for a structured answer whose finished text no longer parses."""
-        assert self.guard is not None
-        finished = self.guard.finished
-        if finished is not None and finished.blocked:
-            return _blocked(self.guard, Stage.FINISH, finished.message)
-        self.guard.refuse("masked result does not fit its schema")
-        return _blocked(self.guard, Stage.FINISH, str(Block.DEFAULT_MESSAGE))
 
 
 @contextlib.asynccontextmanager
@@ -316,7 +160,7 @@ async def turn(
             return await t.finish(answer)  # masked; raises Blocked
 
     Pass `messages` (history, then the question) or `input` (just the question).
-    `oversight` works as in `run_turn`. Inside the block, tool hooks see the turn.
+    `oversight` works as in `Agent.run`. Inside the block, tool hooks see the turn.
     An exception other than `Blocked` is recorded as the run's error.
     """
     if oversight is False:
@@ -377,7 +221,7 @@ def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
     return outer is not None and outer.policy is not None and outer.policy.name == policy_name
 
 
-def takes_stored_history(guard: TurnGuard) -> bool:
+def takes_stored_history(policy: ResolvedPolicy | None) -> bool:
     """Whether the turn uses the stored thread as its history.
 
     Only when the policy enforces masking at the gate. Then the stored copy is
@@ -385,11 +229,11 @@ def takes_stored_history(guard: TurnGuard) -> bool:
     the client's history is used and judged by `gate_history`, so a policy in
     report mode changes nothing.
     """
-    return guard.active and bool(gate_masking_lenses(guard.resolved))
+    return policy is not None and bool(gate_masking_lenses(policy))
 
 
 async def thread_history(
-    guard: TurnGuard, storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
+    policy: ResolvedPolicy | None, storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
 ) -> list[ChatMessage] | None:
     """Return the history the stored thread vouches for, or None if it must be judged.
 
@@ -398,11 +242,55 @@ async def thread_history(
     thread (role and text) was already judged and is kept. One that differs was
     edited or made up, so it gets judged. Chat and the run endpoints both use this.
     """
-    if takes_stored_history(guard):
+    if takes_stored_history(policy):
         return await stored_history(storage_adapter, messages)
     if await _as_stored(storage_adapter, messages):
         return messages
     return None
+
+
+async def resolve_policy(
+    agent: Any,
+    *,
+    channel: str,
+    user: Any = None,
+    oversight: type[Policy] | str | Literal[False] | None = None,
+) -> ResolvedPolicy | None:
+    """The policy a turn of `agent` would run under, or None. Never raises.
+
+    For choosing the history before the run opens its turn. None (no policy, or
+    it failed to load) means the history is judged as sent, which is the safe side.
+    """
+    from django_ai_sdk.oversight.conf import is_enabled
+    from django_ai_sdk.oversight.registry import policy_name
+    from django_ai_sdk.oversight.resolve import aget_policy
+
+    if oversight in (False, "") or not is_enabled():
+        return None
+    try:
+        name = policy_name(oversight) if oversight else ""
+        name = name or (await acode_policy(agent, channel=channel, user=user))[0]
+        return await aget_policy(name) if name else None
+    except Exception:
+        return None
+
+
+async def history_for(
+    agent: Any,
+    thread_id: str | None,
+    messages: list[ChatMessage],
+    *,
+    channel: str,
+    user: Any = None,
+    oversight: type[Policy] | str | Literal[False] | None = None,
+) -> tuple[list[ChatMessage], bool]:
+    """The messages a run of `agent` sends, and whether the stored thread vouches for the history."""
+    storage = await _thread_storage(agent, thread_id)
+    if storage is None:
+        return messages, False
+    policy = await resolve_policy(agent, channel=channel, user=user, oversight=oversight)
+    vouched = await thread_history(policy, storage, messages)
+    return (vouched, True) if vouched is not None else (messages, False)
 
 
 async def stored_history(
@@ -522,9 +410,9 @@ def _rebuilt(result: Any, output: str) -> BaseModel | None:
 __all__ = [
     "OpenTurn",
     "gate_conversation",
-    "guard_run_override",
+    "history_for",
     "joins_turn",
-    "run_turn",
+    "resolve_policy",
     "thread_history",
     "turn",
     "validate_oversight",

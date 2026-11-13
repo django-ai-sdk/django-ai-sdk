@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, overload
 from haystack.components.agents import Agent
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ImageContent
-from pydantic import ValidationError
 
 from django_ai_sdk.generators import schema_kwargs
 from django_ai_sdk.logger import get_logger
@@ -15,7 +14,6 @@ from django_ai_sdk.logger import get_logger
 if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import T
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.agent_run import OpenTurn
 
 logger = get_logger(__name__)
 
@@ -79,7 +77,7 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        turn: OpenTurn | None = None,
+        hook_context: dict[str, Any] | None = None,
     ) -> str | None: ...
     @overload
     async def run(
@@ -91,7 +89,7 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        turn: OpenTurn | None = None,
+        hook_context: dict[str, Any] | None = None,
     ) -> T | None: ...
 
     async def run(
@@ -103,37 +101,32 @@ class Run:
         tools: list[Any] | None = None,
         max_agent_steps: int | None = None,
         hooks: dict[str, list[Any]] | None = None,
-        turn: OpenTurn | None = None,
+        hook_context: dict[str, Any] | None = None,
     ) -> T | str | None:
         """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
 
-        Oversight runs inside it as hooks (see `oversight.runs`). `turn` is the turn
-        this run answers: its question is gated and its answer finished in the run.
-        Raises `Blocked` when either refuses.
+        `hooks` come from `default_hooks(agent)`, oversight's among them, and
+        `hook_context` names the turn. Raises `Blocked` when the turn's gate
+        refused the question or its finish withheld the answer.
         """
-        from django_ai_sdk.oversight.runs import run_attached
+        from django_ai_sdk.oversight.plugin import GuardedToolset, has_oversight, run_agent, turn_of
 
-        def to_haystack(given: list[ChatMessage]) -> list[HaystackChatMessage]:
-            converted = self.get_messages(given)
-            # A message, not the Agent's system_prompt, which Haystack renders as a template.
-            return (
-                [HaystackChatMessage.from_system(system_prompt), *converted]
-                if system_prompt
-                else converted
-            )
-
+        context = {**(hook_context or {}), "schema": response_format}
         steps = {"max_agent_steps": max_agent_steps} if max_agent_steps is not None else {}
-        agent = Agent(chat_generator=self.generator, tools=tools, hooks=hooks, **steps)
+        offered = GuardedToolset.wrap(tools) if has_oversight(hooks) else tools
+        agent = Agent(chat_generator=self.generator, tools=offered, hooks=hooks, **steps)
+        converted = self.get_messages(messages)
+        if system_prompt:
+            # A message, not the Agent's system_prompt, which Haystack renders as a template.
+            converted = [HaystackChatMessage.from_system(system_prompt), *converted]
         schema = (
             {"generation_kwargs": schema_kwargs(self.generator, response_format)}
             if response_format
             else {}
         )
-        result = await run_attached(
-            agent, to_haystack(messages), turn=turn.hooks(to_haystack) if turn else None, **schema
-        )
-        if turn is not None:
-            await turn.gate()  # the run's gate hook judged it; raises Blocked on a refusal
+        result = await run_agent(agent, converted, hook_context=context, **schema)
+        if (turn := turn_of(context)) is not None:
+            turn.raise_if_blocked()
         replies = result.get("messages") or []
         text = replies[-1].text if replies else None
         if not response_format:
@@ -146,13 +139,7 @@ class Run:
                 replies[-1].meta.get("finish_reason") if replies else None,
             )
             return None
-        try:
-            return response_format.model_validate_json(text)
-        except ValidationError:
-            if turn is not None and turn.guard is not None and turn.guard.finished is not None:
-                # The finish replaced the JSON: refuse rather than return the original.
-                raise turn.unparsable() from None
-            raise
+        return response_format.model_validate_json(text)
 
 
 __all__ = ["Run", "get_user_message", "get_user_text"]

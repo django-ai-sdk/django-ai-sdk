@@ -90,26 +90,25 @@ resolved = self.response_format if response_format is self._UNSET else response_
 adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
 
 if not isinstance(adapter, Run):
-    await current.gate()
-    return await adapter.run(messages=current.messages, system_prompt=rendered_prompt, response_format=resolved)
-if not tools or resolved is not None:
-    return await adapter.run(current.messages, rendered_prompt, response_format=resolved, turn=current)
+    return await self._run_custom(adapter, ...)  # an explicit turn() around it
+with_tools = tools and resolved is None
 ```
 
 - **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
 - **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
 - **`isinstance(adapter, Run)`** — only the SDK's own plain `Run` is ours to add a tool loop to. A `get_run_adapter()` override that returns something else made that choice on purpose and is left alone, calling its own `.run()` unchanged.
 
-`Agent._run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
+`Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
 ```python
 return await adapter.run(
-    current.messages,
+    sent,
     rendered_prompt,
-    tools=await self.get_tools(thread_id=thread_id or "", user=user),
-    max_agent_steps=self.max_agent_steps,
+    response_format=resolved,
+    tools=await self.get_tools(thread_id=thread_id or "", user=user) if with_tools else None,
+    max_agent_steps=self.max_agent_steps if with_tools else None,
     hooks=default_hooks(self),
-    turn=current,
+    hook_context={"channel": channel, "user": user, "thread_id": thread_id, ...},
 )
 ```
 
@@ -137,11 +136,12 @@ first real caller.
 
 Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
 turn, and oversight runs inside the Haystack Agent as hooks
-(`django_ai_sdk.oversight.runs.attach`): the gate judges the history and the
-question before the first model call, every tool call is checked before it runs
+from `default_hooks(self)` (`django_ai_sdk.oversight.plugin`): the run opens its
+turn (`TurnOpenHook`), the gate judges the history and the question before the
+first model call (`GateHook`), every tool call is checked before it runs
 (`OversightToolHook`), every result is masked before the model reads it
 (`OversightToolResultHook`), and finish judges what the loop wrote before the
-answer is returned (`OversightRunHook`). A refusal raises
+answer is returned (`FinishHook`). A refusal raises
 `django_ai_sdk.errors.Blocked`.
 
 What oversight does not guard (`stream_response()` from your own view, an adapter

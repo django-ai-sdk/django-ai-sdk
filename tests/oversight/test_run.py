@@ -96,18 +96,6 @@ class TestRun:
         assert reply == "Noted."
         assert "jan@example.com" not in asked_text(model)
 
-    async def test_an_overridden_run_is_handed_chat_messages_for_dicts(self):
-        seen: list[Any] = []
-        base, _ = agent_with("Noted.")
-
-        class Overridden(type(base)):
-            async def run(self, messages, *args, **kwargs):  # noqa: ANN001, ANN202
-                seen.extend(messages)
-                return await super().run(messages, *args, **kwargs)
-
-        assert await Overridden().run([{"role": "user", "content": "Hi"}]) == "Noted."
-        assert [type(m) for m in seen] == [ChatMessage]
-
     async def test_the_answer_is_masked_before_it_is_returned(self):
         agent, _ = agent_with("Ask jan@example.com.")
         assert await agent.run([ChatMessage(role="user", content="Who?")]) == "Ask [EMAIL]."
@@ -227,95 +215,6 @@ class TestSideOutputs:
         asked = " ".join(m.text or "" for messages in titler.asked for m in messages)
         assert "[EMAIL]" in asked
         assert "jan@example.com" not in asked
-
-
-@pytest.mark.usefixtures("no_reflect_queue")
-@pytest.mark.django_db(transaction=True)
-class TestOverriddenRun:
-    def agent(self, ran: list[str]) -> tuple[Agent, Generator]:
-        generator = Generator("Sure.")
-
-        class Commands(Agent):
-            _skip_auto_register = True
-            permissions = [AllowAll]
-            name = "commands"
-            oversight = RunPolicy
-            title_generation = False
-
-            async def get_run_adapter(self, thread_id=None, user=None):  # noqa: ANN001, ANN201
-                return Run(generator=generator)
-
-            async def run(self, messages, *args, **kwargs):  # noqa: ANN001, ANN201
-                ran.append(messages[-1].content)
-                if messages[-1].content.startswith("/whois"):
-                    return "Ask jan@example.com."
-                return await super().run(messages, *args, **kwargs)
-
-        return Commands(), generator
-
-    async def test_an_override_cannot_skip_the_gate(self):
-        ran: list[str] = []
-        agent, _ = self.agent(ran)
-        with pytest.raises(Blocked):
-            await agent.run([ChatMessage(role="user", content=f"/whois {INJECTION}")])
-        assert ran == []
-
-    async def test_an_early_return_is_finished(self):
-        agent, _ = self.agent([])
-        assert await agent.run([ChatMessage(role="user", content="/whois")]) == "Ask [EMAIL]."
-
-    async def test_a_tuple_of_messages_cannot_skip_the_gate(self):
-        ran: list[str] = []
-        agent, _ = self.agent(ran)
-        with pytest.raises(Blocked):
-            await agent.run((ChatMessage(role="user", content=f"/whois {INJECTION}"),))
-        assert ran == []
-        assert await agent.run(({"role": "user", "content": "/whois"},)) == "Ask [EMAIL]."
-
-    async def test_the_base_run_inside_joins_one_turn(self):
-        ran: list[str] = []
-        agent, generator = self.agent(ran)
-        question = ChatMessage(role="user", content="mail jan@example.com")
-        assert await agent.run([question], channel="api") == "Sure."
-        assert ran == ["mail [EMAIL]"]
-        assert "jan@example.com" not in asked_text(generator)
-        turn = await Turn.objects.aget()
-        assert turn.channel == "api"
-
-    def test_the_override_keeps_its_signature(self):
-        agent, _ = self.agent([])
-        assert list(inspect.signature(type(agent).run).parameters) == [
-            "self", "messages", "args", "kwargs"
-        ]
-
-    async def test_a_run_from_a_mixin_cannot_skip_the_gate(self):
-        class Commands:
-            async def run(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
-                return "Ask jan@example.com."
-
-        class Mixed(Commands, Agent):
-            _skip_auto_register = True
-            permissions = [AllowAll]
-            oversight = RunPolicy
-            title_generation = False
-
-        with pytest.raises(Blocked):
-            await Mixed().run([ChatMessage(role="user", content=INJECTION)])
-        assert await Mixed().run([ChatMessage(role="user", content="hi")]) == "Ask [EMAIL]."
-
-    async def test_an_override_may_take_arguments_of_its_own(self):
-        class Localized(Agent):
-            _skip_auto_register = True
-            permissions = [AllowAll]
-            oversight = RunPolicy
-            title_generation = False
-
-            async def run(self, messages, *args, locale="en", **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN201
-                return f"{locale}: jan@example.com"
-
-        question = [ChatMessage(role="user", content="hi")]
-        assert await Localized().run(question, locale="nl", channel="api") == "nl: [EMAIL]"
-        assert (await Turn.objects.aget()).channel == "api"
 
 
 @pytest.mark.usefixtures("no_reflect_queue")

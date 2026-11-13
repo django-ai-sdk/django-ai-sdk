@@ -25,13 +25,13 @@ from django_ai_sdk.agents.tool_agent import (
 )
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, TurnGuard, guarding
-from django_ai_sdk.oversight.hooks import (
+from django_ai_sdk.oversight.plugin import (
     OversightToolHook,
     OversightToolResultHook,
     masked_result,
 )
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
-from django_ai_sdk.oversight.runs import OversightGateHook, OversightRunHook, attach
+from django_ai_sdk.oversight.plugin import TurnCloseHook, TurnOpenHook, install
 from tests.oversight.helpers import (
     RunPolicy,
     Storage,
@@ -59,7 +59,7 @@ class TestHooks:
             max_tool_output_chars=1234,
         )
         built = ToolAgent(config, generator=MockChatGenerator(responses=["x"])).pipeline()
-        hooks = attach(attach(built.get_component("agent"))).hooks
+        hooks = install(install(built.get_component("agent"))).hooks
         before, after = hooks["before_tool"], hooks["after_tool"]
         assert isinstance(before[0], OversightToolHook)
         assert sum(isinstance(h, OversightToolHook) for h in before) == 1
@@ -69,15 +69,16 @@ class TestHooks:
         # Masked before the cut, so the stream and the hook mask the same text.
         [mask] = [h for h in after if isinstance(h, OversightToolResultHook)]
         assert after.index(mask) + 1 == after.index(limit)
-        assert isinstance(hooks["before_run"][0], OversightGateHook)
-        assert isinstance(hooks["after_run"][-1], OversightRunHook)
+        assert isinstance(hooks["before_run"][0], TurnOpenHook)
+        assert isinstance(hooks["after_run"][-1], TurnCloseHook)
 
     def test_any_haystack_agent_gets_the_oversight_hooks_when_it_runs(self):
-        # Built by hand, not through ToolAgent: attach still adds every check.
-        hooks = attach(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]))).hooks
+        # Built by hand, not through ToolAgent: install still adds every check.
+        hooks = install(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]))).hooks
         assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
         assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
-        assert not any(
+        # default_hooks is where an SDK agent's runs get them.
+        assert any(
             isinstance(h, OversightToolHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
         )
 
@@ -303,7 +304,7 @@ class TestSyncHooks:
 
         from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
         from django_ai_sdk.oversight.guard import guarding
-        from django_ai_sdk.oversight.hooks import OversightToolHook, OversightToolResultHook
+        from django_ai_sdk.oversight.plugin import OversightToolHook, OversightToolResultHook
 
         call = HaystackCall(tool_name="lookup", arguments={"q": 1}, id="c1")
         asked = HaystackMessage.from_assistant(tool_calls=[call])
@@ -324,7 +325,7 @@ class TestSyncHooks:
         from haystack.dataclasses import ChatMessage as HaystackMessage
         from haystack.dataclasses import ToolCall as HaystackCall
 
-        from django_ai_sdk.oversight.hooks import OversightToolHook
+        from django_ai_sdk.oversight.plugin import OversightToolHook
 
         call = HaystackCall(tool_name="lookup", arguments={}, id="c1")
         state = self._state([HaystackMessage.from_assistant(tool_calls=[call])])

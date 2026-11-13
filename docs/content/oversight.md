@@ -297,7 +297,7 @@ async with turn(agent, channel="api", user=request.user, input=text) as t:
     return await t.finish(answer)          # masked; raises Blocked
 ```
 
-Pass `messages` (history, then the question) instead of `input` to have the history judged as `run()` judges it; `t.messages` is then what to send. `finish()` takes a string or a Pydantic model and gives back the same kind. Inside the block, tool hooks see the turn and `t.guard` takes what the run found (`set_sources`, `add_usage`). To run a Haystack Agent inside it, pass `t.hooks(...)` to `oversight.runs.run_attached`, and the run's hooks gate and finish the turn for you. An exception other than `Blocked` is recorded as the run's error. Without a policy `gate()` and `finish()` hand back what they are given. `oversight` takes what `run(oversight=...)` takes. `run()` itself is built on it.
+Pass `messages` (history, then the question) instead of `input` to have the history judged as `run()` judges it; `t.messages` is then what to send. `finish()` takes a string or a Pydantic model and gives back the same kind. Inside the block, tool hooks see the turn and `t.guard` takes what the run found (`set_sources`, `add_usage`). An exception other than `Blocked` is recorded as the run's error. Without a policy `gate()` and `finish()` hand back what they are given. `oversight` takes what `run(oversight=...)` takes. A Haystack Agent run needs none of this: its hooks carry the turn (below).
 
 The other paths oversight does not watch for you are listed under [Limitations](#limitations).
 
@@ -305,15 +305,28 @@ Every run reports its token usage to its turn, from Haystack's `token_usage`.
 
 ## Where oversight hooks into the SDK
 
-For whoever works on the SDK itself: these are the places the SDK calls into core oversight. Every model run of an SDK agent is a Haystack Agent run, and oversight is a set of hooks on that run, attached at one point (`oversight.runs.attach`): `before_run` gates, `before_llm` stops a run whose turn closed, `before_tool` and `after_tool` check tool calls and mask results, and `after_run` records usage and sources and finishes the answer. A `GuardedToolset` offers the model only the tools the turn still allows, checked again each step. Opening and closing the turn stays outside the run, because Haystack skips `after_run` when a run raises or is cancelled. The call sites carry an `# Oversight:` comment, so `grep -rn "Oversight:" django_ai_sdk` finds them. The modules of `django_ai_sdk.oversight` the SDK may import are listed, each with the reason, in `SEAMS` in `tests/oversight/test_layers.py`, which fails on any other import.
+For whoever works on the SDK itself. Oversight is a Haystack plugin, `django_ai_sdk.oversight.plugin`: hooks a Haystack Agent runs, one per concern, which carry the turn themselves.
+
+| Hook point | Hook | What it does |
+| --- | --- | --- |
+| `before_run` | `TurnOpenHook` | Opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. |
+| `before_run` | `GateHook` | Judges the history and the question in the run's messages; masks them, or ends the run with the refusal before the first model call. |
+| `before_llm` | `OversightStopHook` | Stops a run whose turn has closed. |
+| `before_tool` | `OversightToolHook` | Refuses a tool call the policy says no to. |
+| `after_tool` | `OversightToolResultHook` | Masks a tool result before the model reads it. |
+| `after_run` | `UsageHook`, `FinishHook`, `TurnCloseHook` | Records usage and sources, judges the answer (pass, mask or withhold), and records the turn. |
+
+`GuardedToolset` wraps the agent's tools and offers only those the turn still allows, checked again each step. The run's `hook_context` names the turn (`channel`, `user`, `thread_id`, `oversight`, `history_vouched`, `on_gated`) and holds it afterwards (`turn_of(context)`). Haystack skips `after_run` when a run raises or is cancelled: `run_agent` closes the turn then; a run started without it leaves its turn open until the sweep marks it interrupted. The hooks save and load with the Agent.
+
+The SDK installs the plugin in one place: `default_hooks(agent)` in `agents/tool_agent.py`, which every Haystack Agent the SDK builds gets. `install(agent)` adds it to an Agent built by hand. The call sites carry an `# Oversight:` comment, so `grep -rn "Oversight:" django_ai_sdk` finds them. The modules of `django_ai_sdk.oversight` the SDK may import are listed, each with the reason, in `SEAMS` in `tests/oversight/test_layers.py`, which fails on any other import.
 
 | SDK file, function | What it guards | Oversight entry point |
 | --- | --- | --- |
-| `agents/base.py`, `Agent.run()` | Every `run()`: it opens the turn and hands it to the `Run` adapter's Haystack Agent, whose hooks gate, check and finish it. A custom run adapter is gated and finished around its call. An overridden `run()` is wrapped in `__init_subclass__` (`agent_run.guard_run_override`), so the outermost `run()` is the turn. | `oversight.agent_run.turn`, `OpenTurn.hooks` |
-| `agents/base.py`, `Agent.as_view()` | A chat turn: it opens the guard, picks the history (`thread_history`) and hands both to the `Stream` (`adapter.guard`, `adapter.gate`). The run's gate hook judges the history and question, then stores the question; a refused question is never stored. An adapter that is not a `Stream` over an Agent is gated before it starts and then refused (`close_unguardable`) unless the policy fails open. | `oversight.guard.TurnGuard.start(channel="chat")` |
-| `adapters/base.py`, `Stream` | Showing what the run decided: the answer held while an enforced rule may change it at finish (`policy.holds_answer()`), tool cards and sources masked as they stream (the stream sees a result before `after_tool`), the finished answer passed, masked or withheld, a gate refusal streamed, and `close()` on every way out. | `oversight.runs.run_attached`, `oversight.stream.StreamTurn` |
-| `oversight/runs.py`, `attach()` | Each run of any Haystack Agent, built by the SDK or by hand: the gate, each tool call before it runs, each result before the model reads it, usage, sources and finish. | `OversightGateHook`, `OversightStopHook`, `OversightToolHook`, `OversightToolResultHook`, `OversightRunHook`, `GuardedToolset` |
-| `agents/subagent.py`, `SubagentStreamFilter.run_async()` | A delegation: it joins the coordinator's turn, or opens a child turn under the subagent's policy, whose hooks gate the task and finish the response. A synchronous `run()` that would need one is refused. | `oversight.agent_run.turn`, `OpenTurn.hooks` |
+| `agents/tool_agent.py`, `default_hooks()` | Every Haystack Agent the SDK builds: chat, `run()`, subagents. | `oversight.plugin.with_oversight` |
+| `agents/base.py`, `Agent.run()` | Every `run()`: it picks the history (`history_for`) and runs the `Run` adapter's Haystack Agent with the plugin's hooks. A custom run adapter, which is no Haystack Agent, runs inside an explicit `turn()`. An overridden `run()` that calls its own model is not checked. | `oversight.plugin.run_agent` |
+| `agents/base.py`, `Agent.as_view()` | A chat turn: it picks the history (`thread_history`) and gives the `Stream` the turn's `hook_context`; its `on_gated` stores the question once the gate passed it, so a refused question is never stored. An adapter that is not a `Stream` over an Agent is refused (`close_unguardable`) unless the policy fails open. | `oversight.plugin.run_agent` |
+| `adapters/base.py`, `Stream` | Showing what the run decided: the answer held while an enforced rule may change it at finish (`policy.holds_answer()`), tool cards masked as they stream (the stream sees a result before `after_tool`), the finished answer passed, masked or withheld, a gate refusal streamed, and the turn closed once the answer is stored. | `oversight.stream.StreamTurn` |
+| `agents/subagent.py`, `SubagentStreamFilter.run_async()` | A delegation: its run joins the coordinator's turn or opens a child turn under the subagent's policy, which judges the response the coordinator reads. A synchronous `run()` that would need one is refused. | `oversight.plugin.run_agent` |
 | `oversight/stream.py`, `run_side_task()` (title, suggestions, citations) | Nothing, on purpose: side calls over a turn already judged run with `oversight=False`. | — |
 | `contrib/ninja/agents.py`, `contrib/ninja/threads.py`, `contrib/drf/views.py` | The HTTP run endpoints: they call `Agent.run(channel="api")` and answer `Blocked` as `"blocked": true`. | `Agent.run()`, above |
 

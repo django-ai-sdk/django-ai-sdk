@@ -45,7 +45,6 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.guard import TurnGuard, guarding
 from django_ai_sdk.oversight.stream import (
     CONTENT_FILTER,
     StreamTurn,
@@ -55,12 +54,11 @@ from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
-    from django_ai_sdk.oversight.guard import GateResult
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -200,10 +198,6 @@ class Stream:
     _grounder: Grounder | None = None
     # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
-    # Oversight: the turn's guard, handed over by Agent.as_view. None streams unguarded.
-    guard: TurnGuard | None = None
-    # Oversight: judges and stores the question, called by the run's gate hook.
-    gate: Callable[[], Awaitable[GateResult]] | None = None
     # The oversight side of the turn being streamed.
     _turn: StreamTurn | None = None
 
@@ -547,16 +541,11 @@ class Stream:
         return asyncio.create_task(coro)
 
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
-        from django_ai_sdk.oversight.runs import run_attached
+        from django_ai_sdk.oversight.plugin import run_agent
 
-        turn = self._turn.run if self._turn is not None else None
-        if turn is None and self.gate is not None:
-            # No policy: the gate only stores the question.
-            await self.gate()
-        # Oversight: the run's hooks gate the question, check tools and finish the answer.
-        return await run_attached(
-            agent, messages, turn=turn, streaming_callback=callback, hook_context=self.hook_context
-        )
+        # Oversight: the run's hooks open, gate, check and finish the turn.
+        context = self._turn.context if self._turn is not None else self.hook_context
+        return await run_agent(agent, messages, hook_context=context, streaming_callback=callback)
 
     async def get_events(
         self,
@@ -765,16 +754,14 @@ class Stream:
             await asyncio.to_thread(self.generator.warm_up)
 
         pipeline_task: asyncio.Task[Any] | None = None
-        # Oversight: the guard learns the message id and streams the calls it refuses.
+        # Oversight: the run's turn learns the message id and streams the calls it refuses.
         turn = self._turn = StreamTurn(
-            self.guard or TurnGuard(),
+            dict(self.hook_context or {}),
             message_id,
             stream_writer,
             self.citation_registry,
             self._artifact_ids,
             queue,
-            gate=self.gate,
-            to_haystack=lambda: self.get_messages(messages),
         )
         # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""
@@ -794,8 +781,6 @@ class Stream:
                         thread_id=getattr(self.storage_adapter, "thread_id", None),
                         message_id=message_id,
                     ),
-                    # Oversight: tools and generators started here see the guard.
-                    guarding(self.guard),
                 ):
                     pipeline_task = self.get_task(haystack_messages, streaming_callback)
             finally:
@@ -809,7 +794,7 @@ class Stream:
                 self._grounder = Grounder(
                     registry,
                     self.citation_agent,
-                    on_block=None if turn.hold else lambda: queue.put_nowait(_CITED),
+                    on_block=lambda: turn.hold or queue.put_nowait(_CITED),
                 )
 
             async for event in self.get_events(queue, stream_writer):

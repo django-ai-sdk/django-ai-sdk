@@ -22,7 +22,6 @@ from django_ai_sdk.common import (
     Prompt,
     as_chat_messages,
     last_user_message,
-    last_user_text,
     prompt,
 )
 from django_ai_sdk.conversation.utils import (
@@ -62,8 +61,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
-    from django_ai_sdk.oversight.agent_run import OpenTurn
-    from django_ai_sdk.oversight.guard import GateResult, TurnGuard
     from django_ai_sdk.oversight.policy import Policy
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
@@ -115,6 +112,27 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
             integration_name,
         )
         return tool
+
+
+async def _mask_question(messages: list[ChatMessage], turn: Any) -> None:
+    """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
+
+    The gate read the question as the model does: its text, then each attachment's
+    context, joined by blank lines (see `get_user_text`). Each part goes back where
+    it came from.
+    """
+    gated = getattr(turn, "gated", None)
+    question = last_user_message(messages)
+    if gated is None or not gated.masked or question is None:
+        return
+    hints = [a for a in question.attachments if a.context]
+    parts = gated.input.rsplit("\n\n", len(hints)) if hints else [gated.input]
+    if len(parts) != len(hints) + 1:
+        question.content = gated.input
+        return
+    question.content = parts[0]
+    for attachment, text in zip(hints, parts[1:], strict=True):
+        attachment.context = text
 
 
 class Agent(ABC, AgentInfoMixin, InlineFileCapability):
@@ -287,11 +305,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         llm = cls.__dict__.get("llm")
         if callable(llm) and not isinstance(llm, staticmethod):
             cls.llm = staticmethod(llm)  # ty: ignore[invalid-assignment]
-        from django_ai_sdk.oversight.agent_run import guard_run_override, validate_oversight
+        from django_ai_sdk.oversight.agent_run import validate_oversight
 
         validate_oversight(cls)
-        # Oversight: an overridden run() is wrapped, so it cannot skip the policy.
-        guard_run_override(cls)
         # Don't register the base Agent class itself, or classes that
         # manage their own registration (e.g. RuntimeAgent).
         if cls.__name__ != "Agent" and not getattr(cls, "_skip_auto_register", False):
@@ -885,8 +901,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         stores the masked copy.
 
         A run inside another turn joins that turn when the policy is the same (or
-        there is none). Otherwise it opens a child turn. An override of `run()` is
-        the turn, and `super().run()` inside it joins.
+        there is none). Otherwise it opens a child turn. The checks are Haystack
+        hooks on the run (see `oversight.plugin`), so an override of `run()` that
+        calls its own model is not checked: open a `turn()` for that.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
@@ -896,65 +913,77 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 `Blocked.message` holds the text to show the user.
         """
 
-        from django_ai_sdk.oversight.agent_run import turn
-
-        # Bind the thread so headless runs are traced to it.
-        with bind_trace(thread_id=thread_id):
-            async with turn(
-                self,
-                channel=channel,
-                user=user,
-                thread_id=thread_id,
-                messages=as_chat_messages(messages),
-                oversight=oversight,
-            ) as current:
-                result = await self._run(
-                    current, system_prompt, response_format, thread_id, user, tools
-                )
-                if result is None:
-                    current.error = "no result"
-                    return None
-                return await current.finish(result)
-
-    async def _run(
-        self,
-        current: OpenTurn,
-        system_prompt: str | Prompt | None,
-        response_format: type[T] | None,
-        thread_id: str | None,
-        user: AbstractBaseUser | AnonymousUser | None,
-        tools: bool,
-    ) -> T | str | None:
-        """Run the turn on the run adapter. The SDK's own Run runs it as a Haystack Agent.
-
-        With `tools`, the loop is governed by this agent's own `max_agent_steps`,
-        `max_tool_calls` and hooks, the same assembly `build_subagent` uses for a
-        streamed delegation. Oversight runs inside it as hooks.
-        """
         from django_ai_sdk.adapters.run import Run
         from django_ai_sdk.agents.tool_agent import default_hooks
+        from django_ai_sdk.oversight.agent_run import history_for
 
         resolved = self.response_format if response_format is self._UNSET else response_format
-        adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
-        if not isinstance(adapter, Run):
-            # A custom adapter runs outside Haystack, so the turn is gated around it.
+        given = as_chat_messages(messages)
+        # Bind the thread so headless runs are traced to it.
+        with bind_trace(thread_id=thread_id):
+            adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
+            if not isinstance(adapter, Run):
+                return await self._run_custom(
+                    adapter, given, rendered_prompt, resolved, channel, user, thread_id, oversight
+                )
+            # Oversight: the stored thread may stand for the history, so it is not judged again.
+            sent, vouched = await history_for(
+                self, thread_id, given, channel=channel, user=user, oversight=oversight
+            )
+            with_tools = tools and resolved is None
+            return await adapter.run(
+                sent,
+                rendered_prompt,
+                response_format=resolved,
+                tools=await self.get_tools(thread_id=thread_id or "", user=user)
+                if with_tools
+                else None,
+                max_agent_steps=self.max_agent_steps if with_tools else None,
+                # Oversight: its hooks gate, check and finish the run (see oversight.plugin).
+                hooks=default_hooks(self),
+                hook_context={
+                    "channel": channel,
+                    "user": user,
+                    "thread_id": thread_id,
+                    "oversight": oversight,
+                    "history_vouched": vouched,
+                    "on_gated": lambda turn: _mask_question(given, turn),
+                },
+            )
+
+    async def _run_custom(
+        self,
+        adapter: Any,
+        messages: list[ChatMessage],
+        system_prompt: str | Prompt,
+        response_format: type[T] | None,
+        channel: str,
+        user: AbstractBaseUser | AnonymousUser | None,
+        thread_id: str | None,
+        oversight: type[Policy] | str | Literal[False] | None,
+    ) -> T | str | None:
+        """Run a custom run adapter, which is no Haystack Agent, inside an explicit turn."""
+        from django_ai_sdk.oversight.agent_run import turn
+
+        async with turn(
+            self,
+            channel=channel,
+            user=user,
+            thread_id=thread_id,
+            messages=messages,
+            oversight=oversight,
+        ) as current:
             await current.gate()
-            return await adapter.run(
-                messages=current.messages, system_prompt=rendered_prompt, response_format=resolved
+            result = await adapter.run(
+                messages=current.messages,
+                system_prompt=system_prompt,
+                response_format=response_format,
             )
-        if not tools or resolved is not None:
-            return await adapter.run(
-                current.messages, rendered_prompt, response_format=resolved, turn=current
-            )
-        return await adapter.run(
-            current.messages,
-            rendered_prompt,
-            tools=await self.get_tools(thread_id=thread_id or "", user=user),
-            max_agent_steps=self.max_agent_steps,
-            hooks=default_hooks(self),
-            turn=current,
-        )
+            if result is None:
+                current.error = "no result"
+                return None
+            return await current.finish(result)
 
     async def get_run_adapter(
         self,
@@ -1196,34 +1225,26 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         # exactly what the model will read.
         await self._resolve_attachments(messages, thread, user, inline_images=self.has_vision())
 
-        from django_ai_sdk.oversight.guard import TurnGuard, closing_turn
-
-        # Oversight: a chat turn opens here. The Stream closes it, or the code
-        # before it does on an error.
-        guard = await TurnGuard.start(
-            self, channel="chat", user=user, thread_id=thread_id, messages=messages
-        )
-        async with closing_turn(guard, keep_open=True):
-            return await self._chat_turn(guard, messages, thread, thread_id, storage_adapter, user)
+        return await self._chat_turn(messages, thread, thread_id, storage_adapter, user)
 
     async def _chat_turn(
         self,
-        guard: TurnGuard,
         messages: list[ChatMessage],
         thread: ThreadInfo | None,
         thread_id: str | None,
         storage_adapter: BaseStorageAdapter | None,
         user: AbstractBaseUser | AnonymousUser | None,
     ) -> Any:
-        """Run an open chat turn: pick the history, then stream. The run gates and stores the question."""
-        from django_ai_sdk.oversight.agent_run import gate_conversation, thread_history
+        """Pick the history, then stream. The run's hooks open the turn and gate it."""
+        from django_ai_sdk.oversight.agent_run import resolve_policy, thread_history
 
         # Prefer the stored thread over the client's history. The client's copy may
         # be unmasked or made up. If there is no usable stored copy, the client's
         # history is judged as sent.
         vouched = None
-        if thread and storage_adapter and guard.active:
-            vouched = await thread_history(guard, storage_adapter, messages)
+        if thread and storage_adapter:
+            policy = await resolve_policy(self, channel="chat", user=user)
+            vouched = await thread_history(policy, storage_adapter, messages)
         if vouched is not None and vouched is not messages:
             messages = vouched
             newest = bool(messages) and messages[-1].role == "user"
@@ -1239,22 +1260,16 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
             )
 
-        async def admit() -> GateResult:
-            """Judge the history and question, then store the question and title the thread.
+        async def admit(turn: Any) -> None:
+            """Store the question as the gate left it, then title the thread.
 
-            Oversight: the run's gate hook calls this before the model reads anything,
-            so a refused question is never stored or sent to the model.
+            Oversight: the run's gate hook calls this once the question passed, so a
+            refused question is never stored.
             """
-            from django_ai_sdk.oversight.guard import GateResult
-
-            gate = GateResult(input=last_user_text(messages))
-            if guard.active:
-                gate = await gate_conversation(guard, messages, vouched=vouched is not None)
-                if gate.blocked:
-                    return gate
-                if gate.notice:
-                    guard.notices.append(gate.notice)
-            await self._store_question(messages, storage_adapter, thread_id, guard)
+            await _mask_question(messages, turn)
+            question_id = await self._store_question(messages, storage_adapter, thread_id)
+            if turn is not None and question_id:
+                turn.guard.user_message_id = question_id
             if self.title_generation and thread and not thread.title:
                 # A failed title must not fail the reply.
                 # Oversight: off on purpose. The title uses the question after the gate.
@@ -1266,62 +1281,46 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                         await ThreadService.update_thread(thread.id, title=title, user=user)
                 except Exception:
                     logger.exception("Thread title generation failed")
-            return gate
 
         async def build_adapter() -> Streamable:
-            from django_ai_sdk.oversight.guard import closing_turn
-
             # Built inside the stream, so a failure (e.g. RAG warmup) reaches the client.
-            async with closing_turn(guard, keep_open=True):
-                adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
-                suggestion_generator = self.get_suggestion_generator()
-                if suggestion_generator:
-                    adapter.suggestion_generator = suggestion_generator
-                if required_tools := self.get_run_required_tools(messages):
-                    adapter.hook_context = {"required_tools": required_tools}
-                # Artifacts are stored on the thread: none without one.
-                if thread_id:
-                    adapter.thread_id = thread_id
-                    adapter.user = user
-                    # Shown after each mapped tool's result, for any tool of the run.
-                    adapter.tool_artifacts = self.tool_artifacts
+            adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
+            suggestion_generator = self.get_suggestion_generator()
+            if suggestion_generator:
+                adapter.suggestion_generator = suggestion_generator
+            context: dict[str, Any] = {}
+            if required_tools := self.get_run_required_tools(messages):
+                context["required_tools"] = required_tools
+            # Artifacts are stored on the thread: none without one.
+            if thread_id:
+                adapter.thread_id = thread_id
+                adapter.user = user
+                # Shown after each mapped tool's result, for any tool of the run.
+                adapter.tool_artifacts = self.tool_artifacts
 
-                    # Seed the citation registry with sources from current thread
-                    registry = getattr(adapter, "citation_registry", None)
-                    if registry is not None:
-                        await registry.seed_from_thread(thread_id)
-                        registry.seed(await self.get_citation_sources(thread_id, user))
-                        adapter.citation_agent = get_citation_agent(self)
-                from django_ai_sdk.adapters.base import Stream
+                # Seed the citation registry with sources from current thread
+                registry = getattr(adapter, "citation_registry", None)
+                if registry is not None:
+                    await registry.seed_from_thread(thread_id)
+                    registry.seed(await self.get_citation_sources(thread_id, user))
+                    adapter.citation_agent = get_citation_agent(self)
+            from django_ai_sdk.adapters.base import Stream
 
-                if isinstance(adapter, Stream) and adapter.agent_component is not None:
-                    # Oversight: hand the turn over. The run's hooks gate, check and
-                    # finish it; the Stream shows the result and closes it.
-                    adapter.guard = guard
-                    adapter.gate = admit
-                    return adapter
-                # Other adapters run outside a Haystack Agent: gate before they start.
-                gate = await admit()
-            if gate.blocked:
-                from django_ai_sdk.oversight.stream import RefusalStream
-
-                await guard.close()
-                return RefusalStream(gate.message, gate.notice)
-            if guard.active:
-                from django_ai_sdk.oversight.stream import close_unguardable
-
-                # They cannot report tool calls or the answer to the guard.
-                adapter = await close_unguardable(guard) or adapter
-            logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
-            return adapter
-
-        async def warmup() -> AsyncGenerator[dict[str, Any], None]:
-            from django_ai_sdk.oversight.guard import closing_turn
-
-            # The client may leave or warmup may fail before the Stream exists.
-            async with closing_turn(guard, keep_open=True):
-                async for part in self.warmup_progress(thread_id, user):
-                    yield part
+            if isinstance(adapter, Stream) and adapter.agent_component is not None:
+                # Oversight: the run's hooks open, gate, check and finish the turn
+                # (see oversight.plugin); the Stream shows what they decided.
+                adapter.hook_context = {
+                    **context,
+                    "agent": self,
+                    "channel": "chat",
+                    "user": user,
+                    "thread_id": thread_id,
+                    "history_vouched": vouched is not None,
+                    "on_gated": admit,
+                }
+                return adapter
+            adapter.hook_context = context or None
+            return await self._unguardable(adapter, messages, admit, user, thread_id)
 
         logger.debug("Initiating stream response")
         return await stream_response(
@@ -1329,31 +1328,53 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             messages,
             self.protocol_handler,
             storage_adapter=storage_adapter,
-            warmup=warmup(),
+            warmup=self.warmup_progress(thread_id, user),
         )
+
+    async def _unguardable(
+        self,
+        adapter: Any,
+        messages: list[ChatMessage],
+        admit: Any,
+        user: AbstractBaseUser | AnonymousUser | None,
+        thread_id: str | None,
+    ) -> Any:
+        """An adapter that is no Haystack Agent: refused under a policy, unless it fails open.
+
+        Oversight: nothing can check its tool calls or its answer.
+        """
+        from django_ai_sdk.oversight.guard import TurnGuard
+        from django_ai_sdk.oversight.stream import close_unguardable
+
+        guard = await TurnGuard.start(
+            self, channel="chat", user=user, thread_id=thread_id, messages=messages
+        )
+        if guard.active and (refusal := await close_unguardable(guard)) is not None:
+            return refusal
+        await admit(None)
+        return adapter
 
     @staticmethod
     async def _store_question(
         messages: list[ChatMessage],
         storage_adapter: BaseStorageAdapter | None,
         thread_id: str | None,
-        guard: TurnGuard,
-    ) -> None:
-        """Store only the last user message, the one just sent.
+    ) -> str:
+        """Store only the last user message, the one just sent, and return its id.
 
         Many protocols send the full conversation, but only the new message is stored.
         """
         if not (storage_adapter and thread_id):
-            return
+            return ""
         question = last_user_message(messages)
         if question is None:
             logger.debug("No user messages found to store")
-            return
+            return ""
         logger.debug(f"Storing last user message: {len(question.content)} characters")
         # FIXME: we need a better way on how to create a id for the user messages
         question.id = str(uuid.uuid4())
         await storage_adapter.store_chat_message(question)
-        guard.user_message_id = question.id
+        return question.id
 
     async def _resolve_attachments(
         self,

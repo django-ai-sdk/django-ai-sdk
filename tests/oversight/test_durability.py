@@ -42,6 +42,7 @@ from haystack.components.generators.chat import MockChatGenerator
 from tests.oversight.helpers import (
     FnLens,
     Storage,
+    agent_with,
     chat,
     make_agent,
     race,
@@ -249,30 +250,22 @@ class TestCrashedTurns:
         assert turn.outcome == "flagged"
 
     async def test_a_run_that_raised_is_recorded_with_its_error(self):
-        agent = make_agent([], None, policy="test-durable")
+        # Haystack skips after_run on an exception: run_agent closes the turn then.
+        agent, model = agent_with("never", policy="test-durable")
 
-        async def work(messages: list[ChatMessage]) -> Any:
-            raise ValueError("broken tool")
-
-        from django_ai_sdk.oversight.agent_run import run_turn
-
-        with pytest.raises(ValueError):
-            await run_turn(agent, work, [ChatMessage(role="user", content="hi")], channel="api")
+        with (
+            patch.object(type(model), "run", side_effect=ValueError("broken tool")),
+            pytest.raises(ValueError),
+        ):
+            await agent.run([ChatMessage(role="user", content="hi")], channel="api")
         turn = await Turn.objects.aget()
         assert (turn.status, turn.outcome, turn.error) == ("closed", "", "ValueError")
 
     async def test_a_blocked_run_is_blocked_not_blank(self):
-        agent = make_agent([], None, policy="test-durable")
-
-        async def work(messages: list[ChatMessage]) -> Any:
-            return "never"
-
-        from django_ai_sdk.oversight.agent_run import run_turn
+        agent, _ = agent_with("never", policy="test-durable")
 
         with pytest.raises(Blocked):
-            await run_turn(
-                agent, work, [ChatMessage(role="user", content="forbidden")], channel="api"
-            )
+            await agent.run([ChatMessage(role="user", content="forbidden")], channel="api")
         turn = await Turn.objects.aget()
         assert (turn.status, turn.outcome, turn.error) == ("closed", "blocked", "")
 

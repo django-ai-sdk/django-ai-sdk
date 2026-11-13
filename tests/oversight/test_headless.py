@@ -294,14 +294,18 @@ class TestWorkflowStep:
     def step(self, result, policy="test-guard"):
         from django_ai_sdk.workflows.steps import AgentStep
 
+        from django_ai_sdk.adapters.run import Run
+
+        from tests.oversight.helpers import Generator
+
         class Stub(Agent):
             _skip_auto_register = True
             permissions = [AllowAll]
             name = "stub"
             oversight = policy
 
-            async def _run(self, messages, *args):
-                return result
+            async def get_run_adapter(self, thread_id=None, user=None):
+                return Run(generator=Generator(result.model_dump_json()))
 
         class Extract(AgentStep):
             agent = Stub

@@ -1,7 +1,7 @@
-"""Haystack hooks that check tool calls with the turn's guard.
+"""The tool hooks: check each tool call before it runs, mask each result before the model reads it.
 
-They are installed on every tool agent, including subagents, and do nothing
-without an active guard. Every call and result is recorded in the turn.
+They check against the current turn (see turn.py) and do nothing without one.
+Every call and result is recorded in the turn.
 
 If any call in a step is refused, the whole step is answered with stubs, because
 Haystack runs a step's calls all together or not at all. The model is told which
@@ -31,6 +31,7 @@ from django_ai_sdk.oversight.guard import (
     current_guard,
     outlived_turn,
 )
+from django_ai_sdk.oversight.plugin.turn import OversightHook
 from django_ai_sdk.oversight.types import ToolCall
 
 if TYPE_CHECKING:
@@ -48,12 +49,10 @@ SKIPPED = gettext_lazy(
 UNGUARDABLE = gettext_lazy("This tool cannot be checked in a sync run, so it is not run.")
 
 
-class OversightToolHook:
+class OversightToolHook(OversightHook):
     """Refuse tool calls the turn's policy says no to, before they run."""
 
-    # The SDK's seam for tool calls. agents/tool_agent.py installs this hook as a
-    # Haystack before_tool hook on every tool agent.
-    allowed_hook_points = ["before_tool"]
+    allowed_hook_points = ["before_tool"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
         """Refuse every call when inside a turn.
@@ -133,16 +132,14 @@ def _answer_with_stubs(
     )
 
 
-class OversightToolResultHook:
+class OversightToolResultHook(OversightHook):
     """Mask tool results before the model reads them, like the gate masks the question.
 
     A tool can return data the gate would hide, such as a record number or a
     client's name. Each result is checked once, when it arrives.
     """
 
-    # The SDK's seam for tool results. agents/tool_agent.py installs this hook as a
-    # Haystack after_tool hook on every tool agent.
-    allowed_hook_points = ["after_tool"]
+    allowed_hook_points = ["after_tool"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
         """Withhold every result that is not a stub when inside a turn.

@@ -42,7 +42,7 @@ class TestConcurrency:
 @pytest.mark.usefixtures("no_reflect_queue")
 @pytest.mark.django_db(transaction=True)
 class TestChatLifecycle:
-    async def test_an_adapter_that_fails_before_the_run_still_records_the_turn(self):
+    async def test_an_adapter_that_fails_before_the_run_records_and_stores_nothing(self):
         # The gate runs inside the run, so a failed adapter fails before it.
         storage = Storage()
         agent = make_agent(["never"], storage)
@@ -51,9 +51,10 @@ class TestChatLifecycle:
             raise RuntimeError("rag warmup failed")
 
         agent.get_pipeline_adapter = broken  # ty: ignore[invalid-assignment]
-        await chat(agent, "My IBAN is NL91ABNA0417164300")
-        turn = await Turn.objects.aget()
-        assert "RuntimeError" in turn.error
+        parts = await chat(agent, "My IBAN is NL91ABNA0417164300")
+        assert [p for p in parts if p.get("type") == "error"]
+        # The turn opens in the run, which never started: nothing is recorded or stored.
+        assert not await Turn.objects.aexists()
         assert storage.stored == []
 
     async def test_storing_the_question_failing_still_records_the_turn(self):
@@ -76,12 +77,17 @@ class TestChatLifecycle:
     async def test_a_cut_off_answer_that_fails_to_store_still_closes_the_turn(self):
         from django_ai_sdk.common import ChatMessage, StreamWriter
 
-        adapter = await make_agent(["Hi."], Storage()).get_pipeline_adapter()
-        adapter.guard = guard = await start("test-guard")
+        from django_ai_sdk.events import TextChunkEvent
+
+        # Report-only: the answer streams live, so the client can leave mid-answer.
+        agent = make_agent(["Hi."], Storage(), policy="test-report-only")
+        adapter = await agent.get_pipeline_adapter()
+        adapter.hook_context = {"agent": agent, "channel": "chat"}
         events = adapter.stream([ChatMessage(role="user", content="hello")])
-        await anext(events)
+        async for event in events:  # until the run opened its turn and the answer streams
+            if isinstance(event, TextChunkEvent):
+                break
         failing = AsyncMock(side_effect=RuntimeError("db down"))
         with patch.object(StreamWriter, "finalize", failing), pytest.raises(RuntimeError):
             await events.aclose()  # the client left
-        assert guard._closed
-        assert (await Turn.objects.aget(id=guard.id)).error == "disconnected"
+        assert (await Turn.objects.aget()).error == "disconnected"

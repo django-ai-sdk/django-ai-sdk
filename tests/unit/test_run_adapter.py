@@ -125,7 +125,8 @@ class TestAgentRunToolsDefault:
 
         assert result == "done"
         tools.assert_awaited_once()
-        assert agent_cls.call_args.kwargs["tools"] == [tool]
+        # Under oversight the model is offered only the tools the turn still allows.
+        assert agent_cls.call_args.kwargs["tools"].items == [tool]
         # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
         # generic constant.
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 6

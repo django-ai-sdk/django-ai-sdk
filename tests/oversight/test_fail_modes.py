@@ -402,22 +402,14 @@ class TestBrokenHandlers:
     async def test_a_headless_run_whose_finish_raises_is_refused_and_recorded(self):
         from django_ai_sdk.common import ChatMessage
         from django_ai_sdk.errors import Blocked
-        from django_ai_sdk.oversight.agent_run import run_turn
         from django_ai_sdk.oversight.models import Turn
 
-        from tests.oversight.helpers import make_agent
+        from tests.oversight.helpers import agent_with
 
-        async def work(messages):
-            return "an answer"
-
+        agent, _ = agent_with("an answer", policy="test-guard")
         with patch("django_ai_sdk.oversight.guard.finish.acted_on", raising):
             with pytest.raises(Blocked):
-                await run_turn(
-                    make_agent([], None),
-                    work,
-                    [ChatMessage(role="user", content="hi")],
-                    channel="api",
-                )
+                await agent.run([ChatMessage(role="user", content="hi")], channel="api")
         turn = await Turn.objects.aget()
         assert turn.outcome == "blocked"
         assert "finish failed" in turn.error

@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
 
     from django_ai_sdk.agents.base import Agent
-    from django_ai_sdk.oversight.runs import TurnRun
 
 logger = get_logger(__name__)
 
@@ -316,12 +315,12 @@ class SubagentStreamFilter:
         # Oversight: a sync run cannot open the child turn this delegation needs.
         if self._needs_own_turn():
             return _answered(str(UNGUARDABLE))
-        from django_ai_sdk.oversight.runs import attach
+        from django_ai_sdk.oversight.plugin import install
 
         seen: set[str] = set()
         with self._span():
             # Oversight: the sync tool hooks refuse every call inside a turn.
-            result = attach(self._agent).run(
+            result = install(self._agent, self._subagent).run(
                 messages=_handoff_context(messages),
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
@@ -352,41 +351,11 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        # Oversight: a subagent with its own policy runs as a child turn that gates
-        # the task, guards its tools and checks the response. Otherwise it joins
-        # the outer turn.
-        if self._subagent is None:
-            return await self._delegate(messages, streaming_callback, task, **kwargs)
-        from django_ai_sdk.errors import Blocked
-        from django_ai_sdk.oversight.agent_run import turn
-        from django_ai_sdk.oversight.guard import current_guard
-
-        outer = current_guard()
-        try:
-            async with turn(
-                self._subagent,
-                channel=outer.channel if outer is not None else "subagent",
-                user=self._user,
-                thread_id=self._thread_id or None,
-                input=task or "",
-            ) as child:
-                # A child turn judges only the task, so the subagent reads only the
-                # task, not the coordinator's conversation and tool results.
-                context = [] if child.guard is not None else messages
-                # The run's hooks gate the task, check its tools and finish its response.
-                result = await self._delegate(
-                    context,
-                    streaming_callback,
-                    task,
-                    child.hooks(answer=subagent_response),
-                    **kwargs,
-                )
-                await child.gate()
-                response = subagent_response(result.get("messages"))
-                answer = await child.finish(response)
-        except Blocked as refused:
-            return _answered(refused.message)
-        return result if answer == response else _answered(answer)
+        # Oversight: under a policy of its own, the subagent's run opens a child turn
+        # that judges only the task (see oversight.plugin), so it reads only the
+        # task, not the coordinator's conversation and tool results.
+        context = [] if self._needs_own_turn() else messages
+        return await self._delegate(context, streaming_callback, task, **kwargs)
 
     def _needs_own_turn(self) -> bool:
         """Return True when a sync delegation would need its own turn.
@@ -417,17 +386,25 @@ class SubagentStreamFilter:
         messages: list[ChatMessage],
         streaming_callback: StreamingCallbackT | None,
         task: str | None,
-        turn: TurnRun | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        from django_ai_sdk.oversight.runs import run_attached
+        from django_ai_sdk.oversight.guard import current_guard
+        from django_ai_sdk.oversight.plugin import run_agent
 
+        outer = current_guard()
         seen: set[str] = set()
         with self._span():
-            result = await run_attached(
+            result = await run_agent(
                 self._agent,
                 _handoff_context(messages),
-                turn=turn,
+                hook_context={
+                    "agent": self._subagent,
+                    "channel": outer.channel if outer is not None else "subagent",
+                    "user": self._user,
+                    "thread_id": self._thread_id or None,
+                    # The coordinator reads this, so finish judges it.
+                    "answer": subagent_response,
+                },
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,

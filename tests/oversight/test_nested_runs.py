@@ -195,15 +195,15 @@ class TestSubagents:
     async def test_a_child_turn_hands_the_subagent_only_the_checked_task(self, monkeypatch):
         component = await delegation(secret_subagent([], "done"))
         handed: list[list[Any]] = []
-        from django_ai_sdk.oversight import runs
+        from django_ai_sdk.oversight import plugin as runs
 
-        run_attached = runs.run_attached
+        run_agent = runs.run_agent
 
         async def spy(agent: Any, messages: list[Any], **kwargs: Any) -> Any:
             handed.append(messages)
-            return await run_attached(agent, messages, **kwargs)
+            return await run_agent(agent, messages, **kwargs)
 
-        monkeypatch.setattr(runs, "run_attached", spy)
+        monkeypatch.setattr(runs, "run_agent", spy)
         context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
         await component.run_async(messages=context, task="who")
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")

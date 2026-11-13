@@ -1330,10 +1330,10 @@ class TestSubagentSynthesis:
         assert "France and Spain battle wildfires" in digest
 
     def test_build_subagent_runs_it_before_oversight_finishes(self):
-        from django_ai_sdk.oversight.runs import OversightRunHook, with_oversight
+        from django_ai_sdk.oversight.plugin import FinishHook, TurnCloseHook, UsageHook, with_oversight
 
         after = with_oversight({"after_run": [FinalResponseHook(MagicMock())]})["after_run"]
-        assert [type(h) for h in after] == [FinalResponseHook, OversightRunHook]
+        assert [type(h) for h in after] == [FinalResponseHook, UsageHook, FinishHook, TurnCloseHook]
 
 
 class TestUnstreamedResults:

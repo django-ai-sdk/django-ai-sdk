@@ -372,8 +372,8 @@ class TestStoredHistory:
         report = await TurnGuard.start(
             make_agent([], None, policy="test-report-only"), channel="chat", input="hi"
         )
-        assert takes_stored_history(masking)
-        assert not takes_stored_history(report)
+        assert takes_stored_history(masking.resolved)
+        assert not takes_stored_history(report.resolved)
 
     async def test_stored_history_follows_ids_or_the_clients_length(self):
         from django_ai_sdk.oversight.agent_run import stored_history
@@ -420,7 +420,8 @@ class TestAttachments:
 
         async def start(cls, *args, **kwargs):  # noqa: ANN001, ANN202
             order.append("start")
-            seen.extend(a.context for m in kwargs["messages"] for a in m.attachments)
+            # The run's turn opens on the question as the model reads it, attachments included.
+            seen.append(kwargs["input"])
             return await real_start(cls, *args, **kwargs)
 
         with (
@@ -432,7 +433,7 @@ class TestAttachments:
                 agent, [("user", "What is in it?")], thread_id=str(thread.id), user=user
             )
         assert order[:2] == ["resolve", "start"]
-        assert seen == ["Attached file notes.pdf"]
+        assert "Attached file notes.pdf" in seen[0]
 
     async def test_without_a_thread_attachments_never_reach_the_turn(self):
         seen: list[Any] = []

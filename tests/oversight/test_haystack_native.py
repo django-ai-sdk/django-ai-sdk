@@ -1,6 +1,6 @@
-"""Oversight as Haystack Agent hooks: what Haystack must keep doing, and what that buys.
+"""Oversight as a Haystack plugin: what Haystack must keep doing, and what that buys.
 
-`TestHaystackLoop` pins the Haystack behaviour `oversight.runs` relies on, so an
+`TestHaystackLoop` pins the Haystack behaviour `oversight.plugin` relies on, so an
 upgrade that changes it fails here first. The rest checks oversight through it.
 """
 
@@ -14,10 +14,13 @@ from django_ai_sdk.agents import Agent
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight import L, RestrictTools, Rule, Stage, Subject
 from django_ai_sdk.oversight.guard import TurnGuard, guarding
+from django_ai_sdk.oversight.models import Turn
+from django_ai_sdk.oversight.plugin import GateHook, TurnOpenHook, oversight_hooks, turn_of
 from django_ai_sdk.permissions import AllowAll
 from haystack import Pipeline, component
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.agents.state import State
+from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage, StreamingChunk
 from haystack.hooks import hook
 from haystack.tools import Tool, Toolset
@@ -209,11 +212,30 @@ class TestOversightInTheRun:
             await Run(generator=model).run([])
         assert (guard.usage.prompt_tokens, guard.usage.completion_tokens) == (7, 2)
 
+    async def test_a_plain_haystack_agent_with_the_hooks_runs_as_a_turn(self):
+        # No SDK code around the run: the hooks open, finish and record the turn.
+        sdk_agent, _ = agent_with("x", policy="test-guard")
+        agent = HaystackAgent(
+            chat_generator=Scripted(["Mail jan@example.com"]), hooks=oversight_hooks(sdk_agent)
+        )
+        context: dict[str, Any] = {"channel": "api"}
+        result = await agent.run_async([ChatMessage.from_user("Who?")], hook_context=context)
+        assert result["last_message"].text == "Mail [EMAIL]"
+        turn = turn_of(context)
+        assert turn is not None and turn.owns
+        assert (await Turn.objects.aget(id=turn.guard.id)).channel == "api"
+
     async def test_a_turn_is_finished_once(self):
         guard = await start("test-guard")
         first = await guard.finish("Mail me at jan@example.com")
         assert await guard.finish("something else") is first
         assert first.replaced
+
+
+def test_the_hooks_save_and_load_with_the_agent():
+    agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), hooks=oversight_hooks())
+    again = HaystackAgent.from_dict(agent.to_dict())
+    assert [type(h) for h in again.hooks["before_run"]] == [TurnOpenHook, GateHook]
 
 
 def test_the_test_generator_is_a_real_chat_generator():
