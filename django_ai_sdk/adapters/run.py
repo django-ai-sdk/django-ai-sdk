@@ -24,6 +24,18 @@ def get_user_text(message: ChatMessage) -> str:
     return "\n\n".join([message.content, *hints]) if hints else message.content
 
 
+def set_user_text(message: ChatMessage, text: str) -> None:
+    """Put back `text`, joined as `get_user_text` joins it: the content, then each context line."""
+    hints = [a for a in message.attachments if a.context]
+    parts = text.rsplit("\n\n", len(hints)) if hints else [text]
+    if len(parts) != len(hints) + 1:
+        message.content = text
+        return
+    message.content = parts[0]
+    for attachment, part in zip(hints, parts[1:], strict=True):
+        attachment.context = part
+
+
 def get_user_message(message: ChatMessage) -> HaystackChatMessage:
     """Haystack user message, multimodal when images were inlined for a vision model."""
     text = get_user_text(message)
@@ -112,9 +124,11 @@ class Run:
         from django_ai_sdk.oversight.plugin import GuardedToolset, has_oversight, run_agent, turn_of
 
         context = {**(hook_context or {}), "schema": response_format}
-        steps = {"max_agent_steps": max_agent_steps} if max_agent_steps is not None else {}
+        options: dict[str, Any] = {"hooks": hooks}
+        if max_agent_steps is not None:
+            options["max_agent_steps"] = max_agent_steps
         offered = GuardedToolset.wrap(tools) if has_oversight(hooks) else tools
-        agent = Agent(chat_generator=self.generator, tools=offered, hooks=hooks, **steps)
+        agent = Agent(chat_generator=self.generator, tools=offered, **options)
         converted = self.get_messages(messages)
         if system_prompt:
             # A message, not the Agent's system_prompt, which Haystack renders as a template.
@@ -142,4 +156,4 @@ class Run:
         return response_format.model_validate_json(text)
 
 
-__all__ = ["Run", "get_user_message", "get_user_text"]
+__all__ = ["Run", "get_user_message", "get_user_text", "set_user_text"]

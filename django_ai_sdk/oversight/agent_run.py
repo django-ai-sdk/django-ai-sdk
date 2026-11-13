@@ -1,11 +1,10 @@
-"""A turn around model calls that do not run in a Haystack Agent, and the history rules.
+"""Opening, gating and finishing a turn of an agent.
 
-Haystack Agent runs carry their turn themselves (see `oversight.plugin`). `turn()`
-is for everything else: your own model calls, or a custom run adapter. It opens
-the same kind of turn, gates and finishes it explicitly, and joins an outer turn
-under the same rules: the same policy (or none) joins, another opens a child turn.
+The plugin's hooks (see `oversight.plugin`) run these steps inside a Haystack
+Agent run. `turn()` runs the same steps around model calls of your own.
 
-Which history a turn judges is decided before it starts, with `history_for`.
+A turn inside another one joins it when its policy is the same (or there is
+none). Another policy opens a child turn, linked to the outer one.
 """
 
 from __future__ import annotations
@@ -18,9 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from django_ai_sdk.common import last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.actions import Block
-from django_ai_sdk.oversight.agents import acode_policy
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
     closing_turn,
@@ -28,8 +25,8 @@ from django_ai_sdk.oversight.guard import (
     guarding,
     unguarded,
 )
-from django_ai_sdk.oversight.guard.masks import gate_masking_lenses
 from django_ai_sdk.oversight.guard.state import merge_restrict
+from django_ai_sdk.oversight.history import thread_history, thread_storage
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -39,11 +36,8 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.guard import GateResult
-    from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy
-    from django_ai_sdk.storage.base import BaseStorageAdapter
-
-logger = get_logger(__name__)
+    from django_ai_sdk.oversight.guard import FinishResult, GateResult
+    from django_ai_sdk.oversight.policy import Policy
 
 
 def validate_oversight(cls: type) -> None:
@@ -67,6 +61,80 @@ def validate_oversight(cls: type) -> None:
         f"{cls.__qualname__}.oversight must be a Policy subclass, a policy's name, False "
         f"or None, not {value!r}."
     )
+
+
+async def open_turn(
+    agent: Any,
+    *,
+    channel: str,
+    user: Any = None,
+    thread_id: str | None = None,
+    messages: list[ChatMessage] | None = None,
+    input: str | None = None,
+    oversight: type[Policy] | str | Literal[False] | None = None,
+) -> tuple[TurnGuard, bool]:
+    """Start a turn of `agent`. Returns its guard, and whether it opened a turn of its own.
+
+    It opens none without a policy, or inside a turn of the same policy, which
+    it joins. Inside a turn of another policy it opens a child turn, which is
+    still the outer turn's person and keeps the tools the outer turn took away.
+    """
+    outer = current_guard()
+    guard = await TurnGuard.start(
+        agent,
+        channel=channel,
+        user=user,
+        thread_id=thread_id,
+        messages=messages,
+        input=input,
+        oversight=oversight,
+    )
+    if not guard.active or joins_turn(outer, guard.resolved.name):
+        return guard, False
+    if outer is not None:
+        guard.parent_turn_id = outer.id
+        guard.actor_id = guard.actor_id or outer.actor_id
+        if outer.restrict is not None:
+            guard.restrict = merge_restrict(guard.restrict, outer.restrict)
+    return guard, True
+
+
+def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
+    """Whether a run under `policy_name` joins the open turn `outer` instead of its own."""
+    return outer is not None and outer.policy is not None and outer.policy.name == policy_name
+
+
+async def gate_conversation(
+    guard: TurnGuard, messages: list[ChatMessage], *, vouched: bool
+) -> GateResult:
+    """Judge the history and the question, masking each in `messages` in place.
+
+    A history the stored thread `vouched` for is not judged again, but attachment
+    context always is: it is rebuilt from the document each turn and the model reads it.
+    """
+    if messages:
+        checked = await guard.gate_history(messages, history=not vouched)
+        if checked.blocked:
+            return checked
+    gate = await guard.gate()
+    if gate.masked and (question := last_user_message(messages)) is not None:
+        question.content = gate.input
+    return gate
+
+
+def withhold_unfit(guard: TurnGuard, finished: FinishResult, schema: type[BaseModel]) -> None:
+    """Withhold a masked structured answer whose JSON no longer fits `schema`.
+
+    Returning the unmasked original instead would leak what the mask hid.
+    """
+    if not finished.replaced or finished.blocked:
+        return
+    try:
+        schema.model_validate_json(finished.output)
+    except ValidationError:
+        guard.refuse("masked result does not fit its schema")
+        finished.blocked = True
+        finished.message = finished.output = str(Block.DEFAULT_MESSAGE)
 
 
 class OpenTurn:
@@ -116,7 +184,7 @@ class OpenTurn:
         vouched = None
         if self.messages:
             self.messages = _working_copy(self.messages)
-            storage = await _thread_storage(self.agent, self.thread_id)
+            storage = await thread_storage(self.agent, self.thread_id)
             vouched = (
                 await thread_history(guard.resolved, storage, self.messages) if storage else None
             )
@@ -131,14 +199,24 @@ class OpenTurn:
     async def finish(self, result: Any) -> Any:
         """Return the answer as the policy allows it, or raise `Blocked`.
 
-        A string comes back as a string. A Pydantic model comes back as the same
-        model, rebuilt from its masked JSON.
+        A Pydantic model comes back as the same model, rebuilt from its masked
+        JSON. Anything else comes back as its masked text.
         """
-        if self.guard is None:
+        guard = self.guard
+        if guard is None:
             return result
         if not self._gated:
             await self.gate()
-        return await _finish(self.guard, result)
+        schema = type(result) if isinstance(result, BaseModel) else None
+        text = result.model_dump_json() if schema else str(result)
+        finished = await guard.finish(text)
+        if schema is not None:
+            withhold_unfit(guard, finished, schema)
+        if finished.blocked:
+            raise _blocked(guard, Stage.FINISH, finished.message)
+        if not finished.replaced:
+            return result
+        return schema.model_validate_json(finished.output) if schema else finished.output
 
 
 @contextlib.asynccontextmanager
@@ -167,8 +245,7 @@ async def turn(
         with guarding(None), unguarded():
             yield OpenTurn(agent, None, thread_id=thread_id, messages=messages, input=input)
         return
-    outer = current_guard()
-    guard = await TurnGuard.start(
+    guard, opened = await open_turn(
         agent,
         channel=channel,
         user=user,
@@ -177,14 +254,6 @@ async def turn(
         input=input,
         oversight=oversight,
     )
-    # Inside another turn, the same policy (or none) joins it; another opens a child turn.
-    opened = guard.active and not joins_turn(outer, guard.resolved.name)
-    if opened and outer is not None:
-        guard.parent_turn_id = outer.id
-        # A child turn is still the outer turn's person, and keeps the tools it took away.
-        guard.actor_id = guard.actor_id or outer.actor_id
-        if outer.restrict is not None:
-            guard.restrict = merge_restrict(guard.restrict, outer.restrict)
     current = OpenTurn(
         agent, guard if opened else None, thread_id=thread_id, messages=messages, input=input
     )
@@ -197,171 +266,6 @@ async def turn(
             yield current
 
 
-async def gate_conversation(
-    guard: TurnGuard, messages: list[ChatMessage], *, vouched: bool
-) -> GateResult:
-    """Judge the history and the question, then mask the question in `messages` in place.
-
-    Chat and `OpenTurn.gate` both use this. A history the stored thread `vouched`
-    for is not judged again, but attachment context always is: it is rebuilt from
-    the document each turn and the model reads it.
-    """
-    if messages:
-        checked = await guard.gate_history(messages, history=not vouched)
-        if checked.blocked:
-            return checked
-    gate = await guard.gate()
-    if gate.masked and (question := last_user_message(messages)) is not None:
-        question.content = gate.input
-    return gate
-
-
-def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
-    """Whether a run under `policy_name` joins the open turn `outer` instead of its own."""
-    return outer is not None and outer.policy is not None and outer.policy.name == policy_name
-
-
-def takes_stored_history(policy: ResolvedPolicy | None) -> bool:
-    """Whether the turn uses the stored thread as its history.
-
-    Only when the policy enforces masking at the gate. Then the stored copy is
-    the masked one, and each message in it was judged in its own turn. Otherwise
-    the client's history is used and judged by `gate_history`, so a policy in
-    report mode changes nothing.
-    """
-    return policy is not None and bool(gate_masking_lenses(policy))
-
-
-async def thread_history(
-    policy: ResolvedPolicy | None, storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
-) -> list[ChatMessage] | None:
-    """Return the history the stored thread vouches for, or None if it must be judged.
-
-    Under a policy that masks at the gate, the stored messages replace the sent
-    ones (see `stored_history`). Otherwise a sent history that matches the stored
-    thread (role and text) was already judged and is kept. One that differs was
-    edited or made up, so it gets judged. Chat and the run endpoints both use this.
-    """
-    if takes_stored_history(policy):
-        return await stored_history(storage_adapter, messages)
-    if await _as_stored(storage_adapter, messages):
-        return messages
-    return None
-
-
-async def resolve_policy(
-    agent: Any,
-    *,
-    channel: str,
-    user: Any = None,
-    oversight: type[Policy] | str | Literal[False] | None = None,
-) -> ResolvedPolicy | None:
-    """The policy a turn of `agent` would run under, or None. Never raises.
-
-    For choosing the history before the run opens its turn. None (no policy, or
-    it failed to load) means the history is judged as sent, which is the safe side.
-    """
-    from django_ai_sdk.oversight.conf import is_enabled
-    from django_ai_sdk.oversight.registry import policy_name
-    from django_ai_sdk.oversight.resolve import aget_policy
-
-    if oversight in (False, "") or not is_enabled():
-        return None
-    try:
-        name = policy_name(oversight) if oversight else ""
-        name = name or (await acode_policy(agent, channel=channel, user=user))[0]
-        return await aget_policy(name) if name else None
-    except Exception:
-        return None
-
-
-async def history_for(
-    agent: Any,
-    thread_id: str | None,
-    messages: list[ChatMessage],
-    *,
-    channel: str,
-    user: Any = None,
-    oversight: type[Policy] | str | Literal[False] | None = None,
-) -> tuple[list[ChatMessage], bool]:
-    """The messages a run of `agent` sends, and whether the stored thread vouches for the history."""
-    storage = await _thread_storage(agent, thread_id)
-    if storage is None:
-        return messages, False
-    policy = await resolve_policy(agent, channel=channel, user=user, oversight=oversight)
-    vouched = await thread_history(policy, storage, messages)
-    return (vouched, True) if vouched is not None else (messages, False)
-
-
-async def stored_history(
-    storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]
-) -> list[ChatMessage]:
-    """Replace the history in `messages` with the stored thread. Keep the new question.
-
-    The client's copy may be unmasked or made up, so it is not trusted. When every
-    earlier message has a stored id, those stored messages are used. Otherwise the
-    stored messages are taken up to the length of the client's history, so a
-    regenerated or edited turn still drops what came after. Only user and
-    assistant messages count.
-    """
-    earlier, newest = _split_question(messages)
-    kept = await _stored_for(storage_adapter, earlier)
-    return [*kept, newest] if newest is not None else kept
-
-
-async def _as_stored(storage_adapter: BaseStorageAdapter, messages: list[ChatMessage]) -> bool:
-    """Whether every message before the question matches the stored thread."""
-    earlier, _ = _split_question(messages)
-    if not earlier:
-        return True
-    kept = await _stored_for(storage_adapter, earlier)
-    # A shorter match means the client sent more history than the thread holds.
-    return len(kept) == len(earlier) and all(
-        k.role == m.role and (k.content or "") == (m.content or "")
-        for k, m in zip(kept, earlier, strict=True)
-    )
-
-
-def _split_question(
-    messages: list[ChatMessage],
-) -> tuple[list[ChatMessage], ChatMessage | None]:
-    """Split `messages` into the history and the new question, if the last one is a question."""
-    if messages and messages[-1].role == "user":
-        return messages[:-1], messages[-1]
-    return list(messages), None
-
-
-async def _stored_for(
-    storage_adapter: BaseStorageAdapter, earlier: list[ChatMessage]
-) -> list[ChatMessage]:
-    """The stored messages that stand for `earlier`: by id, or else by position.
-
-    By position it may return fewer messages than `earlier` when the thread is shorter.
-    """
-    if not earlier:
-        return []
-    stored = [m for m in await storage_adapter.get_messages() if m.role in ("user", "assistant")]
-    by_id = {m.id: m for m in stored if m.id}
-    if all(m.id and m.id in by_id for m in earlier):
-        return [by_id[m.id] for m in earlier]
-    return stored[: len(earlier)]
-
-
-async def _thread_storage(agent: Any, thread_id: str | None) -> BaseStorageAdapter | None:
-    """Return the storage for `thread_id`, or None when the thread is not stored."""
-    get_storage = getattr(agent, "get_storage_adapter", None)
-    if not thread_id or get_storage is None:
-        return None
-    try:
-        storage = await get_storage(thread_id)
-        if storage is not None and await type(storage).get_thread(thread_id):
-            return storage
-    except Exception:
-        # Without a stored thread, the history is judged as sent.
-        logger.opt(exception=True).debug("No stored thread {}", thread_id)
-    return None
-
-
 def _working_copy(messages: list[ChatMessage]) -> list[ChatMessage]:
     """Copy every message except the last user message.
 
@@ -372,48 +276,16 @@ def _working_copy(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [m if m is question else m.model_copy(deep=True) for m in messages]
 
 
-async def _finish(guard: TurnGuard, result: Any) -> Any:
-    """Return the result as the policy allows it, or raise Blocked."""
-    if isinstance(result, BaseModel):
-        text = result.model_dump_json()
-    else:
-        text = result if isinstance(result, str) else str(result)
-    finished = await guard.finish(text)
-    if finished.blocked:
-        raise _blocked(guard, Stage.FINISH, finished.output)
-    if not finished.replaced:
-        return result
-    if isinstance(result, str):
-        return finished.output
-    rebuilt = _rebuilt(result, finished.output)
-    if rebuilt is None:
-        # If the masked JSON no longer fits the schema, refuse rather than return the original.
-        guard.refuse("masked result does not fit its schema")
-        raise _blocked(guard, Stage.FINISH, str(Block.DEFAULT_MESSAGE))
-    return rebuilt
-
-
 def _blocked(guard: TurnGuard, stage: Stage, message: str) -> Blocked:
     return Blocked(message, stage=str(stage), turn_id=guard.id)
-
-
-def _rebuilt(result: Any, output: str) -> BaseModel | None:
-    """Rebuild a structured result from its masked JSON. None if that fails."""
-    if not isinstance(result, BaseModel):
-        return None
-    try:
-        return type(result).model_validate_json(output)
-    except ValidationError:
-        return None
 
 
 __all__ = [
     "OpenTurn",
     "gate_conversation",
-    "history_for",
     "joins_turn",
-    "resolve_policy",
-    "thread_history",
+    "open_turn",
     "turn",
     "validate_oversight",
+    "withhold_unfit",
 ]

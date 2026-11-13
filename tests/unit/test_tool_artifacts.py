@@ -146,7 +146,7 @@ async def test_stream_gets_the_agents_tool_artifacts():
             pipeline = ToolAgent(config, generator=generator).pipeline()
             return Stream(pipeline=pipeline, generator=generator)
 
-    with patch("django_ai_sdk.agents.base.stream_response", new=AsyncMock()) as respond:
+    with patch("django_ai_sdk.agents.chat.stream_response", new=AsyncMock()) as respond:
         await FileAgent().as_view([], thread_id="t")
         adapter = await respond.await_args.args[0]()
 

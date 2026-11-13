@@ -74,7 +74,7 @@ async def get_pipeline_adapter(self, thread_id=None, user=None):
     )
 ```
 
-A worker-only agent (`hidden = True`, never in chat) can leave `get_pipeline_adapter()` unimplemented.
+The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get_llm()`, the agent's tools and its limits. Override it for another pipeline.
 
 ## Storage Resolution
 

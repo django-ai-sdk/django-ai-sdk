@@ -30,7 +30,7 @@ from typing import Any
 from haystack.core.serialization_security import allow_deserialization_module
 
 from django_ai_sdk.oversight.plugin.finish import FinishHook, UsageHook, mask_sources
-from django_ai_sdk.oversight.plugin.gate import GateHook
+from django_ai_sdk.oversight.plugin.gate import GateHook, keep_masked
 from django_ai_sdk.oversight.plugin.tools import (
     OversightToolHook,
     OversightToolResultHook,
@@ -130,6 +130,7 @@ __all__ = [
     "close_turn",
     "has_oversight",
     "install",
+    "keep_masked",
     "mask_sources",
     "masked_result",
     "oversight_hooks",

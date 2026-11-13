@@ -332,7 +332,7 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     gate = add_note(
         dot,
         "gate",
-        "tools=True\nAND response_format is None\nAND isinstance(adapter, Run)",
+        "tools=True\nAND response_format is None",
     )
 
     own_tools = add_component(

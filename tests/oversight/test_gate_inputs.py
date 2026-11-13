@@ -366,7 +366,7 @@ class TestStoredHistory:
         assert "a@b.nl" not in asked_text(model)
 
     async def test_takes_stored_history_only_under_masking(self):
-        from django_ai_sdk.oversight.agent_run import takes_stored_history
+        from django_ai_sdk.oversight.history import takes_stored_history
 
         masking = await TurnGuard.start(make_agent([], None), channel="chat", input="hi")
         report = await TurnGuard.start(
@@ -376,7 +376,7 @@ class TestStoredHistory:
         assert not takes_stored_history(report.resolved)
 
     async def test_stored_history_follows_ids_or_the_clients_length(self):
-        from django_ai_sdk.oversight.agent_run import stored_history
+        from django_ai_sdk.oversight.history import stored_history
 
         stored = [
             ChatMessage(role="user" if i % 2 == 0 else "assistant", content=f"s{i}", id=f"m{i}")
@@ -469,7 +469,7 @@ class TestAttachments:
             return messages
 
         with (
-            patch("django_ai_sdk.oversight.agent_run.thread_history", vouched),
+            patch("django_ai_sdk.oversight.history.thread_history", vouched),
             patch.object(TurnGuard, "gate_history", gate_history),
         ):
             await chat_turns(agent, [("user", "hi")], thread_id=str(thread.id), user=user)

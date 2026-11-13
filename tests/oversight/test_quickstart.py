@@ -87,10 +87,6 @@ class TestQuickstart:
         review = await ReviewItem.objects.aget()
         assert (review.turn_id, review.queue) == (turn.id, "security")
 
-    @pytest.mark.xfail(
-        reason="the gate runs inside the run, so chat needs the agent's chat adapter even to refuse",
-        strict=True,
-    )
     async def test_chat_streams_the_refusal_as_shown(self, agents):
         import json
 

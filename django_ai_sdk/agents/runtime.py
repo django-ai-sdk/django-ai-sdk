@@ -4,14 +4,11 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils.module_loading import import_string
 
-from django_ai_sdk.adapters.base import Run, Stream
 from django_ai_sdk.adapters.suggestions import DefaultSuggestionGenerator
 from django_ai_sdk.agents.base import Agent
 from django_ai_sdk.common import prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.storage.db import DbStorageAdapter
-
-from .tool_agent import ToolAgent, ToolAgentConfig, default_hooks
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -60,40 +57,6 @@ class RuntimeAgent(Agent):
     @property
     def agent_id(self) -> str:
         return str(self._config.id)
-
-    async def get_run_adapter(
-        self,
-        thread_id: str | None = None,
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> Run:
-        return Run(generator=self.get_llm())
-
-    async def get_pipeline_adapter(
-        self,
-        thread_id: str | None = None,
-        user: AbstractBaseUser | AnonymousUser | None = None,
-    ) -> Stream:
-        generator = self.get_llm()
-        storage_adapter = await self.get_storage_adapter(thread_id)
-        tools = await self.get_tools(thread_id=thread_id or "", user=user)
-
-        tool_agent = ToolAgent(
-            config=ToolAgentConfig(
-                model=self.get_model(),
-                system_prompt=self.get_system_prompt(),
-                tools=tools,
-                # Same limits and hooks as a code-defined agent's own tool loop.
-                max_agent_steps=self.max_agent_steps,
-                hooks=default_hooks(self),
-            ),
-            generator=generator,
-        )
-
-        return Stream(
-            pipeline=tool_agent.pipeline(),
-            generator=generator,
-            storage_adapter=storage_adapter,
-        )
 
     async def get_tools(
         self,

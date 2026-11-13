@@ -790,12 +790,13 @@ class Stream:
 
             registry = self.citation_registry
             if registry is not None and self.thread_id and self.citation_agent and stream_writer:
-                # A held answer shows no citations while it streams.
-                self._grounder = Grounder(
-                    registry,
-                    self.citation_agent,
-                    on_block=lambda: turn.hold or queue.put_nowait(_CITED),
-                )
+
+                def cited() -> None:
+                    # A held answer shows no citations while it streams.
+                    if not turn.hold:
+                        queue.put_nowait(_CITED)
+
+                self._grounder = Grounder(registry, self.citation_agent, on_block=cited)
 
             async for event in self.get_events(queue, stream_writer):
                 for sent in turn.pass_event(event):

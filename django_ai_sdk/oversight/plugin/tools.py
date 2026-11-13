@@ -67,7 +67,7 @@ class OversightToolHook(OversightHook):
         guard, messages = step
         calls = messages[-1].tool_calls
         for call in calls:
-            guard.add_tool_call(_as_tool_call(call))
+            guard.add_tool_call(_as_tool_call(call, state))
         guard.note_error("tool called in a sync run")
         _answer_with_stubs(state, messages, {i: str(UNGUARDABLE) for i in range(len(calls))})
 
@@ -80,7 +80,7 @@ class OversightToolHook(OversightHook):
         guard, messages = step
         refusals: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
-            seen = _as_tool_call(call)
+            seen = _as_tool_call(call, state)
             guard.add_tool_call(seen)
             reason = await guard.tool_call(seen)
             if reason:
@@ -111,8 +111,15 @@ def _refused_after_turn(state: State) -> bool:
     return True
 
 
-def _as_tool_call(call: Any) -> ToolCall:
-    return ToolCall(id=call.id or "", name=call.tool_name, arguments=call.arguments)
+def _as_tool_call(call: Any, state: State) -> ToolCall:
+    return ToolCall(
+        id=call.id or "", name=call.tool_name, arguments=call.arguments, agent=_agent_name(state)
+    )
+
+
+def _agent_name(state: State) -> str:
+    """The subagent whose run this is (hook_context `agent_name`), recorded with its tool calls."""
+    return (state.data.get("hook_context") or {}).get("agent_name") or ""
 
 
 def _answer_with_stubs(
@@ -166,6 +173,7 @@ class OversightToolResultHook(OversightHook):
                     name="" if result.origin.id else result.origin.tool_name,
                     result=masked if isinstance(masked, str) else _text_of(masked),
                     error=bool(result.error),
+                    agent=_agent_name(state),
                 )
             )
             changed[index] = _with_result(message, result, masked)

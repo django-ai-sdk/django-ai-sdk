@@ -9,13 +9,15 @@ from haystack.components.agents.state.state import replace_values
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ChatRole, TextContent
 
-from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.oversight.actions import Block
-from django_ai_sdk.oversight.guard import GateResult
+from django_ai_sdk.common import ChatMessage, last_user_message
+from django_ai_sdk.oversight.agent_run import gate_conversation
 from django_ai_sdk.oversight.plugin.turn import OversightHook, _context, turn_of
 
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
+
+    from django_ai_sdk.oversight.guard import GateResult
+    from django_ai_sdk.oversight.plugin.turn import Turn
 
 # The meta key on the assistant message that stands in for a refused or replaced answer.
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
@@ -33,15 +35,6 @@ class GateHook(OversightHook):
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
-
-    def run(self, state: State) -> None:
-        """A sync run cannot await the gate, so a turn of its own is refused."""
-        turn = turn_of(_context(state))
-        if turn is None or not turn.owns:
-            return
-        turn.guard.refuse("gate in a sync run")
-        turn.gated = GateResult(blocked=True, message=str(Block.DEFAULT_MESSAGE))
-        answer_with(state, turn.gated.message, stop="blocked")
 
     async def run_async(self, state: State) -> None:
         context = _context(state)
@@ -73,18 +66,23 @@ async def _gate(state: State, guard: Any, *, vouched: bool) -> GateResult:
     judged = [
         ChatMessage(role=messages[i].role.value, content=messages[i].text or "") for i in said
     ]
-    if judged:
-        checked = await guard.gate_history(judged, history=not vouched)
-        if checked.blocked:
-            return checked
-    gate = await guard.gate()
+    gate = await gate_conversation(guard, judged, vouched=vouched)
+    if gate.blocked:
+        return gate
     for index, copy in zip(said, judged, strict=True):
         if copy.content != messages[index].text:
             messages[index] = with_text(messages[index], copy.content)
-    if gate.masked and said and messages[said[-1]].is_from(ChatRole.USER):
-        messages[said[-1]] = with_text(messages[said[-1]], gate.input)
     state.set("messages", messages, handler_override=replace_values)
     return gate
+
+
+def keep_masked(messages: list[ChatMessage], turn: Turn | None) -> None:
+    """Mask the caller's last user message as the gate masked it, so the caller stores that copy."""
+    from django_ai_sdk.adapters.run import set_user_text
+
+    gated = turn.gated if turn is not None else None
+    if gated is not None and gated.masked and (question := last_user_message(messages)):
+        set_user_text(question, gated.input)
 
 
 async def _mask_seeded_sources(guard: Any) -> None:
@@ -119,4 +117,4 @@ def answer_with(state: State, text: str, *, stop: str) -> None:
     state.set("stop_run", stop)
 
 
-__all__ = ["REPLACED_META_KEY", "GateHook", "answer_with", "stand_in", "with_text"]
+__all__ = ["REPLACED_META_KEY", "GateHook", "answer_with", "keep_masked", "stand_in", "with_text"]

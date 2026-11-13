@@ -124,7 +124,7 @@ An agent exposes two adapter hooks. You implement them; the SDK uses them.
 - **`get_run_adapter(thread_id, user)`**: returns a `Run` for non-streaming calls. `Agent.run()` calls this (title generation, structured extraction, background jobs). The default wraps the agent's own generator (`get_llm()`); override it only for something else.
 
 {{< callout type="info" >}}
-A worker-only agent (`hidden = True`, never used in chat) can leave `get_pipeline_adapter()` unimplemented.
+Both have defaults: a `Stream` over a `ToolAgent` with the agent's generator, tools and limits, and a `Run` around the same generator. Override them for another pipeline or generator.
 {{< /callout >}}
 
 See the [Protocols guide](/protocols/) for the full `Stream` and `Run` API.

@@ -83,22 +83,17 @@ that needs tool access but has nobody watching a live response.
 answer = await agent.run(messages, tools=True)
 ```
 
-`Agent.run()` takes the headless path only when three conditions all hold:
+`Agent.run()` takes the headless path only when both conditions hold:
 
 ```python
 resolved = self.response_format if response_format is self._UNSET else response_format
-adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
-
-if not isinstance(adapter, Run):
-    return await self._run_custom(adapter, ...)  # an explicit turn() around it
 with_tools = tools and resolved is None
 ```
 
 - **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
 - **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
-- **`isinstance(adapter, Run)`** — only the SDK's own plain `Run` is ours to add a tool loop to. A `get_run_adapter()` override that returns something else made that choice on purpose and is left alone, calling its own `.run()` unchanged.
 
-`Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
+`get_run_adapter()` must return a `Run`: oversight runs as hooks on its Haystack Agent, so anything else would go unchecked and raises `TypeError`. `Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
 ```python
 return await adapter.run(

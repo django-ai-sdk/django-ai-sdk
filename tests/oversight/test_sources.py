@@ -95,7 +95,7 @@ class TestCitations:
                 )
 
         with patch(
-            "django_ai_sdk.agents.base.get_citation_agent", return_value=CitationAgent(citations())
+            "django_ai_sdk.agents.chat.get_citation_agent", return_value=CitationAgent(citations())
         ):
             parts = await chat_turns(
                 Cited(), [("user", "find Jan")], thread_id=str(thread.id), user=user

@@ -60,7 +60,7 @@ Each agent runs under its own policy. A run inside an active turn joins it when 
 
 `run()` judges what the caller sent on copies: only the last user message of the list is masked in place, so what the caller stores is the masked copy. History the server stored itself is judged on its own turn, not again: with a `thread_id` whose thread is stored, under a policy whose gate masks, the stored messages are the history (the thread run endpoints, as chat); a history that is the stored thread as stored stands. Any other history is judged by `TurnGuard.gate_history()` before the question.
 
-The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: open a `turn()` for that. `history_for` and `thread_history` in `django_ai_sdk.oversight.agent_run` are the stored-thread rules `run()` and chat share.
+The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: open a `turn()` for that. `django_ai_sdk.oversight.history` holds the stored-thread rules `run()`, chat and `turn()` share.
 
 ## Lenses
 
@@ -400,7 +400,7 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.W007` | Deploy check, against a database (`check --deploy --database default`): rows whose `expires_at` passed more than two days ago still exist, so `oversight_prune` does not run. |
 | `ai_sdk.oversight.W008` | An enforced rule reads lenses whose judges are all optional aliases and none is defined: it never acts. |
 | `ai_sdk.oversight.W011` | A policy in use masks or blocks the answer at finish but streams it live: the client has the text before finish judges it. Use `stream_mode = "auto"` or a client that applies the `replace` notice. |
-| `ai_sdk.oversight.W013` | An agent with a policy streams chat through a `get_pipeline_adapter()` annotated to return something other than the SDK's `Stream`: the answer is never finished. |
+| `ai_sdk.oversight.W013` | An agent with a policy streams chat through a `get_pipeline_adapter()` annotated to return something other than the SDK's `Stream`: its chats are refused, or run unchecked if the policy fails open. |
 | `ai_sdk.oversight.W014` | Deploy check: the `TASKS` backend runs reflect and notifications inline in the request (`ImmediateBackend`), never runs them (`DummyBackend`), or does not load. |
 | `ai_sdk.oversight.W015` | A policy in use has an enforced `Notify` rule, but `NOTIFIERS` is empty: nobody is told. |
 

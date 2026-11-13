@@ -31,7 +31,7 @@ from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
 from django_ai_sdk.oversight.plugin import close_turn, mask_sources, masked_result, turn_of
-from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
+from django_ai_sdk.oversight.types import Outcome, Stage
 
 if TYPE_CHECKING:
     import asyncio
@@ -108,23 +108,6 @@ async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
     await guard.close()
     notice = notice_base(guard.id, Stage.FINISH, Outcome.BLOCKED)
     return RefusalStream(str(Block.DEFAULT_MESSAGE), notice)
-
-
-def _observe_event(guard: TurnGuard, event: StreamEvent) -> None:
-    """Report a streamed tool call or tool result to the guard."""
-    if isinstance(event, ToolInputCompleteEvent):
-        guard.add_tool_call(
-            ToolCall(
-                id=event.tool_call_id,
-                name=event.tool_name,
-                arguments=event.tool_input,
-                agent=event.agent or "",
-            )
-        )
-    elif isinstance(event, ToolOutputEvent):
-        output = event.tool_output
-        failed = isinstance(output, dict) and bool(output.get("error"))
-        guard.add_tool_call(ToolCall(id=event.tool_call_id, name="", result=output, error=failed))
 
 
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
@@ -258,7 +241,6 @@ class StreamTurn:
         if isinstance(event, TextChunkEvent):
             self.guard.add_text(event.content)
         elif not isinstance(event, ReasoningChunkEvent):
-            _observe_event(self.guard, event)
             if self.hold:
                 self.held.append(event)
                 progress = _held_progress(event)

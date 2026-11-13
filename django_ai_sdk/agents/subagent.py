@@ -399,6 +399,8 @@ class SubagentStreamFilter:
                 _handoff_context(messages),
                 hook_context={
                     "agent": self._subagent,
+                    # Its tool calls are recorded under its name.
+                    "agent_name": self.name,
                     "channel": outer.channel if outer is not None else "subagent",
                     "user": self._user,
                     "thread_id": self._thread_id or None,

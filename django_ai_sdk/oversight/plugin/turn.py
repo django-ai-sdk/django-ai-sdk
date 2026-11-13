@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from haystack.core.serialization import default_from_dict, default_to_dict
 
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight.agent_run import joins_turn
+from django_ai_sdk.oversight.agent_run import open_turn
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
     current_guard,
@@ -26,7 +26,6 @@ from django_ai_sdk.oversight.guard import (
     leave,
     outlived_turn,
 )
-from django_ai_sdk.oversight.guard.state import merge_restrict
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -69,9 +68,17 @@ class Turn:
 
 
 class OversightHook:
-    """Base for the oversight hooks: serializable, so an Agent with them still saves to YAML."""
+    """Base for the oversight hooks: serializable, so an Agent with them still saves to YAML.
+
+    Haystack calls `run_async` in an async run, and `run` in a sync one. A sync
+    run never opens a turn of its own (it cannot await the guard), so `run`
+    does nothing unless a hook overrides it.
+    """
 
     allowed_hook_points: list[str] = []  # noqa: RUF012
+
+    def run(self, state: State) -> None:
+        """A sync run: nothing to do."""
 
     def to_dict(self) -> dict[str, Any]:
         return default_to_dict(self)
@@ -82,12 +89,7 @@ class OversightHook:
 
 
 class TurnOpenHook(OversightHook):
-    """Open the run's turn under `agent`'s policy, or join the turn it runs inside.
-
-    A run inside another turn joins it when the policy is the same (or there is
-    none). A different policy opens a child turn, linked to the outer one, that
-    keeps its person and the tools it took away.
-    """
+    """Open the run's turn under `agent`'s policy, or join the turn it runs inside (see `open_turn`)."""
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
 
@@ -116,7 +118,7 @@ class TurnOpenHook(OversightHook):
         if agent is None:
             context[TURN_KEY] = Turn(outer or TurnGuard(), owns=False)
             return
-        guard = await TurnGuard.start(
+        guard, opened = await open_turn(
             agent,
             channel=context.get("channel") or "run",
             user=context.get("user"),
@@ -124,14 +126,9 @@ class TurnOpenHook(OversightHook):
             input=_question(state),
             oversight=context.get("oversight"),
         )
-        if not guard.active or joins_turn(outer, guard.resolved.name):
+        if not opened:
             context[TURN_KEY] = Turn(outer or guard, owns=False)
             return
-        if outer is not None:
-            guard.parent_turn_id = outer.id
-            guard.actor_id = guard.actor_id or outer.actor_id
-            if outer.restrict is not None:
-                guard.restrict = merge_restrict(guard.restrict, outer.restrict)
         guard.message_id = context.get("message_id") or guard.message_id
         guard.on_tool_results = context.get("on_tool_results")
         context[TURN_KEY] = Turn(guard, owns=True, token=enter(guard))
@@ -145,9 +142,6 @@ class TurnCloseHook(OversightHook):
     """
 
     allowed_hook_points = ["after_run"]  # noqa: RUF012
-
-    def run(self, state: State) -> None:
-        _leave(turn_of(_context(state)))
 
     async def run_async(self, state: State) -> None:
         context = _context(state)

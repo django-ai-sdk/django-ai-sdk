@@ -194,23 +194,20 @@ class TestRecordingFailures:
         assert turn.id is not None
         assert without_nul({"a": ["x\x00y"], "b\x00": 1}) == {"a": ["xy"], "b": 1}
 
-    async def test_a_masked_result_that_no_longer_fits_is_recorded_blocked(self):
+    def test_a_masked_result_that_no_longer_fits_is_recorded_blocked(self):
         from pydantic import BaseModel
 
-        from django_ai_sdk.oversight.agent_run import _finish
+        from django_ai_sdk.oversight.agent_run import withhold_unfit
+        from django_ai_sdk.oversight.guard import FinishResult
 
         class Count(BaseModel):
             n: int
 
-        guard = AsyncMock()
-        guard.id = "t1"
-        guard.refuse = lambda error="": refused.append(error)
-        guard.finish.return_value = type(
-            "Finished", (), {"blocked": False, "replaced": True, "output": '{"n": "[NUMBER]"}'}
-        )()
         refused: list[str] = []
-        with pytest.raises(Blocked):
-            await _finish(guard, Count(n=3))
+        guard = type("Guard", (), {"refuse": lambda self, error="": refused.append(error)})()
+        finished = FinishResult(output='{"n": "[NUMBER]"}', replaced=True)
+        withhold_unfit(guard, finished, Count)
+        assert finished.blocked and finished.message == str(Block.DEFAULT_MESSAGE)
         assert refused == ["masked result does not fit its schema"]
 
 

@@ -83,18 +83,17 @@ def agent_checks() -> list[Any]:
 
 
 def _adapter_checks(cls: type) -> list[Any]:
-    """Warn when an agent's chat adapter isn't the SDK's Stream, so FINISH never runs."""
+    """Warn when an agent's chat adapter isn't the SDK's Stream, so no hook can check its chats."""
     import typing
 
     from django_ai_sdk.adapters.base import Stream
     from django_ai_sdk.oversight.agents import code_policy
     from django_ai_sdk.oversight.checks.policies import build_or_none
-    from django_ai_sdk.oversight.types import Stage
 
     policy, _ = code_policy(cls)  # "" when the agent opts out
     method = getattr(cls, "get_pipeline_adapter", None)
     resolved = build_or_none(policy) if policy and method is not None else None
-    if resolved is None or not resolved.has_stage(Stage.FINISH):
+    if resolved is None:
         return []
     try:
         returned = typing.get_type_hints(method).get("return")
@@ -105,8 +104,8 @@ def _adapter_checks(cls: type) -> list[Any]:
     return [
         Warning(
             f"Agent {cls.__qualname__} streams chat through {returned.__qualname__}, which is "
-            f"not the SDK's Stream: policy {policy!r} judges the question, but never "
-            "finishes the answer.",
+            f"not the SDK's Stream: policy {policy!r} refuses its chats, or lets them through "
+            "unchecked if it fails open.",
             hint="Return a Stream (or a subclass) from get_pipeline_adapter().",
             id=f"{PREFIX}.W013",
         )

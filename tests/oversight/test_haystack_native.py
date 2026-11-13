@@ -21,7 +21,7 @@ from haystack import Pipeline, component
 from haystack.components.agents import Agent as HaystackAgent
 from haystack.components.agents.state import State
 from haystack.components.generators.chat import MockChatGenerator
-from haystack.dataclasses import ChatMessage, StreamingChunk
+from haystack.dataclasses import ChatMessage, StreamingChunk, ToolCall
 from haystack.hooks import hook
 from haystack.tools import Tool, Toolset
 
@@ -224,6 +224,21 @@ class TestOversightInTheRun:
         turn = turn_of(context)
         assert turn is not None and turn.owns
         assert (await Turn.objects.aget(id=turn.guard.id)).channel == "api"
+
+    async def test_a_subagents_tool_calls_are_recorded_under_its_name(self):
+        # The hooks record every call, so the stream need not: a joined run names its agent.
+        guard = await start("test-guard")
+        looked_up = ToolCall(tool_name="lookup", arguments={"to": "x"}, id="c1")
+        agent = HaystackAgent(
+            chat_generator=Scripted([ChatMessage.from_assistant(tool_calls=[looked_up]), "done"]),
+            tools=[tool("lookup", [])],
+            hooks=oversight_hooks(),
+        )
+        with guarding(guard):
+            await agent.run_async(
+                [ChatMessage.from_user("go")], hook_context={"agent_name": "researcher"}
+            )
+        assert [(c.name, c.agent) for c in guard.context.tool_calls] == [("lookup", "researcher")]
 
     async def test_a_turn_is_finished_once(self):
         guard = await start("test-guard")

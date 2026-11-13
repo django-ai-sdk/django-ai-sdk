@@ -209,8 +209,8 @@ class TestStructuredCallsDoNotResolveTools:
         tools.assert_not_awaited()
         log.warning.assert_not_called()
 
-    async def test_an_adapter_without_a_tools_attribute_is_left_alone(self):
-        # get_run_adapter is an override point; an adapter is not required to carry tools.
+    async def test_an_adapter_that_is_no_run_is_refused(self):
+        # Oversight runs as hooks on the Run's Haystack Agent: anything else would go unchecked.
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -225,9 +225,10 @@ class TestStructuredCallsDoNotResolveTools:
 
         with (
             patch.object(RuntimeAgent, "get_run_adapter", AsyncMock(return_value=bare)),
-            patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])),
+            pytest.raises(TypeError, match="must return a Run"),
         ):
-            assert await agent.run([user_message()], response_format=None, tools=True) == "fine"
+            await agent.run([user_message()])
+        bare.run.assert_not_called()
 
 
 class TestDefaultRunAdapter:

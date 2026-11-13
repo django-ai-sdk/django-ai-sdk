@@ -286,7 +286,7 @@ The policy wraps the outermost `run()`. A subclass's own `run()` is wrapped when
 
 ### Model calls of your own: `turn()`
 
-A model you call yourself, not through an agent's `run()` (a generator in a loop, a vendor client), is seen by no policy unless it runs in a turn. `turn()` (`django_ai_sdk.oversight.agent_run`) opens one under an agent's policy, or a policy named outright, and closes it when the block ends:
+A model you call yourself, not through an agent's `run()` (a generator in a loop, a vendor client), is seen by no policy unless it runs in a turn. `turn()` (`django_ai_sdk.oversight.agent_run`) runs the same steps as the plugin's hooks: it opens one under an agent's policy, or a policy named outright, and closes it when the block ends:
 
 ```python
 from django_ai_sdk.oversight.agent_run import turn
@@ -323,8 +323,8 @@ The SDK installs the plugin in one place: `default_hooks(agent)` in `agents/tool
 | SDK file, function | What it guards | Oversight entry point |
 | --- | --- | --- |
 | `agents/tool_agent.py`, `default_hooks()` | Every Haystack Agent the SDK builds: chat, `run()`, subagents. | `oversight.plugin.with_oversight` |
-| `agents/base.py`, `Agent.run()` | Every `run()`: it picks the history (`history_for`) and runs the `Run` adapter's Haystack Agent with the plugin's hooks. A custom run adapter, which is no Haystack Agent, runs inside an explicit `turn()`. An overridden `run()` that calls its own model is not checked. | `oversight.plugin.run_agent` |
-| `agents/base.py`, `Agent.as_view()` | A chat turn: it picks the history (`thread_history`) and gives the `Stream` the turn's `hook_context`; its `on_gated` stores the question once the gate passed it, so a refused question is never stored. An adapter that is not a `Stream` over an Agent is refused (`close_unguardable`) unless the policy fails open. | `oversight.plugin.run_agent` |
+| `agents/base.py`, `Agent.run()` | Every `run()`: it picks the history (`oversight.history.history_for`) and runs the `Run` adapter's Haystack Agent with the plugin's hooks. `get_run_adapter()` must return a `Run`. An overridden `run()` that calls its own model is not checked. | `oversight.plugin.run_agent` |
+| `agents/base.py`, `Agent.as_view()`, `agents/chat.py` | A chat turn: it picks the history (`history_for`) and gives the `Stream` the turn's `hook_context`; its `on_gated` stores the question once the gate passed it, so a refused question is never stored. An adapter that is not a `Stream` over an Agent is refused (`close_unguardable`) unless the policy fails open. | `oversight.plugin.run_agent` |
 | `adapters/base.py`, `Stream` | Showing what the run decided: the answer held while an enforced rule may change it at finish (`policy.holds_answer()`), tool cards masked as they stream (the stream sees a result before `after_tool`), the finished answer passed, masked or withheld, a gate refusal streamed, and the turn closed once the answer is stored. | `oversight.stream.StreamTurn` |
 | `agents/subagent.py`, `SubagentStreamFilter.run_async()` | A delegation: its run joins the coordinator's turn or opens a child turn under the subagent's policy, which judges the response the coordinator reads. A synchronous `run()` that would need one is refused. | `oversight.plugin.run_agent` |
 | `oversight/stream.py`, `run_side_task()` (title, suggestions, citations) | Nothing, on purpose: side calls over a turn already judged run with `oversight=False`. | — |
@@ -713,7 +713,8 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
 - **Some paths are not guarded.** These are the doors oversight does not watch for you:
   - a model called outside a turn;
   - `stream_response()` called from your own view: only `as_view()` opens a turn;
-  - a `get_pipeline_adapter()` that returns an adapter other than the SDK's `Stream`: it gets the gate only, and its answer is never finished (`ai_sdk.oversight.W013` warns when its return annotation says so);
+  - a `get_pipeline_adapter()` that returns an adapter other than the SDK's `Stream` over an Agent: under a policy it is refused, unless the policy fails open, and then nothing is checked (`ai_sdk.oversight.W013` warns when its return annotation says so);
+  - an overridden `run()` that calls its own model instead of `super().run()`: open a `turn()` for it;
   - `run(oversight=False)`, and an agent with no policy and no `DEFAULT_POLICY`;
   - a synchronous delegation that needs a turn of its own: it is refused ([Nested runs and subagents](#nested-runs-and-subagents)).
 

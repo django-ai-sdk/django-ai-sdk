@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from haystack.components.agents.state.state import replace_values
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ChatRole
-from pydantic import ValidationError
 
-from django_ai_sdk.oversight.actions import Block
+from django_ai_sdk.oversight.agent_run import withhold_unfit
 from django_ai_sdk.oversight.guard import current_guard
 from django_ai_sdk.oversight.plugin.gate import REPLACED_META_KEY, stand_in
 from django_ai_sdk.oversight.plugin.turn import OversightHook, _context, turn_of
@@ -19,7 +18,7 @@ if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
 
     from django_ai_sdk.adapters.citations import SourceRegistry
-    from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
+    from django_ai_sdk.oversight.guard import TurnGuard
 
 
 class UsageHook(OversightHook):
@@ -57,9 +56,6 @@ class FinishHook(OversightHook):
 
     allowed_hook_points = ["after_run"]  # noqa: RUF012
 
-    def run(self, state: State) -> None:
-        """A sync run never owns a turn, so there is nothing to finish."""
-
     async def run_async(self, state: State) -> None:
         context = _context(state)
         turn = turn_of(context)
@@ -75,7 +71,7 @@ class FinishHook(OversightHook):
             return
         finished = await guard.finish(text)
         if (schema := context.get("schema")) is not None:
-            _withhold_unfit(guard, finished, schema)
+            withhold_unfit(guard, finished, schema)
         if not finished.replaced:
             return
         if answer is not None:
@@ -99,18 +95,6 @@ async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
         # mask_result keys on the text too, so a changed source is masked again.
         masked = await guard.mask_result(f"source:{source.key}", text)
         source.content = guard.masked_sources[source.key] = masked
-
-
-def _withhold_unfit(guard: TurnGuard, finished: FinishResult, schema: Any) -> None:
-    """Withhold a masked structured answer whose JSON no longer fits `schema`."""
-    if not finished.replaced or finished.blocked:
-        return
-    try:
-        schema.model_validate_json(finished.output)
-    except ValidationError:
-        guard.refuse("masked result does not fit its schema")
-        finished.blocked = True
-        finished.message = finished.output = str(Block.DEFAULT_MESSAGE)
 
 
 def _record_usage(state: State) -> None:
