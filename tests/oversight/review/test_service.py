@@ -363,7 +363,7 @@ class TestMetrics:
 
 
 def test_visible_content_shows_the_turn_as_kept_and_nothing_beside_it():
-    from django_ai_sdk.oversight.services.turns import visible_content
+    from django_ai_sdk.oversight.services import visible_content
 
     kept = {
         "input": "q",
