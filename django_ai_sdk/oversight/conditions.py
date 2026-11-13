@@ -4,21 +4,20 @@
     L("pii").contains("bsn") | L("topic").in_({"hr", "legal"})
     ~L("grounded").is_true & L("sources").confident(0.7)
 
-Both forms use the same evaluator, so a rule from code and a rule from a dict
-behave the same. Every comparison on a lens without a usable answer is
-false. Use `L(name).missing` to test for that. `is_true` is a yes, or for an
+A condition wraps the JSON node it is stored as, so a rule from code and a rule
+from a dict behave the same. Every comparison on a lens without a usable answer
+is false. Use `L(name).missing` to test for that. `is_true` is a yes, or for an
 Entities lens, that it found something; `is_false` the opposite.
 
-A failed lens (its check or judge raised or timed out) is unknown, not false. A
-comparison on it is neither true nor false, so `~L("grounded").is_true` does not
-match just because "grounded" failed. Only `missing` and `present` treat a failed
-lens like any other. A lens that answers at a later stage is unknown to every test,
-so `L("gate").is_true | L("reflect").is_true` matches at the gate once "gate" is.
+A lens in `unknown` (its check or judge failed this turn) is unknown, not
+false: a comparison on it is neither true nor false, so `~L("grounded").is_true`
+does not match just because "grounded" failed. Only `missing` and `present` read
+a failed lens like any other, through its error answer.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Set
+from collections.abc import Iterator, Mapping, Set
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -39,8 +38,6 @@ OPS: dict[str, Any] = {
 }
 # Ops that read the answer itself, not its value.
 META_OPS = {"missing", "present", "confident", "unsure"}
-# Ops that check whether a lens answered. They treat a failed lens like any other.
-PRESENCE_OPS = {"missing", "present"}
 
 
 def _num(value: Any) -> float | None:
@@ -50,176 +47,116 @@ def _num(value: Any) -> float | None:
 
 
 class Condition:
-    """A test over a turn's answers, keyed by lens name."""
+    """A test over a turn's answers, keyed by lens name. Raises ValueError for a bad node."""
 
-    def evaluate(self, answers: Mapping[str, Answer], failed: Set[str] = frozenset()) -> bool:
-        """Whether the condition is known to match.
+    __slots__ = ("node",)
 
-        `failed` names the lenses that failed this turn. Comparisons on them are
-        unknown, and an unknown condition does not match.
-        """
-        return self.decide(answers, failed) is True
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        """Return True, False, or None when a failed or `pending` lens makes it unknown.
-
-        `pending` names lenses that answer at a later stage. Every test on one is
-        unknown, `missing` too, so only what is known already can decide.
-        """
-        raise NotImplementedError
-
-    def to_dict(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def lenses(self) -> set[str]:
-        raise NotImplementedError
+    def __init__(self, node: Mapping[str, Any]) -> None:
+        self.node = _validated(node)
 
     def __and__(self, other: Condition) -> Condition:
-        return All([*_flatten(self, All), *_flatten(other, All)])
+        return Condition({"all": _parts(self, "all") + _parts(other, "all")})
 
     def __or__(self, other: Condition) -> Condition:
-        return AnyOf([*_flatten(self, AnyOf), *_flatten(other, AnyOf)])
+        return Condition({"any": _parts(self, "any") + _parts(other, "any")})
 
     def __invert__(self) -> Condition:
-        return Not(self)
+        return Condition({"not": self.node})
 
     def __repr__(self) -> str:
-        return f"<{type(self).__name__} {self.to_dict()}>"
-
-
-def _flatten(condition: Condition, kind: type[_Group]) -> list[Condition]:
-    return list(condition.items) if isinstance(condition, kind) else [condition]
-
-
-class Compare(Condition):
-    """One test on one lens's answer."""
-
-    def __init__(self, lens: str, op: str, value: Any = None) -> None:
-        if op not in OPS and op not in META_OPS:
-            raise ValueError(f"Unknown op {op!r}")
-        # Reject a bad operand now instead of failing on every turn.
-        if op in {"confident", "unsure"}:
-            if _num(value) is None or not 0 <= float(value) <= 1:
-                raise ValueError(f"{op!r} needs a confidence from 0 to 1, not {value!r}")
-        elif op in {"gt", "ge", "lt", "le"} and _num(value) is None:
-            raise ValueError(f"{op!r} needs a number, not {value!r}")
-        elif op == "in" and not isinstance(value, list | tuple | set | frozenset):
-            raise ValueError(f"'in' needs a list of values, not {value!r}")
-        self.lens = lens
-        self.op = op
-        # A number, a list, a label or None, depending on `op`.
-        self.value: Any = sorted(value) if isinstance(value, set | frozenset) else value
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        if self.lens in pending:
-            return None
-        answer = answers.get(self.lens)
-        usable = answer is not None and answer.ok
-        if not usable and self.lens in failed and self.op not in PRESENCE_OPS:
-            return None
-        if self.op == "missing":
-            return not usable
-        if self.op == "present":
-            return usable
-        if not usable:
-            return False
-        if self.op == "confident":
-            return answer.confidence >= float(self.value)
-        if self.op == "unsure":
-            return answer.confidence < float(self.value)
-        try:
-            return bool(OPS[self.op](answer.value, self.value))
-        except TypeError:
-            return False
+        return f"<Condition {self.node}>"
 
     def to_dict(self) -> dict[str, Any]:
-        node: dict[str, Any] = {"lens": self.lens, "op": self.op}
-        if self.value is not None:
-            node["value"] = self.value
-        return node
+        return self.node
 
     def lenses(self) -> set[str]:
-        return {self.lens}
+        return set(_lenses(self.node))
+
+    def decide(self, answers: Mapping[str, Answer], unknown: Set[str] = frozenset()) -> bool | None:
+        """Return True, False, or None when a lens in `unknown` leaves it undecided."""
+        return _decide(self.node, answers, unknown)
 
 
-class _Group(Condition):
-    """A list of conditions, stored under `key` in the JSON form."""
-
-    key = ""
-
-    def __init__(self, items: list[Condition]) -> None:
-        self.items = items
-
-    def to_dict(self) -> dict[str, Any]:
-        return {self.key: [item.to_dict() for item in self.items]}
-
-    def lenses(self) -> set[str]:
-        return set().union(*(item.lenses() for item in self.items))
+def _parts(condition: Condition, key: str) -> list[dict[str, Any]]:
+    return list(condition.node[key]) if key in condition.node else [condition.node]
 
 
-class All(_Group):
-    key = "all"
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        results = [item.decide(answers, failed, pending) for item in self.items]
-        if False in results:
-            return False
-        return None if None in results else True
+def _children(node: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if "not" in node:
+        return [node["not"]]
+    return node.get("all") or node.get("any") or []
 
 
-class AnyOf(_Group):
-    # Not `Any`, which would shadow typing.Any in this module.
-    key = "any"
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        results = [item.decide(answers, failed, pending) for item in self.items]
-        if True in results:
-            return True
-        return None if None in results else False
+def _lenses(node: Mapping[str, Any]) -> Iterator[str]:
+    if "lens" in node:
+        yield node["lens"]
+    for child in _children(node):
+        yield from _lenses(child)
 
 
-class Not(Condition):
-    def __init__(self, item: Condition) -> None:
-        self.item = item
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        result = self.item.decide(answers, failed, pending)
+def _decide(
+    node: Mapping[str, Any], answers: Mapping[str, Answer], unknown: Set[str]
+) -> bool | None:
+    if "all" in node or "any" in node:
+        # Kleene logic: one False decides an `all`, one True an `any`.
+        decisive = "any" in node
+        results = [_decide(child, answers, unknown) for child in _children(node)]
+        if decisive in results:
+            return decisive
+        return None if None in results else not decisive
+    if "not" in node:
+        result = _decide(node["not"], answers, unknown)
         return None if result is None else not result
+    lens, op, operand = node["lens"], node["op"], node.get("value")
+    answer = answers.get(lens)
+    usable = answer is not None and answer.ok
+    if not usable and lens in unknown and (op not in {"missing", "present"} or answer is None):
+        return None
+    if op == "missing":
+        return not usable
+    if op == "present":
+        return usable
+    if not usable:
+        return False
+    if op == "confident":
+        return answer.confidence >= node["value"]
+    if op == "unsure":
+        return answer.confidence < node["value"]
+    try:
+        return bool(OPS[op](answer.value, operand))
+    except TypeError:
+        return False
 
-    def to_dict(self) -> dict[str, Any]:
-        return {"not": self.item.to_dict()}
 
-    def lenses(self) -> set[str]:
-        return self.item.lenses()
-
-
-class Always(Condition):
-    """Matches every turn, e.g. for a rule that always alerts."""
-
-    def decide(
-        self, answers: Mapping[str, Answer], failed: Set[str], pending: Set[str] = frozenset()
-    ) -> bool | None:
-        return True
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"always": True}
-
-    def lenses(self) -> set[str]:
-        return set()
+def _validated(node: Any) -> dict[str, Any]:
+    """Return `node` as a clean JSON node. Rejects a bad op or operand now, not on every turn."""
+    if not isinstance(node, Mapping):
+        raise ValueError(f"{node!r} is not a condition")
+    for key in ("all", "any"):
+        if key in node:
+            return {key: [_validated(child) for child in node[key]]}
+    if "not" in node:
+        return {"not": _validated(node["not"])}
+    if "lens" not in node or "op" not in node:
+        raise ValueError(f"{dict(node)!r} is not a condition")
+    lens, op, value = str(node["lens"]), str(node["op"]), node.get("value")
+    if op not in OPS and op not in META_OPS:
+        raise ValueError(f"Unknown op {op!r}")
+    if op in {"confident", "unsure"}:
+        if _num(value) is None or not 0 <= value <= 1:
+            raise ValueError(f"{op!r} needs a confidence from 0 to 1, not {value!r}")
+    elif op in {"gt", "ge", "lt", "le"} and _num(value) is None:
+        raise ValueError(f"{op!r} needs a number, not {value!r}")
+    elif op == "in" and not isinstance(value, list | tuple):
+        raise ValueError(f"'in' needs a list of values, not {value!r}")
+    leaf: dict[str, Any] = {"lens": lens, "op": op}
+    if value is not None:
+        leaf["value"] = list(value) if op == "in" else value
+    return leaf
 
 
 class L:
-    """A lens by name. Its operators build Compare conditions."""
+    """A lens by name. Its operators build conditions."""
 
     # __eq__ builds a condition, so an L cannot be hashed.
     __hash__ = None  # type: ignore[assignment]
@@ -227,78 +164,55 @@ class L:
     def __init__(self, name: str) -> None:
         self.name = name
 
-    @property
-    def is_true(self) -> Compare:
-        return Compare(self.name, "is_true")
+    def _test(self, op: str, value: Any = None) -> Condition:
+        return Condition({"lens": self.name, "op": op, "value": value})
 
     @property
-    def is_false(self) -> Compare:
-        return Compare(self.name, "is_false")
+    def is_true(self) -> Condition:
+        return self._test("is_true")
 
     @property
-    def missing(self) -> Compare:
-        return Compare(self.name, "missing")
+    def is_false(self) -> Condition:
+        return self._test("is_false")
 
     @property
-    def present(self) -> Compare:
-        return Compare(self.name, "present")
+    def missing(self) -> Condition:
+        return self._test("missing")
+
+    @property
+    def present(self) -> Condition:
+        return self._test("present")
 
     # Returns a condition instead of a bool, so the signature differs from object's.
-    def __eq__(self, value: object) -> Compare:  # ty: ignore[invalid-method-override]
-        return Compare(self.name, "eq", value)
+    def __eq__(self, value: object) -> Condition:  # ty: ignore[invalid-method-override]
+        return self._test("eq", value)
 
-    def __ne__(self, value: object) -> Compare:  # ty: ignore[invalid-method-override]
-        return Compare(self.name, "ne", value)
+    def __ne__(self, value: object) -> Condition:  # ty: ignore[invalid-method-override]
+        return self._test("ne", value)
 
-    def __gt__(self, value: float) -> Compare:
-        return Compare(self.name, "gt", value)
+    def __gt__(self, value: float) -> Condition:
+        return self._test("gt", value)
 
-    def __ge__(self, value: float) -> Compare:
-        return Compare(self.name, "ge", value)
+    def __ge__(self, value: float) -> Condition:
+        return self._test("ge", value)
 
-    def __lt__(self, value: float) -> Compare:
-        return Compare(self.name, "lt", value)
+    def __lt__(self, value: float) -> Condition:
+        return self._test("lt", value)
 
-    def __le__(self, value: float) -> Compare:
-        return Compare(self.name, "le", value)
+    def __le__(self, value: float) -> Condition:
+        return self._test("le", value)
 
-    def in_(self, values: Any) -> Compare:
-        return Compare(self.name, "in", list(values))
+    def in_(self, values: Any) -> Condition:
+        return self._test("in", list(values))
 
-    def contains(self, value: str) -> Compare:
-        return Compare(self.name, "contains", value)
+    def contains(self, value: str) -> Condition:
+        return self._test("contains", value)
 
-    def confident(self, at_least: float) -> Compare:
-        return Compare(self.name, "confident", at_least)
+    def confident(self, at_least: float) -> Condition:
+        return self._test("confident", at_least)
 
-    def unsure(self, below: float) -> Compare:
-        return Compare(self.name, "unsure", below)
-
-
-def condition_from_dict(node: Mapping[str, Any] | bool) -> Condition:
-    """Build a condition from its JSON form. Raises ValueError for anything else."""
-    if node is True or (isinstance(node, Mapping) and node.get("always")):
-        return Always()
-    if not isinstance(node, Mapping):
-        raise ValueError(f"{node!r} is not a condition")
-    if "all" in node:
-        return All([condition_from_dict(item) for item in node["all"]])
-    if "any" in node:
-        return AnyOf([condition_from_dict(item) for item in node["any"]])
-    if "not" in node:
-        return Not(condition_from_dict(node["not"]))
-    if "lens" in node and "op" in node:
-        return Compare(str(node["lens"]), str(node["op"]), node.get("value"))
-    raise ValueError(f"{dict(node)!r} is not a condition")
+    def unsure(self, below: float) -> Condition:
+        return self._test("unsure", below)
 
 
-__all__ = [
-    "All",
-    "Always",
-    "AnyOf",
-    "Compare",
-    "Condition",
-    "L",
-    "Not",
-    "condition_from_dict",
-]
+__all__ = ["Condition", "L"]
