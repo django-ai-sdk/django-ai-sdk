@@ -18,7 +18,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 
 ## Settings
 
-`AI_SDK_OVERSIGHT`, one dict, every key optional (`django_ai_sdk.oversight.conf.setting`). A dict value merges one level deep with its default, so `{"DEADLINE_MS": {"gate": 3000}}` keeps the other stages' deadlines. Every key is checked: an unknown key, or a value of the wrong kind, is an error that says how to fix it (`ai_sdk.oversight.E012`).
+`AI_SDK_OVERSIGHT`, one dict, every key optional (`django_ai_sdk.oversight.conf.setting`). A dict value merges one level deep with its default, so `{"DEADLINE_MS": {"gate": 3000}}` keeps the other stages' deadlines. Every key is checked: an unknown key, or a value of the wrong kind, is an error that names the key and what it accepts (`ai_sdk.oversight.E012`).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -390,7 +390,7 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.E009` | An agent class names a policy no app registers: every turn it runs is refused. |
 | `ai_sdk.oversight.E010` | Two policy classes declare the same name; the first one registered keeps it. |
 | `ai_sdk.oversight.E011` | An agent class's `oversight` names no policy (set after the class was defined). |
-| `ai_sdk.oversight.E012` | `AI_SDK_OVERSIGHT` has an unknown key, or a value of the wrong kind; the hint says how to set it. |
+| `ai_sdk.oversight.E012` | `AI_SDK_OVERSIGHT` has an unknown key, or a value of the wrong kind; the message says what it accepts. |
 | `ai_sdk.oversight.E013` | Deploy warning: an enforced gate or tool rule that blocks, masks or takes tools away reads a lens with an external judge (any judge with `external` set) whose timeout is longer than that stage's deadline. A slow answer fails the lens, and the rule refuses the turn or the tool call. |
 | `ai_sdk.oversight.E014` | A `Notify(to=[...])` names a notifier `NOTIFIERS` does not have (checked when `NOTIFIERS` is set). |
 | `ai_sdk.oversight.W001` | Deploy check: `CAPTURE` is `"full"`, so content is kept unmasked. |

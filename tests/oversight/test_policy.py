@@ -272,7 +272,7 @@ class TestRuleEvaluation:
         from django_ai_sdk.oversight.conf import validate_retention
 
         assert build("test-parent").retention == {"content": 90, "metadata": 730}
-        with pytest.raises(ValueError, match="unknown kinds"):
+        with pytest.raises(ValueError, match="content.*metadata"):
             validate_retention({"security": 90})
 
 

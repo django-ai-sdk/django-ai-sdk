@@ -2,129 +2,141 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from django.apps import apps
+from django.conf import settings
+from django.core.checks import Error
+from django.core.exceptions import ImproperlyConfigured
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
-from django_ai_sdk.checks import AppSettings, number, of_type, one_of
 from django_ai_sdk.oversight.types import Capture
 
 APP_LABEL = "django_ai_sdk_oversight"
 
-STAGE_KEYS = ("gate", "tool", "finish")
 # Allowed values, shared with policy.py, which checks a policy's own options.
 STREAM_MODES = ("auto", "live")
 FAIL_MODES = ("closed", "open")
-RETENTION_KEYS = ("content", "metadata")
+
+Positive = Annotated[float, Field(gt=0, strict=True)]
+Retention = dict[Literal["content", "metadata"], Annotated[StrictInt, Field(ge=1)]]
 
 
-def _text(value: Any) -> str:
-    return "" if isinstance(value, str) else f"is {value!r}, not a policy name"
+class OversightSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-
-_positive = number(0, above=True, allow_none=True)
-
-
-def _judges(value: Any) -> str:
-    if not isinstance(value, dict):
-        return f'is a {type(value).__name__}, not a dict of aliases: {{"judge": {{"class": ...}}}}'
-    from django_ai_sdk.oversight.judges.base import Judge
-
-    bad = [alias for alias, spec in value.items() if not isinstance(spec, str | dict | Judge)]
-    return f"has aliases that are not judge specs: {bad}" if bad else ""
-
-
-def _deadlines(value: Any) -> str:
-    if not isinstance(value, dict):
-        return f'is {value!r}, not a dict of milliseconds per stage: {{"gate": 1000}}'
-    unknown = sorted(str(stage) for stage in value if stage not in STAGE_KEYS)
-    if unknown:
-        return f"names unknown stages {unknown}; the stages are {list(STAGE_KEYS)}"
-    bad = {stage: ms for stage, ms in value.items() if _positive(ms)}
-    return f"has values that are not positive milliseconds or None: {bad}" if bad else ""
-
-
-def _retention(value: Any) -> str:
-    """The problem with a retention dict, or "". `validate_retention` raises it at runtime."""
-    if not isinstance(value, dict):
-        return f'is {value!r}, not {{"content": days, "metadata": days}}'
-    unknown = sorted(str(kind) for kind in value if kind not in RETENTION_KEYS)
-    if unknown:
-        return f'names unknown kinds {unknown}; the kinds are ["content", "metadata"]'
-    bad = {
-        kind: days
-        for kind, days in value.items()
-        if isinstance(days, bool) or not isinstance(days, int) or days < 1
+    # Kill switch: False leaves every agent unguarded.
+    ENABLED: StrictBool = True
+    # Policy for agents without `oversight`; "" leaves them unguarded.
+    DEFAULT_POLICY: StrictStr = ""
+    # The most content the record keeps. A policy may keep less, never more.
+    CAPTURE: Capture = Capture.MASKED
+    STREAM_MODE: Literal["auto", "live"] = "auto"
+    # Judges by alias: {"judge": {"class": "LLMJudge"}}.
+    JUDGES: dict[str, Any] = {}
+    # Milliseconds per inline stage; a lens still running at the deadline fails.
+    DEADLINE_MS: dict[Literal["gate", "tool", "finish"], Positive | None] = {
+        "gate": 1000,
+        "tool": 1000,
+        "finish": 2_000,
     }
-    return f"has values that are not whole days of at least 1: {bad}" if bad else ""
+    # Longer questions are refused at the gate: lenses would only read part of them.
+    MAX_INPUT_CHARS: Positive | None = 100_000
+    CLIENT_DETAIL: Literal["actions", "full"] = "actions"
+    FAIL_MODE: Literal["closed", "open"] = "closed"
+    RETENTION: Retention = {"content": 90, "metadata": 730}
+    # Dotted paths or Notifier instances.
+    NOTIFIERS: list[Any] = []
+    # How long each process caches authored policies. 0 reads them every turn.
+    RUNTIME_CACHE_SECONDS: Annotated[float, Field(ge=0, strict=True)] = 10
+
+    @field_validator("JUDGES")
+    @classmethod
+    def _judge_specs(cls, value: dict[str, Any]) -> dict[str, Any]:
+        from django_ai_sdk.oversight.judges.base import Judge
+
+        bad = [alias for alias, spec in value.items() if not isinstance(spec, str | dict | Judge)]
+        if bad:
+            raise ValueError(f"aliases {bad} are not judge specs")
+        return value
 
 
-def validate_retention(value: Any) -> dict[str, int]:
-    """Return `value` as retention days, or raise ValueError with the system check's message.
+class AppSettings:
+    """One settings dict, with its keys and defaults declared as a pydantic model.
+
+    Call it with a key for `settings.<name>[key]`, or its default; a dict value merges
+    one level deep into a dict default. The app's E012 check reports a bad dict.
+    """
+
+    def __init__(self, name: str, model: type[BaseModel]) -> None:
+        self.name = name
+        self.model = model
+        self.defaults = {key: field.default for key, field in model.model_fields.items()}
+
+    def _configured(self) -> Any:
+        return getattr(settings, self.name, None) or {}
+
+    @property
+    def broken(self) -> bool:
+        """Whether the setting is not a dict at all. Checks that read it skip."""
+        return not isinstance(self._configured(), dict)
+
+    def __call__(self, key: str) -> Any:
+        configured = self._configured()
+        if not isinstance(configured, dict):
+            raise ImproperlyConfigured(f"{self.name} is a {type(configured).__name__}, not a dict.")
+        default = self.defaults[key]
+        value = configured.get(key, default)
+        if isinstance(value, dict) and isinstance(default, dict):
+            return {**default, **value}
+        return value
+
+    def errors(self, prefix: str) -> list[Error]:
+        """One `<prefix>.E012` per problem."""
+        configured = self._configured()
+        if not isinstance(configured, dict):
+            message = f"{self.name} is a {type(configured).__name__}, not a dict."
+            return [Error(message, hint="Set a dict, or remove it.", id=f"{prefix}.E012")]
+        try:
+            self.model.model_validate(configured)
+        except ValidationError as exc:
+            return [
+                Error(
+                    f"{self.name}{''.join(f'[{part!r}]' for part in error['loc'] if part != '[key]')}: {error['msg']}.",
+                    hint=f"The keys are {', '.join(self.defaults)}."
+                    if error["type"] == "extra_forbidden"
+                    else None,
+                    id=f"{prefix}.E012",
+                )
+                for error in exc.errors()
+            ]
+        return []
+
+
+setting = AppSettings("AI_SDK_OVERSIGHT", OversightSettings)
+_retention = TypeAdapter(Retention)
+
+
+def validate_retention(value: Any) -> dict[Any, int]:
+    """Return `value` as retention days, or raise ValueError.
 
     The system check does not stop a turn or a prune, so runtime checks the same rule again.
     """
-    problem = _retention(value)
-    if problem:
-        raise ValueError(f"retention {problem}")
-    return dict(value)
-
-
-setting = AppSettings(
-    "AI_SDK_OVERSIGHT",
-    {
-        # Kill switch: False leaves every agent unguarded.
-        "ENABLED": (
-            True,
-            of_type(bool, label="True or False"),
-            "True runs oversight, False turns it off everywhere.",
-        ),
-        # Policy for agents without `oversight`; "" leaves them unguarded.
-        "DEFAULT_POLICY": ("", _text, 'A registered policy\'s name, or "" for none.'),
-        # The most content the record keeps. A policy may keep less, never more.
-        "CAPTURE": (
-            Capture.MASKED,
-            one_of(*(c.value for c in Capture)),
-            'Use "masked" (the default).',
-        ),
-        "STREAM_MODE": ("auto", one_of(*STREAM_MODES), 'Use "auto" (the default) or "live".'),
-        "JUDGES": ({}, _judges, 'Name judges by alias: {"judge": {"class": "LLMJudge"}}.'),
-        # Milliseconds per inline stage; a lens still running at the deadline fails.
-        "DEADLINE_MS": (
-            {"gate": 1000, "tool": 1000, "finish": 2_000},
-            _deadlines,
-            'Milliseconds per stage: {"gate": 1000, "tool": 1000, "finish": 2000}.',
-        ),
-        # Longer questions are refused at the gate: lenses would only read part of them.
-        "MAX_INPUT_CHARS": (
-            100_000,
-            _positive,
-            "A number of characters, or None for no limit.",
-        ),
-        "CLIENT_DETAIL": (
-            "actions",
-            one_of("actions", "full"),
-            'Use "actions" (the default) or "full".',
-        ),
-        "FAIL_MODE": (
-            "closed",
-            one_of(*FAIL_MODES),
-            'Use "closed" (the default) or "open"; a policy may set its own fail_mode.',
-        ),
-        "RETENTION": (
-            {"content": 90, "metadata": 730},
-            _retention,
-            '{"content": 90, "metadata": 730}, either key alone.',
-        ),
-        "NOTIFIERS": (
-            [],
-            of_type(list, tuple, label="a list of dotted paths or Notifier instances"),
-            'A list: ["myapp.notifiers.Slack", WebhookNotifier(url)].',
-        ),
-        # How long each process caches authored policies. 0 reads them every turn.
-        "RUNTIME_CACHE_SECONDS": (10, number(0), "Seconds, such as 10."),
-    },
-)
+    try:
+        return _retention.validate_python(value)
+    except ValidationError as exc:
+        error = exc.errors()[0]
+        raise ValueError(f"retention {list(error['loc'])}: {error['msg']}") from None
 
 
 def deadline_ms(stage: str) -> float | None:

@@ -75,18 +75,33 @@ def capture_checks() -> list[Any]:
 
 def task_backend_checks() -> list[Any]:
     """Warn when the task backend runs reflect inline, or never."""
-    from django_ai_sdk.checks import TASKS_HINT, task_backend_problem
+    from django_tasks.backends.dummy import DummyBackend
+    from django_tasks.backends.immediate import ImmediateBackend
+
     from django_ai_sdk.oversight.tasks import reflect_turn
 
-    if problem := task_backend_problem(reflect_turn):
-        return [
-            Warning(
-                f"Oversight's reflect stage and notifications {problem}.",
-                hint=TASKS_HINT,
-                id=f"{PREFIX}.W014",
-            )
-        ]
-    return []
+    try:
+        backend = reflect_turn.get_backend()
+    except Exception as exc:  # noqa: BLE001 - a backend that does not load is the finding
+        problem = (
+            f"are never queued: the task backend {reflect_turn.backend!r} cannot be loaded: {exc}"
+        )
+    else:
+        if isinstance(backend, ImmediateBackend):
+            problem = "run inline, inside the request that queues them"
+        elif isinstance(backend, DummyBackend):
+            problem = "are queued but never run"
+        else:
+            return []
+        problem += f": TASKS uses {type(backend).__name__}"
+    return [
+        Warning(
+            f"Oversight's reflect stage and notifications {problem}.",
+            hint="Configure TASKS with a backend that has a worker, such as "
+            "django_tasks_db.DatabaseBackend with ./manage.py db_worker.",
+            id=f"{PREFIX}.W014",
+        )
+    ]
 
 
 # How long expired rows may stay before W007.

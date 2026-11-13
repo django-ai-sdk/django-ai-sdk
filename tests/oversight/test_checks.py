@@ -38,13 +38,13 @@ def check_ids(**settings: Any) -> set[str]:
         return {m.id for m in check_oversight()}
 
 
-def keys(**configured: Any) -> dict[str, str]:
+def keys(**configured: Any) -> str:
     with override_settings(AI_SDK_OVERSIGHT=configured):
-        return {key: problem for key, problem, _ in setting.problems()}
+        return " ".join(error.msg for error in setting.errors("x"))
 
 
 class TestSettingsSchema:
-    """E012 names the key, what is wrong, and how to fix it."""
+    """E012 names the key and what is wrong."""
 
     def test_a_valid_configuration_has_no_problems(self):
         assert not keys(
@@ -283,13 +283,11 @@ def test_the_manual_lists_every_check_id():
     import re
     from pathlib import Path
 
-    from django_ai_sdk.checks import SETTINGS_CHECK
-
     root = Path(__file__).resolve().parents[2]
     code = "".join(
         p.read_text(encoding="utf-8") for p in (root / "django_ai_sdk/oversight").rglob("*.py")
     )
-    raised = set(re.findall(r'id=f"\{PREFIX\}\.([EW]\d{3})"', code)) | {SETTINGS_CHECK}
+    raised = set(re.findall(r'id=f"\{PREFIX\}\.([EW]\d{3})"', code)) | {"E012"}
     manual = (root / "docs/content/manual/oversight.md").read_text(encoding="utf-8")
     section = manual.split("\n## System checks\n", 1)[1].split("\n## ", 1)[0]
     listed = set(re.findall(r"^\| `ai_sdk\.oversight\.([EW]\d{3})`", section, re.M))
