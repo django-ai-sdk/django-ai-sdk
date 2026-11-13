@@ -22,8 +22,7 @@ OVERSIGHT = "django_ai_sdk.oversight"
 
 # The only core modules the rest of the SDK may import, and why it needs each one.
 SEAMS = {
-    f"{OVERSIGHT}.agent_run": "a subagent asks whether its run joins the turn it runs inside",
-    f"{OVERSIGHT}.agents": "a subagent finds the policy its agent declares in code",
+    f"{OVERSIGHT}.agents": "an agent checks the policy it declares in code",
     f"{OVERSIGHT}.conf": "the agent reads whether oversight is on, and its settings",
     f"{OVERSIGHT}.history": "a run and a chat pick the history the stored thread vouches for",
     f"{OVERSIGHT}.guard": "the adapter and subagents find the guard of the turn in flight",

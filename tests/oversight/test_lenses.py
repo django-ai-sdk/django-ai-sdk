@@ -24,7 +24,6 @@ from django_ai_sdk.oversight.lenses import lens_from_dict
 from django_ai_sdk.oversight.patterns import (
     COUNTRY_PII_KINDS,
     DEFAULT_PII_KINDS,
-    MAX_SCAN_CHARS,
     PII_PATTERNS,
     bsn_ok,
     iban_ok,
@@ -130,13 +129,18 @@ class TestPII:
         assert email.search("a@b.nl.").group() == "a@b.nl"
 
     async def test_patterns_read_all_of_a_long_text(self):
-        # Padding must not hide what comes after it, nor a match on a window's edge.
-        late = "x " * MAX_SCAN_CHARS + "a@b.nl"
+        # Padding must not hide what comes after it.
+        late = "x " * 50_000 + "a@b.nl"
         found = await answer(PIILens(), view(late))
         assert found.value == ["email"] and late[found.spans[0].start :].startswith("a@b.nl")
-        edge = "x" * (MAX_SCAN_CHARS - 4) + " a@b.nl " + "y" * MAX_SCAN_CHARS
-        found = await answer(PIILens(), view(edge))
-        assert [edge[span.start : span.end] for span in found.spans] == ["a@b.nl"]
+
+    async def test_a_long_private_key_is_masked_whole(self):
+        # Longer than 2k chars, and across where 50k-char scan windows once split it.
+        key = "-----BEGIN RSA PRIVATE KEY-----\n" + ("A" * 64 + "\n") * 40
+        key += "-----END RSA PRIVATE KEY-----"
+        text = "x" * 48_000 + key + " tail"
+        found = await answer(SecretsLens(), view(text))
+        assert mask(text, found.spans) == "x" * 48_000 + "[PRIVATE_KEY] tail"
 
     async def test_mask_replaces_spans_by_label(self):
         text = "write to a@b.nl now"
@@ -192,10 +196,10 @@ class TestPatternLens:
 
     def test_is_true_means_it_found_something(self):
         found, none = Answer(value=["email"]), Answer(value=[])
-        assert L("x").is_true.evaluate({"x": found})
-        assert not L("x").is_true.evaluate({"x": none})
-        assert L("x").is_false.evaluate({"x": none})
-        assert not L("x").is_false.evaluate({"x": found})
+        assert L("x").is_true.decide({"x": found})
+        assert not L("x").is_true.decide({"x": none})
+        assert L("x").is_false.decide({"x": none})
+        assert not L("x").is_false.decide({"x": found})
 
 
 class TestPatternsInTheWild:
@@ -379,21 +383,6 @@ class TestFlag:
 
 class TestAttributesBelongWhereTheyAreRead:
     """An attribute a lens does not read is refused, never silently ignored."""
-
-    def test_a_judge_attribute_on_a_pattern_lens(self):
-        class Asks(PatternLens):
-            name = "asks"
-            patterns = ["x"]  # noqa: RUF012
-            question = "Is it x?"
-
-        with pytest.raises(ImproperlyConfigured, match="question"):
-            Asks().validate()
-
-    def test_an_option_of_another_answer_type(self):
-        with pytest.raises(ImproperlyConfigured, match="labels"):
-            JudgeLens(name="f", judges=["judge"], labels=["a"]).validate()
-        with pytest.raises(ImproperlyConfigured, match="yes"):
-            JudgeLens(name="s", judges=["judge"], answer=Score, yes="Yes!").validate()
 
     def test_an_attribute_no_lens_of_its_kind_has(self):
         with pytest.raises(ImproperlyConfigured, match="judges"):

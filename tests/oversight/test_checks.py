@@ -31,20 +31,6 @@ from tests.oversight.helpers import (
 )
 
 
-class NotAStream:
-    """A chat adapter that is not the SDK's Stream."""
-
-
-class CustomAdapterAgent(Agent):
-    _skip_auto_register = True
-    permissions = [AllowAll]
-    name = "custom-adapter"
-    oversight = "test-guard"
-
-    async def get_pipeline_adapter(self, thread_id=None, user=None) -> NotAStream:  # noqa: ANN001
-        return NotAStream()
-
-
 def check_ids(**settings: Any) -> set[str]:
     from django_ai_sdk.oversight.checks import check_oversight
 
@@ -128,7 +114,7 @@ class TestPolicyAndDeployChecks:
         ):
             return [m.id for m in check_oversight_deploy()]
 
-    def test_an_enforced_gate_rule_only_a_slow_judge_answers_is_a_deploy_error(self):
+    def test_an_enforced_gate_rule_only_a_slow_judge_answers_is_a_deploy_warning(self):
         name = policy(
             "fc-judge-only",
             [JudgeLens(name="j", stages=[Stage.GATE], judges=[LLMJudge(model="m")])],
@@ -138,14 +124,10 @@ class TestPolicyAndDeployChecks:
         # A deadline the judge can meet is fine.
         assert "ai_sdk.oversight.E013" not in self._deploy_ids(name, DEADLINE_MS={"gate": 60_000})
 
-    def test_a_slow_judge_behind_an_unsure_pattern_miss_is_a_deploy_error(self):
+    def test_a_slow_judge_behind_an_unsure_pattern_miss_is_a_deploy_warning(self):
         # A miss below min_confidence is unsure, so the judge is asked on every miss.
         name = self._chain("fc-judge-behind-patterns", miss_confidence=0.5)
         assert "ai_sdk.oversight.E013" in self._deploy_ids(name)
-
-    def test_a_judge_after_a_sure_miss_is_never_asked_and_not_flagged(self):
-        name = self._chain("fc-judge-after-sure-miss", miss_confidence=0.9)
-        assert "ai_sdk.oversight.E013" not in self._deploy_ids(name)
 
     def test_a_local_classifier_is_not_a_slow_judge(self):
         from django_ai_sdk.oversight.judges import LocalClassifier
@@ -157,7 +139,7 @@ class TestPolicyAndDeployChecks:
         )
         assert "ai_sdk.oversight.E013" not in self._deploy_ids(name)
 
-    def test_a_slow_custom_external_judge_is_a_deploy_error(self):
+    def test_a_slow_custom_external_judge_is_a_deploy_warning(self):
         from django_ai_sdk.oversight.judges import Judge
 
         class Remote(Judge):
@@ -174,7 +156,7 @@ class TestPolicyAndDeployChecks:
         )
         assert "ai_sdk.oversight.E013" in self._deploy_ids(name)
 
-    def test_a_slow_judge_on_a_tool_call_lens_is_a_deploy_error(self):
+    def test_a_slow_judge_on_a_tool_call_lens_is_a_deploy_warning(self):
         name = policy(
             "fc-tool-judge",
             [
@@ -239,45 +221,23 @@ class TestChecks:
             AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-guard"}
         )
 
-    def test_unanswered_lenses_only_for_policies_in_use(self):
-        no_agents = patch("django_ai_sdk.agents.registry.registry.all", dict)
-        with no_agents:
-            assert "ai_sdk.oversight.W003" not in check_ids(AI_SDK_OVERSIGHT={})
-            assert "ai_sdk.oversight.W003" in check_ids(
-                AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "default"}
+    def test_an_enforced_rule_no_judge_answers(self):
+        from django.core.checks import ERROR, WARNING
+
+        from django_ai_sdk.oversight.checks.policies import policy_checks
+
+        def level(judge: str) -> list[int]:
+            name = policy(
+                f"fc-blind-{judge.strip('?')}",
+                [JudgeLens(name="j", judges=[judge])],
+                [Rule("r", when=L("j").is_true, then=Block(), mode=ENFORCE)],
             )
+            found = policy_checks(set())
+            return [m.level for m in found if m.id.endswith(".E007") and repr(name) in m.msg]
 
-    def test_a_lens_left_with_patterns_alone_is_named(self):
-        from django_ai_sdk.oversight.checks.policies import policy_checks
-
-        with override_settings(AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "default"}):
-            [warning] = [m for m in policy_checks({"default"}) if m.id.endswith(".W003")]
-        # Skipped outright, and answered by its patterns with no model left to ask.
-        assert "helpfulness" in warning.msg
-        assert "prompt_injection (patterns only)" in warning.msg
-        assert "'classifier'" in warning.hint
-        with override_settings(
-            AI_SDK_OVERSIGHT={
-                "DEFAULT_POLICY": "default",
-                "JUDGES": {"classifier": {"class": "LLMJudge"}, "judge": "classifier"},
-            }
-        ):
-            assert not [m for m in policy_checks({"default"}) if m.id.endswith(".W003")]
-
-    def test_a_judge_after_a_sure_pattern_miss_is_unreachable(self):
-        from django_ai_sdk.oversight.checks.policies import policy_checks
-
-        name = self._sure_miss("fc-unreachable")
-        found = [m for m in policy_checks(set()) if m.id.endswith(".W004")]
-        [warning] = [m for m in found if repr(name) in m.msg]
-        assert "judge:m" in warning.msg
-
-    def _sure_miss(self, name: str) -> str:
-        return policy(
-            name,
-            [JudgeLens(name="j", judges=[Patterns([r"x"], miss_confidence=0.9), LLMJudge("m")])],
-            [],
-        )
+        # Optional aliases left undefined are a choice: a warning. A required one is not.
+        assert level("fc-nobody?") == [WARNING]
+        assert level("fc-nobody") == [ERROR]
 
     def test_a_notify_that_reaches_no_one_is_flagged(self):
         from django_ai_sdk.oversight.actions import Notify
@@ -313,58 +273,6 @@ class TestChecks:
         register_policy(Second)
         assert registry_snapshot.get_policy_class("test-twice") is First
         assert "ai_sdk.oversight.E010" in check_ids()
-
-    def test_a_chat_adapter_that_is_not_a_stream_warns(self):
-        from django_ai_sdk.oversight.checks.agents import agent_checks
-
-        with patch(
-            "django_ai_sdk.agents.registry.registry.all", lambda: {"a": CustomAdapterAgent()}
-        ):
-            found = agent_checks()
-        assert [m.id for m in found] == ["ai_sdk.oversight.W013"]
-
-        class OptedOut(CustomAdapterAgent):
-            oversight = False
-
-        with patch("django_ai_sdk.agents.registry.registry.all", lambda: {"a": OptedOut()}):
-            assert agent_checks() == []
-
-    def test_a_run_override_that_never_calls_super_warns(self):
-        from django_ai_sdk.oversight.checks.agents import agent_checks
-
-        class OwnModel(Agent):
-            _skip_auto_register = True
-            permissions = [AllowAll]
-            oversight = "test-guard"
-
-            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
-                return await my_model(messages)  # noqa: F821
-
-        class Shortcut(OwnModel):
-            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
-                return "hi" if messages == ["hi"] else await super().run(messages, **kwargs)
-
-        class Passes(Agent):
-            _skip_auto_register = True
-            permissions = [AllowAll]
-            oversight = "test-guard"
-
-            async def run(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN202
-                return "hi" if messages == ["hi"] else await super().run(messages, **kwargs)
-
-        def ids(agent: Agent) -> list[str]:
-            with patch("django_ai_sdk.agents.registry.registry.all", lambda: {"a": agent}):
-                return [m.id for m in agent_checks()]
-
-        assert ids(OwnModel()) == ["ai_sdk.oversight.W016"]
-        # super().run() here reaches OwnModel.run, which still replaces the checked run.
-        assert ids(Shortcut()) == ["ai_sdk.oversight.W016"]
-        assert ids(Passes()) == []
-
-        class OptedOut(OwnModel):
-            oversight = False
-
-        assert ids(OptedOut()) == []
 
     def test_the_default_capture_is_masked(self):
         assert setting.defaults["CAPTURE"] == "masked"

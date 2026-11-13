@@ -276,13 +276,10 @@ def evaluate_rules(
     """Return rules that match now and have not matched earlier in this turn.
 
     A rule waits until every lens it reads has had its chance, so a gate lens and
-    a reflect lens can share a rule. A rule that would block or restrict tools here
-    does not wait when the lenses that have answered already decide it, like an
-    `any` with one test true. A rule that masks (and does not block) still waits,
-    to see every lens's spans.
+    a reflect lens can share a rule.
 
     `errored` names lenses that failed this turn. A test on one of them is
-    unknown, never true (`Condition.evaluate`), unless it asks whether the lens
+    unknown, never true (`Condition.decide`), unless it asks whether the lens
     answered. With `fail_closed`, a failed lens triggers an enforced rule that
     reads it, but only when that rule would block, mask or restrict tools here.
     Rules that only alert, queue or notify never fire because of a failure.
@@ -293,6 +290,8 @@ def evaluate_rules(
         if rule.name in done:
             continue
         reads = rule.lenses()
+        if any(_still_to_answer(policy, name, stage, answered) for name in reads):
+            continue
         acted = (
             [a for a in rule.ordered_actions() if stage in a.effective]
             if rule.mode is Mode.ENFORCE
@@ -304,19 +303,12 @@ def evaluate_rules(
                 a.kind == "block" for a in acted
             ):
                 acted.append(Block(rule.message))
-        pending = {name for name in reads if _still_to_answer(policy, name, stage, answered)}
-        kinds = {a.kind for a in acted}
-        # A block ends the turn, so its other actions do not matter. A tool restriction
-        # that also masks waits, or the mask would never see the answer.
-        stops = "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
-        if pending and not (stops and rule.when.decide(answers, errored, pending) is True):
-            continue
         failed = (
             fail_closed
             and bool(reads & set(errored))
             and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
         )
-        if rule.when.evaluate(answers, errored):
+        if rule.when.decide(answers, errored):
             matched.append(Matched(rule, stage, acted))
         elif failed:
             matched.append(Matched(rule, stage, acted, failed=True))

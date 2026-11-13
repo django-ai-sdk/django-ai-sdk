@@ -20,7 +20,7 @@ from django_ai_sdk.oversight.policy import ResolvedPolicy, build
 from django_ai_sdk.oversight.registry import get_policy_class
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable
+    from collections.abc import Awaitable, Callable
 
 logger = get_logger(__name__)
 
@@ -110,15 +110,10 @@ def broken_reason(name: str) -> str:
     return _broken.get(name, "")
 
 
-def ancestors(name: str, *, parents: Iterable[str] | None = None) -> list[str]:
-    """Every policy `name` extends, nearest first. build() reports cycles.
-
-    `parents` replaces the `extends` of `name`, for a policy not registered yet.
-    """
+def ancestors(name: str) -> list[str]:
+    """Every policy `name` extends, nearest first. build() reports cycles."""
     found: list[str] = []
-    if parents is None:
-        parents = getattr(get_policy_class(name), "extends", []) or []
-    todo = list(parents)
+    todo = list(getattr(get_policy_class(name), "extends", []) or [])
     while todo:
         parent = todo.pop(0)
         if parent in found or parent == name:

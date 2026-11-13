@@ -18,7 +18,7 @@ class AuthoredPolicy(models.Model):
     name = models.SlugField(max_length=100, unique=True)
     label = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
-    # Names of parent policies: code policies, packs or other authored policies.
+    # Names of parent policies: code policies and packs, never another authored policy.
     extends = models.JSONField(default=list, blank=True)
     # Lens and rule dicts in the shape `definitions.build_policy_class` reads.
     lenses = models.JSONField(default=list, blank=True)

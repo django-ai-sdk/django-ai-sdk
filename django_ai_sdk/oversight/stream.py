@@ -30,15 +30,7 @@ from django_ai_sdk.events import (
 from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
-from django_ai_sdk.oversight.plugin import (
-    REQUEST_KEY,
-    TurnRequest,
-    close_turn,
-    mask_sources,
-    masked_result,
-    request_of,
-    turn_of,
-)
+from django_ai_sdk.oversight.plugin import TurnRequest, mask_sources, masked_result
 from django_ai_sdk.oversight.types import Outcome, Stage
 
 if TYPE_CHECKING:
@@ -121,7 +113,6 @@ async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
     """Run a side task of a turn, such as suggestions, citations or a title, on an Agent or a Run."""
     from django_ai_sdk.agents.base import Agent
-    from django_ai_sdk.oversight.plugin import TurnRequest
 
     # Oversight: off on purpose. The turn itself is judged, not its side tasks.
     if isinstance(runner, Agent):
@@ -146,9 +137,9 @@ def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[
 class StreamTurn:
     """The oversight side of one streamed chat turn.
 
-    The run's hooks open and decide the turn (see `oversight.plugin`); this shows
-    what they decided. The Stream runs the agent with `context`, which holds the
-    run's TurnRequest, as its hook_context, sends the `start()` events, passes every event through
+    The run opens and decides the turn (see `oversight.plugin`); this shows
+    what it decided. The Stream runs the agent with `request`, the run's
+    TurnRequest, sends the `start()` events, passes every event through
     `pass_event`, then calls `afinish`, or `refusal_events()` when the gate
     refused, or `end_early` when the turn ends before that, and always `aclose`,
     which closes the turn once the answer is stored. Until the run opened a turn,
@@ -157,15 +148,13 @@ class StreamTurn:
 
     def __init__(
         self,
-        context: dict[str, Any],
+        request: TurnRequest | None,
         message_id: str,
         writer: StreamWriter | None,
         registry: SourceRegistry | None,
         artifact_ids: list[str],
         queue: asyncio.Queue[Any],
     ) -> None:
-        # The run's hook_context. The stream closes the turn itself, after storing.
-        self.context = context
         self.writer = writer
         self.registry = registry
         # Artifacts stored during this answer, deleted if the answer is withheld.
@@ -190,18 +179,17 @@ class StreamTurn:
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
-        # A copy, so the adapter's request is never shared between streams.
-        request = dataclasses.replace(request_of(context) or TurnRequest())
-        request.message_id = message_id
-        request.keep_open = True
-        request.on_tool_results = refused_results
-        context[REQUEST_KEY] = request
+        # A copy, so the adapter's request is never shared between streams. The
+        # stream closes the turn itself, after storing.
+        self.request = dataclasses.replace(request or TurnRequest())
+        self.request.message_id = message_id
+        self.request.keep_open = True
+        self.request.on_tool_results = refused_results
 
     @property
     def guard(self) -> TurnGuard:
         """The run's own turn, or an inert guard until it opened one."""
-        turn = turn_of(self.context)
-        return turn.guard if turn is not None and turn.owns else _INERT
+        return self.request.guard or _INERT
 
     @property
     def hold(self) -> bool:
@@ -229,8 +217,7 @@ class StreamTurn:
     @property
     def refusal(self) -> GateResult | None:
         """The gate's refusal, when the run's gate hook refused the question."""
-        turn = turn_of(self.context)
-        return turn.gated if turn is not None and turn.refused else None
+        return self.request.gated if self.request.refused else None
 
     def refusal_events(self) -> list[StreamEvent]:
         """The rest of the reply when the gate refused: the policy's message, stored nowhere."""
@@ -285,7 +272,7 @@ class StreamTurn:
         guard, writer = self.guard, self.writer
         if not guard.active:
             return [], FinishResult()
-        # The after_run hook finished the turn; this reads that decision.
+        # The run's finish hook finished the turn; this reads that decision.
         finished = await guard.finish(writer.text if writer else guard.context.output)
         self.finished = True
         if writer and finished.replaced:
@@ -350,7 +337,8 @@ class StreamTurn:
 
     async def aclose(self, error: str) -> None:
         """Close the turn, saying why it ended early, if it did."""
-        await close_turn(self.context, error=error or ("" if self.finished else "disconnected"))
+        if self.request.guard is not None:
+            await self.request.guard.close(error=error or ("" if self.finished else "disconnected"))
 
 
 def _held_progress(event: StreamEvent) -> StreamEvent | None:

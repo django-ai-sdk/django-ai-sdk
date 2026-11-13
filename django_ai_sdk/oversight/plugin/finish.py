@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING
 from haystack.components.agents.state.state import replace_values
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ChatRole
+from pydantic import ValidationError
 
-from django_ai_sdk.oversight.agent_run import withhold_unfit
+from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import current_guard
 from django_ai_sdk.oversight.plugin.gate import REPLACED_META_KEY, stand_in
 from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
@@ -18,38 +19,19 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from haystack.components.agents.state.state import State
+    from pydantic import BaseModel
 
     from django_ai_sdk.adapters.citations import SourceRegistry
-    from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
 
 
-class Answer:
-    """What finish judges in a run, and where a masked or withheld answer goes.
-
-    By default: all the text the model wrote in the run, as a stream shows it.
-    A replaced answer takes the place of the last reply.
-    """
-
-    def text(self, produced: list[HaystackChatMessage]) -> str:
-        return "".join(m.text or "" for m in produced if m.is_from(ChatRole.ASSISTANT))
-
-    def replace(
-        self, messages: list[HaystackChatMessage], first: int, output: str
-    ) -> list[HaystackChatMessage]:
-        for index in range(len(messages) - 1, first - 1, -1):
-            message = messages[index]
-            if message.is_from(ChatRole.ASSISTANT) and message.text and not message.tool_calls:
-                meta = {**message.meta, REPLACED_META_KEY: True}
-                replaced = HaystackChatMessage.from_assistant(output, meta=meta)
-                return [*messages[:index], replaced, *messages[index + 1 :]]
-        return [*messages, stand_in(output)]
-
-
-class WholeRun(Answer):
+class WholeRun:
     """The text `read` makes of the run's messages, such as what a coordinator reads of a subagent.
 
     A replaced answer takes the place of every message the run produced, so
-    `read` finds only the finished text.
+    `read` finds only the finished text. Without it, finish judges all the text
+    the model wrote, as a stream shows it, and a replaced answer takes the place
+    of the last reply.
     """
 
     def __init__(self, read: Callable[[list[HaystackChatMessage]], str]) -> None:
@@ -64,11 +46,14 @@ class WholeRun(Answer):
         return [*messages[:first], stand_in(output)]
 
 
-class UsageHook(OversightHook):
-    """Add the run's token usage to its turn, its own or the one it joined.
+class FinishHook(OversightHook):
+    """Add the run's token usage to its turn, then judge the answer of a turn of its own.
 
-    Then, for a turn of its own, mask the citation sources and give them to the
-    turn, so finish can judge the answer against them.
+    The citation sources are masked and given to the turn first, so finish can
+    judge the answer against them. The answer is then passed, masked or withheld
+    in the run's messages. The TurnRequest's `answer` says which text that is
+    (see `WholeRun`). With its `schema` (a Pydantic model), a masked answer that
+    no longer fits is withheld.
     """
 
     allowed_hook_points = ["after_run"]  # noqa: RUF012
@@ -78,34 +63,20 @@ class UsageHook(OversightHook):
 
     async def run_async(self, state: State) -> None:
         _record_usage(state)
-        turn = request_in(state).turn
-        if turn is None or not turn.owns:
+        request = request_in(state)
+        guard = request.guard
+        if guard is None:
             return
         from django_ai_sdk.adapters.citations.registry import current_registry
 
         if (registry := current_registry.get()) is not None:
-            await mask_sources(turn.guard, registry)
-            turn.guard.set_sources(registry.all, seeded=registry.seeded)
-
-
-class FinishHook(OversightHook):
-    """Judge the answer the run wrote, then pass, mask or withhold it in the run's messages.
-
-    The TurnRequest's `answer` says which text that is (see `Answer`). With its
-    `schema` (a Pydantic model), a masked answer that no longer fits is withheld.
-    """
-
-    allowed_hook_points = ["after_run"]  # noqa: RUF012
-
-    async def run_async(self, state: State) -> None:
-        request = request_in(state)
-        turn = request.turn
-        if turn is None or not turn.owns or turn.refused:
+            await mask_sources(guard, registry)
+            guard.set_sources(registry.all, seeded=registry.seeded)
+        if request.refused:
             return
-        guard = turn.guard
-        answer = request.answer or Answer()
         messages = list(state.data.get("messages") or [])
-        text = answer.text(messages[turn.first :])
+        produced = messages[request.first :]
+        text = request.answer.text(produced) if request.answer else _written(produced)
         if not text:
             guard.note_error("no result")
             return
@@ -113,8 +84,24 @@ class FinishHook(OversightHook):
         if request.schema is not None:
             withhold_unfit(guard, finished, request.schema)
         if finished.replaced:
-            messages = answer.replace(messages, turn.first, finished.output)
+            replace = request.answer.replace if request.answer else _replace_last_reply
+            messages = replace(messages, request.first, finished.output)
             state.set("messages", messages, handler_override=replace_values)
+
+
+def withhold_unfit(guard: TurnGuard, finished: FinishResult, schema: type[BaseModel]) -> None:
+    """Withhold a masked structured answer whose JSON no longer fits `schema`.
+
+    Returning the unmasked original instead would leak what the mask hid.
+    """
+    if not finished.replaced or finished.blocked:
+        return
+    try:
+        schema.model_validate_json(finished.output)
+    except ValidationError:
+        guard.refuse("masked result does not fit its schema")
+        finished.blocked = True
+        finished.message = finished.output = str(Block.DEFAULT_MESSAGE)
 
 
 async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
@@ -122,7 +109,7 @@ async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
 
     The citations card, the stored citations artifact and the lenses all read
     the registry, so none of them should see unmasked text. The gate, the stream
-    and the usage hook call this; each text is masked once.
+    and the finish hook call this; each text is masked once.
     """
     for source in registry.all:
         text = source.content or ""
@@ -131,6 +118,22 @@ async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
         # mask_result keys on the text too, so a changed source is masked again.
         masked = await guard.mask_result(f"source:{source.key}", text)
         source.content = guard.masked_sources[source.key] = masked
+
+
+def _written(produced: list[HaystackChatMessage]) -> str:
+    return "".join(m.text or "" for m in produced if m.is_from(ChatRole.ASSISTANT))
+
+
+def _replace_last_reply(
+    messages: list[HaystackChatMessage], first: int, output: str
+) -> list[HaystackChatMessage]:
+    for index in range(len(messages) - 1, first - 1, -1):
+        message = messages[index]
+        if message.is_from(ChatRole.ASSISTANT) and message.text and not message.tool_calls:
+            meta = {**message.meta, REPLACED_META_KEY: True}
+            replaced = HaystackChatMessage.from_assistant(output, meta=meta)
+            return [*messages[:index], replaced, *messages[index + 1 :]]
+    return [*messages, stand_in(output)]
 
 
 def _record_usage(state: State) -> None:
@@ -148,4 +151,4 @@ def _model(state: State) -> str | None:
     return None
 
 
-__all__ = ["Answer", "FinishHook", "UsageHook", "WholeRun", "mask_sources"]
+__all__ = ["FinishHook", "WholeRun", "mask_sources", "withhold_unfit"]

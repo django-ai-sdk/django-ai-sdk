@@ -97,34 +97,6 @@ class PromptInjection(JudgeLens):
     judges = [Patterns(INJECTION_PATTERNS), "classifier?"]  # noqa: RUF012
 
 
-class PIIInput(PIILens):
-    name = "pii_input"
-    label = "Personal data in question"
-
-
-class SecretsInput(SecretsLens):
-    name = "secrets_input"
-    label = "Secrets in question"
-
-
-class SecretsTool(SecretsLens):
-    name = "secrets_tool"
-    label = "Secrets in tool call"
-    subject = Subject.TOOL_CALL
-
-
-class PIITool(PIILens):
-    name = "pii_tool"
-    label = "Personal data in tool call"
-    subject = Subject.TOOL_CALL
-
-
-class PIIOutput(PIILens):
-    name = "pii_output"
-    label = "Personal data in answer"
-    subject = Subject.OUTPUT
-
-
 class Exfiltration(PatternLens):
     name = "exfiltration"
     label = "Exfiltration markup"
@@ -140,11 +112,11 @@ class SecurityPack(Policy):
     origin = "pack:security"
     lenses = [
         PromptInjection,
-        PIIInput,
-        SecretsInput,
-        SecretsTool,
-        PIITool,
-        PIIOutput,
+        PIILens(name="pii_input", label="Personal data in question"),
+        SecretsLens(name="secrets_input", label="Secrets in question"),
+        SecretsLens(name="secrets_tool", label="Secrets in tool call", subject=Subject.TOOL_CALL),
+        PIILens(name="pii_tool", label="Personal data in tool call", subject=Subject.TOOL_CALL),
+        PIILens(name="pii_output", label="Personal data in answer", subject=Subject.OUTPUT),
         Exfiltration,
     ]
     rules = [
@@ -196,12 +168,7 @@ class SecurityPack(Policy):
 __all__ = [
     "EXFILTRATION_PATTERNS",
     "INJECTION_PATTERNS",
-    "PIIInput",
-    "PIIOutput",
-    "PIITool",
     "Exfiltration",
     "PromptInjection",
-    "SecretsInput",
-    "SecretsTool",
     "SecurityPack",
 ]

@@ -108,7 +108,7 @@ class TestRecordingFailures:
     async def test_close_cancels_tool_results_still_being_masked(self):
         async def slow_pii(text, view):
             await asyncio.sleep(1.0)
-            spans = PIILens(name="pii", kinds=["email"]).find(text)
+            spans = PIILens(name="pii", kinds=["email"]).finder.find(text, "pii")
             return Answer(value=[span.label for span in spans], spans=spans)
 
         name = policy(
@@ -207,7 +207,7 @@ class TestRecordingFailures:
     def test_a_masked_result_that_no_longer_fits_is_recorded_blocked(self):
         from pydantic import BaseModel
 
-        from django_ai_sdk.oversight.agent_run import withhold_unfit
+        from django_ai_sdk.oversight.plugin.finish import withhold_unfit
         from django_ai_sdk.oversight.guard import FinishResult
 
         class Count(BaseModel):

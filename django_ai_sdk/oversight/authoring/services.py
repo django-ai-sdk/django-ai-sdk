@@ -2,11 +2,10 @@
 
 A save replaces the policy's definition. Toggles change only what the policy itself
 declares: its rules' modes, its lenses, or the whole policy. What it extends always runs.
-A policy cannot be deleted while another authored policy extends it, an agent names it
-in code, or it is DEFAULT_POLICY: turns that use it would be refused.
+A policy cannot be deleted while an agent names it in code, or while it is
+DEFAULT_POLICY: turns that use it would be refused.
 
-Every write locks the row, so a save and a toggle never overwrite each other, and
-rechecks the authored policies that extend it, so a change never breaks one.
+Every write locks the row, so a save and a toggle never overwrite each other.
 """
 
 from __future__ import annotations
@@ -20,9 +19,7 @@ from django_ai_sdk.errors import UserError
 from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
 from django_ai_sdk.oversight.authoring.definitions import (
     DefinitionError,
-    build_policy_class,
     check_definition,
-    in_force,
     is_authored,
 )
 from django_ai_sdk.oversight.authoring.loader import loader
@@ -35,7 +32,7 @@ from django_ai_sdk.oversight.authoring.schemas import (
     TryOut,
 )
 from django_ai_sdk.oversight.permissions import OversightAccess, reader_id
-from django_ai_sdk.oversight.registry import drafted, get_policy_class
+from django_ai_sdk.oversight.registry import get_policy_class
 from django_ai_sdk.oversight.resolve import aload_policies
 from django_ai_sdk.oversight.types import Mode
 from django_ai_sdk.permissions import ConflictError, Operation
@@ -44,7 +41,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
-    from django_ai_sdk.oversight.policy import Policy
     from django_ai_sdk.types import UserType
 
 VIEW = Operation.VIEW_OVERSIGHT_AUTHORING
@@ -212,83 +208,33 @@ def _write(
     *,
     create: bool = False,
 ) -> AuthoredPolicy | None:
-    """Lock the row, apply `mutate`, check the result and the policies that extend it, save.
+    """Lock the row, apply `mutate`, check the result, save.
 
     None when the row does not exist and `create` is False. Raises UserError instead of
-    saving a change that does not check. Its authored parents are locked too, so a
-    concurrent delete of one either waits for this save or makes this check fail.
-    A new name has no row to lock: when another request creates it first, this
-    one raises ConflictError.
+    saving a change that does not check. A new name has no row to lock: when another
+    request creates it first, this one raises ConflictError.
     """
+    from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
+
     try:
-        return _write_locked(name, mutate, user, create=create)
+        with transaction.atomic():
+            row = AuthoredPolicy.objects.select_for_update().filter(name=name).first()
+            if row is None and not create:
+                return None
+            row = row or AuthoredPolicy(name=name)
+            mutate(row)
+            # Read after the lock, so what other processes saved counts.
+            loader._load()
+            try:
+                check_definition(name, row.definition())
+            except DefinitionError as exc:
+                raise UserError(f"This policy cannot be saved: {exc}") from None
+            row.updated_by_id = reader_id(user)
+            row.save()
     except IntegrityError:
         raise ConflictError(f"Policy {name!r} was created at the same time. Try again.") from None
-
-
-def _write_locked(
-    name: str,
-    mutate: Callable[[AuthoredPolicy], None],
-    user: UserType,
-    *,
-    create: bool,
-) -> AuthoredPolicy | None:
-    from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
-
-    with transaction.atomic():
-        row = AuthoredPolicy.objects.select_for_update().filter(name=name).first()
-        if row is None and not create:
-            return None
-        row = row or AuthoredPolicy(name=name)
-        mutate(row)
-        list(AuthoredPolicy.objects.select_for_update().filter(name__in=row.extends or []))
-        # Read after the locks, so what other processes saved counts.
-        loader._load()
-        definition = row.definition()
-        try:
-            check_definition(name, definition)
-            draft = build_policy_class(name, in_force(definition, active=row.active))
-        except DefinitionError as exc:
-            raise UserError(f"This policy cannot be saved: {exc}") from None
-        broken = _broken_children(name, draft)
-        if broken:
-            raise UserError(f"This change breaks what extends it: {'; '.join(broken)}")
-        row.updated_by_id = reader_id(user)
-        row.save()
     loader._load()
     return row
-
-
-def _broken_children(name: str, draft: type[Policy]) -> list[str]:
-    """Recheck every authored policy below `name` against `draft`, and list what fails.
-
-    Breadth first: each child that checks stands in for itself while its own children
-    are checked, so a grandchild is checked against the draft through its parent. One
-    that was broken already is skipped, so it never blocks an unrelated change.
-    """
-    from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
-
-    rows = list(AuthoredPolicy.objects.exclude(name=name))
-    drafts: dict[str, type[Policy]] = {name: draft}
-    checked = {name, *loader.broken}
-    problems: list[str] = []
-    todo = [name]
-    while todo:
-        parent = todo.pop(0)
-        for row in rows:
-            if parent not in (row.extends or []) or row.name in checked:
-                continue
-            checked.add(row.name)
-            try:
-                with drafted(drafts):
-                    drafts[row.name], _ = check_definition(
-                        row.name, in_force(row.definition(), active=row.active)
-                    )
-            except DefinitionError as exc:
-                problems.append(f"{row.name!r} would not load: {exc}")
-                continue
-            todo.append(row.name)
-    return problems
 
 
 def _delete(name: str) -> bool:
@@ -299,7 +245,7 @@ def _delete(name: str) -> bool:
         row = AuthoredPolicy.objects.select_for_update().filter(name=name).first()
         if row is None:
             return False
-        users = _still_used(name)
+        users = _dependents(name)
         if users:
             raise UserError(f"{name!r} is still used: {'; '.join(users)}.")
         row.delete()
@@ -314,22 +260,11 @@ def _with(items: list[dict[str, Any]], name: str, what: str, values: dict[str, A
     return [{**item, **values} if item.get("name") == name else item for item in items]
 
 
-def _still_used(name: str) -> list[str]:
-    """List what still depends on `name`: authored children, agents that name it in code,
-    and DEFAULT_POLICY.
-
-    Children are read from the table, so one that does not load counts too. A child
-    saved meanwhile locks this row first (`_write`), so it waits for the delete.
-    """
-    from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
+def _dependents(name: str) -> list[str]:
+    """List what still depends on `name`: agents that name it in code, and DEFAULT_POLICY."""
     from django_ai_sdk.oversight.conf import setting as oversight_setting
 
-    # Filtered here: SQLite has no JSON contains.
-    found = [
-        f"policy {child!r} extends it"
-        for child, extends in AuthoredPolicy.objects.values_list("name", "extends")
-        if child != name and name in (extends or [])
-    ]
+    found = []
     if oversight_setting("DEFAULT_POLICY") == name:
         found.append("it is DEFAULT_POLICY")
     from django_ai_sdk.agents.registry import registry

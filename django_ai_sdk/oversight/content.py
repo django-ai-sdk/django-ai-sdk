@@ -224,7 +224,7 @@ def _mask_detected(text: str) -> str:
     """Mask personal data (every kind, all countries) and secrets in `text`."""
     if not text:
         return text
-    spans = [span for lens in _detectors() for span in lens.find(text)]
+    spans = [span for lens in _detectors() for span in lens.finder.find(text, lens.name)]
     return mask_all(text, [(spans, "[{label}]")]) if spans else text
 
 

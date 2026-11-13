@@ -1,6 +1,6 @@
 """Which history a turn judges: the client's copy, or the stored thread that vouches for it.
 
-`Agent.run`, chat and `turn()` all decide it here, before the turn opens.
+`Agent.run` and chat both decide it here, before the turn opens.
 """
 
 from __future__ import annotations

@@ -1,166 +1,117 @@
-"""Joining oversight to a Haystack Agent: the hooks in their places, guarded tools, a task per run."""
+"""Running a Haystack Agent with oversight: the turn around the run, the hooks inside it."""
 
 from __future__ import annotations
 
-import asyncio
-import functools
-import inspect
 from typing import Any
 
-from haystack.components.agents import Agent as HaystackAgent
-from haystack.core.serialization import generate_qualified_class_name
-
-from django_ai_sdk.oversight.plugin.finish import FinishHook, UsageHook
+from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
+from django_ai_sdk.oversight.plugin.finish import FinishHook
 from django_ai_sdk.oversight.plugin.gate import GateHook
 from django_ai_sdk.oversight.plugin.tools import OversightToolHook, OversightToolResultHook
-from django_ai_sdk.oversight.plugin.toolset import GuardedToolset
 from django_ai_sdk.oversight.plugin.turn import (
-    REQUEST_KEY,
     OversightHook,
     OversightStopHook,
-    TurnCloseHook,
-    TurnOpenHook,
     TurnRequest,
-    close_turn,
+    agent_of,
+    open_turn,
 )
 
 
-def oversight_hooks(agent: Any = None) -> dict[str, list[Any]]:
-    """The oversight hooks for `agent`, an SDK Agent whose policy they enforce.
-
-    Without `agent`, the run's TurnRequest names it.
-    """
+def oversight_hooks() -> dict[str, list[Any]]:
+    """The oversight hooks, at the points they run. The run's TurnRequest names the agent."""
     return {
-        "before_run": [TurnOpenHook(agent), GateHook()],
+        "before_run": [GateHook()],
         "before_llm": [OversightStopHook()],
         "before_tool": [OversightToolHook()],
         "after_tool": [OversightToolResultHook()],
-        "after_run": [UsageHook(), FinishHook(), TurnCloseHook()],
+        "after_run": [FinishHook()],
     }
 
 
-def with_oversight(hooks: dict[str, list[Any]] | None, agent: Any = None) -> dict[str, list[Any]]:
+def with_oversight(hooks: dict[str, list[Any]] | None) -> dict[str, list[Any]]:
     """Merge the oversight hooks into `hooks`, once, where each must run.
 
-    Opening, the gate and the stop check come first, and so does the tool check,
-    so a refused call is neither budgeted nor logged. Results are masked before
-    ToolOutputLimitHook cuts them. Usage, finish and closing come last, after
-    any hook that completes the answer. Oversight hooks already in `hooks` are
-    moved to these places.
+    They come first, so a refused call is neither budgeted nor logged and a
+    result is masked before any other hook reads or cuts it. Only finish comes
+    last, after any hook that completes the answer. Oversight hooks already in
+    `hooks` are moved to these places.
     """
-    from django_ai_sdk.agents.tool_agent import ToolOutputLimitHook
-
-    if agent is None:
-        # Keep the agent an installed TurnOpenHook already enforces.
-        opening = (hooks or {}).get("before_run", [])
-        agent = next((h.agent for h in opening if isinstance(h, TurnOpenHook)), None)
-    ours = oversight_hooks(agent)
     merged = {
         point: [h for h in items if not isinstance(h, OversightHook)]
         for point, items in (hooks or {}).items()
     }
-    after_tool = merged.get("after_tool", [])
-    cut = next(
-        (i for i, h in enumerate(after_tool) if isinstance(h, ToolOutputLimitHook)),
-        len(after_tool),
-    )
-    for point in ("before_run", "before_llm", "before_tool"):
-        merged[point] = [*ours[point], *merged.get(point, [])]
-    merged["after_tool"] = [*after_tool[:cut], *ours["after_tool"], *after_tool[cut:]]
-    merged["after_run"] = [*merged.get("after_run", []), *ours["after_run"]]
+    for point, ours in oversight_hooks().items():
+        others = merged.get(point, [])
+        merged[point] = [*others, *ours] if point == "after_run" else [*ours, *others]
     return merged
 
 
-class InstalledAgent(HaystackAgent):
-    """A Haystack Agent with oversight installed: see `install`.
-
-    Each async run gets a task of its own, so the turn its hooks make current
-    ends with the run, and the turn is closed with the error when the run
-    raises (Haystack then skips after_run).
-    """
-
-    async def run_async(
-        self,
-        messages: Any,
-        streaming_callback: Any = None,
-        *,
-        generation_kwargs: Any = None,
-        tools: Any = None,
-        hook_context: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        # Never empty: Haystack swaps an empty hook_context for its own, and the
-        # turn would be lost to the caller.
-        context = {} if hook_context is None else hook_context
-        context.setdefault(REQUEST_KEY, TurnRequest())
-        run = super().run_async(
-            messages,
-            streaming_callback,
-            generation_kwargs=generation_kwargs,
-            tools=tools,
-            hook_context=context,
-            **kwargs,
-        )
-        try:
-            return await asyncio.create_task(run)
-        except BaseException as exc:
-            await close_turn(context, error=_run_error(exc))
-            raise
-
-    def to_dict(self) -> dict[str, Any]:
-        """Saved as the Agent it was, with the hooks: install() it again once loaded."""
-        data = super().to_dict()
-        data["type"] = generate_qualified_class_name(_uninstalled(type(self)))
-        return data
-
-
-# Haystack requires run_async to declare the same parameters, typed the same, as run.
-InstalledAgent.run_async.__signature__ = inspect.signature(HaystackAgent.run_async)  # ty: ignore[unresolved-attribute]
-
-
-def install(haystack_agent: Any, agent: Any = None) -> InstalledAgent:
-    """A copy of `haystack_agent` with the oversight hooks in their places and guarded tools.
-
-    The one place oversight joins a Haystack Agent: `run_agent` calls it on every
-    run. `agent` is the SDK Agent whose policy applies, unless the run's
-    TurnRequest or an installed TurnOpenHook already names it. The copy keeps
-    the class of `haystack_agent`, with each async run in a task of its own.
-    """
-    # Like Agent.clone(), into the installed class.
-    params = inspect.signature(type(haystack_agent).__init__).parameters
-    init: dict[str, Any] = {
-        name: getattr(haystack_agent, name) for name in params if name != "self"
-    }
-    init["hooks"] = with_oversight(haystack_agent.hooks, agent)
-    init["tools"] = GuardedToolset.wrap(haystack_agent.tools)
-    return _installed(type(haystack_agent))(**init)
-
-
 async def run_agent(
-    agent: Any, messages: list[Any], *, hook_context: dict[str, Any] | None = None, **kwargs: Any
+    agent: Any,
+    messages: list[Any],
+    *,
+    request: TurnRequest | None = None,
+    hook_context: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """Run a Haystack Agent with oversight. Read the turn with `turn_of(hook_context)`."""
-    return await install(agent).run_async(messages=messages, hook_context=hook_context, **kwargs)
+    """Run a Haystack Agent with oversight. Read what it decided on `request` afterwards.
+
+    The turn opens before the run, under the policy of `request.agent`, or the
+    run joins the turn it runs inside. It closes after the run, also when the
+    run raises, since Haystack then skips after_run.
+    """
+    request = request or TurnRequest()
+    kwargs["hook_context"] = request.context(**(hook_context or {}))
+    agent = _overseen(agent)
+    if request.oversight is False:
+        # Unguarded on purpose: it does not join the outer turn either.
+        with guarding(None):
+            return await agent.run_async(messages=messages, **kwargs)
+    guard = request.guard = await _open(request, messages)
+    if guard is None:
+        return await agent.run_async(messages=messages, **kwargs)
+    async with closing_turn(guard, keep_open=request.keep_open):
+        with guarding(guard):
+            return await agent.run_async(messages=messages, **kwargs)
 
 
-@functools.cache
-def _installed(cls: type[HaystackAgent]) -> type[InstalledAgent]:
-    """`cls` with oversight installed: InstalledAgent itself, or a subclass of both."""
-    if issubclass(cls, InstalledAgent):
-        return cls
-    if cls is HaystackAgent:
-        return InstalledAgent
-    return type(f"Installed{cls.__name__}", (InstalledAgent, cls), {"__module__": cls.__module__})
+def run_agent_sync(
+    agent: Any, messages: list[Any], *, request: TurnRequest, **kwargs: Any
+) -> dict[str, Any]:
+    """Run a Haystack Agent with oversight from sync code, which cannot open a turn.
+
+    Inside a turn the run joins it, and its tool calls are refused, since the
+    guard only works from async code. Ask `needs_own_turn(request)` first: a run
+    that needs a turn of its own must not run here.
+    """
+    return _overseen(agent).run(messages=messages, hook_context=request.context(), **kwargs)
 
 
-def _uninstalled(cls: type) -> type:
-    return next(c for c in cls.__mro__ if not issubclass(c, InstalledAgent))
+def _overseen(agent: Any) -> Any:
+    """A copy of `agent` with the oversight hooks in their places."""
+    return agent.clone(hooks=with_oversight(agent.hooks))
 
 
-def _run_error(exc: BaseException) -> str:
-    if isinstance(exc, GeneratorExit | asyncio.CancelledError):
-        return "disconnected"
-    return type(exc).__name__
+async def _open(request: TurnRequest, messages: list[Any]) -> TurnGuard | None:
+    """Open the run's own turn. None when it joins the turn it runs inside, or has no policy."""
+    agent = agent_of(request)
+    if agent is None:
+        return None
+    # GateHook takes the question again once Haystack rendered any user_prompt.
+    question = next((m.text or "" for m in reversed(messages) if m.is_from("user")), "")
+    guard, opened = await open_turn(
+        agent,
+        channel=request.channel,
+        user=request.user,
+        thread_id=request.thread_id,
+        input=question,
+        oversight=request.oversight,
+    )
+    if not opened:
+        return None
+    guard.message_id = request.message_id or guard.message_id
+    guard.on_tool_results = request.on_tool_results
+    return guard
 
 
-__all__ = ["InstalledAgent", "install", "oversight_hooks", "run_agent", "with_oversight"]
+__all__ = ["oversight_hooks", "run_agent", "run_agent_sync", "with_oversight"]

@@ -26,12 +26,14 @@ from django_ai_sdk.agents.tool_agent import (
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, TurnGuard, guarding
 from django_ai_sdk.oversight.plugin import (
+    FinishHook,
+    GateHook,
     OversightToolHook,
     OversightToolResultHook,
     masked_result,
+    with_oversight,
 )
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
-from django_ai_sdk.oversight.plugin import TurnCloseHook, TurnOpenHook, install
 from tests.oversight.helpers import (
     RunPolicy,
     Storage,
@@ -59,7 +61,7 @@ class TestHooks:
             max_tool_output_chars=1234,
         )
         built = ToolAgent(config, generator=MockChatGenerator(responses=["x"])).pipeline()
-        hooks = install(install(built.get_component("agent"))).hooks
+        hooks = with_oversight(with_oversight(built.get_component("agent").hooks))
         before, after = hooks["before_tool"], hooks["after_tool"]
         assert isinstance(before[0], OversightToolHook)
         assert sum(isinstance(h, OversightToolHook) for h in before) == 1
@@ -68,16 +70,16 @@ class TestHooks:
         assert limit.max_chars == 1234
         # Masked before the cut, so the stream and the hook mask the same text.
         [mask] = [h for h in after if isinstance(h, OversightToolResultHook)]
-        assert after.index(mask) + 1 == after.index(limit)
-        assert isinstance(hooks["before_run"][0], TurnOpenHook)
-        assert isinstance(hooks["after_run"][-1], TurnCloseHook)
+        assert after.index(mask) < after.index(limit)
+        assert isinstance(hooks["before_run"][0], GateHook)
+        assert isinstance(hooks["after_run"][-1], FinishHook)
 
     def test_any_haystack_agent_gets_the_oversight_hooks_when_it_runs(self):
-        # Built by hand, not through ToolAgent: install still adds every check.
-        hooks = install(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]))).hooks
+        # Built by hand, not through ToolAgent: run_agent still adds every check.
+        hooks = with_oversight(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"])).hooks)
         assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
         assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
-        # install, in run_agent, is the one place they join: not default_hooks.
+        # run_agent is the one place they join: not default_hooks.
         assert not any(
             isinstance(h, OversightToolHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
         )

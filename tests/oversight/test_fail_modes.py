@@ -254,14 +254,14 @@ class TestFailModeAtEachStage:
     async def test_conditions_are_three_valued(self):
         failed = Answer(error="RuntimeError")
         answers = {"a": failed, "b": Answer(value=True)}
-        assert (~L("a").is_true).evaluate(answers)  # failed, but not said to: false
-        assert not (~L("a").is_true).evaluate(answers, {"a"})
-        assert not (L("a").is_true | ~L("b").is_true).evaluate(answers, {"a"})
-        assert (L("a").is_true | L("b").is_true).evaluate(answers, {"a"})
-        assert not (L("a").is_false & L("b").is_true).evaluate(answers, {"a"})
-        assert L("a").missing.evaluate(answers, {"a"})
+        assert (~L("a").is_true).decide(answers)  # failed, but not said to: false
+        assert not (~L("a").is_true).decide(answers, {"a"})
+        assert not (L("a").is_true | ~L("b").is_true).decide(answers, {"a"})
+        assert (L("a").is_true | L("b").is_true).decide(answers, {"a"})
+        assert not (L("a").is_false & L("b").is_true).decide(answers, {"a"})
+        assert L("a").missing.decide(answers, {"a"})
         # An unsure answer kept after a later failure is usable: compared as usual.
-        assert L("a").is_true.evaluate({"a": Answer(value=True, confidence=0.4)}, {"a"})
+        assert L("a").is_true.decide({"a": Answer(value=True, confidence=0.4)}, {"a"})
 
     async def test_a_gate_failure_counts_at_finish(self):
         name = policy(

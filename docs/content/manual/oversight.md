@@ -60,7 +60,7 @@ Each agent runs under its own policy. A run inside an active turn joins it when 
 
 `run()` judges what the caller sent on copies: only the last user message of the list is masked in place, so what the caller stores is the masked copy. History the server stored itself is judged on its own turn, not again: with a `thread_id` whose thread is stored, under a policy whose gate masks, the stored messages are the history (the thread run endpoints, as chat); a history that is the stored thread as stored stands. Any other history is judged by `TurnGuard.gate_history()` before the question.
 
-The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: open a `turn()` for that. `django_ai_sdk.oversight.history` holds the stored-thread rules `run()`, chat and `turn()` share.
+The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: run it through `run_agent()` for that. `django_ai_sdk.oversight.history` holds the stored-thread rules `run()` and chat share.
 
 ## Lenses
 
@@ -79,11 +79,11 @@ Every lens:
 | `enabled` | `True` | Off: the lens never runs. |
 | `needs_grounding` | `False` | Only asked when the turn has sources or tool results to judge against. |
 
-Each kind adds its own, and only its own: an attribute declared on a lens whose kind or answer type does not read it is refused when the policy is checked.
+Each kind adds its own:
 
 | Kind | Answers | Own attributes |
 | --- | --- | --- |
-| `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words; the label with the most hits comes first), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords), `exclusive` (each stretch of text gets one label, the first pattern's). What patterns find is a fact: hit and miss both have confidence `1`. |
+| `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords). Each stretch of text gets one label, the first pattern's. What patterns find is a fact: hit and miss both have confidence `1`. |
 | `CheckLens` | `Flag` by default | `validators`: functions `fn(text)` or `fn(text, view)`, or names registered with `register_validator`; each raises `Violation(message)` to say yes, and the messages are the answer's reason. `check(text, view)` runs them; override it to answer another type, returning the value, an `Answer` (with a reason or confidence) or `None` to abstain. A sync `check` runs in a thread. `timeout` (`30` s). |
 | `JudgeLens` | `Flag` by default | `judges`: tried in order (instances, aliases, optional aliases such as `"judge?"`, or `{"class": ..., **kwargs}`); `min_confidence` (`0.75`: an answer below it asks the next judge); `question` (asked verbatim); `guidance` (scale anchors, edge cases); `reads_question` (`True`: a tool-call lens also reads the question that led to the call). |
 
@@ -121,7 +121,7 @@ Local (`external = ""`: nothing leaves the process):
 
 | Class | Answers |
 | --- | --- |
-| `Patterns(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, exclusive=False, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked (`ai_sdk.oversight.W004`). |
+| `Patterns(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked. |
 | `LocalClassifier(model=ENGLISH, *, file="onnx/model_quantized.onnx", positive="", timeout=None)` | An ONNX model from the Hugging Face Hub, run by onnxruntime in this process (the `local` extra, no torch). Zero-shot by default: yes/no (entails the lens's `yes`), label (the criterion it entails most, as "This text is about <criterion>." unless it starts with "This text") and score lenses, about 20 ms each on a CPU. `ENGLISH` (87 MB) and `MULTILINGUAL` (340 MB) are MIT-licensed NLI models; `positive=` makes a model trained for one question (a prompt-injection detector) answer yes/no lenses. Reads one text, the question or the answer, of at most 1,600 characters: lenses on sources or tool calls, lenses that need grounding and "taken from" go to the next judge. Until its model is loaded it answers `unavailable` and loads it in the background, so the next judge is asked, `FAIL_MODE` applies and reflect asks again; a failed load is logged and tried again a minute later. `judges.local.load()` loads it at startup. |
 
 Remote (`external` names who receives the turn's content; secrets are masked first):
@@ -223,7 +223,7 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `GateResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it refuses) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the turn, gate, stop, usage and finish hooks. `run_agent` installs it on every Haystack Agent the SDK runs (`install()`), so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the gate, stop and finish hooks. `run_agent` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
 
 A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
@@ -386,24 +386,19 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.E004` | A judge lens names an alias `JUDGES` does not define (optional `?` aliases excepted). |
 | `ai_sdk.oversight.E005` | An alias cannot be built. |
 | `ai_sdk.oversight.E006` | `DEFAULT_POLICY` names an unknown policy. |
-| `ai_sdk.oversight.E007` | An enforced rule reads a lens no judge here can answer. |
+| `ai_sdk.oversight.E007` | An enforced rule reads a lens no judge here can answer. A warning, not an error, when the lens's judges are all optional aliases and none is defined: the rule never acts. |
 | `ai_sdk.oversight.E009` | An agent class names a policy no app registers: every turn it runs is refused. |
 | `ai_sdk.oversight.E010` | Two policy classes declare the same name; the first one registered keeps it. |
 | `ai_sdk.oversight.E011` | An agent class's `oversight` names no policy (set after the class was defined). |
 | `ai_sdk.oversight.E012` | `AI_SDK_OVERSIGHT` has an unknown key, or a value of the wrong kind; the hint says how to set it. |
-| `ai_sdk.oversight.E013` | Deploy check: an enforced gate or tool rule that blocks, masks or takes tools away reads a lens that can ask an external judge (any judge with `external` set) with a timeout longer than that stage's deadline. That includes a judge behind patterns whose miss is unsure (`miss_confidence` below the lens's `min_confidence`): it is asked on every miss. A slow answer fails the lens, and the rule refuses the turn or the tool call. |
+| `ai_sdk.oversight.E013` | Deploy warning: an enforced gate or tool rule that blocks, masks or takes tools away reads a lens with an external judge (any judge with `external` set) whose timeout is longer than that stage's deadline. A slow answer fails the lens, and the rule refuses the turn or the tool call. |
 | `ai_sdk.oversight.E014` | A `Notify(to=[...])` names a notifier `NOTIFIERS` does not have (checked when `NOTIFIERS` is set). |
 | `ai_sdk.oversight.W001` | Deploy check: `CAPTURE` is `"full"`, so content is kept unmasked. |
-| `ai_sdk.oversight.W003` | Judge lenses of the policies in use (`DEFAULT_POLICY`, the ones agent classes name, and what they extend) have no model judge here, listed in one warning by policy: skipped on every turn, or answered by their `Patterns` alone ("patterns only"). |
-| `ai_sdk.oversight.W004` | A judge lens lists judges it never asks: a `Patterns` judge before them is sure when it finds nothing. |
 | `ai_sdk.oversight.W005` | An alias's judge cannot run here, such as `TypeSafe` without `TYPESAFE_API_KEY` or `typesafe-sdk`. |
 | `ai_sdk.oversight.W007` | Deploy check, against a database (`check --deploy --database default`): rows whose `expires_at` passed more than two days ago still exist, so `oversight_prune` does not run. |
-| `ai_sdk.oversight.W008` | An enforced rule reads lenses whose judges are all optional aliases and none is defined: it never acts. |
 | `ai_sdk.oversight.W011` | A policy in use masks or blocks the answer at finish but streams it live: the client has the text before finish judges it. Use `stream_mode = "auto"` or a client that applies the `replace` notice. |
-| `ai_sdk.oversight.W013` | An agent with a policy streams chat through a `get_pipeline_adapter()` annotated to return something other than the SDK's `Stream`: its chats are refused, or run unchecked if the policy fails open. |
 | `ai_sdk.oversight.W014` | Deploy check: the `TASKS` backend runs reflect and notifications inline in the request (`ImmediateBackend`), never runs them (`DummyBackend`), or does not load. |
 | `ai_sdk.oversight.W015` | A policy in use has an enforced `Notify` rule, but `NOTIFIERS` is empty: nobody is told. |
-| `ai_sdk.oversight.W016` | An agent with a policy overrides `run()` and never calls `super().run()`: the model calls it makes are not checked. Call `super().run()`, or open a `turn()` around your own model calls. |
 | `ai_sdk.oversight.W017` | Deploy check, against a database (`check --deploy --database default`): turns have been open for more than a day, so `oversight_sweep` does not run. |
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.

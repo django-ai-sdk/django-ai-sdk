@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from django_ai_sdk.oversight.actions import ACTION_ORDER, Action, action_from_dict
-from django_ai_sdk.oversight.conditions import Condition, condition_from_dict
+from django_ai_sdk.oversight.conditions import Condition
 from django_ai_sdk.oversight.types import Mode, rank
 
 
@@ -35,7 +35,7 @@ class Rule:
         description: str = "",
     ) -> None:
         self.name = name
-        self.when = when if isinstance(when, Condition) else condition_from_dict(when)
+        self.when = when if isinstance(when, Condition) else Condition(when)
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
         # Shown to the user when the rule refuses (a block, or a tool it took away).
