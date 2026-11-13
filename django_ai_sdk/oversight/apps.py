@@ -32,7 +32,8 @@ class OversightConfig(AppConfig):
 
         autodiscover_modules("oversight")
 
-        from django_ai_sdk.oversight import signals
+        # Deleting a thread or a user forgets what oversight holds about it.
+        import django_ai_sdk.oversight.signals  # noqa: F401
         from django_ai_sdk.oversight.checks import (
             check_oversight,
             check_oversight_deploy,
@@ -42,8 +43,6 @@ class OversightConfig(AppConfig):
         register_check(check_oversight)
         register_check(check_oversight_deploy, deploy=True)
         register_check(check_oversight_retention, Tags.database, deploy=True)
-        # Deleting a thread or a user forgets what oversight holds about it.
-        signals.connect()
 
 
 def require_apps(app_name: str, *needed: str) -> None:

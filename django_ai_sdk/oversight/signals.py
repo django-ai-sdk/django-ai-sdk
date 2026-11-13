@@ -8,9 +8,11 @@ from __future__ import annotations
 from itertools import batched
 from typing import Any
 
+from django.conf import settings
 from django.core.signals import setting_changed
 from django.db import transaction
 from django.db.models.signals import post_delete
+from django.dispatch import receiver
 
 from django_ai_sdk.logger import get_logger
 
@@ -20,6 +22,11 @@ logger = get_logger(__name__)
 FORGET_BATCH = 500
 
 
+@receiver(
+    post_delete,
+    sender="django_ai_sdk.Thread",
+    dispatch_uid="django_ai_sdk.oversight.forget_deleted_thread",
+)
 def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
     """Forget a deleted thread's oversight content."""
     from django_ai_sdk.oversight.content import forget_thread
@@ -35,6 +42,11 @@ def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
         logger.exception("Oversight could not forget deleted thread {}", thread_id)
 
 
+@receiver(
+    post_delete,
+    sender=settings.AUTH_USER_MODEL,
+    dispatch_uid="django_ai_sdk.oversight.forget_deleted_user",
+)
 def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
     """Forget a deleted user on the record and the content of their threadless turns."""
     actor_id = str(instance.pk)
@@ -74,6 +86,7 @@ def forget_actor(actor_id: str) -> int:
     return turns.update(actor_id="")
 
 
+@receiver(setting_changed, dispatch_uid="django_ai_sdk.oversight.settings_changed")
 def settings_changed(setting: str, **kwargs: Any) -> None:
     if setting == "AI_SDK_OVERSIGHT":
         from django_ai_sdk.oversight.resolve import invalidate
@@ -81,24 +94,4 @@ def settings_changed(setting: str, **kwargs: Any) -> None:
         invalidate()
 
 
-def connect() -> None:
-    from django.conf import settings
-
-    from django_ai_sdk.conversation.models import Thread
-
-    post_delete.connect(
-        forget_deleted_thread,
-        sender=Thread,
-        dispatch_uid="django_ai_sdk.oversight.forget_deleted_thread",
-    )
-    post_delete.connect(
-        forget_deleted_user,
-        sender=settings.AUTH_USER_MODEL,
-        dispatch_uid="django_ai_sdk.oversight.forget_deleted_user",
-    )
-    setting_changed.connect(
-        settings_changed, dispatch_uid="django_ai_sdk.oversight.settings_changed"
-    )
-
-
-__all__ = ["connect", "forget_actor", "forget_deleted_thread", "forget_deleted_user"]
+__all__ = ["forget_actor", "forget_deleted_thread", "forget_deleted_user"]
