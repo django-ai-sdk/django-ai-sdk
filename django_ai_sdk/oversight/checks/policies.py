@@ -62,7 +62,7 @@ def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool
     A name in `to` that no notifier has is an error. An enforced Notify while no
     notifier is configured is a warning, for policies in use.
     """
-    from django_ai_sdk.oversight.actions import Notify
+    from django_ai_sdk.oversight.rules import Notify
     from django_ai_sdk.oversight.types import Mode
 
     messages: list[Any] = []

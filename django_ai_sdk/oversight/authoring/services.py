@@ -52,11 +52,10 @@ class AuthoringService(OversightAccess):
     @classmethod
     async def catalog(cls, *, user: UserType) -> CatalogOut:
         """List the building blocks a definition may use."""
-        from django_ai_sdk.oversight.actions import ACTION_KINDS
-        from django_ai_sdk.oversight.conditions import META_OPS, OPS
         from django_ai_sdk.oversight.judges.base import alias_table
         from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS, get_validators
         from django_ai_sdk.oversight.registry import get_policies
+        from django_ai_sdk.oversight.rules import ACTION_KINDS, META_OPS, OPS
         from django_ai_sdk.oversight.types import Stage, Subject
 
         await cls.has_perms(user, VIEW)

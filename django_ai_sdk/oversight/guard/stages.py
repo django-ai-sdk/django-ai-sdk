@@ -12,7 +12,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.conf import deadline_ms, setting
 from django_ai_sdk.oversight.guard.judging import (
     answer_lenses,
@@ -31,6 +30,7 @@ from django_ai_sdk.oversight.guard.notices import (
     tool_refusal_message,
 )
 from django_ai_sdk.oversight.patterns import mask_all
+from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Outcome, Stage, Subject
 
 if TYPE_CHECKING:

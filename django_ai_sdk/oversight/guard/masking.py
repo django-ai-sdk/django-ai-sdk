@@ -11,7 +11,6 @@ import asyncio
 import hashlib
 from typing import TYPE_CHECKING
 
-from django_ai_sdk.oversight.actions import Block, Mask, RestrictTools
 from django_ai_sdk.oversight.agents import FINGERPRINT_CHARS
 from django_ai_sdk.oversight.conf import deadline_ms
 from django_ai_sdk.oversight.guard.judging import (
@@ -31,15 +30,16 @@ from django_ai_sdk.oversight.guard.notices import (
 )
 from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.patterns import mask_all
+from django_ai_sdk.oversight.rules import Block, Mask, RestrictTools
 from django_ai_sdk.oversight.types import Mode, Stage, Subject, TextSpan, TurnContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from django_ai_sdk.oversight.actions import Action
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.policy import ResolvedPolicy
+    from django_ai_sdk.oversight.rules import Action
 
 # The spans a mask hides and the template it puts in their place.
 MaskGroup = tuple[list[TextSpan], str]

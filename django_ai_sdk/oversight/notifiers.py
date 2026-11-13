@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Notify
+from django_ai_sdk.oversight.rules import Notify
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

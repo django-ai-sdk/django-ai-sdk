@@ -15,14 +15,17 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.patterns import mask_secrets
 from django_ai_sdk.oversight.types import Answer, Subject
+from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -58,8 +61,6 @@ TITLE_CHARS = 200
 
 def modules_installed(*modules: str) -> bool:
     """Whether every one of `modules` can be imported, without importing it."""
-    from importlib.util import find_spec
-
     return all(find_spec(module) is not None for module in modules)
 
 
@@ -242,8 +243,6 @@ def unit(value: Any, default: float) -> float:
 
 def secret_setting(name: str) -> str:
     """A key named `name`, from the environment or else Django settings. "" when unset."""
-    from django_ai_sdk.utils import resolve_setting
-
     return str(os.environ.get(name) or resolve_setting(name, "") or "").strip()
 
 
@@ -274,8 +273,6 @@ def resolve(spec: Judge | str | dict[str, Any]) -> Judge:
 
 def alias_table() -> dict[str, Any]:
     """All aliases from AI_SDK_OVERSIGHT["JUDGES"]."""
-    from django_ai_sdk.oversight.conf import setting
-
     return dict(setting("JUDGES"))
 
 

@@ -10,14 +10,11 @@ from __future__ import annotations
 
 from django.utils.translation import gettext_lazy as _
 
-from django_ai_sdk.oversight.actions import Alert, Block, Mask
-from django_ai_sdk.oversight.conditions import L
 from django_ai_sdk.oversight.judges.patterns import Patterns
-from django_ai_sdk.oversight.lenses import JudgeLens, PatternLens
+from django_ai_sdk.oversight.lenses import JudgeLens, PatternLens, PIILens, SecretsLens
 from django_ai_sdk.oversight.policy import Policy
-from django_ai_sdk.oversight.presets import PIILens, SecretsLens
 from django_ai_sdk.oversight.registry import register_policy
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Alert, Block, L, Mask, Rule
 from django_ai_sdk.oversight.types import Subject
 
 # A url's scheme, host and path, stopping before the "?".

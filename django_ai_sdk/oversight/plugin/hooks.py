@@ -41,9 +41,9 @@ from django_ai_sdk.agents.tool_agent import (
 )
 from django_ai_sdk.common import ChatMessage, last_user_message
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE, UNCHECKED_TEXT
+from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Stage, ToolCall
 from django_ai_sdk.pricing import token_counts
 

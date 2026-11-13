@@ -19,7 +19,7 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
-from django_ai_sdk.oversight.actions import Block
+from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.checks import check_oversight, check_oversight_deploy
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.types import Stage, Subject
@@ -240,7 +240,7 @@ class TestChecks:
         assert level("fc-nobody") == [ERROR]
 
     def test_a_notify_that_reaches_no_one_is_flagged(self):
-        from django_ai_sdk.oversight.actions import Notify
+        from django_ai_sdk.oversight.rules import Notify
         from django_ai_sdk.oversight.checks.policies import policy_checks
 
         lens = JudgeLens(name="j", judges=[Patterns([r"x"])])

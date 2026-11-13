@@ -169,11 +169,11 @@ def builtin_patterns():
     """Every regex the SDK ships: personal data and secrets, the packs' lenses, helpers."""
     import re
 
-    from django_ai_sdk.oversight import patterns, presets
+    from django_ai_sdk.oversight import lenses, patterns
     from django_ai_sdk.oversight.judges import llm, local
     from django_ai_sdk.oversight.judges.patterns import Patterns
     from django_ai_sdk.oversight.packs import QualityPack, SafetyPack, SecurityPack
-    from django_ai_sdk.oversight.presets import PIILens, RefusalLens, SecretsLens
+    from django_ai_sdk.oversight.lenses import PIILens, RefusalLens, SecretsLens
 
     found: set[re.Pattern] = set()
     every = [PIILens(kinds=list(patterns.PII_PATTERNS)), SecretsLens(), RefusalLens()]
@@ -184,7 +184,7 @@ def builtin_patterns():
         for judge in judges:
             if isinstance(judge, Patterns):
                 compiled_in(judge, found)
-    for module in (patterns, presets, llm, local):
+    for module in (patterns, lenses, llm, local):
         compiled_in(list(vars(module).values()), found)
     return sorted(found, key=lambda p: p.pattern)
 

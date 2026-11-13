@@ -28,7 +28,7 @@ from django_ai_sdk.oversight import (
     register_policy,
 )
 from django_ai_sdk.oversight import registry as resolution
-from django_ai_sdk.oversight.conditions import Condition
+from django_ai_sdk.oversight.rules import Condition
 from django_ai_sdk.oversight.content import found_literals
 from django_ai_sdk.oversight.guard.judging import Answered, match_rules, answer_lenses
 from django_ai_sdk.oversight.judges.base import Judge

@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 from django.utils.translation import gettext_lazy as _
 
-from django_ai_sdk.oversight.actions import ACTION_ORDER, USER_FACING, Block, RestrictTools
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.content import stored_value
+from django_ai_sdk.oversight.rules import ACTION_ORDER, USER_FACING, Block, RestrictTools
 from django_ai_sdk.oversight.types import Outcome, Stage, worst_outcome
 
 if TYPE_CHECKING:

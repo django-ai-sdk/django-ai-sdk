@@ -910,7 +910,7 @@ class TestOpenRelease:
         # Lazy, so the turn shows them in the active language; plain text in a
         # policy's recorded configuration.
         from django.utils.functional import Promise
-        from django_ai_sdk.oversight.actions import Block
+        from django_ai_sdk.oversight.rules import Block
         from django_ai_sdk.oversight.registry import build_policy
 
         blocks = [
@@ -1050,7 +1050,7 @@ class TestQualityRefusal:
 
     async def test_a_plain_refusal_is_flagged_without_a_classifier(self):
         from django_ai_sdk.oversight.packs import QualityPack
-        from django_ai_sdk.oversight.presets import RefusalLens
+        from django_ai_sdk.oversight.lenses import RefusalLens
 
         assert RefusalLens in QualityPack.lenses and RefusalLens.name == "refusal"
         said = view("q", "Sorry, I can't help with that.")

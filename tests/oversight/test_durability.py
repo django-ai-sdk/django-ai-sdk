@@ -29,7 +29,7 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
-from django_ai_sdk.oversight.actions import Block, Queue
+from django_ai_sdk.oversight.rules import Block, Queue
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.notifiers import event_id

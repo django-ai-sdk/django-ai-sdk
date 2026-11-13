@@ -21,13 +21,12 @@ from typing import TYPE_CHECKING, Any
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Mask
 from django_ai_sdk.oversight.conf import (
     STREAM_MODES,
     setting,
 )
 from django_ai_sdk.oversight.lenses import Lens
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Mask, Rule
 from django_ai_sdk.oversight.types import Capture, Mode, Stage, Subject
 
 if TYPE_CHECKING:

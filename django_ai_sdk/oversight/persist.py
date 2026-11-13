@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from django.utils import timezone
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Alert, Notify, Queue
 from django_ai_sdk.oversight.content import (
     Masker,
     add_to_content,
@@ -27,6 +26,7 @@ from django_ai_sdk.oversight.content import (
     without_nul,
 )
 from django_ai_sdk.oversight.guard.judging import should_retry
+from django_ai_sdk.oversight.rules import Alert, Notify, Queue
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,

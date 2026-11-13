@@ -7,12 +7,10 @@ is at risk is never blocked. It goes to the front of a person's queue.
 
 from __future__ import annotations
 
-from django_ai_sdk.oversight.actions import Alert, Notify, Queue
-from django_ai_sdk.oversight.conditions import L
 from django_ai_sdk.oversight.lenses import JudgeLens, Score
 from django_ai_sdk.oversight.policy import Policy
 from django_ai_sdk.oversight.registry import register_policy
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Alert, L, Notify, Queue, Rule
 from django_ai_sdk.oversight.types import Subject
 
 

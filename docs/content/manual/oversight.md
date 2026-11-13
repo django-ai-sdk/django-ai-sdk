@@ -100,7 +100,7 @@ An option the lens leaves out takes the default in `<Answer>.options`. A `Choice
 
 ### Built-in lenses
 
-`django_ai_sdk.oversight.presets`. Each has a default `name`; subclass it to name your own.
+`django_ai_sdk.oversight.lenses`. Each has a default `name`; subclass it to name your own.
 
 | Class | Kind | Answers |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ An option the lens leaves out takes the default in `<Answer>.options`. A `Choice
 | `SecretsLens` | pattern | `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key`, `password_assignment` (`patterns.SECRET_PATTERNS`). |
 | `RefusalLens` | judge | Answers that decline: `Patterns(REFUSAL_PATTERNS)` (English and Dutch), then `classifier?`. |
 | `LengthLens` | check | A `Flag`: the subject is longer than `max_chars`. |
-| `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `presets.guess_language`. |
+| `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `lenses.guess_language`. |
 | `EmptyRetrievalLens`, `ToolErrorsLens` | check | A tool call that found no sources (a `Flag`); the share of tool calls that failed (a `Score`: `L("tool_errors") > 0` when any did). |
 
 The regex tables, checksums and the masking helpers (`mask`, `mask_all`, `mask_secrets`) are in `django_ai_sdk.oversight.patterns`.
@@ -237,7 +237,7 @@ A headless `agent.run(...)` reports its tool calls, their results and its usage 
 | `message` | The turn was blocked: the policy's text. |
 | `replace` | Finish replaced the answer: the text to show instead. |
 | `input` | The gate masked the question: the masked text. |
-| `notes` | Enforced rules with a `notice` that acted, once a turn each: `kind` (the first of their actions by `actions.ACTION_ORDER` in `actions.USER_FACING`: `block`, `restrict_tools` or `mask`; else `"notice"`, when it only queued, alerted or notified), `also` (the other user-facing ones), `text`, `stage`. |
+| `notes` | Enforced rules with a `notice` that acted, once a turn each: `kind` (the first of their actions by `rules.ACTION_ORDER` in `rules.USER_FACING`: `block`, `restrict_tools` or `mask`; else `"notice"`, when it only queued, alerted or notified), `also` (the other user-facing ones), `text`, `stage`. |
 | `rules`, `detail` | Only with `CLIENT_DETAIL` `full`: rule names and every stage's answers. Each answer's `value` is the record's ([`LensAnswer`](#models)), so the client never reads what a mask took out. |
 
 A refused question or withheld answer ends with finish reason `content-filter` (`django_ai_sdk.oversight.stream.CONTENT_FILTER`); `OpenAIProtocolHandler` sends `content_filter` and no `data-*` parts. The notices are stored on the message under `metadata["oversight"]`, with `replace` reduced to `"replaced": true`.

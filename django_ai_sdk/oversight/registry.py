@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Mask
 from django_ai_sdk.oversight.conf import FAIL_MODES, STREAM_MODES, setting, validate_retention
 from django_ai_sdk.oversight.policy import (
     Policy,
@@ -38,6 +37,7 @@ from django_ai_sdk.oversight.policy import (
     validate_policy,
     validate_rule,
 )
+from django_ai_sdk.oversight.rules import Mask
 from django_ai_sdk.oversight.types import Capture, rank
 
 if TYPE_CHECKING:

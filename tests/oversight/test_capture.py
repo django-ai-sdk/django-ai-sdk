@@ -301,7 +301,7 @@ class TestWhatTheClientSees:
 class TestTheRecordsValue:
     def test_an_entities_value_keeps_labels_and_counts_names(self):
         from django_ai_sdk.oversight.packs.quality import TakenFrom
-        from django_ai_sdk.oversight.presets import PIILens
+        from django_ai_sdk.oversight.lenses import PIILens
 
         titles = Answer(value=[f"Dossier {EMAIL} (BSN {BSN})"], answerer="typesafe")
         assert stored_value(TakenFrom(), titles) == [FOUND]

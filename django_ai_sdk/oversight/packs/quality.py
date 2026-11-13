@@ -8,18 +8,18 @@ the judge lenses are skipped and the checks still run.
 
 from __future__ import annotations
 
-from django_ai_sdk.oversight.actions import Alert, Queue
-from django_ai_sdk.oversight.conditions import L
-from django_ai_sdk.oversight.lenses import Entities, JudgeLens, Score
-from django_ai_sdk.oversight.policy import Policy
-from django_ai_sdk.oversight.presets import (
+from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
+    Entities,
+    JudgeLens,
     LanguageLens,
     RefusalLens,
+    Score,
     ToolErrorsLens,
 )
+from django_ai_sdk.oversight.policy import Policy
 from django_ai_sdk.oversight.registry import register_policy
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Alert, L, Queue, Rule
 from django_ai_sdk.oversight.types import Stage, Subject
 
 

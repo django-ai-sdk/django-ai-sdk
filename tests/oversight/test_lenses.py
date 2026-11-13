@@ -32,7 +32,7 @@ from django_ai_sdk.oversight.patterns import (
     mask_all,
     mask_secrets,
 )
-from django_ai_sdk.oversight.presets import (
+from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
     LanguageLens,
     LengthLens,

@@ -19,14 +19,12 @@ acted on by its rules, and recorded. See docs/content/oversight.md.
 
 This package re-exports only the declaration API, so importing it needs no app
 registry. Other judges live in `oversight.judges`, the built-in lenses in
-`oversight.presets`, the packs in `oversight.packs`, and models, the guard and
+`oversight.lenses`, the packs in `oversight.packs`, and models, the guard and
 tasks in their own modules.
 """
 
 from __future__ import annotations
 
-from django_ai_sdk.oversight.actions import Alert, Block, Mask, Notify, Queue, RestrictTools
-from django_ai_sdk.oversight.conditions import L
 from django_ai_sdk.oversight.judges.llm import LLMJudge
 from django_ai_sdk.oversight.judges.patterns import Patterns
 from django_ai_sdk.oversight.lenses import (
@@ -37,14 +35,15 @@ from django_ai_sdk.oversight.lenses import (
     JudgeLens,
     Lens,
     PatternLens,
+    PIILens,
     Score,
+    SecretsLens,
     Violation,
     register_validator,
 )
 from django_ai_sdk.oversight.policy import Policy, pick
-from django_ai_sdk.oversight.presets import PIILens, SecretsLens
 from django_ai_sdk.oversight.registry import register_policy
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Alert, Block, L, Mask, Notify, Queue, RestrictTools, Rule
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,

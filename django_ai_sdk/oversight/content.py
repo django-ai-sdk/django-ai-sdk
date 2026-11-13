@@ -230,8 +230,8 @@ def _mask_detected(text: str) -> str:
 
 @cache
 def _detectors() -> tuple[Any, ...]:
+    from django_ai_sdk.oversight.lenses import PIILens, SecretsLens
     from django_ai_sdk.oversight.patterns import PII_PATTERNS
-    from django_ai_sdk.oversight.presets import PIILens, SecretsLens
 
     return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
 

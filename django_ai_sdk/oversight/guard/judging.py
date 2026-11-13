@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.judges.base import (
     ask,
     is_unavailable,
@@ -18,6 +17,7 @@ from django_ai_sdk.oversight.judges.base import (
     sampled,
 )
 from django_ai_sdk.oversight.judges.classifier import batched
+from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import (
     INLINE_STAGES,
     Answer,
@@ -33,11 +33,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
     from collections.abc import Set as AbstractSet
 
-    from django_ai_sdk.oversight.actions import Action
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.policy import ResolvedPolicy
-    from django_ai_sdk.oversight.rules import Rule
+    from django_ai_sdk.oversight.rules import Action, Rule
     from django_ai_sdk.oversight.types import TurnContext
 
 logger = get_logger(__name__)
