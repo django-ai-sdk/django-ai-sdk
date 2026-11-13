@@ -81,9 +81,11 @@ async def areflect(turn_id: str) -> int:
     `oversight_sweep` can queue the turn again.
 
     All results are written in one transaction, and only while this run still
-    holds the lease. A failed run gives its claim back so a retry can reflect.
-    After `REFLECT_ATTEMPTS` the turn is marked failed. Notifications are sent
-    after the commit.
+    holds the lease. A failed run gives its claim back so a retry can reflect,
+    and so does a run whose judge was down or out of time, while it has
+    attempts left: the last attempt keeps what it found, and FAIL_MODE decides
+    for the lens that did not answer. After `REFLECT_ATTEMPTS` failed runs the
+    turn is marked failed. Notifications are sent after the commit.
     """
     from django_ai_sdk.oversight.models import Turn
 
@@ -100,6 +102,10 @@ async def areflect(turn_id: str) -> int:
             await arelease_reflect(turn_id, lease)
             return 0
         policy, view, answered, matched, found, masks = judged
+        if turn.reflect_attempts < REFLECT_ATTEMPTS and any(map(_unsettled, answered)):
+            # A judge was down or out of time: ask again later rather than settle without it.
+            await arelease_reflect(turn_id, lease)
+            return 0
         kept = await sync_to_async(_commit_reflection)(
             turn, policy, view, answered, matched, found, masks, lease=lease
         )
@@ -108,6 +114,11 @@ async def areflect(turn_id: str) -> int:
         await arelease_reflect(turn_id, lease)
         raise
     return len(answered) if kept else 0
+
+
+def _unsettled(item: Answered) -> bool:
+    """True when a later attempt may answer what this one could not (see `should_retry`)."""
+    return should_retry(item.answer.error, [step.error or "" for step in item.answer.trail])
 
 
 def claimable_q(now: datetime, pending_before: datetime | None = None) -> Q:
@@ -315,8 +326,16 @@ async def ajudge_turn(
         view.answers[item.lens.name] = item.answer
     # Rules treat a failed answer as unknown, not as "no".
     failed = {name for name, answer in view.answers.items() if answer.error}
-    matched = evaluate_rules(policy, view.answers, Stage.REFLECT, done=done, errored=failed)
-    return answered, matched, _reflect_masks(view, answered, matched)
+    matched = evaluate_rules(
+        policy,
+        view.answers,
+        Stage.REFLECT,
+        done=done,
+        errored=failed,
+        fail_closed=policy.fails_closed,
+    )
+    masks = _reflect_masks(view, answered, matched, closed=policy.fails_closed)
+    return answered, matched, masks
 
 
 def reflect_lenses(
@@ -348,17 +367,18 @@ def reflect_lenses(
 
 
 def _reflect_masks(
-    view: TurnContext, answered: list[Answered], matched: list[Matched]
+    view: TurnContext, answered: list[Answered], matched: list[Matched], *, closed: bool
 ) -> list[MaskGroup]:
     """Return (match, group) for each mask in the stored answer. Drop masks that change nothing.
 
     A mask that cannot locate what it found masks the whole answer, where finish
-    would have withheld it: masking around it would leave what it found.
+    would have withheld it: masking around it would leave what it found. So
+    does one whose lens failed, when the policy fails closed.
     """
     from django_ai_sdk.oversight.guard.masks import collect_masks
 
     groups, unpointed = collect_masks(
-        matched, answered, subject=Subject.OUTPUT, view=view, closed=False
+        matched, answered, subject=Subject.OUTPUT, view=view, closed=closed
     )
     whole = [TextSpan(start=0, end=len(view.output), label="withheld")]
     for match, mask in unpointed:

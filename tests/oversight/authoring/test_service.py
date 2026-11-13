@@ -10,7 +10,7 @@ from django_ai_sdk.oversight.authoring.services import AuthoringService
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.registry import get_policy_class
 from django_ai_sdk.oversight.resolve import aget_policy
-from django_ai_sdk.permissions import PermissionDenied
+from django_ai_sdk.permissions import ConflictError, PermissionDenied
 
 from tests.oversight.authoring.helpers import AUTHOR, VIEW, refunds
 from tests.oversight.helpers import make_agent
@@ -99,6 +99,25 @@ class TestSaving:
         assert (await gate("refunds", "I want a refund")).blocked
         assert (await gate("refunds", "my IBAN please")).message == "No."
         assert not (await gate("refunds", "hello")).blocked
+
+    async def test_two_creates_of_one_name_at_once_conflict(self):
+        from unittest.mock import patch
+
+        from django_ai_sdk.oversight.authoring.loader import loader
+
+        load = loader._load
+
+        def other_request_creates_it_first() -> None:
+            # A new name has no row to lock, so another request can insert it meanwhile.
+            if not AuthoredPolicy.objects.filter(name="refunds").exists():
+                AuthoredPolicy.objects.create(name="refunds")
+            load()
+
+        with (
+            patch.object(loader, "_load", other_request_creates_it_first),
+            pytest.raises(ConflictError),
+        ):
+            await save()
 
     async def test_a_save_replaces_the_definition(self):
         await save()

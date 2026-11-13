@@ -16,7 +16,7 @@ from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
 
-    from django_ai_sdk.oversight.guard import GateResult
+    from django_ai_sdk.oversight.guard import GateResult, TurnGuard
     from django_ai_sdk.oversight.plugin.turn import Turn
 
 # The meta key on the assistant message that stands in for a refused or replaced answer.
@@ -53,7 +53,7 @@ class GateHook(OversightHook):
             await request.on_gated(turn)
 
 
-async def _gate(state: State, guard: Any, *, vouched: bool) -> GateResult:
+async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
     """Judge the history, then the question, masking each in the run's messages."""
     messages = list(state.data.get("messages") or [])
     said = [
@@ -90,7 +90,7 @@ def keep_masked(messages: list[ChatMessage], turn: Turn | None) -> None:
         question.content = content if content is not None else str(UNCHECKED_TEXT)
 
 
-async def _mask_seeded_sources(guard: Any) -> None:
+async def _mask_seeded_sources(guard: TurnGuard) -> None:
     """Mask the sources the thread already cited, before any citations card shows them."""
     from django_ai_sdk.adapters.citations.registry import current_registry
     from django_ai_sdk.oversight.plugin.finish import mask_sources

@@ -585,14 +585,18 @@ class TestTypeSafe:
         assert state["user_message"].startswith("HEAD ") and state["user_message"].endswith(" TAIL")
         assert len(state["user_message"]) <= TypeSafe.TEXT_CHARS
 
-    async def test_without_a_key_typesafe_abstains(self):
+    async def test_without_a_key_typesafe_abstains_and_the_lens_fails(self):
+        from django_ai_sdk.oversight.guard.asking import NO_JUDGE
         from django_ai_sdk.oversight.judges import TypeSafe
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
         flag = JudgeLens(name="f", question="?", judges=[TypeSafe()])
         with override_settings(TYPESAFE_API_KEY="", AI_SDK_OVERSIGHT=CLASSIFIER_IS_TYPESAFE):
-            assert await answer_lens(flag, view("x"), Stage.GATE) is None
-            assert await answer_lens(TakenFrom(), view("q", "a", ["x"]), Stage.REFLECT) is None
+            assert TypeSafe().missing()
+            # Nothing could judge it, so FAIL_MODE decides: not a quiet "no".
+            assert (await answer_lens(flag, view("x"), Stage.GATE)).error == NO_JUDGE
+            taken = await answer_lens(TakenFrom(), view("q", "a", ["x"]), Stage.REFLECT)
+            assert taken.error == NO_JUDGE
 
     async def test_a_failed_request_is_unavailable_and_logs_its_type_never_its_body(self):
         from unittest.mock import MagicMock

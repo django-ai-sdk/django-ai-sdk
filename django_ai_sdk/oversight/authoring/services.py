@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from django_ai_sdk.errors import UserError
 from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
@@ -38,7 +38,7 @@ from django_ai_sdk.oversight.permissions import OversightAccess, reader_id
 from django_ai_sdk.oversight.registry import drafted, get_policy_class
 from django_ai_sdk.oversight.resolve import aload_policies
 from django_ai_sdk.oversight.types import Mode
-from django_ai_sdk.permissions import Operation
+from django_ai_sdk.permissions import ConflictError, Operation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -217,7 +217,22 @@ def _write(
     None when the row does not exist and `create` is False. Raises UserError instead of
     saving a change that does not check. Its authored parents are locked too, so a
     concurrent delete of one either waits for this save or makes this check fail.
+    A new name has no row to lock: when another request creates it first, this
+    one raises ConflictError.
     """
+    try:
+        return _write_locked(name, mutate, user, create=create)
+    except IntegrityError:
+        raise ConflictError(f"Policy {name!r} was created at the same time. Try again.") from None
+
+
+def _write_locked(
+    name: str,
+    mutate: Callable[[AuthoredPolicy], None],
+    user: UserType,
+    *,
+    create: bool,
+) -> AuthoredPolicy | None:
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
     with transaction.atomic():

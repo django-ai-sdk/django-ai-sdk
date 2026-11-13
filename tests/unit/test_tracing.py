@@ -550,15 +550,13 @@ class TestSubagentSpan:
     named wrapper span is what tells the two subtrees apart."""
 
     @pytest.mark.django_db
+    @pytest.mark.usefixtures("installs_as_is")
     def test_subagent_run_is_a_named_child_span(self, orm_tracer):
         from django_ai_sdk.agents.subagent import SubagentStreamFilter
 
         class _StubAgent:
             hooks: dict = {}  # noqa: RUF012
             tools: list = []  # noqa: RUF012
-
-            def clone(self, **overrides):
-                return self
 
             def run(self, messages, streaming_callback=None, task=None, **kwargs):
                 with haystack_tracer.trace("haystack.agent.run"):

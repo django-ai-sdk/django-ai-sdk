@@ -121,8 +121,8 @@ async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
     """Mask source text in the citation registry, like tool results.
 
     The citations card, the stored citations artifact and the lenses all read
-    the registry, so none of them should see unmasked text. The stream and the
-    usage hook both call this; each text is masked once.
+    the registry, so none of them should see unmasked text. The gate, the stream
+    and the usage hook call this; each text is masked once.
     """
     for source in registry.all:
         text = source.content or ""

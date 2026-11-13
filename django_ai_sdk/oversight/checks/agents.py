@@ -99,14 +99,20 @@ def _run_override_checks(cls: type) -> list[Any]:
     policy, _ = code_policy(cls)  # "" when the agent opts out
     if not policy:
         return []
-    replacing = [
-        klass.__qualname__
-        for klass in cls.__mro__
-        if klass is not Agent
-        and issubclass(klass, Agent)
-        and "run" in vars(klass)
-        and not _calls_super_run(vars(klass)["run"])
-    ]
+    # The nearest class in the MRO that replaces run() without calling super().run().
+    name = next(
+        (
+            klass.__qualname__
+            for klass in cls.__mro__
+            if klass is not Agent
+            and issubclass(klass, Agent)
+            and "run" in vars(klass)
+            and not _calls_super_run(vars(klass)["run"])
+        ),
+        None,
+    )
+    if name is None:
+        return []
     return [
         Warning(
             f"Agent {cls.__qualname__} runs through {name}.run(), which never calls "
@@ -114,7 +120,6 @@ def _run_override_checks(cls: type) -> list[Any]:
             hint="Call super().run() for the model call, or open a turn() around your own.",
             id=f"{PREFIX}.W016",
         )
-        for name in replacing[:1]
     ]
 
 

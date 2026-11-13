@@ -49,7 +49,7 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 
 ## Adapter Hooks
 
-The SDK calls two adapter hooks. `get_pipeline_adapter` you implement; `get_run_adapter` defaults to `Run(generator=self.get_llm())`:
+The SDK calls two adapter hooks. `get_pipeline_adapter` defaults to a `Stream` over a `ToolAgent` of the agent's generator, tools and prompt; `get_run_adapter` defaults to `Run(generator=self.get_llm())` and must return a `Run`:
 
 | Hook | Returns | Used by |
 | --- | --- | --- |
@@ -235,7 +235,7 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 4. Stores the newest user message when a thread is active
 5. Builds the pipeline adapter and returns a `StreamingHttpResponse`
 
-`run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel="run", oversight=<the agent's own>)` is one turn under the agent's policy too, and raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`; an override of `run()` is handed `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn; it returns `oversight` by default. A subclass's own `run()` is wrapped in the turn when the class is defined: the turn opens around the outermost `run()`, and `super().run()` inside it joins.
+`run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel="run", oversight=<the agent's own>)` is one turn under the agent's policy too, and raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`; an override of `run()` is handed `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn; it returns `oversight` by default. The turn opens inside `super().run()`: an override that calls it is checked, one that calls its own model instead is not, and the system check `ai_sdk.W016` says so. Open a `turn()` around such a model call.
 
 ```python
 response = await agent.as_view(payload.messages, thread_id=..., user=request.user)

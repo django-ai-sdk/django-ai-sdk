@@ -221,7 +221,7 @@ class GuardState:
         """
         for item in answered:
             self.answered.append(item)
-            if item.lens.subject is not Subject.TOOL_CALL:
+            if item.about_turn:
                 self._lens_errored[item.lens.name] = item.errored
                 self.context.answers[item.lens.name] = item.answer
 

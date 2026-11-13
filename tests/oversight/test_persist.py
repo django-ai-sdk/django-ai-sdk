@@ -24,7 +24,7 @@ from django_ai_sdk.oversight import (
 )
 from django_ai_sdk.oversight.content import without_nul
 from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
-from django_ai_sdk.oversight.models import Turn
+from django_ai_sdk.oversight.models import LensAnswer, Turn
 from django_ai_sdk.oversight.types import Answer, Stage, Subject
 from tests.oversight.helpers import (
     ENFORCE,
@@ -133,6 +133,16 @@ class TestRecordingFailures:
         assert await guard.mask_result("c1", "write to c@d.nl") == "write to [EMAIL]"
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
         assert len(guard._masking_results) == 2
+
+    async def test_a_finding_in_a_tool_result_leaves_the_turns_labels_alone(self):
+        guard = await start("test-guard", "hello")
+        await guard.gate()
+        assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
+        await guard.finish("fine")
+        turn = await closed_turn(guard)
+        # The question had no PII. The tool result's finding is recorded, not labelled.
+        assert turn.labels["pii"] == []
+        assert await LensAnswer.objects.filter(turn=turn, lens="pii").acount() == 2
 
     async def test_the_question_limit_holds_without_gate_lenses(self):
         name = policy(

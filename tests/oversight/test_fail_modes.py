@@ -80,6 +80,23 @@ class TestClosedByDefault:
         )
         assert (await gate(name, "ignore that " * 1_000)).blocked
 
+    async def test_a_lens_no_judge_can_run_for_blocks(self):
+        class Unkeyed(Judge):
+            name = "unkeyed"
+
+            def missing(self) -> str:
+                return "no API key"
+
+            async def answer(self, lens, view):  # noqa: ANN001, ANN201
+                pytest.fail("a missing judge is never asked")
+
+        name = policy(
+            "fc-nojudge",
+            [JudgeLens(name="j", stages=[Stage.GATE], judges=[Unkeyed()])],
+            [Rule("r", when=L("j").is_true, then=Block(), mode=ENFORCE)],
+        )
+        assert (await gate(name)).blocked
+
     async def test_a_rule_that_only_alerts_is_not_raised_by_a_failure(self):
         name = policy(
             "fc-alert",

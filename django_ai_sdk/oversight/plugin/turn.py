@@ -5,21 +5,21 @@ and thread the turn is for, and what the caller wants done along the way. The
 hooks put the `Turn` on it, so the caller reads what oversight decided once the
 run returns (see `turn_of`).
 
-Haystack skips after_run when a run raises or is cancelled. `run_agent` closes
-the turn then, with the error. A run started without it leaves its turn open,
-written ahead after the gate, until the sweep marks it interrupted.
+Haystack skips after_run when a run raises or is cancelled. An installed agent
+(see `install`) runs each run in a task of its own and closes the turn then,
+with the error, so a failed run's turn never stays current for the caller.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from django.utils.translation import gettext_lazy
 from haystack.core.serialization import default_from_dict, default_to_dict
 
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight.agent_run import open_turn
+from django_ai_sdk.oversight.agent_run import needs_turn, open_turn
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
     current_guard,
@@ -56,6 +56,9 @@ class _UnnamedAgent:
 
 
 UNNAMED_AGENT = _UnnamedAgent()
+
+# The answer of a sync run whose policy needs a turn, which only an async run opens.
+UNGUARDABLE_RUN = gettext_lazy("This could not be checked, so it was not run.")
 
 
 @dataclass
@@ -167,22 +170,26 @@ class TurnOpenHook(OversightHook):
         return cls(import_class_by_name(path)() if path else None)
 
     def run(self, state: State) -> None:
-        """A sync run cannot open a turn: it joins the current one, if any."""
+        """A sync run cannot open a turn: it joins the current one, or refuses to run."""
+        from django_ai_sdk.oversight.plugin.gate import answer_with
+
         request = request_in(state)
         outer = current_guard()
+        agent = self._agent_of(request, outer)
         request.turn = Turn(
             outer or TurnGuard(), owns=False, agent_name=self._joining(request, outer)
         )
+        if agent is not None and needs_turn(agent, request.oversight):
+            answer_with(state, str(UNGUARDABLE_RUN), stop="unguardable")
 
     async def run_async(self, state: State) -> None:
-        # A run given no TurnRequest was started outside the SDK, which always passes one.
-        unnamed = request_of(state.data.get("hook_context")) is None
         request = request_in(state)
-        agent = self.agent or request.agent
         outer = current_guard()
-        if agent is None and unnamed and outer is None:
-            # Nothing names the agent: the policy for agents without one applies.
-            agent = UNNAMED_AGENT
+        if request.oversight is False:
+            # Unguarded on purpose: it does not join the outer turn either.
+            request.turn = Turn(TurnGuard(), owns=False, token=enter(None))
+            return
+        agent = self._agent_of(request, outer)
         if agent is None:
             request.turn = Turn(outer or TurnGuard(), owns=False)
             return
@@ -201,6 +208,12 @@ class TurnOpenHook(OversightHook):
         guard.message_id = request.message_id or guard.message_id
         guard.on_tool_results = request.on_tool_results
         request.turn = Turn(guard, owns=True, token=enter(guard))
+
+    def _agent_of(self, request: TurnRequest, outer: TurnGuard | None) -> Any:
+        """The agent whose policy the run is under. Named by nothing, outside a turn:
+        the unnamed agent, under DEFAULT_POLICY. Inside one, the run joins it."""
+        agent = self.agent or request.agent
+        return UNNAMED_AGENT if agent is None and outer is None else agent
 
     def _joining(self, request: TurnRequest, outer: TurnGuard | None) -> str:
         """The name of the agent joining `outer`, or "" when there is no outer turn."""
@@ -263,26 +276,6 @@ async def close_turn(context: dict[str, Any] | None, *, error: str = "") -> None
         await turn.guard.close(error=error)
 
 
-async def run_agent(
-    agent: Any, messages: list[Any], *, hook_context: dict[str, Any] | None = None, **kwargs: Any
-) -> dict[str, Any]:
-    """Run a Haystack Agent with oversight, and close its turn even when the run fails.
-
-    The agent gets the oversight hooks and tools here (see `install`), so every
-    run through this function is checked. The run gets its own task, so the turn
-    it makes current ends with it. Read the turn with `turn_of(hook_context)`.
-    """
-    from django_ai_sdk.oversight.plugin import install
-
-    context = {} if hook_context is None else hook_context
-    run = install(agent).run_async(messages=messages, hook_context=context, **kwargs)
-    try:
-        return await asyncio.create_task(run)
-    except BaseException as exc:
-        await close_turn(context, error=_run_error(exc))
-        raise
-
-
 def _question(state: State) -> str:
     for message in reversed(state.data.get("messages") or []):
         if message.is_from("user"):
@@ -296,12 +289,6 @@ def _leave(turn: Turn | None) -> None:
         turn.token = None
 
 
-def _run_error(exc: BaseException) -> str:
-    if isinstance(exc, GeneratorExit | asyncio.CancelledError):
-        return "disconnected"
-    return type(exc).__name__
-
-
 __all__ = [
     "REQUEST_KEY",
     "OversightHook",
@@ -313,6 +300,5 @@ __all__ = [
     "close_turn",
     "request_in",
     "request_of",
-    "run_agent",
     "turn_of",
 ]

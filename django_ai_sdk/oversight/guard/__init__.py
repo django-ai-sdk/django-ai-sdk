@@ -80,8 +80,9 @@ def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]
     return scoped(_current, guard if guard is not None and guard.active else None)
 
 
-def enter(guard: TurnGuard) -> contextvars.Token[TurnGuard | None]:
-    """Make `guard` current until `leave()`. For hooks, which cannot hold a `with` block."""
+def enter(guard: TurnGuard | None) -> contextvars.Token[TurnGuard | None]:
+    """Make `guard` current until `leave()`, or no guard for None. For hooks, which
+    cannot hold a `with` block."""
     return _current.set(guard)
 
 

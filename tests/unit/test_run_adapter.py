@@ -94,7 +94,9 @@ class TestAgentRunToolsDefault:
         assert result == "A Title"
         tools.assert_not_awaited()
 
-    async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(self):
+    async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(
+        self, installs_as_is
+    ):
         """Agent.run(tools=True) is governed like a streamed delegation: the
         loop gets the agent's own steps and default_hooks, as build_subagent does."""
         from uuid import uuid4
@@ -108,7 +110,6 @@ class TestAgentRunToolsDefault:
 
         generator = MagicMock()
         fake_agent = MagicMock()
-        fake_agent.clone.return_value = fake_agent  # oversight attaches its hooks to a copy
         fake_agent.run_async = AsyncMock(
             return_value={"messages": [HaystackChatMessage.from_assistant("done")]}
         )
@@ -127,8 +128,8 @@ class TestAgentRunToolsDefault:
         assert result == "done"
         tools.assert_awaited_once()
         assert agent_cls.call_args.kwargs["tools"] == [tool]
-        # run_agent installs oversight: the model is offered only the tools the turn allows.
-        assert fake_agent.clone.call_args.kwargs["tools"].items == [tool]
+        # run_agent installs oversight on the agent it built (see test_haystack_native).
+        installs_as_is.assert_called_once_with(fake_agent)
         # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
         # generic constant.
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 6
@@ -140,6 +141,7 @@ class TestAgentRunToolsDefault:
         assert len(budget) == 1
         assert budget[0].max_tool_calls == 6
 
+    @pytest.mark.usefixtures("installs_as_is")
     async def test_a_non_default_max_agent_steps_is_honored(self):
         """The exact regression: a subagent with a deliberately tight budget
         (e.g. ResearchPlannerAgent's max_agent_steps=4) must keep that budget
@@ -163,7 +165,6 @@ class TestAgentRunToolsDefault:
 
         agent = TightAgent()
         fake_agent = MagicMock()
-        fake_agent.clone.return_value = fake_agent  # oversight attaches its hooks to a copy
         fake_agent.run_async = AsyncMock(return_value={"messages": []})
 
         with (

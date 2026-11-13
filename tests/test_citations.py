@@ -41,7 +41,7 @@ class CitationAgent:
         self.reply = reply
         self.calls: list[str] = []
 
-    async def run(self, messages, system_prompt=None, response_format=None):
+    async def run(self, messages, system_prompt=None, response_format=None, request=None):
         self.calls.append(messages[0].content)
         return self.reply
 

@@ -3,9 +3,27 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import django.db.models.deletion
 from django.db import migrations, models
+
+# The turns feed filters on a label (`labels ? 'topic'`, `labels @> '{"topic": "hr"}'`);
+# on Postgres a GIN index answers both. Other databases scan the window.
+LABELS_INDEX = "oversight_turn_labels_gin"
+
+
+def add_labels_index(apps: Any, schema_editor: Any) -> None:
+    if schema_editor.connection.vendor == "postgresql":
+        schema_editor.execute(
+            f"CREATE INDEX IF NOT EXISTS {LABELS_INDEX} "
+            "ON django_ai_sdk_oversight_turns USING gin (labels)"
+        )
+
+
+def drop_labels_index(apps: Any, schema_editor: Any) -> None:
+    if schema_editor.connection.vendor == "postgresql":
+        schema_editor.execute(f"DROP INDEX IF EXISTS {LABELS_INDEX}")
 
 
 class Migration(migrations.Migration):
@@ -294,4 +312,5 @@ class Migration(migrations.Migration):
                 fields=["reflect_state", "created_at"], name="django_ai_s_reflect_f8cb9c_idx"
             ),
         ),
+        migrations.RunPython(add_labels_index, drop_labels_index, elidable=False),
     ]

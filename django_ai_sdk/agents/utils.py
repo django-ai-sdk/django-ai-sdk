@@ -42,9 +42,12 @@ async def extract_artifact(
     """
     Run a one-shot structured extraction
     """
+    from django_ai_sdk.oversight.stream import run_side_task
+
     extractor = Run(generator=llm_generator())
     try:
-        return await extractor.run(
+        return await run_side_task(
+            extractor,
             messages,
             system_prompt=prompt("""\
                 You are a structured data extractor.

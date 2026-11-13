@@ -37,6 +37,7 @@ from haystack.tools import Tool
 MOCK_MODEL = "gpt-4o-mini"
 
 
+
 def _weather_tool() -> Tool:
     def get_weather(city: str) -> str:
         return f"{city}: sunny"
@@ -388,10 +389,10 @@ class TestSubagentStreaming:
     def test_tool_chunks_only_returns_none_for_no_callback(self):
         assert _tool_chunks_only(None) is None
 
+    @pytest.mark.usefixtures("installs_as_is")
     @pytest.mark.asyncio
     async def test_stream_filter_forwards_task_and_filters_callback(self):
         inner = AsyncMock()
-        inner.clone = MagicMock(return_value=inner)  # oversight attaches its hooks to a copy
         inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
@@ -419,10 +420,10 @@ class TestSubagentStreaming:
         assert len(received) == 1
         assert received[0].tool_calls[0].tool_name == "search_web"
 
+    @pytest.mark.usefixtures("installs_as_is")
     @pytest.mark.asyncio
     async def test_stream_filter_leaves_out_pending_calls_and_system_prompt(self):
         inner = AsyncMock()
-        inner.clone = MagicMock(return_value=inner)  # oversight attaches its hooks to a copy
         inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
@@ -1303,6 +1304,22 @@ class TestSubagentSynthesis:
         assert sent[-1].text == FINAL_PROMPT
         assert subagent_response(out).startswith("Bordeaux: 220,000 evacuated.")
 
+    def test_synthesis_tokens_count_with_the_run(self):
+        from haystack.components.agents.state.state import State
+
+        generator = MagicMock()
+        usage = {"prompt_tokens": 7, "completion_tokens": 3}
+        generator.run.return_value = {
+            "replies": [ChatMessage.from_assistant("Bordeaux.", meta={"usage": usage})]
+        }
+        state = State(schema={"messages": {"type": list[ChatMessage]}, "token_usage": {"type": dict}})
+        state.set("messages", _research_messages(skipped=True))
+        state.set("token_usage", {"prompt_tokens": 10, "completion_tokens": 5})
+
+        FinalResponseHook(generator).run(state)
+
+        assert state.data["token_usage"] == {"prompt_tokens": 17, "completion_tokens": 8}
+
     def test_synthesis_is_skipped_when_a_report_exists(self):
         generator = MagicMock()
 
@@ -1342,11 +1359,11 @@ class TestSubagentSynthesis:
 
 
 class TestUnstreamedResults:
+    @pytest.mark.usefixtures("installs_as_is")
     def test_hook_written_result_is_streamed_once(self):
         generator = MagicMock()
         generator.run.return_value = {"replies": [ChatMessage.from_assistant("done")]}
         agent = MagicMock()
-        agent.clone.return_value = agent  # oversight attaches its hooks to a copy
         agent.chat_generator = generator
         messages = _research_messages(skipped=True)
         agent.run.return_value = {"messages": messages}
@@ -1361,6 +1378,7 @@ class TestUnstreamedResults:
         assert ids == ["c1", "c2", "c3"]
         assert all(c.meta[SUBAGENT_META_KEY] == "Research Planner" for c in received)
 
+    @pytest.mark.usefixtures("installs_as_is")
     def test_already_streamed_result_is_not_duplicated(self):
         from haystack.dataclasses import ToolCallResult
 
@@ -1380,7 +1398,6 @@ class TestUnstreamedResults:
             return {"messages": _research_messages(report="done")}
 
         agent = MagicMock()
-        agent.clone.return_value = agent
         agent.chat_generator = generator
         agent.run.side_effect = fake_run
         received = []

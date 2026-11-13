@@ -36,16 +36,15 @@ async def generate_thread_title(
         return None
 
     from django_ai_sdk.agents.utils import task_runner  # noqa: PLC0415
+    from django_ai_sdk.oversight.stream import run_side_task  # noqa: PLC0415
 
     system_prompt = agent.get_title_generation_prompt()
     try:
         if runner := task_runner():
-            title = await runner.run(
-                messages=user_messages, system_prompt=system_prompt, response_format=None
+            title = await run_side_task(
+                runner, user_messages, system_prompt=system_prompt, response_format=None
             )
         else:
-            from django_ai_sdk.oversight.stream import run_side_task  # noqa: PLC0415
-
             title = await run_side_task(
                 agent,
                 user_messages,

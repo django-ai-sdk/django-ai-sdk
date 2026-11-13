@@ -104,6 +104,52 @@ def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
     return outer is not None and outer.policy is not None and outer.policy.name == policy_name
 
 
+def needs_turn(agent: Any, oversight: type[Policy] | str | Literal[False] | None = None) -> bool:
+    """Whether a run of `agent` here needs a turn of its own, which only an async run opens.
+
+    Sync code cannot await `get_oversight()`, so an agent that overrides it is
+    assumed to need one, and so is a policy name that does not resolve.
+    """
+    from django_ai_sdk.oversight.agents import code_policy, policy_needs_await
+    from django_ai_sdk.oversight.conf import is_enabled
+    from django_ai_sdk.oversight.registry import policy_name
+
+    if oversight in (False, "") or not is_enabled():
+        return False
+    try:
+        if oversight:
+            name = policy_name(oversight)
+        elif policy_needs_await(agent):
+            return True
+        else:
+            name = code_policy(agent)[0]
+    except Exception:
+        return True
+    return bool(name) and not joins_turn(current_guard(), name)
+
+
+async def opens_turn(
+    agent: Any,
+    *,
+    channel: str,
+    user: Any = None,
+    oversight: type[Policy] | str | Literal[False] | None = None,
+) -> bool:
+    """Whether a run of `agent` here opens a turn of its own. True when its policy cannot be told."""
+    from django_ai_sdk.oversight.agents import acode_policy
+    from django_ai_sdk.oversight.conf import is_enabled
+    from django_ai_sdk.oversight.registry import policy_name
+
+    if oversight in (False, "") or not is_enabled():
+        return False
+    try:
+        name = policy_name(oversight) if oversight else ""
+        name = name or (await acode_policy(agent, channel=channel, user=user))[0]
+    except Exception:
+        return True
+    return bool(name) and not joins_turn(current_guard(), name)
+
+
 async def gate_conversation(
     guard: TurnGuard, messages: list[ChatMessage], *, vouched: bool
 ) -> GateResult:
@@ -284,7 +330,9 @@ __all__ = [
     "OpenTurn",
     "gate_conversation",
     "joins_turn",
+    "needs_turn",
     "open_turn",
+    "opens_turn",
     "turn",
     "validate_oversight",
     "withhold_unfit",

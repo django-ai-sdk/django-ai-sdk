@@ -13,6 +13,8 @@ from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.services import ThreadService
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
@@ -134,7 +136,7 @@ async def _unguardable(
     agent: Agent,
     adapter: Any,
     messages: list[ChatMessage],
-    admit: Any,
+    admit: Callable[[Turn | None], Awaitable[None]],
     user: AbstractBaseUser | AnonymousUser | None,
     thread_id: str | None,
 ) -> Any:

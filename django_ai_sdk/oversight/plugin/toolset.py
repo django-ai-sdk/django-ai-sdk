@@ -32,6 +32,24 @@ class GuardedToolset(Toolset):
             return tools
         return cls([tools] if isinstance(tools, Toolset) else list(tools))
 
+    def to_dict(self) -> dict[str, Any]:
+        from haystack.core.serialization import generate_qualified_class_name
+        from haystack.tools import serialize_tools_or_toolset
+
+        return {
+            "type": generate_qualified_class_name(type(self)),
+            "data": {"items": serialize_tools_or_toolset(self.items)},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GuardedToolset:
+        from haystack.tools import deserialize_tools_or_toolset_inplace
+
+        inner = dict(data["data"])
+        deserialize_tools_or_toolset_inplace(inner, key="items")
+        items = inner["items"]
+        return cls([items] if isinstance(items, Toolset) else list(items or []))
+
     def _all(self) -> list[Tool]:
         return [
             tool for item in self.items for tool in (item if isinstance(item, Toolset) else [item])

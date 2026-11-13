@@ -347,14 +347,14 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     build_agent = add_component(
         dot,
         "build_agent",
-        "ToolAgent.build_agent(\n  generator, tools, system_prompt,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)",
+        "Haystack Agent(\n  generator, tools,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)\nrun_agent() installs oversight",
         fillcolor="#e1f5fe",
         color="#1565c0",
         fontcolor="#1565c0",
     )
 
     run_async = add_flow_node(
-        dot, "run_async", "haystack_agent.run_async(...)\nno streaming callback"
+        dot, "run_async", "run_agent(agent, ...)\ninstall(agent).run_async(...)\nno streaming callback"
     )
 
     result = add_component(
@@ -369,7 +369,7 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     not_run = add_component(
         dot,
         "not_run",
-        "adapter.run(...)\nplain / structured, unchanged",
+        "Run.run(...)\nplain / structured: the same\nrun_agent(), with no tools",
         fillcolor="#f5f5f5",
         color="#666666",
     )
@@ -377,7 +377,7 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     shared_note = add_note(
         dot,
         "shared_note",
-        "default_hooks() + ToolAgent.build_agent()\nare the SAME assembly build_subagent()\nuses for a streamed delegation",
+        "default_hooks() + run_agent()\nare the SAME assembly build_subagent()\nuses for a streamed delegation",
     )
 
     dot.edge("call", "agent_run")

@@ -10,6 +10,7 @@ from django.utils.text import slugify
 from django.utils.translation import gettext_lazy
 from haystack import component
 from haystack.components.agents.state.state import replace_values
+from haystack.components.agents.utils import _record_llm_usage
 from haystack.dataclasses import (
     ChatMessage,
     ChatRole,
@@ -43,6 +44,9 @@ logger = get_logger(__name__)
 UNGUARDABLE = gettext_lazy(
     "This task cannot be delegated here: it could not be checked. Answer without it."
 )
+
+# The channel of a delegation run outside any turn.
+SUBAGENT_CHANNEL = "subagent"
 
 # meta key naming the subagent
 SUBAGENT_META_KEY = "django_ai_sdk.subagent"
@@ -240,6 +244,8 @@ class FinalResponseHook:
     def _accept(
         self, state: State, messages: list[ChatMessage], replies: list[ChatMessage]
     ) -> None:
+        # The call is part of the run, so its tokens count with the run's own.
+        _record_llm_usage(state=state, llm_messages=replies)
         if replies and _is_usable_final_response(replies[0]):
             state.set("messages", [*messages, replies[0]], handler_override=replace_values)
 
@@ -353,32 +359,22 @@ class SubagentStreamFilter:
         # Oversight: under a policy of its own, the subagent's run opens a child turn
         # that judges only the task (see oversight.plugin), so it reads only the
         # task, not the coordinator's conversation and tool results.
-        context = [] if self._needs_own_turn() else messages
-        return await self._delegate(context, streaming_callback, task, **kwargs)
-
-    def _needs_own_turn(self) -> bool:
-        """Return True when a sync delegation would need its own turn.
-
-        Sync runs cannot open a turn. They cannot await `get_oversight()` either,
-        so a subagent that overrides it is assumed to need a turn.
-        """
-        if self._subagent is None:
-            return False
-        from django_ai_sdk.oversight.conf import is_enabled
-
-        if not is_enabled():
-            return False
-        from django_ai_sdk.oversight.agent_run import joins_turn
-        from django_ai_sdk.oversight.agents import code_policy, policy_needs_await
+        from django_ai_sdk.oversight.agent_run import opens_turn
         from django_ai_sdk.oversight.guard import current_guard
 
-        if policy_needs_await(self._subagent):
-            return True
-        try:
-            own = code_policy(self._subagent)[0]
-        except Exception:
-            return True
-        return bool(own) and not joins_turn(current_guard(), own)
+        outer = current_guard()
+        child = self._subagent is not None and await opens_turn(
+            self._subagent,
+            channel=outer.channel if outer is not None else SUBAGENT_CHANNEL,
+            user=self._user,
+        )
+        return await self._delegate([] if child else messages, streaming_callback, task, **kwargs)
+
+    def _needs_own_turn(self) -> bool:
+        """Return True when a sync delegation would need its own turn, which it cannot open."""
+        from django_ai_sdk.oversight.agent_run import needs_turn
+
+        return self._subagent is not None and needs_turn(self._subagent)
 
     async def _delegate(
         self,
@@ -398,7 +394,7 @@ class SubagentStreamFilter:
                 _handoff_context(messages),
                 hook_context=TurnRequest(
                     agent=self._subagent,
-                    channel=outer.channel if outer is not None else "subagent",
+                    channel=outer.channel if outer is not None else SUBAGENT_CHANNEL,
                     user=self._user,
                     thread_id=self._thread_id or None,
                     # The coordinator reads this, so finish judges it.

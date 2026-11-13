@@ -72,6 +72,33 @@ class TestReflect:
         message = await Message.objects.aget(id=message_id)
         assert message.result["content"] == "[WITHHELD]"
 
+    async def test_a_judge_that_is_down_is_asked_again_and_fails_closed_at_the_last(self):
+        from django_ai_sdk.oversight.models import Turn
+        from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS
+
+        from django_ai_sdk.conversation.models import Message, Thread
+
+        message_id = str(uuid.uuid4())
+        await Message.objects.acreate(
+            id=message_id,
+            thread=await Thread.objects.acreate(),
+            result=ChatMessage(id=message_id, role="assistant", content="Ask Jan.").model_dump(),
+        )
+        down = lambda lens, view: Answer(error="unavailable: ConnectionError")  # noqa: E731
+        with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "closed"}):
+            turn_id = await self._finished("fx-ref-down", down, message_id)
+            for _ in range(REFLECT_ATTEMPTS - 1):
+                assert await areflect(turn_id) == 0
+                turn = await Turn.objects.aget(id=turn_id)
+                assert turn.reflect_state == Turn.ReflectState.PENDING
+                assert not await RuleMatch.objects.filter(turn_id=turn_id).aexists()
+            await areflect(turn_id)
+        turn = await Turn.objects.aget(id=turn_id)
+        assert turn.reflect_state == Turn.ReflectState.DONE
+        assert (await RuleMatch.objects.aget(turn_id=turn_id, rule="mask_names")).acted
+        message = await Message.objects.aget(id=message_id)
+        assert message.result["content"] == "[WITHHELD]"
+
     async def test_a_reason_cannot_quote_what_the_gate_masked(self):
         from django_ai_sdk.conversation.models import Message, Thread
         from django_ai_sdk.oversight.models import LensAnswer

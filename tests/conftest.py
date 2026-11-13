@@ -5,6 +5,7 @@ Test configuration and shared fixtures for django-ai-sdk tests.
 import asyncio
 import pytest
 import pytest_asyncio
+from unittest.mock import MagicMock, patch
 from collections.abc import AsyncGenerator
 
 # Django configuration for tests
@@ -137,3 +138,14 @@ def sample_rag_documents():
         )
         for i in range(5)
     ]
+
+
+@pytest.fixture
+def installs_as_is():
+    """Run a mocked Haystack Agent as it is: oversight would install a copy of a real one."""
+    installed = MagicMock(side_effect=lambda agent, *args: agent)
+    with (
+        patch("django_ai_sdk.oversight.plugin.agent.install", installed),
+        patch("django_ai_sdk.oversight.plugin.install", installed),
+    ):
+        yield installed

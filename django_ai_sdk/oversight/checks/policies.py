@@ -216,7 +216,8 @@ def unanswered_warning(unanswered: Unanswered) -> Any:
     count = len(unanswered.lenses)
     return Warning(
         f"{count} oversight lens{'es have' if count != 1 else ' has'} no model judge here: "
-        f"{where}. A lens without patterns is skipped on every turn.",
+        f"{where}. A lens left with no judge is skipped on every turn; one whose judges "
+        "cannot run fails, and FAIL_MODE decides.",
         hint=" ".join(hints),
         id=f"{PREFIX}.W003",
     )

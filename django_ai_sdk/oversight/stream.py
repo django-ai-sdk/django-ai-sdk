@@ -121,10 +121,13 @@ async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
     """Run a side task of a turn, such as suggestions, citations or a title, on an Agent or a Run."""
     from django_ai_sdk.agents.base import Agent
+    from django_ai_sdk.oversight.plugin import TurnRequest
 
+    # Oversight: off on purpose. The turn itself is judged, not its side tasks.
     if isinstance(runner, Agent):
-        # Oversight: off on purpose. The turn itself is judged, not its side tasks.
         kwargs["oversight"] = False
+    else:
+        kwargs["request"] = TurnRequest(oversight=False)
     return await runner.run(messages, **kwargs)
 
 

@@ -355,6 +355,9 @@ def _record_judgments(
 ) -> None:
     """Save answers, matches and review items, and merge labels and severity into the turn.
 
+    Labels hold the turn's own answers (`Answered.about_turn`): a finding in a
+    tool result or an earlier message is recorded, but never relabels the turn.
+
     Run inside a transaction. `rows` come from `_build_answers(answered)`. `locked`
     is the turn's row as read under the lock; it gets the merged labels and
     severity. `floor` is the least severity to record.
@@ -388,7 +391,7 @@ def _record_judgments(
         **{
             row.lens: row.value
             for item, row in zip(answered, answer_rows, strict=True)
-            if item.answer.ok
+            if item.answer.ok and item.about_turn
         },
     }
     alerts = (a.severity for m, a in acted if isinstance(a, Alert | Notify))

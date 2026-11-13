@@ -14,6 +14,7 @@ from django_ai_sdk.oversight.actions import Block
 from django_ai_sdk.oversight.judges.base import (
     ask,
     is_unavailable,
+    resolve,
     sampled,
 )
 from django_ai_sdk.oversight.judges.classifier import batched
@@ -60,6 +61,17 @@ class Answered:
         """True when the lens failed at this stage."""
         return self.failed or bool(self.answer.error)
 
+    @property
+    def about_turn(self) -> bool:
+        """True when this is the turn's own answer: not about other text, nor one tool call.
+
+        Only these are the turn's answers for its rules and its labels.
+        """
+        return not self.aside and self.lens.subject is not Subject.TOOL_CALL
+
+
+# The error of a lens none of whose judges can run here.
+NO_JUDGE = "no judge can run here"
 
 # Actions a failed lens may trigger under FAIL_MODE "closed". Only protective ones.
 FAIL_CLOSED_ACTIONS = frozenset({"block", "mask", "restrict_tools"})
@@ -96,6 +108,8 @@ async def answer_lens(
 ) -> Answer | None:
     """Ask a lens's steps in order (its patterns, check or judges) until one is sure.
 
+    A lens whose judges all cannot run here (`Judge.missing()`, such as an unset
+    API key) answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped.
     Only reflect samples. Inline stages always ask. `sample=False` ignores the
     sample rate, for `testing.dry_run`. `progress` collects each answer as it
     arrives, so a caller that cancels still has them.
@@ -111,7 +125,18 @@ async def answer_lens(
     steps = lens.steps()
     if not steps:
         return None
-    return await _first_sure(steps, lens, view, progress if progress is not None else [])
+    answer = await _first_sure(steps, lens, view, progress if progress is not None else [])
+    if answer is None and all(map(_cannot_run, steps)):
+        return Answer(error=NO_JUDGE)
+    return answer
+
+
+def _cannot_run(step: Any) -> bool:
+    """Whether `step` is a judge that cannot run here. One that does not build answers an error."""
+    try:
+        return bool(resolve(step).missing())
+    except Exception:
+        return False
 
 
 async def _first_sure(

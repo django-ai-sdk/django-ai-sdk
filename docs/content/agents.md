@@ -479,7 +479,7 @@ except Blocked as refused:
     answer = refused.message           # the policy's text for the person asking
 ```
 
-`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](/manual/oversight/#agents-and-runs); what a turn checks, how nested runs and subagents join it, and why an override of `run()` cannot skip it, in [the guide](/oversight/#every-sdk-entry-point-is-a-turn).
+`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](/manual/oversight/#agents-and-runs); what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked, in [the guide](/oversight/#every-sdk-entry-point-is-a-turn).
 
 ---
 
