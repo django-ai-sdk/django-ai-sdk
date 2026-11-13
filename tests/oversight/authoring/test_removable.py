@@ -10,7 +10,7 @@ import sys
 from django.db import connection
 
 from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule, register_policy
-from django_ai_sdk.oversight import resolve
+from django_ai_sdk.oversight import registry as resolve
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.types import Stage
 from tests.removable import ask
@@ -35,7 +35,7 @@ assert not authoring, authoring
 
 
 def test_the_app_adds_its_loader_on_start():
-    from django_ai_sdk.oversight import resolve
+    from django_ai_sdk.oversight import registry as resolve
     from django_ai_sdk.oversight.authoring.loader import loader
 
     assert loader.load in resolve._loaders

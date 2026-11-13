@@ -30,7 +30,7 @@ class AuthoringConfig(AppConfig):
             check_authoring_deploy,
         )
         from django_ai_sdk.oversight.authoring.loader import loader
-        from django_ai_sdk.oversight.resolve import add_policy_loader
+        from django_ai_sdk.oversight.registry import add_policy_loader
 
         register_check(check_authoring)
         register_check(check_authoring_deploy, deploy=True)

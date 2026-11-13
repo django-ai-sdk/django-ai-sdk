@@ -32,8 +32,7 @@ from django_ai_sdk.oversight.authoring.schemas import (
     TryOut,
 )
 from django_ai_sdk.oversight.permissions import OversightAccess, reader_id
-from django_ai_sdk.oversight.registry import get_policy_class
-from django_ai_sdk.oversight.resolve import aload_policies
+from django_ai_sdk.oversight.registry import get_policy_class, run_policy_loaders
 from django_ai_sdk.oversight.types import Mode
 from django_ai_sdk.permissions import ConflictError, Operation
 
@@ -56,12 +55,12 @@ class AuthoringService(OversightAccess):
         from django_ai_sdk.oversight.actions import ACTION_KINDS
         from django_ai_sdk.oversight.conditions import META_OPS, OPS
         from django_ai_sdk.oversight.judges.base import alias_table
-        from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS
-        from django_ai_sdk.oversight.registry import get_policies, get_validators
+        from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS, get_validators
+        from django_ai_sdk.oversight.registry import get_policies
         from django_ai_sdk.oversight.types import Stage, Subject
 
         await cls.has_perms(user, VIEW)
-        await aload_policies()
+        await run_policy_loaders()
         return CatalogOut(
             lens_kinds=sorted(LENS_KINDS),
             answers=sorted(ANSWER_TYPES),
@@ -86,7 +85,7 @@ class AuthoringService(OversightAccess):
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         await cls.has_perms(user, VIEW)
-        await aload_policies()
+        await run_policy_loaders()
         return [_out(row) async for row in AuthoredPolicy.objects.order_by("name")]
 
     @classmethod
@@ -95,7 +94,7 @@ class AuthoringService(OversightAccess):
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         await cls.has_perms(user, VIEW)
-        await aload_policies()
+        await run_policy_loaders()
         row = await AuthoredPolicy.objects.filter(name=name).afirst()
         return _out(row) if row else None
 
@@ -159,7 +158,7 @@ class AuthoringService(OversightAccess):
         from django_ai_sdk.oversight.testing import dry_run
 
         await cls.has_perms(user, AUTHOR)
-        await aload_policies()
+        await run_policy_loaders()
         if run.definition is not None:
             definition = run.definition.model_dump()
         else:

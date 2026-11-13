@@ -39,10 +39,11 @@ from django_ai_sdk.oversight.lenses import (
     PatternLens,
     Score,
     Violation,
+    register_validator,
 )
 from django_ai_sdk.oversight.policy import Policy, pick
 from django_ai_sdk.oversight.presets import PIILens, SecretsLens
-from django_ai_sdk.oversight.registry import register_policy, register_validator
+from django_ai_sdk.oversight.registry import register_policy
 from django_ai_sdk.oversight.rules import Rule
 from django_ai_sdk.oversight.types import (
     Answer,

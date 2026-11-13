@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.oversight.guard.judging import should_retry
 from django_ai_sdk.oversight.guard.stages import StageResult
+from django_ai_sdk.oversight.policy import ResolvedPolicy
+from django_ai_sdk.oversight.registry import broken_reason, get_resolved_policy
 from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
 
 if TYPE_CHECKING:
@@ -33,7 +35,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.guard.judging import Matched
-    from django_ai_sdk.oversight.policy import ResolvedPolicy
 
 
 @dataclass
@@ -77,13 +78,11 @@ async def dry_run(
     named policy does not load.
     """
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.policy import ResolvedPolicy
-    from django_ai_sdk.oversight.resolve import aget_policy, broken_reason
 
     if isinstance(policy, ResolvedPolicy):
         resolved = policy
     else:
-        resolved = await aget_policy(policy)
+        resolved = await get_resolved_policy(policy)
         if resolved is None:
             raise LookupError(broken_reason(policy) or f"No oversight policy {policy!r}")
     # Opened directly, so a dry run checks even when oversight is switched off.

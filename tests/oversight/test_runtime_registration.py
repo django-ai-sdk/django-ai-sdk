@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import pytest
 from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule
-from django_ai_sdk.oversight.policy import build
+from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy, unregister_policy
-from django_ai_sdk.oversight.resolve import _loaders, add_policy_loader, aget_policy, invalidate
+from django_ai_sdk.oversight.registry import _loaders, add_policy_loader, get_resolved_policy, invalidate
 from django_ai_sdk.oversight.testing import dry_run
 from django_ai_sdk.oversight.types import Outcome, Stage
 
@@ -28,13 +28,13 @@ def draft(name: str = "draft") -> type[Policy]:
 
 class TestDrafts:
     def test_build_takes_a_class_that_is_not_registered(self, registry_snapshot):
-        resolved = build("draft", policy_class=draft())
+        resolved = build_policy("draft", policy_class=draft())
         assert set(resolved.rules) == {"no_refunds"}
         assert get_policy_class("draft") is None
 
     @pytest.mark.django_db(transaction=True)
     async def test_dry_run_takes_a_built_draft(self, registry_snapshot):
-        result = await dry_run(build("draft", policy_class=draft()), input="I want a refund")
+        result = await dry_run(build_policy("draft", policy_class=draft()), input="I want a refund")
         assert result.outcome is Outcome.BLOCKED
         assert result.stage(Stage.GATE).message == "No."
 
@@ -51,7 +51,7 @@ class TestLoaders:
 
         add_policy_loader(loader)
         try:
-            resolved = await aget_policy("loaded")
+            resolved = await get_resolved_policy("loaded")
         finally:
             _loaders.remove(loader)
         assert resolved is not None and "no_refunds" in resolved.rules
@@ -65,11 +65,11 @@ class TestLoaders:
 
         add_policy_loader(loader)
         try:
-            await aget_policy("missing")
-            await aget_policy("missing")
+            await get_resolved_policy("missing")
+            await get_resolved_policy("missing")
             assert len(calls) == 1
             invalidate()
-            await aget_policy("missing")
+            await get_resolved_policy("missing")
             assert len(calls) == 2
         finally:
             _loaders.remove(loader)
@@ -82,23 +82,24 @@ class TestLoaders:
 
         add_policy_loader(broken)
         try:
-            assert await aget_policy("kept") is not None
+            assert await get_resolved_policy("kept") is not None
         finally:
             _loaders.remove(broken)
 
     async def test_an_unregistered_policy_is_unknown_at_once(self, registry_snapshot):
         register_policy(draft("gone"))
-        assert await aget_policy("gone") is not None
+        assert await get_resolved_policy("gone") is not None
         unregister_policy("gone")
         assert get_policy_class("gone") is None
-        assert await aget_policy("gone") is None
+        assert await get_resolved_policy("gone") is None
 
 
 async def test_lookups_during_a_load_wait_for_it(registry_snapshot):
     """A lookup that starts while the loaders run loads too, instead of finding nothing."""
     import asyncio
 
-    from django_ai_sdk.oversight import Policy, resolve
+    from django_ai_sdk.oversight import Policy
+    from django_ai_sdk.oversight import registry as resolve
     from django_ai_sdk.oversight.registry import register_policy
 
     class Late(Policy):
@@ -111,7 +112,7 @@ async def test_lookups_during_a_load_wait_for_it(registry_snapshot):
     resolve._loaders.append(slow_loader)
     resolve._loaded_at = float("-inf")
     try:
-        found = await asyncio.gather(resolve.aget_policy("rt-late"), resolve.aget_policy("rt-late"))
+        found = await asyncio.gather(resolve.get_resolved_policy("rt-late"), resolve.get_resolved_policy("rt-late"))
     finally:
         resolve._loaders.remove(slow_loader)
     assert all(policy is not None for policy in found)

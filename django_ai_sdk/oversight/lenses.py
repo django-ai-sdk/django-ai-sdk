@@ -467,6 +467,45 @@ class PatternLens(Lens):
         return [self.finder]
 
 
+# Validators a check lens may name, by name.
+_validators: dict[str, Callable[..., Any]] = {}
+
+
+def register_validator(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Decorator that lets check lenses, and lenses from JSON, name a validator::
+
+    @register_validator("even_amount")
+    def validate_even(text):
+        ...
+    """
+
+    def register(validator: Callable[..., Any]) -> Callable[..., Any]:
+        _validators[name] = validator
+        return validator
+
+    return register
+
+
+def get_validator(validator: Callable[..., Any] | str) -> Callable[..., Any]:
+    """The validator itself, or the one registered under a name.
+
+    Raises ImproperlyConfigured for an unknown name. A name is never imported as a
+    path, so JSON cannot run code a developer did not register.
+    """
+    if callable(validator):
+        return validator
+    if validator not in _validators:
+        raise ImproperlyConfigured(
+            f"No validator {validator!r}; register it with register_validator."
+        )
+    return _validators[validator]
+
+
+def get_validators() -> dict[str, Callable[..., Any]]:
+    """Every validator registered in code."""
+    return dict(_validators)
+
+
 class CheckLens(Lens):
     """Answered by plain Python, in `check(text, view)`.
 
@@ -483,8 +522,6 @@ class CheckLens(Lens):
     timeout: float = DEFAULT_TIMEOUT
 
     def check(self, text: str, view: TurnContext) -> Any:
-        from django_ai_sdk.oversight.registry import get_validator
-
         found: list[str] = []
         for validator in self.validators:
             run = get_validator(validator)
@@ -495,8 +532,6 @@ class CheckLens(Lens):
         return Answer(value=bool(found), rationale="; ".join(found))
 
     def validate(self) -> None:
-        from django_ai_sdk.oversight.registry import get_validator
-
         super().validate()
         overridden = type(self).check is not CheckLens.check
         if not overridden and not self.validators:
@@ -655,4 +690,5 @@ __all__ = [
     "Score",
     "Violation",
     "lens_from_dict",
+    "register_validator",
 ]

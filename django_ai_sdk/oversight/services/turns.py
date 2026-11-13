@@ -18,6 +18,7 @@ from django.db.models.fields.json import KeyTransform
 from django_ai_sdk.errors import UserError
 from django_ai_sdk.oversight.content import expired, load_content
 from django_ai_sdk.oversight.permissions import CONTENT, METRICS, OversightAccess
+from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.oversight.schemas import (
     ContentState,
     LensAnswerOut,
@@ -97,7 +98,6 @@ class TurnReads(OversightAccess):
     async def get_turn(cls, turn_id: str, *, user: UserType) -> TurnDetail | None:
         """Get one turn with its answers, matches and reviews. None outside the reader's scope."""
         from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, Turn
-        from django_ai_sdk.oversight.resolve import aget_policy
 
         await cls.has_perms(user, METRICS)
         scoped = await cls.scoped(user, METRICS, Turn.objects.select_related("content"))
@@ -113,7 +113,7 @@ class TurnReads(OversightAccess):
         reviews = [r async for r in scoped_reviews]
         [row] = await rows_of([turn], {turn.id} if shown else set(), scoped_reviews)
         texts = (content or {}).get("texts") or {}
-        resolved = await aget_policy(turn.policy)
+        resolved = await get_resolved_policy(turn.policy)
         return TurnDetail(
             **row.model_dump(),
             content=visible_content(content),

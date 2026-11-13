@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy
 from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
+from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
 
 if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage
@@ -80,15 +81,13 @@ async def resolve_policy(
     it failed to load) means the history is judged as sent, which is the safe side.
     """
     from django_ai_sdk.oversight.conf import is_enabled
-    from django_ai_sdk.oversight.registry import policy_name
-    from django_ai_sdk.oversight.resolve import aget_policy
 
     if oversight in (False, "") or not is_enabled():
         return None
     try:
         name = policy_name(oversight) if oversight else ""
         name = name or (await acode_policy(agent, channel=channel, user=user))[0]
-        return await aget_policy(name) if name else None
+        return await get_resolved_policy(name) if name else None
     except Exception:
         return None
 

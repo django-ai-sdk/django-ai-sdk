@@ -247,7 +247,7 @@ class TestHeadless:
 
     async def test_a_broken_policy_store_refuses_the_turn_unless_open(self):
         failing = patch(
-            "django_ai_sdk.oversight.resolve.aget_policy", side_effect=RuntimeError("db")
+            "django_ai_sdk.oversight.guard.get_resolved_policy", side_effect=RuntimeError("db")
         )
         with failing:
             guard = await TurnGuard.start(make_agent([], None), channel="api", input="x")

@@ -89,7 +89,7 @@ def forget_actor(actor_id: str) -> int:
 @receiver(setting_changed, dispatch_uid="django_ai_sdk.oversight.settings_changed")
 def settings_changed(setting: str, **kwargs: Any) -> None:
     if setting == "AI_SDK_OVERSIGHT":
-        from django_ai_sdk.oversight.resolve import invalidate
+        from django_ai_sdk.oversight.registry import invalidate
 
         invalidate()
 

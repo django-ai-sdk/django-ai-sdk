@@ -24,6 +24,7 @@ from django_ai_sdk.oversight.guard.judging import (
     should_retry,
 )
 from django_ai_sdk.oversight.persist import fit_column, save_answers
+from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.oversight.types import (
     Answer,
     Outcome,
@@ -248,9 +249,8 @@ async def _judge(
 ):
     """Run reflect's lenses and rules on `turn`. None when its policy does not load."""
     from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
-    from django_ai_sdk.oversight.resolve import aget_policy
 
-    policy = await aget_policy(turn.policy)
+    policy = await get_resolved_policy(turn.policy)
     if policy is None:
         return None
     content = await sync_to_async(load_content)(turn)

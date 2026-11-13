@@ -481,7 +481,7 @@ class TestReflectLease:
 
     async def test_a_policy_that_did_not_load_gives_the_claim_back(self):
         turn_id = await self.closed("fine")
-        with patch("django_ai_sdk.oversight.resolve.aget_policy", return_value=None):
+        with patch("django_ai_sdk.oversight.reflect.get_resolved_policy", return_value=None):
             assert await areflect(turn_id) == 0
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
         assert await areflect(turn_id) == 1

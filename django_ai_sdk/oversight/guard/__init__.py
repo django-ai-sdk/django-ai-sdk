@@ -47,6 +47,8 @@ from django_ai_sdk.oversight.guard.judging import Answered, Matched
 from django_ai_sdk.oversight.guard.masking import TurnMasks
 from django_ai_sdk.oversight.guard.notices import TurnNotices
 from django_ai_sdk.oversight.persist import persist_turn
+from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, default_fail_mode
+from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
 from django_ai_sdk.oversight.types import (
     Capture,
     HistoryItem,
@@ -67,7 +69,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.guard.stages import StageResult
-    from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy
 
 logger = get_logger(__name__)
 
@@ -422,8 +423,6 @@ class TurnGuard:
         inert = cls(context=TurnContext(input=input))
         if oversight in (False, "") or is_unguarded() or not is_enabled():
             return inert
-        from django_ai_sdk.oversight.registry import policy_name
-        from django_ai_sdk.oversight.resolve import aget_policy
 
         opening = {
             "agent": agent,
@@ -444,7 +443,7 @@ class TurnGuard:
         if not name:
             return inert
         try:
-            resolved = await aget_policy(name)
+            resolved = await get_resolved_policy(name)
         except Exception:
             logger.exception("Oversight policy {!r} could not be loaded", name)
             resolved = None
@@ -492,7 +491,6 @@ class TurnGuard:
         It refuses everything under an empty stand-in policy, so the refusal and
         the error are still recorded. With FAIL_MODE "open" it is inert instead.
         """
-        from django_ai_sdk.oversight.policy import default_fail_mode
 
         if default_fail_mode() == "open":
             logger.error(
@@ -601,7 +599,6 @@ class TurnGuard:
 def _refusing_policy(name: str) -> ResolvedPolicy:
     """Return an empty policy named `name`, used to refuse a turn whose policy failed to load."""
     from django_ai_sdk.oversight.conf import validate_retention
-    from django_ai_sdk.oversight.policy import ResolvedPolicy
 
     return ResolvedPolicy(
         name=name,

@@ -911,12 +911,12 @@ class TestOpenRelease:
         # policy's recorded configuration.
         from django.utils.functional import Promise
         from django_ai_sdk.oversight.actions import Block
-        from django_ai_sdk.oversight.policy import build
+        from django_ai_sdk.oversight.registry import build_policy
 
         blocks = [
             action
             for pack in ("security", "safety", "quality")
-            for rule in build(pack).rules.values()
+            for rule in build_policy(pack).rules.values()
             for action in rule.then
             if isinstance(action, Block)
         ]

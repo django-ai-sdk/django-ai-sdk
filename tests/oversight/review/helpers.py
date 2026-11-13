@@ -8,7 +8,7 @@ from unittest.mock import patch
 from django.test import override_settings
 
 from django_ai_sdk.oversight.guard import TurnGuard
-from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.oversight.registry import invalidate
 from tests.factories.db import UserFactory, agrant
 from tests.oversight.helpers import make_agent
 

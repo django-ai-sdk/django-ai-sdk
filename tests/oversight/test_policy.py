@@ -27,15 +27,16 @@ from django_ai_sdk.oversight import (
     pick,
     register_policy,
 )
-from django_ai_sdk.oversight import resolve as resolution
+from django_ai_sdk.oversight import registry as resolution
 from django_ai_sdk.oversight.conditions import Condition
 from django_ai_sdk.oversight.content import found_literals
 from django_ai_sdk.oversight.guard.judging import Answered, match_rules, answer_lenses
 from django_ai_sdk.oversight.judges.base import Judge
 from django_ai_sdk.oversight.packs.security import SecurityPack
-from django_ai_sdk.oversight.policy import build
-from django_ai_sdk.oversight.registry import get_invalid_policies, validate_policy
-from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.oversight.registry import build_policy
+from django_ai_sdk.oversight.policy import validate_policy
+from django_ai_sdk.oversight.registry import get_invalid_policies
+from django_ai_sdk.oversight.registry import invalidate
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,
@@ -163,21 +164,21 @@ class TestConditions:
 
 class TestPolicies:
     def test_extends_merges_with_sources(self):
-        resolved = build("test-child")
+        resolved = build_policy("test-child")
         assert set(resolved.lenses) == {"mentions_x", "topic"}
         assert set(resolved.rules) == {"block_x", "note_b"}
         # Each value names the policy that declared it.
         assert resolved.sources["rule:block_x"] == "test-parent"
         assert resolved.sources["lens:topic"] == "test-child"
-        assert build("default").sources["lens:prompt_injection"] == "security"
+        assert build_policy("default").sources["lens:prompt_injection"] == "security"
         assert resolved.capture is Capture.MASKED
 
     def test_inherited_rules_start_in_report_mode(self):
-        assert build("test-child").rules["block_x"].mode is Mode.REPORT
+        assert build_policy("test-child").rules["block_x"].mode is Mode.REPORT
 
     @override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "metadata"})
     def test_the_deployment_capture_is_a_ceiling(self):
-        assert build("test-child").capture is Capture.METADATA
+        assert build_policy("test-child").capture is Capture.METADATA
 
     def test_incomplete_policies_are_not_registered(self):
         class NoName(Policy):
@@ -194,7 +195,7 @@ class TestPolicies:
         assert "test-bad" in get_invalid_policies()
 
     def test_a_policy_picks_single_lenses_and_rules_from_a_pack(self):
-        resolved = build("test-picked")
+        resolved = build_policy("test-picked")
         assert list(resolved.lenses) == ["prompt_injection", "secrets_input"]
         assert list(resolved.rules) == ["block_injection", "mask_secrets_in_question"]
         assert resolved.rules["mask_secrets_in_question"].mode is Mode.ENFORCE
@@ -214,7 +215,7 @@ class TestPolicies:
             pick(SecurityPack.lenses, "prompt_injection", mode=Mode.ENFORCE)
 
     def test_the_packs_are_registered_and_resolve(self):
-        resolved = build("default")
+        resolved = build_policy("default")
         assert {"prompt_injection", "pii_input", "groundedness", "self_harm"} <= set(
             resolved.lenses
         )
@@ -223,20 +224,20 @@ class TestPolicies:
 
 class TestRuleEvaluation:
     def test_a_rule_waits_for_lenses_still_to_come(self):
-        resolved = build("default")
+        resolved = build_policy("default")
         early = match_rules(resolved, {"pii_input": ans([])}, Stage.GATE, done=set())
         assert "review_ungrounded" not in {m.rule.name for m in early}
         later = match_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
         assert "review_ungrounded" in {m.rule.name for m in later}
 
     def test_report_matches_record_but_do_not_act(self):
-        resolved = build("test-parent")
+        resolved = build_policy("test-parent")
         [match] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
         assert not match.acted
         assert match.outcome(report=True).value == "blocked"
 
     def test_enforced_actions_only_where_they_still_can(self):
-        resolved = build("test-parent")
+        resolved = build_policy("test-parent")
         resolved.rules["block_x"].mode = Mode.ENFORCE
         resolved.rules["block_x"].then = [Block(), Mask()]
         [gate] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
@@ -245,7 +246,7 @@ class TestRuleEvaluation:
         assert [a.kind for a in late.acted] == ["mask"]
 
     def test_fail_closed_treats_an_error_as_a_match(self):
-        resolved = build("test-parent")
+        resolved = build_policy("test-parent")
         broken = {"mentions_x": ans(None, error="timeout")}
 
         def closed():
@@ -260,7 +261,7 @@ class TestRuleEvaluation:
         assert [m.rule.name for m in closed()] == ["block_x"]
 
     def test_fail_closed_never_raises_an_alert(self):
-        resolved = build("test-parent")
+        resolved = build_policy("test-parent")
         resolved.rules["block_x"].mode = Mode.ENFORCE
         resolved.rules["block_x"].then = [Alert("high")]
         broken = {"mentions_x": ans(None, error="timeout")}
@@ -271,7 +272,7 @@ class TestRuleEvaluation:
     def test_retention_takes_content_and_metadata_only(self):
         from django_ai_sdk.oversight.conf import validate_retention
 
-        assert build("test-parent").retention == {"content": 90, "metadata": 730}
+        assert build_policy("test-parent").retention == {"content": 90, "metadata": 730}
         with pytest.raises(ValueError, match="content.*metadata"):
             validate_retention({"security": 90})
 
@@ -291,19 +292,19 @@ class TestSeverity:
 
 class TestResolving:
     async def test_policies_resolve_from_code_and_are_cached(self):
-        resolved = await resolution.aget_policy("test-child")
+        resolved = await resolution.get_resolved_policy("test-child")
         assert resolved.rules["block_x"].mode is Mode.REPORT
-        assert await resolution.aget_policy("test-child") is resolved
+        assert await resolution.get_resolved_policy("test-child") is resolved
 
     async def test_invalidating_a_parent_forgets_its_children(self):
-        resolved = await resolution.aget_policy("test-child")
+        resolved = await resolution.get_resolved_policy("test-child")
         invalidate("test-parent")
-        assert await resolution.aget_policy("test-child") is not resolved
+        assert await resolution.get_resolved_policy("test-child") is not resolved
 
 
 class TestPolicyFields:
     def test_stream_mode_and_retention_are_inherited(self):
-        resolved = build("test-held-child")
+        resolved = build_policy("test-held-child")
         assert resolved.stream_mode == "live"
         assert resolved.retention == {"content": 7, "metadata": 730}
         assert resolved.sources["policy.stream_mode"] == "test-held-parent"
@@ -323,15 +324,15 @@ class TestPolicyFields:
 
         with patch.dict(registry._registry, {"test-typo": Typo, "test-hold": Hold}):
             with pytest.raises(ImproperlyConfigured, match="stream_mode 'held'"):
-                build("test-typo")
+                build_policy("test-typo")
             # "hold" is gone: a client that needs the whole answer buffers it itself.
             with pytest.raises(ImproperlyConfigured, match="stream_mode 'hold'"):
-                build("test-hold")
+                build_policy("test-hold")
 
     @override_settings(AI_SDK_OVERSIGHT={"STREAM_MODE": "held"})
     def test_an_unknown_default_stream_mode_is_refused(self):
         with pytest.raises(ImproperlyConfigured, match="STREAM_MODE"):
-            build("test-parent")
+            build_policy("test-parent")
 
 
 class TestDeclarationsThatCannotWork:
@@ -366,7 +367,7 @@ class TestDeclarationsThatCannotWork:
             rules = [Rule("mask_x", when=L("mentions_x").is_true, then=Mask())]  # noqa: RUF012
 
         with pytest.raises(ImproperlyConfigured, match="only an entities lens"):
-            build("test-masks-parent")
+            build_policy("test-masks-parent")
 
     def test_a_rule_reading_a_lens_the_policy_lacks_does_not_resolve(self):
         @register_policy
@@ -385,7 +386,7 @@ class TestDeclarationsThatCannotWork:
 
         for name in ("test-unknown-lens", "test-unknown-mask-lens"):
             with pytest.raises(ImproperlyConfigured, match="unknown lenses"):
-                build(name)
+                build_policy(name)
 
     def test_a_choice_default_must_be_one_of_its_labels(self):
         class OddDefault(Policy):
@@ -535,7 +536,7 @@ class TestDeclarations:
         assert found_literals(answered, {Subject.INPUT: text}) == {"Jan": "person"}
 
     def test_a_mask_over_a_tool_call_lens_is_refused(self):
-        from django_ai_sdk.oversight.registry import validate_rule
+        from django_ai_sdk.oversight.policy import validate_rule
 
         lens = PatternLens(name="args", subject=Subject.TOOL_CALL, keywords=["x"])
         rule = Rule("mask_args", when=L("args").is_true, then=Mask(), mode=Mode.ENFORCE)
@@ -543,7 +544,7 @@ class TestDeclarations:
             validate_rule(rule, {"args": lens})
 
     def test_a_mask_over_a_sources_lens_is_refused(self):
-        from django_ai_sdk.oversight.registry import validate_rule
+        from django_ai_sdk.oversight.policy import validate_rule
 
         lens = PatternLens(name="src", subject=Subject.SOURCES, keywords=["x"])
         rule = Rule("mask_src", when=L("src").is_true, then=Mask(), mode=Mode.ENFORCE)
@@ -551,7 +552,7 @@ class TestDeclarations:
             validate_rule(rule, {"src": lens})
 
     def test_reset_registry_forgets_cached_resolutions(self, registry_snapshot: Any):
-        from django_ai_sdk.oversight import resolve
+        from django_ai_sdk.oversight import registry as resolve
 
         resolve._cache["x"] = (None, frozenset())
         registry_snapshot.reset_registry()

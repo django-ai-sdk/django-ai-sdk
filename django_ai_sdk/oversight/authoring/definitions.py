@@ -31,9 +31,13 @@ from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
 from django_ai_sdk.oversight.checks.policies import policy_errors
 from django_ai_sdk.oversight.judges.base import alias_defined, alias_of, is_optional
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
-from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, build, policy_lenses
-from django_ai_sdk.oversight.registry import get_invalid_policies, get_policy_class, validate_policy
-from django_ai_sdk.oversight.resolve import ancestors
+from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, policy_lenses, validate_policy
+from django_ai_sdk.oversight.registry import (
+    ancestors,
+    build_policy,
+    get_invalid_policies,
+    get_policy_class,
+)
 from django_ai_sdk.oversight.rules import Rule
 from django_ai_sdk.oversight.types import Capture, rank
 
@@ -164,7 +168,7 @@ def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy
     _fail_on(_inherited_names(parents, cls))
     try:
         validate_policy(cls)
-        resolved = build(name, policy_class=cls)
+        resolved = build_policy(name, policy_class=cls)
     except (ImproperlyConfigured, LookupError, ValueError) as exc:
         raise DefinitionError([str(exc)]) from None
     _fail_on(_changed_from_parents(parents, resolved))
@@ -213,7 +217,7 @@ def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
     parents: dict[str, ResolvedPolicy] = {}
     for parent in extends:
         try:
-            parents[parent] = build(parent)
+            parents[parent] = build_policy(parent)
         except Exception as exc:
             problems.append(f"policy {parent!r} does not load: {exc}")
     return parents, problems

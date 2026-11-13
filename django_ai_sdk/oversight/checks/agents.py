@@ -13,7 +13,7 @@ def policies_in_use() -> set[str]:
     """DEFAULT_POLICY, the policies agent classes name, and all their ancestors."""
     from django_ai_sdk.agents.registry import registered_agent_classes
     from django_ai_sdk.oversight.conf import setting
-    from django_ai_sdk.oversight.resolve import ancestors
+    from django_ai_sdk.oversight.registry import ancestors
 
     names = {str(setting("DEFAULT_POLICY") or "")}
     for cls in [*registered_agent_classes(), *agent_runtime_bases()]:

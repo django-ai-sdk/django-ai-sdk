@@ -24,7 +24,7 @@ from django_ai_sdk.oversight import (
 )
 from django_ai_sdk.oversight.judges import Judge, LLMJudge
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
-from django_ai_sdk.oversight.policy import build
+from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall
 
 from tests.oversight.helpers import (
@@ -122,13 +122,13 @@ class TestClosedByDefault:
             fail_mode="open",
         )
         child = policy("fc-child", [], [], extends=[parent])
-        assert build(child).fail_mode == "open"
+        assert build_policy(child).fail_mode == "open"
         assert not (await gate(child)).blocked
 
     def test_a_policy_with_an_unknown_fail_mode_does_not_load(self):
         name = policy("fc-bad-mode", [], [], fail_mode="half")
         with pytest.raises(ImproperlyConfigured, match="fail_mode"):
-            build(name)
+            build_policy(name)
 
     async def test_an_unknown_policy_refuses_with_the_generic_message(self):
         result = await gate("fc-nobody-registers-this")

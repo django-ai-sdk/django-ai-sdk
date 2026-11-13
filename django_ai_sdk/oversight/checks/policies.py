@@ -19,8 +19,8 @@ def policy_checks(in_use: set[str]) -> list[Any]:
     Warnings about notifiers and streaming are only reported for policies in `in_use`.
     """
     from django_ai_sdk.oversight.notifiers import configured_notifiers
-    from django_ai_sdk.oversight.policy import build
     from django_ai_sdk.oversight.registry import (
+        build_policy,
         get_duplicate_policies,
         get_invalid_policies,
         get_policies,
@@ -43,7 +43,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
         )
     for name in get_policies():
         try:
-            resolved = build(name)
+            resolved = build_policy(name)
         except Exception as exc:
             messages.append(
                 Error(f"Oversight policy {name!r} does not resolve: {exc}", id=f"{PREFIX}.E002")
@@ -260,9 +260,9 @@ def build_or_none(name: str) -> Any:
     Not cached: each check is registered on its own, and a policy registered at
     runtime would leave a cache stale.
     """
-    from django_ai_sdk.oversight.policy import build
+    from django_ai_sdk.oversight.registry import build_policy
 
     try:
-        return build(name)
+        return build_policy(name)
     except Exception:
         return None

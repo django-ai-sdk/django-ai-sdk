@@ -9,7 +9,7 @@ from django_ai_sdk.oversight.authoring.schemas import PolicyIn, TryIn
 from django_ai_sdk.oversight.authoring.services import AuthoringService
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.registry import get_policy_class
-from django_ai_sdk.oversight.resolve import aget_policy
+from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.permissions import ConflictError, PermissionDenied
 
 from tests.oversight.authoring.helpers import AUTHOR, VIEW, refunds
@@ -66,7 +66,7 @@ class TestSaving:
         # What it extends still runs.
         assert (await gate("refunds", "a xylophone")).blocked
         assert not (await gate("refunds", "hello")).blocked
-        resolved = await aget_policy("refunds")
+        resolved = await get_resolved_policy("refunds")
         assert resolved is not None and resolved.origin == "authored"
 
     async def test_a_judge_lens_of_keywords_and_a_registered_check_run_too(self):

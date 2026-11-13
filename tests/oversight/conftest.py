@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy
-from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.oversight.registry import invalidate
 from tests.oversight.helpers import TEST_POLICIES
 
 
