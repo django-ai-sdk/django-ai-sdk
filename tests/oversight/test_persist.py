@@ -23,7 +23,7 @@ from django_ai_sdk.oversight import (
     Rule,
 )
 from django_ai_sdk.oversight.content import without_nul
-from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 from django_ai_sdk.oversight.models import LensAnswer, Turn
 from django_ai_sdk.oversight.types import Answer, Stage, Subject
 from tests.oversight.helpers import (
@@ -52,7 +52,7 @@ class TestRecordingFailures:
         side = RuntimeError("bug")
         with (
             closed(),
-            patch("django_ai_sdk.oversight.guard.state.evaluate_rules", side_effect=side),
+            patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
             assert (await guard.gate()).blocked
@@ -68,7 +68,7 @@ class TestRecordingFailures:
         side = RuntimeError("bug")
         with (
             closed(),
-            patch("django_ai_sdk.oversight.guard.state.evaluate_rules", side_effect=side),
+            patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
             assert (await guard.finish("hello")).blocked
@@ -86,7 +86,7 @@ class TestRecordingFailures:
 
     async def test_a_caller_that_refuses_a_passed_result_records_it_blocked(self):
         guard = await start("test-guard", "mail a@b.nl")
-        assert (await guard.gate()).masked
+        assert (await guard.gate()).changed
         guard.refuse("masked result does not fit its schema")
         turn = await closed_turn(guard)
         assert turn.outcome == "blocked"
@@ -123,7 +123,7 @@ class TestRecordingFailures:
         with contextlib.suppress(asyncio.CancelledError):
             await first
         await closed_turn(guard)
-        assert all(f.done() for f in guard._masking_results.values())
+        assert all(f.done() for f in guard.masks.results.values())
         await asyncio.sleep(0.1)
         assert not guard.answered
 
@@ -132,7 +132,7 @@ class TestRecordingFailures:
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
         assert await guard.mask_result("c1", "write to c@d.nl") == "write to [EMAIL]"
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
-        assert len(guard._masking_results) == 2
+        assert len(guard.masks.results) == 2
 
     async def test_a_finding_in_a_tool_result_leaves_the_turns_labels_alone(self):
         guard = await start("test-guard", "hello")
@@ -208,14 +208,14 @@ class TestRecordingFailures:
         from pydantic import BaseModel
 
         from django_ai_sdk.oversight.plugin.finish import withhold_unfit
-        from django_ai_sdk.oversight.guard import FinishResult
+        from django_ai_sdk.oversight.guard.stages import StageResult
 
         class Count(BaseModel):
             n: int
 
         refused: list[str] = []
         guard = type("Guard", (), {"refuse": lambda self, error="": refused.append(error)})()
-        finished = FinishResult(output='{"n": "[NUMBER]"}', replaced=True)
+        finished = StageResult(text='{"n": "[NUMBER]"}', changed=True)
         withhold_unfit(guard, finished, Count)
         assert finished.blocked and finished.message == str(Block.DEFAULT_MESSAGE)
         assert refused == ["masked result does not fit its schema"]

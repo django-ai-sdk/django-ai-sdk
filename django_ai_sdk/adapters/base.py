@@ -859,7 +859,7 @@ class Stream:
             yield MessageEndEvent(finish_reason=finish_reason)
 
             # No follow-up suggestions for a masked or withheld answer.
-            if not finished.replaced and (suggestion := await self.get_suggestions(messages)):
+            if not finished.changed and (suggestion := await self.get_suggestions(messages)):
                 yield suggestion
 
         except Exception as critical_error:

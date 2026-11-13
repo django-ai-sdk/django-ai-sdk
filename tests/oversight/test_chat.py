@@ -81,7 +81,10 @@ class TestChat:
         assert not await LensAnswer.objects.filter(stage="gate").aexists()
 
     async def test_a_broken_gate_follows_the_fail_mode(self):
-        broken = patch.object(TurnGuard, "_gate", side_effect=RuntimeError("broken rule"))
+        broken = patch(
+            "django_ai_sdk.oversight.guard.stages.judge_stage",
+            side_effect=RuntimeError("broken rule"),
+        )
         with broken:
             parts = await chat(make_agent(["Fine."], Storage()), "hello")
         assert text_of(parts) == str(Block.DEFAULT_MESSAGE)

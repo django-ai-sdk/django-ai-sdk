@@ -18,10 +18,10 @@ class TestTurn:
         agent = make_agent([], None, policy="")
         messages = [ChatMessage(role="user", content="hi"), ChatMessage(role="user", content="go")]
         inert = await TurnGuard.start(agent, channel="api", messages=messages)
-        assert not inert.active and (await inert.gate()).input == "go"
+        assert not inert.active and (await inert.gate()).text == "go"
         with opened():
             unknown = await TurnGuard.start(agent, channel="api", input="hi", oversight="fc-none")
-        assert not unknown.active and (await unknown.gate()).input == "hi"
+        assert not unknown.active and (await unknown.gate()).text == "hi"
 
     async def test_an_empty_policy_name_opens_no_turn_at_any_layer(self):
         from django_ai_sdk.oversight.guard import TurnGuard

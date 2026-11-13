@@ -20,12 +20,13 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
-from django_ai_sdk.oversight.guard import (
-    UNCHECKED_TEXT,
-    GateResult,
-    TurnGuard,
+from django_ai_sdk.oversight.guard import TurnGuard
+from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.stages import (
+    HISTORY_CONCURRENCY,
+    MAX_HISTORY_JUDGED,
+    StageResult,
 )
-from django_ai_sdk.oversight.guard.gate import HISTORY_CONCURRENCY, MAX_HISTORY_JUDGED
 from django_ai_sdk.oversight.models import RuleMatch
 from django_ai_sdk.oversight.types import (
     Stage,
@@ -117,7 +118,7 @@ class TestHistoryAtTheGate:
         await guard.gate_history(messages)
         gate = await guard.gate()
         # The question's own masking still runs: history did not make the rule "done".
-        assert gate.masked and gate.input == "My IBAN? [EMAIL]"
+        assert gate.changed and gate.text == "My IBAN? [EMAIL]"
         turn = await closed_turn(guard)
         queued = await RuleMatch.objects.filter(turn=turn, rule="hr_to_people").acount()
         assert queued == 0
@@ -270,7 +271,7 @@ class TestStoredHistory:
 
         async def refuse(self, messages, **kwargs):  # noqa: ANN001, ANN202
             seen.append([m.content for m in messages])
-            return GateResult(blocked=True, message="Not that history.")
+            return StageResult(blocked=True, message="Not that history.")
 
         history = [
             ChatMessage(role="user", content=INJECTION),
@@ -285,7 +286,7 @@ class TestStoredHistory:
 
     async def test_chat_without_a_thread_refuses_what_gate_history_refuses(self):
         async def refuse(self, messages, **kwargs):  # noqa: ANN001, ANN202
-            return GateResult(blocked=True, message="Not that history.")
+            return StageResult(blocked=True, message="Not that history.")
 
         with patch.object(TurnGuard, "gate_history", refuse):
             parts = await chat_turns(
@@ -336,9 +337,9 @@ class TestStoredHistory:
         async def refuse(self, messages, *, history=True):  # noqa: ANN001, ANN202
             if not history:
                 # Only the question's attachments; it has none.
-                return GateResult()
+                return StageResult()
             checked.append(len(messages))
-            return GateResult(blocked=True, message="Judged.")
+            return StageResult(blocked=True, message="Judged.")
 
         question = ChatMessage(role="user", content="go on")
         with patch.object(TurnGuard, "gate_history", refuse):

@@ -17,7 +17,7 @@ from haystack.core.serialization import default_from_dict, default_to_dict
 
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.guard import TurnGuard, current_guard, outlived_turn
-from django_ai_sdk.oversight.guard.state import merge_restrict
+from django_ai_sdk.oversight.guard.notices import merge_restrict
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.guard import FinishResult, GateResult
+    from django_ai_sdk.oversight.guard.stages import StageResult
     from django_ai_sdk.oversight.plugin.finish import WholeRun
     from django_ai_sdk.oversight.policy import Policy
 
@@ -79,7 +79,7 @@ class TurnRequest:
     # Called with the stubs of refused tool calls, which never reach the ToolInvoker.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     guard: TurnGuard | None = None
-    gated: GateResult | None = None
+    gated: StageResult | None = None
     # Index of the first message the run produced, after the gate.
     first: int = 0
 
@@ -88,7 +88,7 @@ class TurnRequest:
         return self.gated is not None and self.gated.blocked
 
     @property
-    def finished(self) -> FinishResult | None:
+    def finished(self) -> StageResult | None:
         return self.guard.finished if self.guard is not None else None
 
     def raise_if_blocked(self) -> None:

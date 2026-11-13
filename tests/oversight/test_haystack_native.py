@@ -348,7 +348,7 @@ class TestOversightInTheRun:
         guard = await start("test-guard")
         first = await guard.finish("Mail me at jan@example.com")
         assert await guard.finish("something else") is first
-        assert first.replaced
+        assert first.changed
 
 
 @pytest.mark.django_db

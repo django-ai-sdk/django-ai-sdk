@@ -30,7 +30,7 @@ from django_ai_sdk.oversight import (
 from django_ai_sdk.oversight import resolve as resolution
 from django_ai_sdk.oversight.conditions import Condition
 from django_ai_sdk.oversight.content import found_literals
-from django_ai_sdk.oversight.guard.asking import Answered, evaluate_rules, run_lenses
+from django_ai_sdk.oversight.guard.judging import Answered, match_rules, answer_lenses
 from django_ai_sdk.oversight.judges.base import Judge
 from django_ai_sdk.oversight.packs.security import SecurityPack
 from django_ai_sdk.oversight.policy import build
@@ -224,14 +224,14 @@ class TestPolicies:
 class TestRuleEvaluation:
     def test_a_rule_waits_for_lenses_still_to_come(self):
         resolved = build("default")
-        early = evaluate_rules(resolved, {"pii_input": ans([])}, Stage.GATE, done=set())
+        early = match_rules(resolved, {"pii_input": ans([])}, Stage.GATE, done=set())
         assert "review_ungrounded" not in {m.rule.name for m in early}
-        later = evaluate_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
+        later = match_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
         assert "review_ungrounded" in {m.rule.name for m in later}
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build("test-parent")
-        [match] = evaluate_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
+        [match] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
         assert not match.acted
         assert match.outcome(report=True).value == "blocked"
 
@@ -239,9 +239,9 @@ class TestRuleEvaluation:
         resolved = build("test-parent")
         resolved.rules["block_x"].mode = Mode.ENFORCE
         resolved.rules["block_x"].then = [Block(), Mask()]
-        [gate] = evaluate_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
+        [gate] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())
         assert [a.kind for a in gate.acted] == ["block", "mask"]
-        [late] = evaluate_rules(resolved, {"mentions_x": ans(True)}, Stage.REFLECT, done=set())
+        [late] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.REFLECT, done=set())
         assert [a.kind for a in late.acted] == ["mask"]
 
     def test_fail_closed_treats_an_error_as_a_match(self):
@@ -249,14 +249,14 @@ class TestRuleEvaluation:
         broken = {"mentions_x": ans(None, error="timeout")}
 
         def closed():
-            return evaluate_rules(
+            return match_rules(
                 resolved, broken, Stage.GATE, done=set(), errored={"mentions_x"}, fail_closed=True
             )
 
         # In report mode, a slow answerer would only fill the record with false matches.
         assert not closed()
         resolved.rules["block_x"].mode = Mode.ENFORCE
-        assert not evaluate_rules(resolved, broken, Stage.GATE, done=set())
+        assert not match_rules(resolved, broken, Stage.GATE, done=set())
         assert [m.rule.name for m in closed()] == ["block_x"]
 
     def test_fail_closed_never_raises_an_alert(self):
@@ -264,7 +264,7 @@ class TestRuleEvaluation:
         resolved.rules["block_x"].mode = Mode.ENFORCE
         resolved.rules["block_x"].then = [Alert("high")]
         broken = {"mentions_x": ans(None, error="timeout")}
-        assert not evaluate_rules(
+        assert not match_rules(
             resolved, broken, Stage.GATE, done=set(), errored={"mentions_x"}, fail_closed=True
         )
 
@@ -421,18 +421,18 @@ class TestAnswerChains:
         unsure = Said(lambda lens, v: Answer(value=False, confidence=0.5), name="quick")
         judge = Said(down, name="judge")
         lens = JudgeLens(name="f", judges=[unsure, judge])
-        [answered] = await run_lenses([lens], TurnContext(input="x"), Stage.GATE)
+        [answered] = await answer_lenses([lens], TurnContext(input="x"), Stage.GATE)
         # Kept for the record, failed for FAIL_MODE.
         assert (answered.answer.value, answered.answer.answerer) == (False, "quick")
         assert answered.failed and answered.errored
         # Ending on an unsure answer is not failing: the last one to answer decides.
         lens = JudgeLens(name="g", judges=[judge, unsure])
-        [answered] = await run_lenses([lens], TurnContext(input="x"), Stage.GATE)
+        [answered] = await answer_lenses([lens], TurnContext(input="x"), Stage.GATE)
         assert answered.answer.answerer == "quick"
         assert not answered.failed and not answered.errored
 
     def test_reflect_asks_again_when_the_service_after_an_unsure_answer_was_down(self):
-        from django_ai_sdk.oversight.guard.asking import should_retry
+        from django_ai_sdk.oversight.guard.judging import should_retry
 
         assert should_retry("", ["unavailable: ConnectionError"])
         assert should_retry("unavailable: ConnectionError")
@@ -446,7 +446,7 @@ class TestAnswerChains:
 
         unsure = Said(lambda lens, v: Answer(value=False, confidence=0.5), name="quick")
         lens = JudgeLens(name="f", judges=[unsure, Said(slow)])
-        [answered] = await run_lenses([lens], TurnContext(input="x"), Stage.GATE, deadline_ms=50)
+        [answered] = await answer_lenses([lens], TurnContext(input="x"), Stage.GATE, deadline_ms=50)
         assert answered.answer.answerer == "quick" and answered.failed
 
     @pytest.mark.parametrize("deadline_ms", [None, 50])
@@ -463,7 +463,7 @@ class TestAnswerChains:
 
         lens = JudgeLens(name="f", judges=[Said(slow)])
         stage = asyncio.ensure_future(
-            run_lenses([lens], TurnContext(input="x"), Stage.GATE, deadline_ms=deadline_ms)
+            answer_lenses([lens], TurnContext(input="x"), Stage.GATE, deadline_ms=deadline_ms)
         )
         if deadline_ms is None:
             # The stage itself is cancelled: the person went away mid-stream.

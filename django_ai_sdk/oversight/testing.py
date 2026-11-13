@@ -21,8 +21,9 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from django_ai_sdk.oversight.guard.asking import Answered, Matched, should_retry
-from django_ai_sdk.oversight.types import Answer, Outcome, Stage, ToolCall
+from django_ai_sdk.oversight.guard.judging import should_retry
+from django_ai_sdk.oversight.guard.stages import StageResult
+from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -31,32 +32,8 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.guard.judging import Matched
     from django_ai_sdk.oversight.policy import ResolvedPolicy
-
-
-@dataclass
-class StageResult:
-    """The answers and rule matches from one stage of a dry run."""
-
-    stage: Stage
-    answered: list[Answered] = field(default_factory=list)
-    matched: list[Matched] = field(default_factory=list)
-    blocked: bool = False
-    message: str = ""
-    # The text after this stage: the question at the gate, the answer at finish.
-    text: str = ""
-    # The tool call's name, for a tool stage.
-    tool: str = ""
-
-    @property
-    def answers(self) -> dict[str, Answer]:
-        """The latest answer per lens at this stage."""
-        return {o.lens.name: o.answer for o in self.answered}
-
-    @property
-    def rules(self) -> list[str]:
-        """Rules that matched at this stage, whether they acted or not."""
-        return [m.rule.name for m in self.matched]
 
 
 @dataclass
@@ -110,7 +87,7 @@ async def dry_run(
         if resolved is None:
             raise LookupError(broken_reason(policy) or f"No oversight policy {policy!r}")
     # Opened directly, so a dry run checks even when oversight is switched off.
-    guard = TurnGuard._opened(
+    guard = TurnGuard.under_policy(
         resolved,
         agent=SimpleNamespace(name="Dry run", oversight=resolved.name),
         channel="dry_run",
@@ -143,7 +120,7 @@ async def _run(
         )
 
     gate = await guard.gate()
-    stage_out(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.input)
+    stage_out(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.text)
     if gate.blocked:
         result.ended_at = "gate"
 
@@ -171,7 +148,7 @@ async def _run(
             matched,
             blocked=finished.blocked,
             message=finished.message,
-            text=finished.output,
+            text=finished.text,
         )
         if finished.blocked:
             result.ended_at = "finish"

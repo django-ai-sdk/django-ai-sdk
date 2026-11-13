@@ -28,8 +28,9 @@ from django_ai_sdk.events import (
     ToolOutputEvent,
 )
 from django_ai_sdk.oversight.actions import Block
-from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
+from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
+from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.plugin import TurnRequest, mask_sources, masked_result
 from django_ai_sdk.oversight.types import Outcome, Stage
 
@@ -42,7 +43,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.common import ChatMessage, StreamWriter
     from django_ai_sdk.events import StreamEvent
-    from django_ai_sdk.oversight.guard.gate import GateResult
 
 # The guard a stream reads before the run opened its turn: allows everything.
 _INERT = TurnGuard()
@@ -210,12 +210,12 @@ class StreamTurn:
 
     def _pending(self) -> list[StreamEvent]:
         """Send the notices raised since the last event, such as the gate's."""
-        events: list[StreamEvent] = [self._send(notice) for notice in self.guard.notices]
-        self.guard.notices.clear()
+        events: list[StreamEvent] = [self._send(notice) for notice in self.guard.notices.pending]
+        self.guard.notices.pending.clear()
         return events
 
     @property
-    def refusal(self) -> GateResult | None:
+    def refusal(self) -> StageResult | None:
         """The gate's refusal, when the run's gate hook refused the question."""
         return self.request.gated if self.request.refused else None
 
@@ -267,17 +267,17 @@ class StreamTurn:
         if self.registry is not None:
             await mask_sources(self.guard, self.registry)
 
-    async def afinish(self) -> tuple[list[StreamEvent], FinishResult]:
+    async def afinish(self) -> tuple[list[StreamEvent], StageResult]:
         """Pass, mask or withhold the answer as the run's finish decided. Returns the events to send."""
         guard, writer = self.guard, self.writer
         if not guard.active:
-            return [], FinishResult()
+            return [], StageResult(Stage.FINISH)
         # The run's finish hook finished the turn; this reads that decision.
         finished = await guard.finish(writer.text if writer else guard.context.output)
         self.finished = True
-        if writer and finished.replaced:
-            writer.replace_text(finished.output)
-        if writer and (finished.replaced or self.hold):
+        if writer and finished.changed:
+            writer.replace_text(finished.text)
+        if writer and (finished.changed or self.hold):
             # Reasoning may reveal what was masked or withheld, and held reasoning
             # was never judged, so do not store it.
             writer.drop_reasoning()
@@ -294,7 +294,7 @@ class StreamTurn:
             writer.message.metadata["oversight"] = stored_notices(self.sent)
         events += _released(self.held, withheld=finished.blocked)
         if self.hold:
-            events.append(TextChunkEvent(content=finished.output))
+            events.append(TextChunkEvent(content=finished.text))
         return events, finished
 
     def _drop_refused_inputs(self) -> None:

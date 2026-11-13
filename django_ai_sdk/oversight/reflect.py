@@ -16,11 +16,11 @@ from django.utils import timezone
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.content import context_from_turn, load_content, unmasked_literals
-from django_ai_sdk.oversight.guard.asking import (
+from django_ai_sdk.oversight.guard.judging import (
     Answered,
     Matched,
-    evaluate_rules,
-    run_lenses,
+    answer_lenses,
+    match_rules,
     should_retry,
 )
 from django_ai_sdk.oversight.persist import fit_column, save_answers
@@ -319,14 +319,14 @@ async def ajudge_turn(
         policy, retry, answered=has_answer, content=content, has_text=has_text
     )
     with unguarded():
-        answered = await run_lenses(lenses, view, Stage.REFLECT, sample=sample)
+        answered = await answer_lenses(lenses, view, Stage.REFLECT, sample=sample)
         # No sampling, since these were due inline on every turn.
-        answered += await run_lenses(late, view, Stage.REFLECT, sample=False)
+        answered += await answer_lenses(late, view, Stage.REFLECT, sample=False)
     for item in answered:
         view.answers[item.lens.name] = item.answer
     # Rules treat a failed answer as unknown, not as "no".
     failed = {name for name, answer in view.answers.items() if answer.error}
-    matched = evaluate_rules(
+    matched = match_rules(
         policy,
         view.answers,
         Stage.REFLECT,
@@ -375,7 +375,7 @@ def _reflect_masks(
     would have withheld it: masking around it would leave what it found. So
     does one whose lens failed, when the policy fails closed.
     """
-    from django_ai_sdk.oversight.guard.masks import collect_masks
+    from django_ai_sdk.oversight.guard.masking import collect_masks
 
     groups, unpointed = collect_masks(
         matched, answered, subject=Subject.OUTPUT, view=view, closed=closed
@@ -434,7 +434,7 @@ def _after_effects(
     Runs inside reflect's transaction. Returns (event, notifier names) pairs to
     send after the commit.
     """
-    from django_ai_sdk.oversight.guard import rule_notes
+    from django_ai_sdk.oversight.guard.notices import rule_notes
     from django_ai_sdk.oversight.notifiers import match_events
 
     masks = [group for _, group in groups]

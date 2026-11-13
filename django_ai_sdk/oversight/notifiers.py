@@ -31,7 +31,7 @@ from django_ai_sdk.oversight.actions import Notify
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from django_ai_sdk.oversight.guard.asking import Matched
+    from django_ai_sdk.oversight.guard.judging import Matched
 
 logger = get_logger(__name__)
 

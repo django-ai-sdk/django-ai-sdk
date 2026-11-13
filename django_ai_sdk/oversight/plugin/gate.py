@@ -15,7 +15,8 @@ from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
 
-    from django_ai_sdk.oversight.guard import GateResult, TurnGuard
+    from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.guard.stages import StageResult
     from django_ai_sdk.oversight.plugin.turn import TurnRequest
 
 # The meta key on the assistant message that stands in for a refused or replaced answer.
@@ -43,14 +44,14 @@ class GateHook(OversightHook):
                 answer_with(state, gate.message, stop="blocked")
                 return
             if gate.notice:
-                guard.notices.append(gate.notice)
+                guard.notices.pending.append(gate.notice)
             await _mask_seeded_sources(guard)
         request.first = len(state.data.get("messages") or [])
         if request.on_gated is not None:
             await request.on_gated(request)
 
 
-async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
+async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> StageResult:
     """Judge the history, then the question, masking each in the run's messages.
 
     A history the stored thread `vouched` for is not judged again, but attachment
@@ -76,8 +77,8 @@ async def _gate(state: State, guard: TurnGuard, *, vouched: bool) -> GateResult:
     gate = await guard.gate()
     if gate.blocked:
         return gate
-    if gate.masked and (question := last_user_message(judged)) is not None:
-        question.content = gate.input
+    if gate.changed and (question := last_user_message(judged)) is not None:
+        question.content = gate.text
     for index, copy in zip(said, judged, strict=True):
         if copy.content != messages[index].text:
             messages[index] = with_text(messages[index], copy.content)
@@ -93,11 +94,11 @@ def keep_masked(messages: list[ChatMessage], request: TurnRequest) -> None:
     than stored with what may be unmasked.
     """
     from django_ai_sdk.adapters.run import user_content
-    from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+    from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
     gated = request.gated
-    if gated is not None and gated.masked and (question := last_user_message(messages)):
-        content = user_content(question, gated.input)
+    if gated is not None and gated.changed and (question := last_user_message(messages)):
+        content = user_content(question, gated.text)
         question.content = content if content is not None else str(UNCHECKED_TEXT)
 
 

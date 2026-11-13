@@ -1,4 +1,4 @@
-"""Ask a stage's lenses within a deadline, then find the rules that match.
+"""Judging: ask a stage's lenses within a deadline, then find the rules that match.
 
 Used by every guard stage, by reflect and by `testing.dry_run`.
 """
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Set as AbstractSet
 
     from django_ai_sdk.oversight.actions import Action
+    from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.policy import ResolvedPolicy
     from django_ai_sdk.oversight.rules import Rule
@@ -181,7 +182,7 @@ def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
     return any(e == "deadline" or is_unavailable(e) for e in (error, last_error))
 
 
-async def run_lenses(
+async def answer_lenses(
     lenses: list[Lens],
     view: TurnContext,
     stage: Stage,
@@ -264,7 +265,7 @@ def _still_to_answer(policy: ResolvedPolicy, name: str, stage: Stage, answered: 
     return any(rank(STAGE_ORDER, s) > here for s in lens.stages)
 
 
-def evaluate_rules(
+def match_rules(
     policy: ResolvedPolicy,
     answers: dict[str, Answer],
     stage: Stage,
@@ -327,12 +328,31 @@ def _reads_tool_call(policy: ResolvedPolicy, names: AbstractSet[str]) -> bool:
     )
 
 
+async def judge_stage(
+    guard: TurnGuard, stage: Stage, *, subjects: set[Subject], deadline: float | None
+) -> list[Matched]:
+    """Ask the stage's lenses on `subjects`, keep their answers on `guard`, and return
+    the rules that match now."""
+    lenses = [lens for lens in guard.resolved.active_lenses(stage) if lens.subject in subjects]
+    answered = await answer_lenses(lenses, guard.context, stage, deadline_ms=deadline)
+    guard.keep_answers(answered)
+    return match_rules(
+        guard.resolved,
+        guard.context.answers,
+        stage,
+        done={m.rule.name for m in guard.matched if not m.aside},
+        errored=guard.errored_lenses(),
+        fail_closed=guard.fails_closed,
+    )
+
+
 __all__ = [
     "Matched",
     "Answered",
     "answer_lens",
     "errored_lenses",
-    "evaluate_rules",
-    "run_lenses",
+    "judge_stage",
+    "match_rules",
+    "answer_lenses",
     "should_retry",
 ]

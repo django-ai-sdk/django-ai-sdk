@@ -162,7 +162,7 @@ class TestFailModeAtEachStage:
     async def test_a_tool_removed_only_by_a_failed_lens_gets_the_generic_refusal(self):
         """The rule's own message would tell the person a rule matched, which it did not."""
         from django_ai_sdk.common import ChatMessage
-        from django_ai_sdk.oversight.guard import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE
 
         history_rule = policy(
             "fx-history-restrict-failed",
@@ -361,7 +361,7 @@ class TestBrokenHandlers:
     @pytest.mark.parametrize("mode", ["closed", "open"])
     async def test_a_history_check_that_raises(self, mode):
         from django_ai_sdk.common import ChatMessage
-        from django_ai_sdk.oversight.guard import TurnGuard
+        from django_ai_sdk.oversight.guard.masking import TurnMasks
 
         history = [
             ChatMessage(role="user", content="earlier"),
@@ -370,7 +370,7 @@ class TestBrokenHandlers:
         ]
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "now")
-            with patch.object(TurnGuard, "_judged", raising):
+            with patch.object(TurnMasks, "mask_other_text", raising):
                 result = await guard.gate_history(history)
         assert "history check failed" in guard.error
         if mode == "closed":
@@ -383,19 +383,20 @@ class TestBrokenHandlers:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "go")
             await guard.gate()
-            with patch("django_ai_sdk.oversight.guard.tool.run_lenses", raising):
+            with patch("django_ai_sdk.oversight.guard.stages.answer_lenses", raising):
                 reason = await guard.tool_call(ToolCall(name="send", arguments={"x": 1}))
         assert "tool check failed" in guard.error
         assert reason == (str(Block.DEFAULT_MESSAGE) if mode == "closed" else None)
 
     @pytest.mark.parametrize("mode", ["closed", "open"])
     async def test_masking_a_tool_result_that_raises(self, mode):
-        from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, TurnGuard
+        from django_ai_sdk.oversight.guard.masking import TurnMasks
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "go")
             await guard.gate()
-            with patch.object(TurnGuard, "_judged", raising):
+            with patch.object(TurnMasks, "mask_other_text", raising):
                 text = await guard.mask_text("mail jan@example.com")
         assert "tool result masking failed" in guard.error
         assert text == (str(UNCHECKED_TEXT) if mode == "closed" else "mail jan@example.com")
@@ -406,7 +407,7 @@ class TestBrokenHandlers:
 
         from tests.oversight.helpers import make_agent
 
-        with patch.object(TurnGuard, "_opened", raising):
+        with patch.object(TurnGuard, "under_policy", raising):
             guard = await TurnGuard.start(
                 make_agent([], None, policy="no-such-policy"), channel="api", input="hi"
             )
@@ -423,8 +424,17 @@ class TestBrokenHandlers:
 
         from tests.oversight.helpers import agent_with
 
+        from django_ai_sdk.oversight.guard import stages
+
+        judge_stage = stages.judge_stage
+
+        async def finish_raising(guard, stage, **kwargs):  # noqa: ANN001, ANN202
+            if stage is Stage.FINISH:
+                raise RuntimeError("boom")
+            return await judge_stage(guard, stage, **kwargs)
+
         agent, _ = agent_with("an answer", policy="test-guard")
-        with patch("django_ai_sdk.oversight.guard.finish.acted_on", raising):
+        with patch.object(stages, "judge_stage", finish_raising):
             with pytest.raises(Blocked):
                 await agent.run([ChatMessage(role="user", content="hi")], channel="api")
         turn = await Turn.objects.aget()

@@ -92,7 +92,7 @@ class TestWhatTheClientIsTold:
     async def test_messages_people_see_are_translatable_and_stored_as_text(self):
         from django.utils.functional import Promise
         from django_ai_sdk.oversight import stream
-        from django_ai_sdk.oversight.guard import TOO_LONG_MESSAGE
+        from django_ai_sdk.oversight.guard.notices import TOO_LONG_MESSAGE
 
         for message in (
             Block.DEFAULT_MESSAGE,
@@ -103,7 +103,7 @@ class TestWhatTheClientIsTold:
             assert isinstance(message, Promise)
         guard = await start("test-withhold")
         finished = await guard.finish("anything")
-        assert type(finished.output) is str
+        assert type(finished.text) is str
         turn = await closed_turn(guard)
         row = await RuleMatch.objects.aget(turn=turn, rule="withhold")
         assert json.dumps(row.actions)

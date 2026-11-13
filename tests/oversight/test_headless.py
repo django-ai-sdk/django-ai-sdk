@@ -40,7 +40,7 @@ class TestHeadless:
         guard = await start("test-guard", "What is my leave?")
         assert (await guard.gate()).blocked is False
         finished = await guard.finish("Ask jan@example.com.")
-        assert finished.output == "Ask [EMAIL]."
+        assert finished.text == "Ask [EMAIL]."
         turn_id = await guard.close()
         turn = await Turn.objects.aget(id=turn_id)
         assert turn.channel == "api"
@@ -104,7 +104,7 @@ class TestHeadless:
     async def test_an_exchange_lens_masks_the_answer_where_it_found_it(self):
         guard = await start("test-masking", "Pay NL91ABNA0417164300 please")
         finished = await guard.finish("Paid from NL91ABNA0417164300 just now.")
-        assert finished.output == "Paid from [IBAN] just now."
+        assert finished.text == "Paid from [IBAN] just now."
 
     async def test_notifications_leave_from_the_worker(self):
         from django_ai_sdk.oversight import Notify
@@ -143,12 +143,15 @@ class TestHeadless:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
             opened = await start("test-guard", "x")
         guard = await start("test-guard", "x")
-        with patch.object(TurnGuard, "_stage", AsyncMock(side_effect=KeyError("template"))):
+        with patch(
+            "django_ai_sdk.oversight.guard.stages.judge_stage",
+            AsyncMock(side_effect=KeyError("template")),
+        ):
             finished = await opened.finish("Ask jan@example.com.")
-            assert (finished.output, finished.blocked) == ("Ask jan@example.com.", False)
+            assert (finished.text, finished.blocked) == ("Ask jan@example.com.", False)
             assert opened.error == "finish failed"
             closed = await guard.finish("Ask jan@example.com.")
-        assert closed.blocked and closed.output == Block.DEFAULT_MESSAGE
+        assert closed.blocked and closed.text == Block.DEFAULT_MESSAGE
 
     async def test_a_mask_template_must_only_name_the_label(self):
         with pytest.raises(ValueError, match="label"):

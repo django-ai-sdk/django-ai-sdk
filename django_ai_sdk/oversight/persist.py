@@ -26,7 +26,7 @@ from django_ai_sdk.oversight.content import (
     turn_found,
     without_nul,
 )
-from django_ai_sdk.oversight.guard.asking import should_retry
+from django_ai_sdk.oversight.guard.judging import should_retry
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.guard.asking import Answered, Matched
+    from django_ai_sdk.oversight.guard.judging import Answered, Matched
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.models import LensAnswer, Turn
     from django_ai_sdk.oversight.policy import ResolvedPolicy
@@ -69,7 +69,7 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     policy = guard.resolved
     now = timezone.now()
     created = guard.created_at or now
-    saved_answered, saved_matched = len(guard._answer_ids), guard._matched_saved
+    saved_answered, saved_matched = len(guard.record.answer_ids), guard.record.matches_saved
     content: dict[str, Any] | None = None
     keep: Masker | None = None
     if closing:
@@ -78,7 +78,7 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         # PostgreSQL rejects NUL characters in text, so strip them.
         content = without_nul(capture_content(guard, policy.capture, keep))
     # Answer texts go with the content. Rows written earlier keep their ids.
-    answer_rows, texts = _build_answers(guard.answered, keep=keep, ids=guard._answer_ids)
+    answer_rows, texts = _build_answers(guard.answered, keep=keep, ids=guard.record.answer_ids)
     texts = without_nul(texts)
     added = answer_rows[saved_answered:]
     matched = guard.matched[saved_matched:]
@@ -88,7 +88,9 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         # Lock first: a forget then waits for this close, or has flagged the row. The
         # row is read here, since reflect may have changed labels or severity since.
         turn = (
-            Turn.objects.select_for_update().filter(pk=guard.id).first() if guard._written else None
+            Turn.objects.select_for_update().filter(pk=guard.id).first()
+            if guard.record.row_written
+            else None
         )
         row = None
         if content is not None and not (turn is not None and turn.content_forgotten):
@@ -116,11 +118,11 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         )
         if closing and columns.get("reflect_state") == Turn.ReflectState.PENDING:
             transaction.on_commit(lambda: enqueue_reflect(turn.id))
-        if events := guard.notifications(matched):
+        if events := guard.notices.notifications(matched):
             transaction.on_commit(lambda: enqueue_notifications(events))
-    guard._written = True
-    guard._answer_ids = [str(row.id) for row in answer_rows]
-    guard._matched_saved = len(guard.matched)
+    guard.record.row_written = True
+    guard.record.answer_ids = [str(row.id) for row in answer_rows]
+    guard.record.matches_saved = len(guard.matched)
     return str(turn.id)
 
 
@@ -146,7 +148,9 @@ def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str,
         "prompt_tokens": guard.usage.prompt_tokens,
         "completion_tokens": guard.usage.completion_tokens,
         "cost": _cost(guard),
-        "latency_ms": round((time.perf_counter() - guard._started) * 1000, 1) if closing else None,
+        "latency_ms": round((time.perf_counter() - guard.started_at) * 1000, 1)
+        if closing
+        else None,
         "error": fit_column(Turn, "error", guard.error),
     }
     columns["outcome"], columns["report_outcome"] = _outcome_columns(guard, closing=closing)

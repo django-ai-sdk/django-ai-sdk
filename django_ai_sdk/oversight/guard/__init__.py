@@ -9,13 +9,18 @@ the turn to the record (see `persist`) and queues the background stages.
     gate = await guard.gate()
     if gate.blocked:
         return gate.message
-    answer = await run_my_agent(gate.input)
+    answer = await run_my_agent(gate.text)
     finished = await guard.finish(answer)
     await guard.close()
-    return finished.output
+    return finished.text
 
 A guard for an agent without a policy, or with oversight off, is inert. Every
 call returns at once and allows everything.
+
+TurnGuard holds the turn's state and its lifecycle. Its collaborators do the
+work, each in its own module: `stages` (how each stage judges and acts),
+`judging` (asking lenses, matching rules), `masking` (TurnMasks) and `notices`
+(TurnNotices).
 """
 
 from __future__ import annotations
@@ -23,6 +28,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import time
+import uuid
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from asgiref.sync import sync_to_async
@@ -33,26 +41,32 @@ from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy, agent_key, fingerprint
 from django_ai_sdk.oversight.conf import is_enabled, setting
-from django_ai_sdk.oversight.guard.finish import FinishResult, FinishStage
-from django_ai_sdk.oversight.guard.gate import GateResult, GateStage
-from django_ai_sdk.oversight.guard.notices import (
-    TOO_LONG_MESSAGE,
-    TOOL_UNAVAILABLE,
-    UNCHECKED_TEXT,
-    rule_notes,
-)
-from django_ai_sdk.oversight.guard.tool import ToolStage
+from django_ai_sdk.oversight.content import as_source
+from django_ai_sdk.oversight.guard import stages
+from django_ai_sdk.oversight.guard.judging import Answered, Matched
+from django_ai_sdk.oversight.guard.masking import TurnMasks
+from django_ai_sdk.oversight.guard.notices import TurnNotices
 from django_ai_sdk.oversight.persist import persist_turn
-from django_ai_sdk.oversight.types import Capture, TurnContext
+from django_ai_sdk.oversight.types import (
+    Capture,
+    HistoryItem,
+    Outcome,
+    Stage,
+    ToolCall,
+    TurnContext,
+    join_error,
+    worst_outcome,
+)
 from django_ai_sdk.utils import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.common import ChatMessage
+    from django_ai_sdk.oversight.guard.stages import StageResult
     from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy
 
 logger = get_logger(__name__)
@@ -128,15 +142,256 @@ def outlived_turn() -> bool:
     return guard is not None and guard._closed
 
 
-class TurnGuard(GateStage, ToolStage, FinishStage):
-    """One turn under a policy. Build it with `start()`. Inert when `active` is False.
+# How many earlier messages the lenses see with a question.
+HISTORY_TURNS = 12
 
-    The stages run in order: `gate` (gate.py), `tool_call` (tool.py), `finish`
-    (finish.py), then `close` here. Shared state lives in GuardState (state.py).
-    Asking lenses and matching rules lives in asking.py.
+
+@dataclass
+class Usage:
+    """The model and token counts a turn used, summed over its model calls."""
+
+    model: str = ""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+    def add(self, model: str | None, prompt: int | None, completion: int | None) -> None:
+        self.model = self.model or (model or "")
+        if prompt is not None:
+            self.prompt_tokens = (self.prompt_tokens or 0) + prompt
+        if completion is not None:
+            self.completion_tokens = (self.completion_tokens or 0) + completion
+
+
+@dataclass
+class TurnRecordState:
+    """What the record has of a turn so far. Only `persist` writes it."""
+
+    # The row was written ahead after the gate, so close updates it.
+    row_written: bool = False
+    # Ids of the answers already written, in order, and how many matches were saved.
+    answer_ids: list[str] = field(default_factory=list)
+    matches_saved: int = 0
+
+
+@dataclass
+class TurnGuard:
+    """One turn under a policy: its state and lifecycle. Build it with `start()`.
+
+    Inert when `active` is False. `gate`, `gate_history`, `tool_call` and `finish`
+    run the stages (stages.py); `mask_text` and `mask_result` mask tool results
+    (`masks`); `close` writes the turn to the record.
     """
 
-    # Opening.
+    active: bool = False
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    policy: ResolvedPolicy | None = None
+    channel: str = ""
+    context: TurnContext = field(default_factory=TurnContext)
+    agent_fingerprint: str = ""
+    thread_id: str = ""
+    user_message_id: str = ""
+    message_id: str = ""
+    # The asking user's id, "" when nobody was signed in.
+    actor_id: str = ""
+    answered: list[Answered] = field(default_factory=list)
+    matched: list[Matched] = field(default_factory=list)
+    restrict: list[str] | None = None
+    usage: Usage = field(default_factory=Usage)
+    created_at: Any = None
+    # Errors in the turn, joined with "; ".
+    error: str = ""
+    # The run's own error passed to close(), like a crash or disconnect. The turn
+    # never finished, so nothing was let through.
+    run_error: str = ""
+    # False for a dry run, which writes nothing.
+    recording: bool = True
+    # Refused unread at the gate for exceeding MAX_INPUT_CHARS.
+    too_long: bool = False
+    # Set when a stage failed closed, the policy did not load, or the caller called
+    # `refuse`. The turn is recorded as blocked.
+    refused: bool = False
+    original_input: str = ""
+    original_output: str = ""
+    # What finish decided. A turn is finished once, inside its run or after it.
+    finished: StageResult | None = None
+    # The enclosing turn when this one has its own policy, like a subagent or nested run().
+    parent_turn_id: str = ""
+    # Set by a streaming adapter to send stub results for refused tool calls, so the
+    # chat shows them as refused instead of still running.
+    on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
+    started_at: float = field(default_factory=time.perf_counter)
+    _closed: bool = False
+    # Whether each lens's latest answer errored. An error carries over to later
+    # stages until the lens answers again.
+    _lens_errored: dict[str, bool] = field(default_factory=dict)
+    # The policy could not be chosen or loaded under FAIL_MODE "closed". Every stage refuses.
+    policy_unloaded: bool = False
+    # What the record has of this turn so far. Only `persist` writes it.
+    record: TurnRecordState = field(default_factory=TurnRecordState)
+    masks: TurnMasks = field(init=False, repr=False)
+    notices: TurnNotices = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.masks = TurnMasks(self)
+        self.notices = TurnNotices(self)
+
+    @property
+    def resolved(self) -> ResolvedPolicy:
+        """The policy of an active guard, which always has one. Read it only when `active`."""
+        assert self.policy is not None
+        return self.policy
+
+    def note_error(self, error: str) -> None:
+        """Add `error` to the turn's errors. Never put content in it."""
+        self.error = join_error(self.error, error)
+
+    def refuse(self, error: str = "") -> None:
+        """Mark the turn as refused by the caller, recorded as blocked with `error`.
+
+        For results oversight allowed that the caller still cannot use, like a
+        masked result that no longer fits its schema.
+        """
+        if not self.active:
+            return
+        self.refused = True
+        self.note_error(error)
+
+    def set_history(self, messages: list[ChatMessage]) -> None:
+        """Set the earlier conversation the lenses see, keeping the latest HISTORY_TURNS."""
+        self.context.history = [
+            HistoryItem(role=m.role, content=m.content or "")
+            for m in messages[:-1]
+            if m.role in {"user", "assistant"} and m.content
+        ][-HISTORY_TURNS:]
+
+    def set_sources(self, sources: Iterable[Any], *, seeded: Iterable[Any] = ()) -> None:
+        """Set what retrieval found, as NumberedSource, Source or dicts.
+
+        `seeded` lists sources carried over from earlier turns, as sources or keys
+        (a SourceRegistry keeps keys).
+        """
+        if not self.active:
+            return
+        seeded_keys = {s if isinstance(s, str) else as_source(s).key for s in seeded}
+        fresh = [as_source(s) for s in sources]
+        for source in fresh:
+            source.seeded = source.seeded or (bool(source.key) and source.key in seeded_keys)
+        self.context.sources = fresh
+
+    def allows_tool(self, name: str) -> bool:
+        """Whether tool `name` is still available. `restrict` None keeps all, [] removes all."""
+        return self.restrict is None or (bool(self.restrict) and name not in self.restrict)
+
+    def add_tool_call(self, call: ToolCall | dict[str, Any]) -> None:
+        if not self.active:
+            return
+        call = call if isinstance(call, ToolCall) else ToolCall.model_validate(call)
+        for index, existing in enumerate(self.context.tool_calls):
+            if call.id and existing.id == call.id:
+                # Only what this report says. A result of 0 or False still counts.
+                update = {k: v for k, v in call.model_dump().items() if v is not None and v != ""}
+                update["error"] = existing.error or call.error
+                self.context.tool_calls[index] = existing.model_copy(update=update)
+                return
+        self.context.tool_calls.append(call)
+
+    def add_usage(self, model: str | None, prompt: int | None, completion: int | None) -> None:
+        if self.active:
+            self.usage.add(model, prompt, completion)
+
+    def add_text(self, chunk: str) -> None:
+        """Add streamed answer text; finish judges the whole answer."""
+        if self.active and chunk:
+            self.context.output += chunk
+
+    def keep_answers(self, answered: list[Answered]) -> None:
+        """Store the stage's answers for the record and for rule evaluation.
+
+        Tool call lenses judge one call each. The record keeps every call's answer,
+        but rules never read them as the turn's answer or failure. Other lenses keep
+        their latest answer and failure state.
+        """
+        for item in answered:
+            self.answered.append(item)
+            if item.about_turn:
+                self._lens_errored[item.lens.name] = item.errored
+                self.context.answers[item.lens.name] = item.answer
+
+    @property
+    def fails_closed(self) -> bool:
+        """True when a failed lens should trigger the policy's protective rules."""
+        return self.policy is None or self.policy.fails_closed
+
+    def record_stage_error(self, error: str, *, refuse_turn: bool) -> bool:
+        """Log the exception being handled and note `error` on the turn.
+
+        Returns True when the policy fails closed, so the caller refuses. With
+        `refuse_turn` the whole turn is then refused. Without it (a tool call or a
+        tool result) only that one call is.
+        """
+        logger.exception("Oversight: {} in turn {}", error, self.id)
+        self.note_error(error)
+        if self.fails_closed and refuse_turn:
+            self.refused = True
+        return self.fails_closed
+
+    def errored_lenses(self) -> set[str]:
+        """Return lenses whose latest answer this turn errored."""
+        return {name for name, errored in self._lens_errored.items() if errored}
+
+    def record_aside(
+        self, stage: Stage, answered: list[Answered], matched: list[Matched]
+    ) -> list[Matched]:
+        """Record findings on other text as aside, once per lens and rule per stage.
+
+        Spans are dropped because they point into the other text, so they never
+        place masks in the question or answer. Failed lenses are recorded too.
+        Returns the matches added by this call.
+        """
+        seen = {(o.lens.name, o.stage) for o in self.answered if o.aside}
+        for item in answered:
+            found = (item.answer.ok and item.answer.value) or item.errored
+            if found and (item.lens.name, stage) not in seen:
+                seen.add((item.lens.name, stage))
+                answer = item.answer.model_copy(update={"spans": []})
+                self.answered.append(Answered(item.lens, stage, answer, item.failed, aside=True))
+        recorded = {(m.rule.name, m.stage) for m in self.matched if m.aside}
+        added: list[Matched] = []
+        for match in matched:
+            if (match.rule.name, stage) not in recorded:
+                recorded.add((match.rule.name, stage))
+                added.append(
+                    Matched(match.rule, stage, match.acted, aside=True, failed=match.failed)
+                )
+        self.matched.extend(added)
+        return added
+
+    # Recording.
+
+    @property
+    def outcome(self) -> Outcome:
+        refused = [Outcome.BLOCKED] if self.too_long or self.refused else []
+        return worst_outcome(*refused, *(m.outcome() for m in self.matched))
+
+    @property
+    def report_outcome(self) -> Outcome:
+        """The outcome had every matched rule been enforced."""
+        refused = [Outcome.BLOCKED] if self.too_long or self.refused else []
+        return worst_outcome(*refused, *(m.outcome(report=True) for m in self.matched))
+
+    async def write_ahead(self) -> None:
+        """Insert the turn's row now, still open, with the answers and matches so far.
+
+        The gate calls this so a turn that never closes (a killed worker, an unread
+        response) still leaves a row for `oversight_sweep` to mark interrupted.
+        Runs once and never raises. If it fails, close writes the whole turn.
+        """
+        if not self.active or self._closed or self.record.row_written or not self.recording:
+            return
+        try:
+            await sync_to_async(persist_turn)(self, closing=False)
+        except Exception:
+            logger.exception("Oversight could not write turn {} ahead; close writes it", self.id)
 
     @classmethod
     async def start(
@@ -185,7 +440,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
                 name = (await acode_policy(agent, channel=channel, user=user))[0]
         except Exception:
             logger.exception("Oversight could not choose a policy for {!r}", agent_key(agent))
-            return cls._unloadable(name="", error="policy could not be chosen", **opening)
+            return cls.refusing_all(name="", error="policy could not be chosen", **opening)
         if not name:
             return inert
         try:
@@ -194,11 +449,11 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
             logger.exception("Oversight policy {!r} could not be loaded", name)
             resolved = None
         if resolved is None:
-            return cls._unloadable(name=name, error="policy could not be loaded", **opening)
-        return cls._opened(resolved, **opening)
+            return cls.refusing_all(name=name, error="policy could not be loaded", **opening)
+        return cls.under_policy(resolved, **opening)
 
     @classmethod
-    def _opened(
+    def under_policy(
         cls,
         policy: ResolvedPolicy,
         *,
@@ -231,7 +486,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         return guard
 
     @classmethod
-    def _unloadable(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
+    def refusing_all(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
         """Build the guard for a turn whose policy could not be chosen or loaded.
 
         It refuses everything under an empty stand-in policy, so the refusal and
@@ -247,12 +502,12 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
             )
             return cls(context=TurnContext(input=opening["input"]))
         try:
-            guard = cls._opened(_stand_in(name), **opening)
+            guard = cls.under_policy(_refusing_policy(name), **opening)
         except Exception:
             # The refusal cannot be recorded, so refuse without a record.
             logger.exception("Oversight could not open a refusing turn")
-            guard = cls(active=True, policy=_stand_in(name), _closed=True)
-        guard._unloaded = True
+            guard = cls(active=True, policy=_refusing_policy(name), _closed=True)
+        guard.policy_unloaded = True
         guard.refused = True
         guard.note_error(error)
         logger.error(
@@ -261,6 +516,52 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
             error,
         )
         return guard
+
+    # The stages. Their work is in stages.py.
+
+    async def gate(self) -> StageResult:
+        """Judge the question before the model sees it (`stages.judge_question`).
+
+        Always writes the turn ahead (`write_ahead`) afterwards, refused or not.
+        """
+        result = await stages.judge_question(self)
+        await self.write_ahead()
+        return result
+
+    async def gate_history(
+        self, messages: list[ChatMessage], *, history: bool = True
+    ) -> StageResult:
+        """Judge the history that comes with the question (`stages.judge_history`).
+
+        Call it before `gate()` for history the server did not store itself, such
+        as a stateless run, a chat without a thread, or a workflow's `history` input.
+        """
+        return await stages.judge_history(self, messages, history=history)
+
+    async def tool_call(self, call: ToolCall) -> str | None:
+        """Judge one tool call (`stages.judge_tool_call`). Returns the refusal, or None."""
+        return await stages.judge_tool_call(self, call)
+
+    async def finish(self, output: str | None = None) -> StageResult:
+        """Judge the finished answer (`stages.judge_answer`). Later calls return the same result.
+
+        The run's after_run hook usually finishes the turn. The code around the run
+        then reads that decision instead of judging again.
+        """
+        if self.finished is not None:
+            return self.finished
+        result = await stages.judge_answer(self, output)
+        if self.active:
+            self.finished = result
+        return result
+
+    async def mask_text(self, text: str) -> str:
+        """Mask a tool result the way the gate masks the question (`TurnMasks.mask_text`)."""
+        return await self.masks.mask_text(text)
+
+    async def mask_result(self, call_id: str, text: str) -> str:
+        """Mask a tool result once per call id and text (`TurnMasks.mask_result`)."""
+        return await self.masks.mask_result(call_id, text)
 
     # Closing.
 
@@ -277,7 +578,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         if not self.active or self._closed:
             return None
         self._closed = True
-        await self._cancel_masking()
+        await self.masks.cancel()
         self.note_error(error)
         self.run_error = error
         if not self.recording:
@@ -297,7 +598,7 @@ class TurnGuard(GateStage, ToolStage, FinishStage):
         return turn_id
 
 
-def _stand_in(name: str) -> ResolvedPolicy:
+def _refusing_policy(name: str) -> ResolvedPolicy:
     """Return an empty policy named `name`, used to refuse a turn whose policy failed to load."""
     from django_ai_sdk.oversight.conf import validate_retention
     from django_ai_sdk.oversight.policy import ResolvedPolicy
@@ -317,17 +618,11 @@ def _actor_id(user: Any) -> str:
 
 
 __all__ = [
-    "TOOL_UNAVAILABLE",
-    "TOO_LONG_MESSAGE",
-    "UNCHECKED_TEXT",
-    "FinishResult",
-    "GateResult",
     "TurnGuard",
     "closing_turn",
     "current_guard",
     "guarding",
     "is_unguarded",
     "outlived_turn",
-    "rule_notes",
     "unguarded",
 ]

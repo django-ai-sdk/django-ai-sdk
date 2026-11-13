@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from django.test import override_settings
 from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, Patterns, Rule, Score
-from django_ai_sdk.oversight.guard.asking import answer_lens, run_lenses, should_retry
+from django_ai_sdk.oversight.guard.judging import answer_lens, answer_lenses, should_retry
 from django_ai_sdk.oversight.judges import TypeSafe
 from django_ai_sdk.oversight.judges.base import (
     NO_VERDICT,
@@ -286,7 +286,7 @@ class TestCascade:
 
         quick = Says(lambda lens, v: Answer(value=True, confidence=0.6), name="quick")
         lens = JudgeLens(name="f", question="?", judges=[quick, Says(slow, name="slow")])
-        [answered] = await run_lenses([lens], view("x"), Stage.GATE, deadline_ms=100)
+        [answered] = await answer_lenses([lens], view("x"), Stage.GATE, deadline_ms=100)
         assert (answered.answer.value, answered.answer.answerer) == (True, "quick")
         assert answered.answer.trail[-1].error == "deadline"
         assert should_retry(answered.answer.error, [step.error for step in answered.answer.trail])
@@ -298,7 +298,7 @@ class TestCascade:
             await asyncio.sleep(2)
 
         lens = JudgeLens(name="f", question="?", judges=[Says(slow)])
-        [answered] = await run_lenses([lens], view("x"), Stage.GATE, deadline_ms=50)
+        [answered] = await answer_lenses([lens], view("x"), Stage.GATE, deadline_ms=50)
         assert answered.answer.error == "deadline"
 
 
@@ -581,7 +581,7 @@ class TestTypeSafe:
         assert len(state["user_message"]) <= TypeSafe.TEXT_CHARS
 
     async def test_without_a_key_typesafe_abstains_and_the_lens_fails(self):
-        from django_ai_sdk.oversight.guard.asking import NO_JUDGE
+        from django_ai_sdk.oversight.guard.judging import NO_JUDGE
         from django_ai_sdk.oversight.judges import TypeSafe
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
@@ -639,7 +639,7 @@ class TestTypeSafe:
 
         lenses = [JudgeLens(name=f"f{n}", question="?", judges=[TypeSafe()]) for n in range(3)]
         with typesafe() as mock:
-            answered = await run_lenses(lenses, view("x"), Stage.GATE, deadline_ms=1000)
+            answered = await answer_lenses(lenses, view("x"), Stage.GATE, deadline_ms=1000)
         assert mock.await_count == 1
         assert sorted(mock.await_args.args[1]) == ["f0", "f1", "f2"]
         assert all(o.answer.value is True for o in answered)
@@ -680,7 +680,7 @@ class TestTypeSafe:
         lens = JudgeLens(name="t", question="Is it bad?", stages=[Stage.GATE], judges=[TypeSafe()])
         with typesafe_client(slow_request):
             task = asyncio.ensure_future(
-                run_lenses([lens], view("content"), Stage.GATE, deadline_ms=10_000)
+                answer_lenses([lens], view("content"), Stage.GATE, deadline_ms=10_000)
             )
             await asyncio.sleep(0.05)
             task.cancel()

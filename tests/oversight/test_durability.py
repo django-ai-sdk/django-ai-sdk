@@ -218,10 +218,8 @@ class TestWriteAhead:
         assert (turn.status, turn.outcome) == ("open", "blocked")
 
     async def test_a_write_ahead_that_fails_is_written_whole_at_close(self):
-        from django_ai_sdk.oversight.guard import state
-
         guard = await start("test-durable", "I want a refund")
-        with patch.object(state, "persist_turn", side_effect=DatabaseError("down")):
+        with patch("django_ai_sdk.oversight.guard.persist_turn", side_effect=DatabaseError("down")):
             await guard.gate()
         assert not await Turn.objects.filter(id=guard.id).aexists()
         await guard.finish("ok")
@@ -590,7 +588,7 @@ class TestStableEventIds:
         guard = await start("test-durable-noisy", "hello")
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
             await guard.gate()
-        first, again = guard.notifications(guard.matched), guard.notifications(guard.matched)
+        first, again = guard.notices.notifications(guard.matched), guard.notices.notifications(guard.matched)
         assert [e["id"] for e, _ in first] == [e["id"] for e, _ in again]
         assert first[0][0]["id"] == event_id(guard.id, "tell", "gate")
 

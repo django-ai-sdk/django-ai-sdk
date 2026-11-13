@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.agents import acode_policy
-from django_ai_sdk.oversight.guard.masks import gate_masking_lenses
+from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
 
 if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage

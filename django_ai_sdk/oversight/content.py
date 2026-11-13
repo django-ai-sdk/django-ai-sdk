@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
 
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.guard.asking import Answered
+    from django_ai_sdk.oversight.guard.judging import Answered
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.models import Turn, TurnContent
 

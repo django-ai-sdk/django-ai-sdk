@@ -20,6 +20,7 @@ from django_ai_sdk.oversight import (
     register_policy,
 )
 from django_ai_sdk.oversight.guard import TurnGuard
+from django_ai_sdk.oversight.guard.masking import TurnMasks
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
 from django_ai_sdk.oversight.types import Stage, Subject, ToolCall
 from tests.oversight.helpers import (
@@ -185,7 +186,7 @@ class TestTools:
 @pytest.mark.django_db(transaction=True)
 class TestToolStage:
     async def test_a_tool_restriction_at_the_tool_stage_takes_only_the_tools_it_names(self):
-        from django_ai_sdk.oversight.guard import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE
 
         @register_policy
         class Narrowing(Policy):
@@ -225,7 +226,7 @@ class TestToolResultMasking:
     IBAN_RESULT = '{"iban": "NL91ABNA0417164300"}'
 
     async def test_a_result_that_cannot_be_checked_is_withheld(self):
-        from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         guard = await start(masking_policy("test-tool-mask-broken", broken))
         assert await guard.mask_text(self.IBAN_RESULT) == str(UNCHECKED_TEXT)
@@ -239,19 +240,19 @@ class TestToolResultMasking:
         assert failed.error == "RuntimeError"
 
     async def test_a_result_named_but_not_pointed_at_is_withheld(self):
-        from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         guard = await start(masking_policy("test-tool-no-spans", found_without_spans))
         assert await guard.mask_text("Jan's record") == str(UNCHECKED_TEXT)
         assert (await closed_turn(guard)).outcome == "masked"
 
     async def test_masking_never_raises_into_the_agent_loop(self):
-        from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         guard = await start("test-guard")
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
             opened = await start("test-guard")
-        failing = patch.object(TurnGuard, "_judged", side_effect=RuntimeError("boom"))
+        failing = patch.object(TurnMasks, "mask_other_text", side_effect=RuntimeError("boom"))
         with failing:
             assert await opened.mask_result("c1", self.IBAN_RESULT) == self.IBAN_RESULT
             assert await guard.mask_text(self.IBAN_RESULT) == str(UNCHECKED_TEXT)

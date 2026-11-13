@@ -24,7 +24,8 @@ from django_ai_sdk.agents.tool_agent import (
     default_hooks,
 )
 from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, TurnGuard, guarding
+from django_ai_sdk.oversight.guard import TurnGuard, guarding
+from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 from django_ai_sdk.oversight.plugin import (
     FinishHook,
     GateHook,
@@ -114,7 +115,7 @@ class TestToolCallsInTheTurn:
         assert IBAN not in handed_on
 
     async def test_a_run_that_outlived_its_turn_is_refused_and_withheld(self):
-        from django_ai_sdk.oversight.guard import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE
 
         guard = await self.guard()
         call = HaystackToolCall(id="c1", tool_name="lookup", arguments={"name": "Jan"})
@@ -141,14 +142,14 @@ class TestToolCallsInTheTurn:
     async def test_a_result_is_judged_once_however_often_it_is_asked(self):
         guard = await self.guard()
         calls = 0
-        original = guard.mask_text
+        original = guard.masks.mask_text
 
         async def counted(text):
             nonlocal calls
             calls += 1
             return await original(text)
 
-        guard.mask_text = counted
+        guard.masks.mask_text = counted
         first = await guard.mask_result("c3", f"IBAN {IBAN}")
         again = await guard.mask_result("c3", f"IBAN {IBAN}")
         assert first == again

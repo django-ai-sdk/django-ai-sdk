@@ -197,7 +197,7 @@ def deadline_warnings(name: str, resolved: Any) -> list[Any]:
     Any judge with `external` set counts, a user's own too. `LocalClassifier` doesn't.
     """
     from django_ai_sdk.oversight.conf import deadline_ms
-    from django_ai_sdk.oversight.guard.asking import FAIL_CLOSED_ACTIONS
+    from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
     from django_ai_sdk.oversight.lenses import JudgeLens
     from django_ai_sdk.oversight.types import Mode, Stage
 

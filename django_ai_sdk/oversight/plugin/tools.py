@@ -25,12 +25,8 @@ from django_ai_sdk.agents.tool_agent import (
     replace_messages,
     tool_results,
 )
-from django_ai_sdk.oversight.guard import (
-    TOOL_UNAVAILABLE,
-    UNCHECKED_TEXT,
-    current_guard,
-    outlived_turn,
-)
+from django_ai_sdk.oversight.guard import current_guard, outlived_turn
+from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE, UNCHECKED_TEXT
 from django_ai_sdk.oversight.plugin.turn import OversightHook, request_in
 from django_ai_sdk.oversight.types import ToolCall
 

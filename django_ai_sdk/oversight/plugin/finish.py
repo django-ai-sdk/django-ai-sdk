@@ -22,7 +22,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from django_ai_sdk.adapters.citations import SourceRegistry
-    from django_ai_sdk.oversight.guard import FinishResult, TurnGuard
+    from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.guard.stages import StageResult
 
 
 class WholeRun:
@@ -83,25 +84,25 @@ class FinishHook(OversightHook):
         finished = await guard.finish(text)
         if request.schema is not None:
             withhold_unfit(guard, finished, request.schema)
-        if finished.replaced:
+        if finished.changed:
             replace = request.answer.replace if request.answer else _replace_last_reply
-            messages = replace(messages, request.first, finished.output)
+            messages = replace(messages, request.first, finished.text)
             state.set("messages", messages, handler_override=replace_values)
 
 
-def withhold_unfit(guard: TurnGuard, finished: FinishResult, schema: type[BaseModel]) -> None:
+def withhold_unfit(guard: TurnGuard, finished: StageResult, schema: type[BaseModel]) -> None:
     """Withhold a masked structured answer whose JSON no longer fits `schema`.
 
     Returning the unmasked original instead would leak what the mask hid.
     """
-    if not finished.replaced or finished.blocked:
+    if not finished.changed or finished.blocked:
         return
     try:
-        schema.model_validate_json(finished.output)
+        schema.model_validate_json(finished.text)
     except ValidationError:
         guard.refuse("masked result does not fit its schema")
         finished.blocked = True
-        finished.message = finished.output = str(Block.DEFAULT_MESSAGE)
+        finished.message = finished.text = str(Block.DEFAULT_MESSAGE)
 
 
 async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
@@ -113,11 +114,11 @@ async def mask_sources(guard: TurnGuard, registry: SourceRegistry) -> None:
     """
     for source in registry.all:
         text = source.content or ""
-        if not text or guard.masked_sources.get(source.key) == text:
+        if not text or guard.masks.sources.get(source.key) == text:
             continue
         # mask_result keys on the text too, so a changed source is masked again.
         masked = await guard.mask_result(f"source:{source.key}", text)
-        source.content = guard.masked_sources[source.key] = masked
+        source.content = guard.masks.sources[source.key] = masked
 
 
 def _written(produced: list[HaystackChatMessage]) -> str:

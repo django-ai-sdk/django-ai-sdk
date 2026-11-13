@@ -1,4 +1,4 @@
-"""Masking of the turn's own text, and of other text the model reads.
+"""Masking: what a Mask rule hides in the turn's own text and in other text the model reads.
 
 Other text, like an earlier message or a tool result, is judged by the gate's
 lenses the same way as the question. It is masked or withheld whole, and the
@@ -9,27 +9,27 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from django_ai_sdk.oversight.actions import Block, Mask, RestrictTools
 from django_ai_sdk.oversight.agents import FINGERPRINT_CHARS
 from django_ai_sdk.oversight.conf import deadline_ms
-from django_ai_sdk.oversight.guard.asking import (
+from django_ai_sdk.oversight.guard.judging import (
     Answered,
     Matched,
+    answer_lenses,
     cancel_all,
     errored_lenses,
-    evaluate_rules,
-    run_lenses,
+    match_rules,
 )
 from django_ai_sdk.oversight.guard.notices import (
     REFUSED_TEXT,
     UNCHECKED_TEXT,
-    refusal,
-    restrict_refusal,
+    merge_restrict,
+    refusal_message,
+    tool_refusal_message,
 )
-from django_ai_sdk.oversight.guard.state import GuardState, merge_restrict
+from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.patterns import mask_all
 from django_ai_sdk.oversight.types import Mode, Stage, Subject, TextSpan, TurnContext
 
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from django_ai_sdk.oversight.actions import Action
+    from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.policy import ResolvedPolicy
 
@@ -44,24 +45,36 @@ if TYPE_CHECKING:
 MaskGroup = tuple[list[TextSpan], str]
 
 
-class Masking(GuardState):
-    """Masks for the turn's own text, and for other text judged like the question."""
+class TurnMasks:
+    """What a turn masks: its own text, and other text the model reads.
 
-    def _masks(self, matched: list[Matched], subject: Subject) -> list[MaskGroup]:
+    Owns the tool results being masked, so the stream and the tool hook share one
+    masking per result, and the citation sources already masked.
+    """
+
+    def __init__(self, guard: TurnGuard) -> None:
+        self.guard = guard
+        # In-flight tool result masking, keyed by call id and text hash.
+        self.results: dict[str, asyncio.Future[str]] = {}
+        # Masked citation source text by source key, so each text is masked only once.
+        self.sources: dict[str, str] = {}
+
+    def mask_groups(self, matched: list[Matched], subject: Subject) -> list[MaskGroup]:
         """Collect the Mask actions' groups for `subject` (see `collect_masks`).
 
         A mask that cannot locate what it should hide becomes a Block.
         """
+        guard = self.guard
         groups, unpointed = collect_masks(
-            matched, self.answered, subject=subject, view=self.context, closed=self._fails_closed
+            matched, guard.answered, subject=subject, view=guard.context, closed=guard.fails_closed
         )
         for match, mask in unpointed:
             match.acted = [Block(match.rule.message) if a is mask else a for a in match.acted]
         return [group for _, group in groups]
 
-    async def _judged(
+    async def mask_other_text(
         self, lenses: list[Lens], text: str, stage: Stage, *, blocks: bool = False
-    ) -> Judged:
+    ) -> StageResult:
         """Judge `text` with `lenses` like the gate judges the question, and mask it.
 
         `stage` picks the deadline. Text a mask cannot locate (see `_unpointed`) is
@@ -69,22 +82,25 @@ class Masking(GuardState):
         actions are kept as well. Only protective actions are kept, so other text
         never triggers alerts or notifications.
         """
-        judged = Judged(text=text)
+        guard = self.guard
+        judged = StageResult(stage, text=text)
         if not text:
             return judged
-        view = self.context.model_copy(update={"input": text, "answers": {}})
-        judged.answered = await run_lenses(lenses, view, Stage.GATE, deadline_ms=deadline_ms(stage))
+        view = guard.context.model_copy(update={"input": text, "answers": {}})
+        judged.answered = await answer_lenses(
+            lenses, view, Stage.GATE, deadline_ms=deadline_ms(stage)
+        )
         answers = {o.lens.name: o.answer for o in judged.answered}
-        matched = evaluate_rules(
-            self.resolved,
+        matched = match_rules(
+            guard.resolved,
             answers,
             Stage.GATE,
             done=set(),
             errored=errored_lenses(judged.answered),
-            fail_closed=self._fails_closed,
+            fail_closed=guard.fails_closed,
         )
         groups, unpointed = collect_masks(
-            matched, judged.answered, subject=Subject.INPUT, view=view, closed=self._fails_closed
+            matched, judged.answered, subject=Subject.INPUT, view=view, closed=guard.fails_closed
         )
         for match in matched:
             acting: list[Action] = [
@@ -94,10 +110,11 @@ class Masking(GuardState):
             ]
             for action in acting:
                 if isinstance(action, Block):
-                    judged.block = judged.block or refusal(match, action)
+                    if not judged.blocked:
+                        judged.refuse(refusal_message(match, action))
                 elif isinstance(action, RestrictTools):
-                    if not action.names:
-                        judged.block = judged.block or restrict_refusal(match)
+                    if not action.names and not judged.blocked:
+                        judged.refuse(tool_refusal_message(match))
                     judged.restrict = merge_restrict(judged.restrict, action.names)
             if acting:
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
@@ -105,34 +122,8 @@ class Masking(GuardState):
             judged.text = str(UNCHECKED_TEXT)
         elif groups:
             judged.text = mask_all(text, [group for _, group in groups])
+        judged.changed = judged.text != text
         return judged
-
-    def _record_aside(
-        self, stage: Stage, answered: list[Answered], matched: list[Matched]
-    ) -> list[Matched]:
-        """Record findings on other text as aside, once per lens and rule per stage.
-
-        Spans are dropped because they point into the other text, so they never
-        place masks in the question or answer. Failed lenses are recorded too.
-        Returns the matches added by this call.
-        """
-        seen = {(o.lens.name, o.stage) for o in self.answered if o.aside}
-        for item in answered:
-            found = (item.answer.ok and item.answer.value) or item.errored
-            if found and (item.lens.name, stage) not in seen:
-                seen.add((item.lens.name, stage))
-                answer = item.answer.model_copy(update={"spans": []})
-                self.answered.append(Answered(item.lens, stage, answer, item.failed, aside=True))
-        recorded = {(m.rule.name, m.stage) for m in self.matched if m.aside}
-        added: list[Matched] = []
-        for match in matched:
-            if (match.rule.name, stage) not in recorded:
-                recorded.add((match.rule.name, stage))
-                added.append(
-                    Matched(match.rule, stage, match.acted, aside=True, failed=match.failed)
-                )
-        self.matched.extend(added)
-        return added
 
     async def mask_text(self, text: str) -> str:
         """Mask a tool result the way the gate masks the question. Never raises.
@@ -142,24 +133,22 @@ class Masking(GuardState):
         If the result cannot be checked, a closed policy withholds it and an open
         one passes it unchanged and records the error.
         """
+        guard = self.guard
         try:
-            lenses = gate_guarding_lenses(self.resolved) if self.active else []
+            lenses = gate_guarding_lenses(guard.resolved) if guard.active else []
             if not lenses or not text:
                 return text
-            judged = await self._judged(lenses, text, Stage.TOOL, blocks=True)
+            judged = await self.mask_other_text(lenses, text, Stage.TOOL, blocks=True)
             if judged.restrict is not None:
-                self.restrict = merge_restrict(self.restrict, judged.restrict)
-            if judged.block is not None:
+                guard.restrict = merge_restrict(guard.restrict, judged.restrict)
+            if judged.blocked:
                 judged.text = str(REFUSED_TEXT)
             if judged.text != text or any(o.errored for o in judged.answered):
-                self._record_aside(Stage.TOOL, judged.answered, judged.matched)
+                guard.record_aside(Stage.TOOL, judged.answered, judged.matched)
             return judged.text
         except Exception:
-            return (
-                str(UNCHECKED_TEXT)
-                if self._stage_failed("tool result masking failed", refuse_turn=False)
-                else text
-            )
+            withhold = guard.record_stage_error("tool result masking failed", refuse_turn=False)
+            return str(UNCHECKED_TEXT) if withhold else text
 
     async def mask_result(self, call_id: str, text: str) -> str:
         """Mask a tool result like `mask_text`, once per call id and text.
@@ -171,13 +160,14 @@ class Masking(GuardState):
         if not call_id:
             return await self.mask_text(text)
         key = f"{call_id}:{hashlib.sha256(text.encode()).hexdigest()[:FINGERPRINT_CHARS]}"
-        pending = self._masking_results.get(key)
+        pending = self.results.get(key)
         if pending is None:
-            pending = self._masking_results[key] = asyncio.ensure_future(self.mask_text(text))
+            pending = self.results[key] = asyncio.ensure_future(self.mask_text(text))
         return await asyncio.shield(pending)
 
-    async def _cancel_masking(self) -> None:
-        await cancel_all(self._masking_results.values())
+    async def cancel(self) -> None:
+        """Cancel the tool results still being masked, so nothing is added to a closed turn."""
+        await cancel_all(self.results.values())
 
 
 def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
@@ -210,19 +200,6 @@ def gate_guarding_lenses(policy: ResolvedPolicy) -> list[Lens]:
         for lens in policy.active_lenses(Stage.GATE, Subject.INPUT)
         if lens in masking or lens.name in names
     ]
-
-
-@dataclass
-class Judged:
-    """The result of judging other text: the text to pass on and what was found."""
-
-    text: str
-    answered: list[Answered] = field(default_factory=list)
-    matched: list[Matched] = field(default_factory=list)
-    # The refusal message, if an enforced rule blocks the turn.
-    block: str | None = None
-    # Tools removed by an enforced rule. None means none, [] means all.
-    restrict: list[str] | None = None
 
 
 def collect_masks(
