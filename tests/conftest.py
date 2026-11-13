@@ -142,10 +142,7 @@ def sample_rag_documents():
 
 @pytest.fixture
 def installs_as_is():
-    """Run a mocked Haystack Agent as it is: oversight would install a copy of a real one."""
-    installed = MagicMock(side_effect=lambda agent, *args: agent)
-    with (
-        patch("django_ai_sdk.oversight.plugin.agent.install", installed),
-        patch("django_ai_sdk.oversight.plugin.install", installed),
-    ):
+    """Run a mocked Haystack Agent as it is: oversight would run a copy of a real one."""
+    installed = MagicMock(side_effect=lambda agent: agent)
+    with patch("django_ai_sdk.oversight.plugin.agent._overseen", installed):
         yield installed

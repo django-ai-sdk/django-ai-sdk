@@ -347,14 +347,14 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
     build_agent = add_component(
         dot,
         "build_agent",
-        "Haystack Agent(\n  generator, tools,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)\nrun_agent() installs oversight",
+        "Haystack Agent(\n  generator, tools,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)\nrun_agent() adds oversight",
         fillcolor="#e1f5fe",
         color="#1565c0",
         fontcolor="#1565c0",
     )
 
     run_async = add_flow_node(
-        dot, "run_async", "run_agent(agent, ...)\ninstall(agent).run_async(...)\nno streaming callback"
+        dot, "run_async", "run_agent(agent, ...)\nno streaming callback"
     )
 
     result = add_component(

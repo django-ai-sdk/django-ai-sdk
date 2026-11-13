@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
+    from django_ai_sdk.oversight.plugin import TurnRequest
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -187,6 +188,8 @@ class Stream:
     suggestion_generator: SuggestionGenerator | None = None
     # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
+    # The turn the run is for (see oversight.plugin); set per run by chat.
+    turn_request: TurnRequest | None = None
     # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
     # user they are stored for; set per run by Agent.stream.
     tool_artifacts: dict[str, ToolArtifact] = {}  # noqa: RUF012
@@ -543,9 +546,15 @@ class Stream:
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
         from django_ai_sdk.oversight.plugin import run_agent
 
-        # Oversight: the run's hooks open, gate, check and finish the turn.
-        context = self._turn.context if self._turn is not None else self.hook_context
-        return await run_agent(agent, messages, hook_context=context, streaming_callback=callback)
+        # Oversight: the run opens, gates, checks and finishes the turn.
+        request = self._turn.request if self._turn is not None else self.turn_request
+        return await run_agent(
+            agent,
+            messages,
+            request=request,
+            hook_context=self.hook_context,
+            streaming_callback=callback,
+        )
 
     async def get_events(
         self,
@@ -756,7 +765,7 @@ class Stream:
         pipeline_task: asyncio.Task[Any] | None = None
         # Oversight: the run's turn learns the message id and streams the calls it refuses.
         turn = self._turn = StreamTurn(
-            dict(self.hook_context or {}),
+            self.turn_request,
             message_id,
             stream_writer,
             self.citation_registry,

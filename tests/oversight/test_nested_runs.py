@@ -82,31 +82,30 @@ class TestNestedRuns:
         assert not model.asked
 
     async def test_the_child_turn_links_to_its_parent(self):
-        from django_ai_sdk.oversight.agent_run import turn
+        from django_ai_sdk.oversight.plugin.turn import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None and child.guard.parent_turn_id == outer.id
-        async with turn(agent, channel="chat", input="hi") as alone:
-            assert alone.guard is not None and alone.guard.parent_turn_id == ""
+            child, opened_own = await open_turn(agent, channel="chat", input="hi")
+        assert opened_own and child.parent_turn_id == outer.id
+        alone, opened_own = await open_turn(agent, channel="chat", input="hi")
+        assert opened_own and alone.parent_turn_id == ""
 
     async def test_the_child_turn_keeps_the_outer_person_and_removed_tools(self):
-        from django_ai_sdk.oversight.agent_run import turn
+        from django_ai_sdk.oversight.plugin.turn import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()
         outer.actor_id, outer.restrict = "7", ["send"]
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None
-                assert (child.guard.actor_id, child.guard.restrict) == ("7", ["send"])
-                assert not child.guard.allows_tool("send")
+            child, _ = await open_turn(agent, channel="chat", input="hi")
+        assert (child.actor_id, child.restrict) == ("7", ["send"])
+        assert not child.allows_tool("send")
         outer.restrict = []
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None and child.guard.restrict == []
+            child, _ = await open_turn(agent, channel="chat", input="hi")
+        assert child.restrict == []
 
     async def test_the_same_policy_or_none_joins(self):
         same, _ = agent_with("Fine.", policy=LenientPolicy)
