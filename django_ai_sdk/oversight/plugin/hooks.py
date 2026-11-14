@@ -149,7 +149,7 @@ class GateQuestionHook(OversightHook):
                 guard.notices.pending.append(gate.notice)
             # Mask the sources the thread already cited, before any citations card shows them.
             await mask_sources(guard, current_registry.get())
-        turn.first = len(state.data.get("messages") or [])
+        turn.first_produced_index = len(state.data.get("messages") or [])
         if turn.on_gated is not None:
             await turn.on_gated(turn)
 
@@ -457,7 +457,7 @@ class JudgeAnswerHook(OversightHook):
         if turn.question_blocked:
             return
         messages = list(state.data.get("messages") or [])
-        produced = messages[turn.first :]
+        produced = messages[turn.first_produced_index :]
         text = turn.read_answer(produced) if turn.read_answer else assistant_text(produced)
         if not text:
             guard.note_error("no result")
@@ -467,9 +467,12 @@ class JudgeAnswerHook(OversightHook):
             withhold_unfit(guard, finished, turn.answer_schema)
         if finished.changed:
             if turn.read_answer:
-                messages = [*messages[: turn.first], replacement_answer(finished.text)]
+                messages = [
+                    *messages[: turn.first_produced_index],
+                    replacement_answer(finished.text),
+                ]
             else:
-                messages = replace_answer(messages, turn.first, finished.text)
+                messages = replace_answer(messages, turn.first_produced_index, finished.text)
             state.set("messages", messages, handler_override=replace_values)
 
 

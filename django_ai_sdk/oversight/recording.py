@@ -268,13 +268,13 @@ def record_answers(
     answered: list[Answered],
     matched: list[Matched],
     *,
-    view: TurnContext | None = None,
+    context: TurnContext | None = None,
     found: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Add later answers and matches to a written turn and update its labels.
 
     Answer texts go into the content, as at close. With MASKED capture they are
-    masked using what the lenses found in `view`, the text reflect judged, and
+    masked using what the lenses found in `context`, the text reflect judged, and
     `found`, what the turn masked at close. Returns the texts by answer id as
     stored, empty when the turn keeps no text or its content is gone.
 
@@ -284,8 +284,8 @@ def record_answers(
     """
     from django_ai_sdk.oversight.models import RuleMatch, Turn
 
-    if view is not None:
-        found = {**(found or {}), **found_literals(answered, {s: view.text(s) for s in Subject})}
+    if context is not None:
+        found = {**(found or {}), **found_literals(answered, {s: context.text(s) for s in Subject})}
     keep = capture_masker(turn.content.capture, found) if turn.content else None
     answer_rows, texts = _build_answers(answered, keep=keep)
     texts = without_nul(texts)

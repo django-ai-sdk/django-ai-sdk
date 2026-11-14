@@ -63,7 +63,7 @@ class TurnRequest:
     guard: TurnGuard | None = None
     gate_result: StageResult | None = None
     # Index of the first message the run produced, after the gate.
-    first: int = 0
+    first_produced_index: int = 0
 
     @property
     def question_blocked(self) -> bool:

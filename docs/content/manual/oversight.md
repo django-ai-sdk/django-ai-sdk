@@ -105,7 +105,7 @@ Each kind adds its own:
 | Kind | Answers | Own attributes |
 | --- | --- | --- |
 | `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords). Each stretch of text gets one label, the first pattern's. What patterns find is a fact: hit and miss both have confidence `1`. |
-| `CheckLens` | `Flag` by default | `validators`: functions `fn(text)` or `fn(text, view)`, or names registered with `register_validator`; each raises `Violation(message)` to say yes, and the messages are the answer's reason. `check(text, view)` runs them; override it to answer another type, returning the value, an `Answer` (with a reason or confidence) or `None` to abstain. A sync `check` runs in a thread. `timeout` (`30` s). |
+| `CheckLens` | `Flag` by default | `validators`: functions `fn(text)` or `fn(text, context)`, or names registered with `register_validator`; each raises `Violation(message)` to say yes, and the messages are the answer's reason. `check(text, context)` runs them; override it to answer another type, returning the value, an `Answer` (with a reason or confidence) or `None` to abstain. A sync `check` runs in a thread. `timeout` (`30` s). |
 | `JudgeLens` | `Flag` by default | `judges`: tried in order (instances, aliases, optional aliases such as `Maybe("judge")`, or `{"class": ..., **kwargs}`); `min_confidence` (`0.75`: an answer below it asks the next judge); `question` (asked verbatim); `guidance` (scale anchors, edge cases); `reads_question` (`True`: a tool-call lens also reads the question that led to the call). |
 
 | Answer | Value | Options, on the lens |
@@ -136,7 +136,7 @@ The regex tables, checksums and the masking helpers (`mask`, `mask_all`, `mask_s
 
 ## Judges
 
-`answer(lens, view) -> Answer | None`, where `view` is the `TurnContext` the lens reads (`input`, `output`, `history`, `sources`, `tool_call`, the `answers` so far, and `text(subject)`); `None` abstains, and so does a judge whose `missing()` says why it can't run; a lens none of whose judges can run fails with `no judge can run here`, so `FAIL_MODE` decides. An answer with neither a value nor an `error` counts as `no verdict`, so `FAIL_MODE` applies. An `Answer` has `value`, `confidence`, `rationale`, `spans`, `items`, `trail`, `error`, `cost`, `tokens`, `latency_ms`, `answerer` (who answered: a judge's name, `patterns` or `check`) and `model`. Every judge also takes `name=`, the name its answers are recorded under, and `timeout=`, the seconds before its answer is abandoned. The package exports the judges; helpers such as `base.resolve` stay in their modules.
+`answer(lens, context) -> Answer | None`, where `context` is the `TurnContext` the lens reads (`input`, `output`, `history`, `sources`, `tool_call`, the `answers` so far, and `text(subject)`); `None` abstains, and so does a judge whose `missing()` says why it can't run; a lens none of whose judges can run fails with `no judge can run here`, so `FAIL_MODE` decides. An answer with neither a value nor an `error` counts as `no verdict`, so `FAIL_MODE` applies. An `Answer` has `value`, `confidence`, `rationale`, `spans`, `items`, `trail`, `error`, `cost`, `tokens`, `latency_ms`, `answerer` (who answered: a judge's name, `patterns` or `check`) and `model`. Every judge also takes `name=`, the name its answers are recorded under, and `timeout=`, the seconds before its answer is abandoned. The package exports the judges; helpers such as `base.resolve` stay in their modules.
 
 Local (`external = ""`: nothing leaves the process):
 
@@ -293,7 +293,7 @@ The router signs readers in with django-ninja's `django_auth`: the session, with
 | `GET /oversight/turns/{id}/` | `get_turn(turn_id, user=)` | metrics; the content takes content |
 | `GET /oversight/reviews/` | `list_reviews(user=, queue=, status=, limit=, cursor=)` | review |
 | `GET /oversight/queues/` | `list_queues(user=)` | review |
-| `POST /oversight/reviews/{id}/` | `resolve_review(item_id, answer, user=)` | review |
+| `POST /oversight/reviews/{id}/` | `resolve_review(item_id, verdict, user=)` | review |
 | `GET /oversight/metrics/` | `get_metrics(user=, days=, agent_id=, policy=)` | metrics |
 
 The turns feed filters on `outcome`, `report_outcome` (turns a report-mode rule would have changed), `status`, `agent_id`, `channel` (a prefix), `policy`, `severity`, `label` with an optional `value`, `rule`, `review` (`open`, `reviewed`, `unreviewed`), `thread_id` (content: it takes `VIEW_OVERSIGHT_CONTENT`, 403 without, and reaches only turns in the content scope), `since` and `until`. Lists are newest first (reviews: oldest first) and page by cursor: pass a page's `next_cursor` back as `cursor`; there is no total. On Postgres a GIN index on the labels answers the label filter.

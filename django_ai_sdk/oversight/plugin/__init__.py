@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from django_ai_sdk.adapters.run import user_content
 from django_ai_sdk.common import last_user_message
 from django_ai_sdk.oversight.agents import (
+    attribute_policy,
     declared_policy,
-    declared_policy_sync,
     overrides_get_oversight,
 )
 from django_ai_sdk.oversight.conf import is_enabled
@@ -120,7 +120,7 @@ def needs_own_turn_sync(turn: TurnRequest) -> bool:
         elif overrides_get_oversight(agent):
             return True
         else:
-            name = declared_policy_sync(agent)[0]
+            name = attribute_policy(agent)[0]
     except Exception:
         return True
     return bool(name) and not joins_turn(current_guard(), name)

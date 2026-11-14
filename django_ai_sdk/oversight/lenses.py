@@ -25,7 +25,7 @@ The rules:
    `labels`), `Score` (0 to 1) or `Entities` (which `labels` occur, and where).
 4. A PatternLens answers Entities: what it found, with spans. `L(name).is_true`
    means it found something. What patterns find is a fact: hit and miss are sure (1).
-5. A CheckLens answers with `check(text, view)`. By default that runs its
+5. A CheckLens answers with `check(text, context)`. By default that runs its
    `validators`, each of which raises `Violation` when the text breaks it, and
    answers a Flag. Override `check` for another answer: it returns the value (or
    an Answer to add a reason or confidence, or None to abstain).
@@ -385,12 +385,12 @@ class Lens:
     def display_label(self) -> str:
         return self.label or self.name.replace("_", " ")
 
-    def applies(self, view: TurnContext) -> bool:
+    def applies(self, context: TurnContext) -> bool:
         """Whether this turn has what the lens judges."""
         if self.subject is Subject.SOURCES:
-            return bool(view.grounding())
+            return bool(context.grounding())
         if self.needs_grounding:
-            return bool(view.grounding(earlier=True))
+            return bool(context.grounding(earlier=True))
         return True
 
     def validate(self) -> None:
@@ -423,7 +423,7 @@ class Lens:
         person's answer on the lens names what they typed, not a kind.
         """
         return any(
-            isinstance(step, PatternJudge) and step.label() == answer.answerer
+            isinstance(step, PatternJudge) and step.display_name == answer.answerer
             for step in self.steps()
         )
 
@@ -529,11 +529,11 @@ def get_validators() -> dict[str, Callable[..., Any]]:
 
 
 class CheckLens(Lens):
-    """Answered by plain Python, in `check(text, view)`.
+    """Answered by plain Python, in `check(text, context)`.
 
     By default `check` runs `validators` and answers a Flag: yes when any raises
     `Violation`, with their messages as the reason. A validator is `fn(text)` or
-    `fn(text, view)`, or the name of one registered with `register_validator`.
+    `fn(text, context)`, or the name of one registered with `register_validator`.
     Override `check` for another answer, as `ToolErrorsLens` does. It returns the
     value, an Answer to give a reason or confidence too, or None to abstain. A
     sync `check` runs in a thread, so a slow one cannot block the event loop.
@@ -543,12 +543,12 @@ class CheckLens(Lens):
     validators: list[Callable[..., Any] | str] = []  # noqa: RUF012
     timeout: float = DEFAULT_TIMEOUT
 
-    def check(self, text: str, view: TurnContext) -> Any:
+    def check(self, text: str, context: TurnContext) -> Any:
         found: list[str] = []
         for validator in self.validators:
             run = get_validator(validator)
             try:
-                run(text, view) if _takes_view(run) else run(text)
+                run(text, context) if _takes_view(run) else run(text)
             except Violation as violation:
                 found.append(str(violation.message))
         return Answer(value=bool(found), rationale="; ".join(found))
@@ -580,13 +580,13 @@ class _Checker(Judge):
     def __init__(self, timeout: float) -> None:
         self.timeout = timeout
 
-    async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
+    async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
         assert isinstance(lens, CheckLens)
-        text = view.text(lens.subject)
+        text = context.text(lens.subject)
         if inspect.iscoroutinefunction(lens.check):
-            result = await lens.check(text, view)
+            result = await lens.check(text, context)
         else:
-            result = await asyncio.to_thread(lens.check, text, view)
+            result = await asyncio.to_thread(lens.check, text, context)
         if inspect.isawaitable(result):
             result = await result
         if result is None or isinstance(result, Answer):
@@ -758,7 +758,7 @@ class LengthLens(CheckLens):
     name = "length"
     max_chars: int = 0
 
-    async def check(self, text: str, view: TurnContext) -> Answer:
+    async def check(self, text: str, context: TurnContext) -> Answer:
         return Answer(value=len(text) > self.max_chars, rationale=f"{len(text)} characters")
 
     def validate(self) -> None:
@@ -798,9 +798,9 @@ class LanguageLens(CheckLens):
     name = "language"
     subject = Subject.EXCHANGE
 
-    async def check(self, text: str, view: TurnContext) -> Answer | None:
-        asked, _ = guess_language(view.input)
-        replied, confidence = guess_language(view.output)
+    async def check(self, text: str, context: TurnContext) -> Answer | None:
+        asked, _ = guess_language(context.input)
+        replied, confidence = guess_language(context.output)
         if not asked or not replied:
             return None
         return Answer(
@@ -817,13 +817,13 @@ class EmptyRetrievalLens(CheckLens):
     label = "Nothing retrieved"
     subject = Subject.SOURCES
 
-    def applies(self, view: TurnContext) -> bool:
+    def applies(self, context: TurnContext) -> bool:
         # Runs on any tool call: an empty search leaves no grounding to judge.
-        return bool(view.tool_calls)
+        return bool(context.tool_calls)
 
-    async def check(self, text: str, view: TurnContext) -> Answer:
-        found = len(view.fresh_sources())
-        return Answer(value=bool(view.tool_calls) and not found, rationale=f"{found} sources")
+    async def check(self, text: str, context: TurnContext) -> Answer:
+        found = len(context.fresh_sources())
+        return Answer(value=bool(context.tool_calls) and not found, rationale=f"{found} sources")
 
 
 class ToolErrorsLens(CheckLens):
@@ -834,11 +834,11 @@ class ToolErrorsLens(CheckLens):
     answer = Score
     subject = Subject.EXCHANGE
 
-    async def check(self, text: str, view: TurnContext) -> Answer | None:
-        if not view.tool_calls:
+    async def check(self, text: str, context: TurnContext) -> Answer | None:
+        if not context.tool_calls:
             return None
-        failed = sum(call.error for call in view.tool_calls)
-        return Answer(value=failed / len(view.tool_calls), rationale=f"{failed} failed")
+        failed = sum(call.error for call in context.tool_calls)
+        return Answer(value=failed / len(context.tool_calls), rationale=f"{failed} failed")
 
 
 PRESETS: dict[str, type[Lens]] = {

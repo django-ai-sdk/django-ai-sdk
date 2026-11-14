@@ -27,7 +27,7 @@ from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 
-from django_ai_sdk.oversight.authoring.apps import setting
+from django_ai_sdk.oversight.authoring.apps import authoring_setting
 from django_ai_sdk.oversight.checks import policy_errors
 from django_ai_sdk.oversight.judges.base import alias_defined
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
@@ -233,7 +233,7 @@ def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
     """Build each parent, and list a missing MUST_EXTEND or a parent that does not load."""
     problems: list[str] = []
     inherited = {*extends, *(ancestor for parent in extends for ancestor in ancestors(parent))}
-    required = [p for p in setting("MUST_EXTEND") if p not in inherited]
+    required = [p for p in authoring_setting("MUST_EXTEND") if p not in inherited]
     if required:
         problems.append(f"every authored policy extends {required} (MUST_EXTEND)")
     parents: dict[str, ResolvedPolicy] = {}

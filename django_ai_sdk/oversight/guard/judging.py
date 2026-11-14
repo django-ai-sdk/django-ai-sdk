@@ -105,7 +105,7 @@ class Matched:
 
 async def answer_lens(
     lens: Lens,
-    view: TurnContext,
+    context: TurnContext,
     stage: Stage,
     *,
     sample: bool = True,
@@ -119,18 +119,18 @@ async def answer_lens(
     sample rate, for `dry_run`. `progress` collects each answer as it
     arrives, so a caller that cancels still has them.
     """
-    if not lens.applies(view):
+    if not lens.applies(context):
         return None
     if (
         sample
         and stage not in INLINE_STAGES
-        and not sampled(f"{view.turn_id}:{lens.name}", lens.sample)
+        and not sampled(f"{context.turn_id}:{lens.name}", lens.sample)
     ):
         return None
     steps = lens.steps()
     if not steps:
         return None
-    answer = await _first_sure(steps, lens, view, progress if progress is not None else [])
+    answer = await _first_sure(steps, lens, context, progress if progress is not None else [])
     if answer is None and all(map(_cannot_run, steps)):
         return Answer(error=NO_JUDGE)
     return answer
@@ -145,7 +145,7 @@ def _cannot_run(step: Any) -> bool:
 
 
 async def _first_sure(
-    steps: list[Any], lens: Lens, view: TurnContext, asked: list[Answer]
+    steps: list[Any], lens: Lens, context: TurnContext, asked: list[Answer]
 ) -> Answer | None:
     """Return the first answer above `min_confidence`, else the last usable one.
 
@@ -154,7 +154,7 @@ async def _first_sure(
     answers go in the result's `trail`, in the order asked.
     """
     for step in steps:
-        result = await ask_judge(step, lens, view)
+        result = await ask_judge(step, lens, context)
         if result is None:
             continue
         if lens.is_final(result):
@@ -188,7 +188,7 @@ def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
 
 async def answer_lenses(
     lenses: list[Lens],
-    view: TurnContext,
+    context: TurnContext,
     stage: Stage,
     *,
     deadline_ms: float | None = None,
@@ -208,7 +208,7 @@ async def answer_lenses(
         for lens in lenses:
             progress: list[Answer] = []
             task = asyncio.ensure_future(
-                answer_lens(lens, view, stage, sample=sample, progress=progress)
+                answer_lens(lens, context, stage, sample=sample, progress=progress)
             )
             tasks[task] = (lens, progress)
     try:

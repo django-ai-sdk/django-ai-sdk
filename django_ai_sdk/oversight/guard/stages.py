@@ -254,9 +254,9 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
         if not lenses:
             return None
-        view = guard.context.model_copy(update={"tool_call": call})
+        context = guard.context.model_copy(update={"tool_call": call})
         answered = await answer_lenses(
-            lenses, view, Stage.TOOL, deadline_ms=deadline_ms(Stage.TOOL)
+            lenses, context, Stage.TOOL, deadline_ms=deadline_ms(Stage.TOOL)
         )
         guard.keep_answers(answered)
         # Keep this call's answers out of context.answers so the next call is judged on its own.

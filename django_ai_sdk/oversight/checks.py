@@ -16,7 +16,7 @@ from django.core.checks import Error, Warning
 from django.db import DatabaseError
 from django.utils import timezone
 
-from django_ai_sdk.oversight.agents import declared_policy_sync
+from django_ai_sdk.oversight.agents import attribute_policy
 from django_ai_sdk.oversight.conf import (
     DEFAULTS,
     FAIL_MODES,
@@ -205,7 +205,7 @@ def agent_policy_name(cls: type) -> str:
 
     Raises TypeError for a value that names no policy.
     """
-    name, source = declared_policy_sync(cls)
+    name, source = attribute_policy(cls)
     return name if source == "agent" else ""
 
 

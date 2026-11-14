@@ -344,7 +344,7 @@ class TestAsk:
 
         for cls in (PatternJudge, TypeSafe, LocalClassifier, LLMJudge):
             judge = cls(name="n", timeout=1.5)
-            assert (judge.label(), judge.timeout) == ("n", 1.5)
+            assert (judge.display_name, judge.timeout) == ("n", 1.5)
             assert cls().timeout == cls.timeout
 
 

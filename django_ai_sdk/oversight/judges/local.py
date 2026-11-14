@@ -109,18 +109,18 @@ class LocalClassifier(Classifier):
             return f"{self.model} has no label {wanted!r} ({', '.join(runner.labels)}){hint}"
         return ""
 
-    async def answer(self, lens: Lens, view: Any) -> Answer | None:
+    async def answer(self, lens: Lens, context: Any) -> Answer | None:
         assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         # A lens it can't read, or nothing to read: nothing to say.
-        if self.question(lens) is None or not view.text(lens.subject).strip():
+        if self.question(lens) is None or not context.text(lens.subject).strip():
             return None
         # Unavailable while the model loads in the background, so the first turn after
         # a deploy goes to the next judge instead of hitting the deadline.
         if loaded_runner(self.model, self.file) is None:
             return Answer(error=f"{UNAVAILABLE}: {load_in_background(self.model, self.file)}")
-        return await super().answer(lens, view)
+        return await super().answer(lens, context)
 
-    async def per_source(self, lens: JudgeLens, view: Any) -> Answer | None:
+    async def per_source(self, lens: JudgeLens, context: Any) -> Answer | None:
         # A zero-shot model reads one text and one statement, not an answer plus a source.
         return None
 

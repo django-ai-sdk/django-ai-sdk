@@ -224,7 +224,7 @@ class OversightService(OversightAccess):
 
     @classmethod
     async def resolve_review(
-        cls, item_id: str, answer: ResolveIn, *, user: UserType
+        cls, item_id: str, verdict: ResolveIn, *, user: UserType
     ) -> ReviewOut | None:
         """Close a review item with the reviewer's verdict, or dismiss it.
 
@@ -237,7 +237,7 @@ class OversightService(OversightAccess):
         from django_ai_sdk.oversight.models import ReviewItem
 
         await cls.has_perms(user, REVIEW)
-        if answer.dismiss == (answer.agree is not None):
+        if verdict.dismiss == (verdict.agree is not None):
             raise UserError("Say whether the rule was right (agree), or dismiss the item.")
         scoped = await cls.scoped(user, REVIEW, ReviewItem.objects.select_related("turn"))
         pk = as_uuid(item_id)
@@ -248,11 +248,11 @@ class OversightService(OversightAccess):
         if me and item.turn.actor_id == me:
             raise PermissionDenied("Nobody reviews a turn of their own.")
         closed = {
-            "status": ReviewItem.Status.DISMISSED if answer.dismiss else ReviewItem.Status.DONE,
+            "status": ReviewItem.Status.DISMISSED if verdict.dismiss else ReviewItem.Status.DONE,
             "resolved_at": timezone.now(),
             "resolved_by_id": me,
-            "agree": answer.agree,
-            "note": answer.note,
+            "agree": verdict.agree,
+            "note": verdict.note,
         }
         claimed = await ReviewItem.objects.filter(
             pk=item.pk, status=ReviewItem.Status.OPEN

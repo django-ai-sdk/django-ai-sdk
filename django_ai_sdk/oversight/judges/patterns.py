@@ -65,7 +65,7 @@ class PatternJudge(Judge):
         self.verify = verify or {}
         self.miss_confidence = miss_confidence
 
-    def kinds(self) -> list[str]:
+    def labels(self) -> list[str]:
         """The labels this judge looks for, so a miss can name them."""
         return list(dict.fromkeys(label for label, _ in self.patterns if label))
 
@@ -83,16 +83,16 @@ class PatternJudge(Judge):
                 spans.append(TextSpan(start=start, end=end, label=label or default_label))
         return sorted(spans, key=lambda span: span.start)
 
-    async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
-        text = view.text(lens.subject)
+    async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
+        text = context.text(lens.subject)
         if not text:
             return None
         # In a thread, so a long text can't block the event loop.
         spans = await asyncio.to_thread(self.find, text, lens.name)
         labels = list(dict.fromkeys(span.label for span in spans))
         notes = [f"found {', '.join(k.replace('_', ' ') for k in labels)}"] if labels else []
-        if not labels and (kinds := self.kinds()):
-            notes.append(f"found none of: {', '.join(k.replace('_', ' ') for k in kinds)}")
+        if not labels and (sought := self.labels()):
+            notes.append(f"found none of: {', '.join(k.replace('_', ' ') for k in sought)}")
         return Answer(
             value=lens.answer.from_detections(lens, labels),
             confidence=1.0 if spans else self.miss_confidence,

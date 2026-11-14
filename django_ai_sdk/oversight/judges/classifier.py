@@ -215,16 +215,16 @@ class Classifier(Judge):
         described = {k: v for k, v in self.describe().items() if k != "name"}
         return f"{type(self).__qualname__}:{json.dumps(described, sort_keys=True, default=str)}"
 
-    async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
+    async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
         assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         if lens.answer.kind == "entities" and lens.per_source:
-            return await self.per_source(lens, view)
+            return await self.per_source(lens, context)
         question = self.question(lens)
         if question is None:
             return None
-        if self.too_long(lens, view):
+        if self.too_long(lens, context):
             return Answer(error=TOO_LONG)
-        answers = await self._classify_batched(self.state(lens, view), {lens.name: question})
+        answers = await self._classify_batched(self.state(lens, context), {lens.name: question})
         # Asked and not answered is a failure, as with the model judge, so fail-closed holds.
         return answers.get(lens.name) or Answer(error=NO_VERDICT)
 
@@ -252,7 +252,7 @@ class Classifier(Judge):
         return masked_clip(text, limit)
 
     def labelled_sources(
-        self, view: TurnContext, *, earlier: bool = False
+        self, context: TurnContext, *, earlier: bool = False
     ) -> list[tuple[str, Source]]:
         """The turn's sources labelled S1, S2, ..., masked and clipped.
 
@@ -261,7 +261,7 @@ class Classifier(Judge):
         """
         labelled: list[tuple[str, Source]] = []
         total = 0
-        for source in view.grounding(earlier=earlier):
+        for source in context.grounding(earlier=earlier):
             title = self.text(source.title, TITLE_CHARS)
             content = self.text(source.content, self.SOURCE_CHARS - len(title))
             if labelled and total + len(title) + len(content) > self.SOURCES_CHARS:
@@ -271,46 +271,46 @@ class Classifier(Judge):
             labelled.append((f"S{len(labelled) + 1}", kept))
         return labelled
 
-    def state(self, lens: JudgeLens, view: TurnContext) -> dict[str, Any]:
+    def state(self, lens: JudgeLens, context: TurnContext) -> dict[str, Any]:
         """Build the state for `lens` from only the parts its subject covers."""
         subject = lens.subject
         state: dict[str, Any] = {}
-        if view.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
+        if context.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
             state["history"] = [
                 {"role": h.role, "content": self.text(h.content, HISTORY_ITEM_CHARS)}
-                for h in view.history[-self.HISTORY :]
+                for h in context.history[-self.HISTORY :]
             ]
         # Judge an answer against the question, as the model judge does.
         if subject is not Subject.TOOL_CALL or lens.reads_question:
-            state["user_message"] = self.text(view.input, self.TEXT_CHARS)
+            state["user_message"] = self.text(context.input, self.TEXT_CHARS)
         if subject in {Subject.ANSWER, Subject.EXCHANGE}:
-            state["assistant_reply"] = self.text(view.output, self.TEXT_CHARS)
+            state["assistant_reply"] = self.text(context.output, self.TEXT_CHARS)
         # An answer also sees earlier turns' sources. A search sees only its own.
         # Unlike the model judge, an exchange gets none: a classifier scores what it is
         # sent, so sources would turn an exchange score into a groundedness one.
         if subject in {Subject.SOURCES, Subject.ANSWER} and (
-            labelled := self.labelled_sources(view, earlier=subject is Subject.ANSWER)
+            labelled := self.labelled_sources(context, earlier=subject is Subject.ANSWER)
         ):
             state["sources"] = [
                 {"id": label, "title": source.title, "content": source.content}
                 for label, source in labelled
             ]
-        if subject is Subject.TOOL_CALL and view.tool_call:
-            arguments = mask_json(view.tool_call.arguments, mask_secrets)
+        if subject is Subject.TOOL_CALL and context.tool_call:
+            arguments = mask_json(context.tool_call.arguments, mask_secrets)
             compact = json.dumps(arguments, ensure_ascii=False, default=str)
             state["tool_call"] = {
-                "name": self.text(view.tool_call.name, TITLE_CHARS),
+                "name": self.text(context.tool_call.name, TITLE_CHARS),
                 "arguments": arguments
                 if len(compact) <= self.TOOL_CALL_CHARS
                 else clip(compact, self.TOOL_CALL_CHARS),
             }
         return state
 
-    def too_long(self, lens: Lens, view: TurnContext) -> bool:
+    def too_long(self, lens: Lens, context: TurnContext) -> bool:
         """Whether the text `lens` judges would have to be clipped. If so, don't ask."""
         return too_long(
             lens,
-            view,
+            context,
             input_chars=self.TEXT_CHARS,
             output_chars=self.TEXT_CHARS,
             tool_chars=self.TOOL_CALL_CHARS,
@@ -328,7 +328,7 @@ class Classifier(Judge):
             )
         )
 
-    async def per_source(self, lens: JudgeLens, view: TurnContext) -> Answer | None:
+    async def per_source(self, lens: JudgeLens, context: TurnContext) -> Answer | None:
         """Find which sources the answer is taken from, with one yes/no per source.
 
         The value lists the titles that answered yes. Sources from earlier turns are
@@ -337,14 +337,14 @@ class Classifier(Judge):
         whether the reply states facts. If it does, it is taken from none. An empty
         reply is also taken from none.
         """
-        if not view.output.strip():
+        if not context.output.strip():
             return Answer(value=lens.answer.parse(lens, []), confidence=1.0, rationale="No answer.")
-        if self.too_long(lens, view):
+        if self.too_long(lens, context):
             return Answer(error=TOO_LONG)
-        labelled = self.labelled_sources(view, earlier=True)
+        labelled = self.labelled_sources(context, earlier=True)
         state = {
-            "user_message": self.text(view.input, self.TEXT_CHARS),
-            "assistant_reply": self.text(view.output, self.TEXT_CHARS),
+            "user_message": self.text(context.input, self.TEXT_CHARS),
+            "assistant_reply": self.text(context.output, self.TEXT_CHARS),
         }
         questions = {label: self.source_question(source) for label, source in labelled}
         questions = {label: q for label, q in questions.items() if q is not None}

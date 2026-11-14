@@ -57,8 +57,11 @@ async def declared_policy(
     return _policy_name_and_reason(chosen)
 
 
-def declared_policy_sync(agent: Any) -> tuple[str, str]:
-    """Like `declared_policy`, but reads only the `oversight` attribute. Used by checks."""
+def attribute_policy(agent: Any) -> tuple[str, str]:
+    """The policy name the agent's `oversight` attribute asks for, and the reason.
+
+    Never calls `get_oversight()`, so sync code (checks, authoring) can ask.
+    """
     return _policy_name_and_reason(getattr(agent, "oversight", None))
 
 

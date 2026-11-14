@@ -425,7 +425,7 @@ class EvenAmount(CheckLens):             # plain Python
 ```
 
 - A `PatternLens` answers `Entities`: which labels it found, with where (`spans`), so a `Mask` can mask them. `patterns` maps a label to regexes, `keywords` a label to whole words, `verify` a label to a check its matches must pass (a checksum). `L(name).is_true` means it found something. Built in: `PIILens` and `SecretsLens`.
-- A `CheckLens` answers with `check(text, view)`. By default that runs its `validators`, `fn(text)` or `fn(text, view)`, and answers a `Flag`: yes when one raises `Violation`, with its message as the reason. Override `check` to answer anything else, as `LengthLens`, `LanguageLens`, `EmptyRetrievalLens` and `ToolErrorsLens` do. `register_validator` names a validator, so a lens in JSON can use it.
+- A `CheckLens` answers with `check(text, context)`. By default that runs its `validators`, `fn(text)` or `fn(text, context)`, and answers a `Flag`: yes when one raises `Violation`, with its message as the reason. Override `check` to answer anything else, as `LengthLens`, `LanguageLens`, `EmptyRetrievalLens` and `ToolErrorsLens` do. `register_validator` names a validator, so a lens in JSON can use it.
 - A `JudgeLens` asks its `judges` ([below](#picking-the-judge)) and answers a `Flag` by default: set `answer` to `Choice`, `Score` or `Entities`. Only a judge lens has a `question`, `guidance` and `min_confidence`; each answer option belongs to the type that reads it: `yes` and `no` to `Flag`, `labels`, `default` and `criteria` to `Choice`, `low`, `middle` and `high` to `Score`, `labels` and `per_source` to `Entities`. A lens's `subject` (what it reads) defaults to the question and its `stages` to where that subject is first there to judge: the question at `gate`, a tool call at `tool`, the answer and the sources at `finish`. Reflect reads all but tool calls. A lens at a stage that never reads its subject is refused (`ai_sdk.oversight.E001`).
 
 ### Start small
@@ -535,7 +535,7 @@ It reads one text: lenses on the question or on the answer. A lens on sources or
 
 ### Your own judge
 
-A judge is a class with one method, `async answer(lens, view) -> Answer | None`. Return `None` to step aside: the lens asks its next judge. The SDK times the call (`timeout`), contains its errors, and checks the value against the lens's answer type. Two class attributes tell oversight what it is:
+A judge is a class with one method, `async answer(lens, context) -> Answer | None`. Return `None` to step aside: the lens asks its next judge. The SDK times the call (`timeout`), contains its errors, and checks the value against the lens's answer type. Two class attributes tell oversight what it is:
 
 | Attribute | Means |
 | --- | --- |

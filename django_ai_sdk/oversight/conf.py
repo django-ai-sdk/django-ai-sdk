@@ -44,23 +44,29 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
-def configured() -> Any:
-    """AI_SDK_OVERSIGHT as the project set it, {} when unset. It may not be a dict."""
-    return getattr(settings, "AI_SDK_OVERSIGHT", None) or {}
+def configured(name: str = "AI_SDK_OVERSIGHT") -> Any:
+    """The setting `name` as the project set it, {} when unset. It may not be a dict."""
+    return getattr(settings, name, None) or {}
 
 
-def setting(key: str) -> Any:
-    """AI_SDK_OVERSIGHT[key], or its default. A dict value merges one level deep into a dict default."""
-    user_settings = configured()
+def setting_from(name: str, defaults: dict[str, Any], key: str) -> Any:
+    """The setting `name`'s `key`, or its default in `defaults`.
+
+    A dict value merges one level deep into a dict default.
+    """
+    user_settings = configured(name)
     if not isinstance(user_settings, dict):
-        raise ImproperlyConfigured(
-            f"AI_SDK_OVERSIGHT must be a dict, not a {type(user_settings).__name__}."
-        )
-    default = DEFAULTS[key]
+        raise ImproperlyConfigured(f"{name} must be a dict, not a {type(user_settings).__name__}.")
+    default = defaults[key]
     value = user_settings.get(key, default)
     if isinstance(value, dict) and isinstance(default, dict):
         return {**default, **value}
     return value
+
+
+def setting(key: str) -> Any:
+    """AI_SDK_OVERSIGHT[key], or its default. A dict value merges one level deep into a dict default."""
+    return setting_from("AI_SDK_OVERSIGHT", DEFAULTS, key)
 
 
 def is_retention(value: Any) -> bool:

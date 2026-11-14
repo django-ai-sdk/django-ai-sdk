@@ -66,7 +66,11 @@ class TurnMasks:
         """
         guard = self.guard
         groups, unpointed = collect_masks(
-            matched, guard.answered, subject=subject, view=guard.context, closed=guard.fails_closed
+            matched,
+            guard.answered,
+            subject=subject,
+            context=guard.context,
+            closed=guard.fails_closed,
         )
         for match, mask in unpointed:
             match.acted = [Block(match.rule.message) if a is mask else a for a in match.acted]
@@ -86,9 +90,9 @@ class TurnMasks:
         judged = StageResult(stage, text=text)
         if not text:
             return judged
-        view = guard.context.model_copy(update={"input": text, "answers": {}})
+        context = guard.context.model_copy(update={"input": text, "answers": {}})
         judged.answered = await answer_lenses(
-            lenses, view, Stage.GATE, deadline_ms=deadline_ms(stage)
+            lenses, context, Stage.GATE, deadline_ms=deadline_ms(stage)
         )
         answers = {o.lens.name: o.answer for o in judged.answered}
         matched = match_rules(
@@ -100,7 +104,11 @@ class TurnMasks:
             fail_closed=guard.fails_closed,
         )
         groups, unpointed = collect_masks(
-            matched, judged.answered, subject=Subject.QUESTION, view=view, closed=guard.fails_closed
+            matched,
+            judged.answered,
+            subject=Subject.QUESTION,
+            context=context,
+            closed=guard.fails_closed,
         )
         for match in matched:
             acting: list[Action] = [
@@ -207,7 +215,7 @@ def collect_masks(
     answered: Iterable[Answered],
     *,
     subject: Subject,
-    view: TurnContext,
+    context: TurnContext,
     closed: bool,
 ) -> tuple[list[tuple[Matched, MaskGroup]], list[tuple[Matched, Mask]]]:
     """Collect the (spans, template) group each Mask action in `matched` masks in `subject`.
@@ -219,16 +227,16 @@ def collect_masks(
     """
     groups: list[tuple[Matched, MaskGroup]] = []
     unpointed: list[tuple[Matched, Mask]] = []
-    text = view.text(subject)
+    text = context.text(subject)
     for match in matched:
         acted: list[Action] = []
         for action in match.acted:
             if isinstance(action, Mask):
                 names = set(action.lenses) or match.rule.lenses()
-                if _unpointed(answered, names, closed=closed, subject=subject, view=view):
+                if _unpointed(answered, names, closed=closed, subject=subject, context=context):
                     unpointed.append((match, action))
                 else:
-                    group = (spans_for(answered, names, subject, view.input), action.template)
+                    group = (spans_for(answered, names, subject, context.input), action.template)
                     if not group[0] or mask_all(text, [group]) == text:
                         continue
                     groups.append((match, group))
@@ -252,7 +260,7 @@ def _unpointed(
     *,
     closed: bool,
     subject: Subject,
-    view: TurnContext,
+    context: TurnContext,
 ) -> bool:
     """True when a mask over lenses `names` cannot locate everything to hide in `subject`.
 
@@ -266,7 +274,7 @@ def _unpointed(
         if closed and item.errored:
             return True
         if item.answer.ok and item.answer.value:
-            size = len(view.text(item.lens.subject))
+            size = len(context.text(item.lens.subject))
             spans = item.answer.spans
             if not spans or not all(0 <= s.start < s.end <= size for s in spans):
                 return True

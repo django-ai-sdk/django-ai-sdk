@@ -78,11 +78,11 @@ def capture_content(
     `keep` is `capture_masker(capture, ...)`. It runs over every kept string,
     including the history, sources and tool calls.
     """
-    view = guard.context
+    context = guard.context
     if capture is Capture.NONE:
         return None
     base: dict[str, Any] = {
-        "agent": {"id": view.agent_id, "name": view.agent_name},
+        "agent": {"id": context.agent_id, "name": context.agent_name},
         # Lens spans point into the original text, which only FULL keeps.
         "capture": str(capture),
     }
@@ -90,25 +90,25 @@ def capture_content(
         # No text at all. Even a title or URL can reveal who the turn was about.
         return {
             **base,
-            "input_chars": len(guard.original_input or view.input),
-            "output_chars": len(guard.original_output or view.output),
-            "sources": [{"kind": s.kind, "seeded": s.seeded} for s in view.sources],
-            "tool_calls": [{"name": c.name, "error": c.error} for c in view.tool_calls],
+            "input_chars": len(guard.original_input or context.input),
+            "output_chars": len(guard.original_output or context.output),
+            "sources": [{"kind": s.kind, "seeded": s.seeded} for s in context.sources],
+            "tool_calls": [{"name": c.name, "error": c.error} for c in context.tool_calls],
         }
     assert keep is not None
     full = capture is Capture.FULL
     return {
         **base,
-        "input": guard.original_input if full else keep.text(view.input),
-        "output": (guard.original_output or view.output) if full else keep.text(view.output),
+        "input": guard.original_input if full else keep.text(context.input),
+        "output": (guard.original_output or context.output) if full else keep.text(context.output),
         # What was shown or stored, when it differs from the original.
-        "shown_input": view.input if full and view.input != guard.original_input else None,
-        "shown_output": view.output
-        if full and guard.original_output and view.output != guard.original_output
+        "shown_input": context.input if full and context.input != guard.original_input else None,
+        "shown_output": context.output
+        if full and guard.original_output and context.output != guard.original_output
         else None,
-        "history": keep([h.model_dump() for h in view.history]),
-        "sources": keep([s.model_dump() for s in view.sources]),
-        "tool_calls": keep([c.model_dump(mode="json") for c in view.tool_calls]),
+        "history": keep([h.model_dump() for h in context.history]),
+        "sources": keep([s.model_dump() for s in context.sources]),
+        "tool_calls": keep([c.model_dump(mode="json") for c in context.tool_calls]),
     }
 
 
@@ -169,14 +169,14 @@ def capture_masker(capture: Capture | str, found: Mapping[str, str] | None = Non
 
 def turn_literals(guard: TurnGuard) -> dict[str, str]:
     """Map each text this turn's entity lenses found to its label (see `found_literals`)."""
-    view = guard.context
-    said_output = guard.original_output or view.output
+    context = guard.context
+    said_output = guard.original_output or context.output
     texts = {
         # Gate lenses read the question before the gate masked it.
-        Subject.QUESTION: guard.original_input or view.input,
+        Subject.QUESTION: guard.original_input or context.input,
         Subject.ANSWER: said_output,
-        Subject.EXCHANGE: f"{view.input}\n\n{said_output}",
-        Subject.SOURCES: "\n\n".join(s.content for s in view.fresh_sources()),
+        Subject.EXCHANGE: f"{context.input}\n\n{said_output}",
+        Subject.SOURCES: "\n\n".join(s.content for s in context.fresh_sources()),
     }
     return found_literals(guard.answered, texts)
 

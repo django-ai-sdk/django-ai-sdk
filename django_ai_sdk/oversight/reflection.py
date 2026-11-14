@@ -109,13 +109,13 @@ async def run_reflection(turn_id: str) -> int:
             # The policy did not load. Give the claim back so a later run can try.
             await release_reflect_claim(turn_id, lease)
             return 0
-        policy, view, answered, matched, found, masks = judged
+        policy, context, answered, matched, found, masks = judged
         if turn.reflect_attempts < REFLECT_ATTEMPTS and any(item.needs_retry for item in answered):
             # A judge was down or out of time: ask again later rather than settle without it.
             await release_reflect_claim(turn_id, lease)
             return 0
         kept = await sync_to_async(commit_reflection)(
-            turn, policy, view, answered, matched, found, masks, lease=lease
+            turn, policy, context, answered, matched, found, masks, lease=lease
         )
     except BaseException:
         # Nothing was written. Give the claim back so a retry can reflect.
@@ -178,7 +178,7 @@ async def release_reflect_claim(turn_id: str, lease: Any) -> None:
 def commit_reflection(
     turn: Turn,
     policy: ResolvedPolicy,
-    view: TurnContext,
+    context: TurnContext,
     answered: list[Answered],
     matched: list[Matched],
     found: dict[str, str],
@@ -202,8 +202,8 @@ def commit_reflection(
         if not held:
             logger.warning("Reflect lost its lease on turn {}; another run reflects it", turn.id)
             return False
-        record_answers(turn, policy, answered, matched, view=view, found=found)
-        events = apply_reflect_actions(turn, view, matched, masks)
+        record_answers(turn, policy, answered, matched, context=context, found=found)
+        events = apply_reflect_actions(turn, context, matched, masks)
         Turn.objects.filter(pk=turn.pk).update(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
@@ -250,22 +250,22 @@ async def judge_stored_turn(
     if policy is None:
         return None
     content = await sync_to_async(load_content)(turn)
-    view = context_from_turn(turn, content)
+    context = context_from_turn(turn, content)
     found: dict[str, str] = {}
     if content is not None and turn.content is not None and turn.content.capture == "masked":
         # The record keeps a masked copy, but the thread keeps the text as shown.
         # Judge the thread's text so mask spans point into the stored answer.
         # What reflect finds there is masked before it is kept, and so is what
         # the turn masked at close, which a judge's reason may quote.
-        masked = (view.input, view.output)
-        view.input = await _stored_text(turn.user_message_id) or view.input
-        view.output = await _stored_text(turn.message_id) or view.output
+        masked = (context.input, context.output)
+        context.input = await _stored_text(turn.user_message_id) or context.input
+        context.output = await _stored_text(turn.message_id) or context.output
         found = {
-            **unmasked_literals(masked[0], view.input),
-            **unmasked_literals(masked[1], view.output),
+            **unmasked_literals(masked[0], context.input),
+            **unmasked_literals(masked[1], context.output),
         }
     existing = [row async for row in LensAnswer.objects.filter(turn=turn)]
-    view.answers = answers_from(existing)
+    context.answers = answers_from(existing)
     has_text = content is not None and "input" in content and "output" in content
     if not has_text:
         logger.info("Turn {} kept no text; reflect judges only what it kept", turn.id)
@@ -280,19 +280,19 @@ async def judge_stored_turn(
     }
     answered, matched, masks = await judge_reflect_stage(
         policy,
-        view,
+        context,
         retry,
         done,
         outcome=turn.outcome,
         content=content,
         has_text=has_text,
     )
-    return policy, view, answered, matched, found, masks
+    return policy, context, answered, matched, found, masks
 
 
 async def judge_reflect_stage(
     policy: ResolvedPolicy,
-    view: TurnContext,
+    context: TurnContext,
     retry: Iterable[str],
     done: set[str],
     *,
@@ -301,34 +301,34 @@ async def judge_reflect_stage(
     has_text: bool = True,
     sample: bool = True,
 ) -> tuple[list[Answered], list[Matched], list[MaskGroup]]:
-    """Ask reflect's lenses on `view` and match its rules. The dry run calls this too.
+    """Ask reflect's lenses on `context` and match its rules. The dry run calls this too.
 
     Also returns the masks for the stored answer (see `_reflect_masks`). `retry` names the inline lenses to ask again, `done` the rules that already
     matched. `outcome` is the turn's outcome so far. `sample=False` asks every
     reflect lens, ignoring sample rates.
     """
     # When the gate blocked the question there is no answer to judge.
-    has_answer = bool(view.output.strip()) or outcome != Outcome.BLOCKED
+    has_answer = bool(context.output.strip()) or outcome != Outcome.BLOCKED
     lenses, late = reflect_lenses(
         policy, retry, answered=has_answer, content=content, has_text=has_text
     )
     with unguarded():
-        answered = await answer_lenses(lenses, view, Stage.REFLECT, sample=sample)
+        answered = await answer_lenses(lenses, context, Stage.REFLECT, sample=sample)
         # No sampling, since these were due inline on every turn.
-        answered += await answer_lenses(late, view, Stage.REFLECT, sample=False)
+        answered += await answer_lenses(late, context, Stage.REFLECT, sample=False)
     for item in answered:
-        view.answers[item.lens.name] = item.answer
+        context.answers[item.lens.name] = item.answer
     # Rules treat a failed answer as unknown, not as "no".
-    failed = {name for name, answer in view.answers.items() if answer.error}
+    failed = {name for name, answer in context.answers.items() if answer.error}
     matched = match_rules(
         policy,
-        view.answers,
+        context.answers,
         Stage.REFLECT,
         done=done,
         errored=failed,
         fail_closed=policy.fails_closed,
     )
-    masks = _reflect_masks(view, answered, matched, closed=policy.fails_closed)
+    masks = _reflect_masks(context, answered, matched, closed=policy.fails_closed)
     return answered, matched, masks
 
 
@@ -361,7 +361,7 @@ def reflect_lenses(
 
 
 def _reflect_masks(
-    view: TurnContext, answered: list[Answered], matched: list[Matched], *, closed: bool
+    context: TurnContext, answered: list[Answered], matched: list[Matched], *, closed: bool
 ) -> list[MaskGroup]:
     """Return (match, group) for each mask in the stored answer. Drop masks that change nothing.
 
@@ -370,11 +370,11 @@ def _reflect_masks(
     does one whose lens failed, when the policy fails closed.
     """
     groups, unpointed = collect_masks(
-        matched, answered, subject=Subject.ANSWER, view=view, closed=closed
+        matched, answered, subject=Subject.ANSWER, context=context, closed=closed
     )
-    whole = [TextSpan(start=0, end=len(view.output), label="withheld")]
+    whole = [TextSpan(start=0, end=len(context.output), label="withheld")]
     for match, mask in unpointed:
-        if view.output:
+        if context.output:
             groups.append((match, (whole, mask.template)))
         else:
             match.acted.remove(mask)
@@ -419,7 +419,7 @@ def _judgeable(
 
 
 def apply_reflect_actions(
-    turn: Turn, view: TurnContext, matched: list[Matched], groups: list[MaskGroup]
+    turn: Turn, context: TurnContext, matched: list[Matched], groups: list[MaskGroup]
 ) -> list[tuple[dict[str, Any], list[str]]]:
     """Apply what reflect's rules can still do: mask the stored answer and notify the user.
 
@@ -433,7 +433,7 @@ def apply_reflect_actions(
     )
     notes = rule_notes(matched, set())
     if (masks or notes) and turn.message_id:
-        _update_stored_message(turn, view.output, masks, rules, notes)
+        _update_stored_message(turn, context.output, masks, rules, notes)
     return events
 
 

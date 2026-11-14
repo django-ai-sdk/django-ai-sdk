@@ -90,9 +90,11 @@ class Judge(ABC):
             self.timeout = timeout
 
     @abstractmethod
-    async def answer(self, lens: Lens, view: TurnContext) -> Answer | None: ...
+    async def answer(self, lens: Lens, context: TurnContext) -> Answer | None: ...
 
-    def label(self) -> str:
+    @property
+    def display_name(self) -> str:
+        """The name its answers are recorded under: `name`, or the class name."""
         return self.name or type(self).__name__.lower()
 
     def missing(self) -> str:
@@ -100,14 +102,14 @@ class Judge(ABC):
         return ""
 
     def describe(self) -> dict[str, Any]:
-        return {"name": self.label(), "external": self.external, "class": type(self).__name__}
+        return {"name": self.display_name, "external": self.external, "class": type(self).__name__}
 
     def __repr__(self) -> str:
-        return f"<{type(self).__name__} {self.label()!r}>"
+        return f"<{type(self).__name__} {self.display_name!r}>"
 
 
 async def ask_judge(
-    judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext
+    judge: Judge | str | dict[str, Any], lens: Lens, context: TurnContext
 ) -> Answer | None:
     """Ask one judge with a timeout. Any failure comes back as an Answer with `error`.
 
@@ -129,36 +131,38 @@ async def ask_judge(
 
     def failed(error: str) -> Answer:
         return Answer(
-            answerer=judge.label(),
+            answerer=judge.display_name,
             error=error,
             latency_ms=round((time.perf_counter() - started) * 1000, 2),
         )
 
     try:
-        answer = await asyncio.wait_for(judge.answer(lens, view), timeout=judge.timeout)
+        answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
     except TimeoutError:
         return failed("timeout")
     except asyncio.CancelledError:
         task = asyncio.current_task()
         if task is not None and task.cancelling():
             raise
-        logger.warning("Judge {} cancelled itself on lens {}", judge.label(), lens.name)
+        logger.warning("Judge {} cancelled itself on lens {}", judge.display_name, lens.name)
         return failed("CancelledError")
     except Exception as exc:
         if judge.external:
             # Log only the type. The message may quote the request or the reply.
             logger.warning(
-                "Judge {} failed on lens {}: {}", judge.label(), lens.name, type(exc).__name__
+                "Judge {} failed on lens {}: {}", judge.display_name, lens.name, type(exc).__name__
             )
             return failed(unavailable(exc))
-        logger.opt(exception=exc).warning("Judge {} failed on lens {}", judge.label(), lens.name)
+        logger.opt(exception=exc).warning(
+            "Judge {} failed on lens {}", judge.display_name, lens.name
+        )
         return failed(type(exc).__name__)
     if answer is None:
         return None
     if not isinstance(answer, Answer):
         logger.warning(
             "Judge {} answered lens {} with a {}, not an Answer",
-            judge.label(),
+            judge.display_name,
             lens.name,
             type(answer).__name__,
         )
@@ -173,7 +177,7 @@ async def ask_judge(
             )
     elif answer.value is None and not answer.error:
         answer = answer.model_copy(update={"error": NO_VERDICT})
-    answer.answerer = answer.answerer or judge.label()
+    answer.answerer = answer.answerer or judge.display_name
     if answer.latency_ms is None:
         answer.latency_ms = round((time.perf_counter() - started) * 1000, 2)
     return answer
@@ -206,7 +210,7 @@ def judge_from_json(spec: Any) -> Any:
 def judge_label(spec: Any) -> str:
     """A name for a judge spec, for logs and checks, without building it."""
     if isinstance(spec, Judge):
-        return spec.label()
+        return spec.display_name
     if isinstance(spec, dict):
         return str(spec.get("name") or spec.get("class") or "judge")
     return str(spec)
@@ -231,7 +235,7 @@ def masked_clip(text: str, limit: int) -> str:
 
 
 def too_long(
-    lens: Lens, view: TurnContext, *, input_chars: int, output_chars: int, tool_chars: int
+    lens: Lens, context: TurnContext, *, input_chars: int, output_chars: int, tool_chars: int
 ) -> bool:
     """Whether the text `lens` judges would have to be clipped. If so, nothing is judged.
 
@@ -240,12 +244,12 @@ def too_long(
     """
     judged: list[tuple[str, int]] = []
     if lens.subject in {Subject.QUESTION, Subject.EXCHANGE}:
-        judged.append((view.input, input_chars))
+        judged.append((context.input, input_chars))
     per_source = lens.answer.kind == "entities" and lens.per_source
     if lens.subject in {Subject.ANSWER, Subject.EXCHANGE} or per_source:
-        judged.append((view.output, output_chars))
-    if lens.subject is Subject.TOOL_CALL and view.tool_call:
-        arguments = json.dumps(view.tool_call.arguments, ensure_ascii=False, default=str)
+        judged.append((context.output, output_chars))
+    if lens.subject is Subject.TOOL_CALL and context.tool_call:
+        arguments = json.dumps(context.tool_call.arguments, ensure_ascii=False, default=str)
         judged.append((arguments, tool_chars))
     return any(len(text) > limit and len(mask_secrets(text)) > limit for text, limit in judged)
 

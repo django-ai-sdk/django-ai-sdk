@@ -71,7 +71,7 @@ TAGS = ("turn", "history", "question", "sources", "source", "answer", "tool_call
 _TAG = re.compile(r"<(\s*/?\s*(?:" + "|".join(TAGS) + r")\b)", re.IGNORECASE)
 
 
-def render_turn(lens: JudgeLens, view: TurnContext) -> str:
+def render_turn(lens: JudgeLens, context: TurnContext) -> str:
     """Render the evidence a judge reads for `lens`, with secrets masked, clipped and fenced.
 
     All text from a person, a model or a tool is fenced, so it stays inside its
@@ -79,15 +79,15 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
     """
     parts: list[str] = []
     subject = lens.subject
-    if view.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
-        recent = view.history[-HISTORY_MESSAGES:]
+    if context.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
+        recent = context.history[-HISTORY_MESSAGES:]
         lines = "\n".join(f"{h.role}: {_evidence(h.content, HISTORY_ITEM_CHARS)}" for h in recent)
         parts.append(f"<history>\n{lines}\n</history>")
     if subject in {Subject.QUESTION, Subject.EXCHANGE, Subject.SOURCES, Subject.ANSWER}:
-        parts.append(f"<question>\n{_evidence(view.input, INPUT_CHARS)}\n</question>")
+        parts.append(f"<question>\n{_evidence(context.input, INPUT_CHARS)}\n</question>")
     # An answer also sees earlier turns' sources. A search sees only its own.
     if subject in {Subject.SOURCES, Subject.ANSWER, Subject.EXCHANGE} and (
-        evidence := view.grounding(earlier=subject is not Subject.SOURCES)
+        evidence := context.grounding(earlier=subject is not Subject.SOURCES)
     ):
         rendered = "\n".join(
             f'<source n="{n}" title="{escape_attribute(s.title)}">\n{_evidence(s.content, SOURCE_CHARS)}'
@@ -96,12 +96,12 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
         )
         parts.append(f"<sources>\n{rendered}\n</sources>")
     if subject in {Subject.ANSWER, Subject.EXCHANGE}:
-        parts.append(f"<answer>\n{_evidence(view.output, OUTPUT_CHARS)}\n</answer>")
-    if subject is Subject.TOOL_CALL and view.tool_call:
-        call = view.tool_call
+        parts.append(f"<answer>\n{_evidence(context.output, OUTPUT_CHARS)}\n</answer>")
+    if subject is Subject.TOOL_CALL and context.tool_call:
+        call = context.tool_call
         arguments = json.dumps(call.arguments, ensure_ascii=False, default=str)
         if lens.reads_question:
-            parts.append(f"<question>\n{_evidence(view.input, INPUT_CHARS)}\n</question>")
+            parts.append(f"<question>\n{_evidence(context.input, INPUT_CHARS)}\n</question>")
         parts.append(
             f'<tool_call name="{escape_attribute(call.name)}">\n'
             f"{_evidence(arguments, TOOL_ARGUMENTS_CHARS)}\n</tool_call>"
@@ -208,7 +208,7 @@ class LLMJudge(Judge):
             factory = openai_responses_chat
         return factory(**kwargs)
 
-    async def answer(self, lens: Lens, view: TurnContext) -> Answer | None:
+    async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
         from haystack.dataclasses import ChatMessage as HaystackChatMessage
 
         from django_ai_sdk.generators.schema import schema_kwargs
@@ -216,7 +216,7 @@ class LLMJudge(Judge):
         assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         if too_long(
             lens,
-            view,
+            context,
             input_chars=INPUT_CHARS,
             output_chars=OUTPUT_CHARS,
             tool_chars=TOOL_ARGUMENTS_CHARS,
@@ -230,7 +230,7 @@ class LLMJudge(Judge):
         except ValueError:
             kwargs = dict(self.generation_kwargs)
             structured = False
-        prompt = f"{render_turn(lens, view)}\n\nQuestion: {lens.answer.value_description(lens)}"
+        prompt = f"{render_turn(lens, context)}\n\nQuestion: {lens.answer.value_description(lens)}"
         if lens.guidance:
             prompt += f"\n\nHow to judge:\n{lens.guidance}"
         if not structured:

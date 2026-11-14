@@ -17,8 +17,8 @@ from django.db import IntegrityError, transaction
 
 from django_ai_sdk.agents.registry import registry
 from django_ai_sdk.errors import UserError
-from django_ai_sdk.oversight.agents import declared_policy_sync
-from django_ai_sdk.oversight.authoring.apps import setting
+from django_ai_sdk.oversight.agents import attribute_policy
+from django_ai_sdk.oversight.authoring.apps import authoring_setting
 from django_ai_sdk.oversight.authoring.definitions import (
     INLINE_ARGS,
     DefinitionError,
@@ -77,7 +77,7 @@ class AuthoringService(OversightAccess):
                 {"name": name, "label": policy.label or name, "origin": policy.origin}
                 for name, policy in sorted(get_policies().items())
             ],
-            must_extend=list(setting("MUST_EXTEND")),
+            must_extend=list(authoring_setting("MUST_EXTEND")),
         )
 
     @classmethod
@@ -267,7 +267,7 @@ def _dependents(name: str) -> list[str]:
     named = []
     for agent_id, agent in sorted(registry.all().items()):
         try:
-            if declared_policy_sync(agent)[0] == name:
+            if attribute_policy(agent)[0] == name:
                 named.append(agent_id)
         except Exception:
             continue  # An agent whose policy cannot be read here names none.
