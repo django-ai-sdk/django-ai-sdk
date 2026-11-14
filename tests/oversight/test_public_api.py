@@ -15,9 +15,7 @@ def test_judges_are_exported_from_the_package_and_load_on_first_use():
     assert {"TypeSafe", "LocalClassifier", "Judge", "Classifier", "certainty"} <= set(
         oversight.__all__
     )
-    assert {"ask_judge", "build_judge", "judge_label", "load_local_classifier"} <= set(
-        oversight.__all__
-    )
+    assert {"ask_judge", "build_judge", "load_local_classifier"} <= set(oversight.__all__)
     # Each judge loads on first use, so declaring a lens never imports a model client.
     assert "TypeSafe" not in vars(oversight)
     assert oversight.TypeSafe.__name__ == "TypeSafe"
@@ -46,3 +44,19 @@ def test_the_settings_table_is_the_defaults():
     assert {key: default for key, default in rows} == {
         key: shown(value) for key, value in DEFAULTS.items()
     }
+
+
+def test_adapter_plumbing_stays_in_its_modules():
+    from django_ai_sdk.oversight import guard, history, stream
+    from django_ai_sdk.oversight.judges import base
+
+    plumbing = {
+        guard: ["guarding", "closing_turn", "outlived_turn"],
+        stream: ["StreamTurn", "CONTENT_FILTER"],
+        history: ["history_for"],
+        base: ["judge_label"],
+    }
+    for module, names in plumbing.items():
+        for name in names:
+            assert hasattr(module, name)
+            assert name not in oversight.__all__

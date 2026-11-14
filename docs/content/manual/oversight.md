@@ -17,17 +17,17 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 | Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
 | Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
-| Judges | `Judge`, `Classifier`, `certainty`, `Patterns`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec), `judge_label` (a spec's name) |
+| Judges | `Judge`, `Classifier`, `certainty`, `Patterns`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
 | Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
 | Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
 | Hooks | `OversightHook`, `GateQuestionHook`, `EnforceTurnLimitsHook`, `JudgeToolCallsHook`, `MaskToolResultsHook`, `RecordUsageHook`, `JudgeAnswerHook` |
-| The guard | `TurnGuard`, `StageResult`, `current_guard`, `guarding`, `unguarded`, `closing_turn` (closes a guard when its block ends), `outlived_turn` (code that runs after its turn closed) |
-| Streams | `StreamTurn`, `CONTENT_FILTER` |
-| History | `history_for` |
+| The guard | `TurnGuard`, `StageResult`, `current_guard`, `unguarded` |
 | Testing | `dry_run`, `DryRunResult` |
 | Notifiers | `Notifier`, `LogNotifier`, `WebhookNotifier`, `send_to_notifiers` (sends an event to every notifier, or the named ones) |
 | Forgetting and retention | `forget_turns`, `forget_thread`, `forget_actor`, `prune` |
+
+Code that runs a turn by hand, such as an adapter, imports its plumbing from the module that defines it: `django_ai_sdk.oversight.guard` (`guarding`, `closing_turn`, which closes a guard when its block ends, and `outlived_turn`, for code that runs after its turn closed), `django_ai_sdk.oversight.stream` (`StreamTurn`, `CONTENT_FILTER`), `django_ai_sdk.oversight.history` (`history_for`) and `django_ai_sdk.oversight.judges.base` (`judge_label`, a spec's name).
 
 ## Installing
 
@@ -244,7 +244,7 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `StageResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it blocks) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `JudgeToolCallsHook` (before each tool call) and `MaskToolResultsHook` (after) are part of the oversight plugin, with `GateQuestionHook`, `EnforceTurnLimitsHook`, `RecordUsageHook` and `JudgeAnswerHook`, all subclasses of `OversightHook`. `run_with_oversight` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `oversight.guard.guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `JudgeToolCallsHook` (before each tool call) and `MaskToolResultsHook` (after) are part of the oversight plugin, with `GateQuestionHook`, `EnforceTurnLimitsHook`, `RecordUsageHook` and `JudgeAnswerHook`, all subclasses of `OversightHook`. `run_with_oversight` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
 
 A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
@@ -261,7 +261,7 @@ A headless `agent.run(...)` reports its tool calls, their results and its usage 
 | `notes` | Enforced rules with a `notice` that acted, once a turn each: `kind` (the first of their actions by `rules.ACTION_ORDER` in `rules.USER_FACING`: `block`, `restrict_tools` or `mask`; else `"notice"`, when it only queued, alerted or notified), `also` (the other user-facing ones), `text`, `stage`. |
 | `rules`, `detail` | Only with `CLIENT_DETAIL` `full`: rule names and every stage's answers. Each answer's `value` is the record's ([`LensAnswer`](#models)), so the client never reads what a mask took out. |
 
-A blocked question or withheld answer ends with finish reason `content-filter` (`CONTENT_FILTER`); `OpenAIProtocolHandler` sends `content_filter` and no `data-*` parts. The notices are stored on the message under `metadata["oversight"]`, with `replace` reduced to `"replaced": true`.
+A blocked question or withheld answer ends with finish reason `content-filter` (`oversight.stream.CONTENT_FILTER`); `OpenAIProtocolHandler` sends `content_filter` and no `data-*` parts. The notices are stored on the message under `metadata["oversight"]`, with `replace` reduced to `"replaced": true`.
 
 ## Models
 

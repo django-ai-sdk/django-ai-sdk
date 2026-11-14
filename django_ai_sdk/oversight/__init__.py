@@ -16,13 +16,17 @@ Add "django_ai_sdk.oversight" to INSTALLED_APPS and give an agent a policy::
 Every turn the agent runs through the SDK is then judged by the policy's lenses,
 acted on by its rules, and recorded. See docs/content/oversight.md.
 
-Everything an app uses imports from here; the submodules are internal. The
+Everything an app uses imports from here; the submodules are internal. Code
+that runs a turn by hand (an adapter) imports its plumbing from the submodule
+that defines it. The
 declaration API loads with the package, so importing it needs no app registry.
 The rest (judges, packs, the run plugin, the guard, the stream, the dry run,
 notifiers and retention) loads on first use. The review API (`services`,
 `schemas`, `permissions`) and the authoring app are opt-in layers with their own
 modules.
 """
+
+# ruff: noqa: F401  (re-exports: ruff cannot read the derived __all__ below)
 
 from __future__ import annotations
 
@@ -73,17 +77,9 @@ from django_ai_sdk.oversight.types import (
 
 if typing.TYPE_CHECKING:
     from django_ai_sdk.oversight.content import forget_actor, forget_thread, forget_turns
-    from django_ai_sdk.oversight.guard import (
-        TurnGuard,
-        closing_turn,
-        current_guard,
-        guarding,
-        outlived_turn,
-        unguarded,
-    )
+    from django_ai_sdk.oversight.guard import TurnGuard, current_guard, unguarded
     from django_ai_sdk.oversight.guard.stages import StageResult
-    from django_ai_sdk.oversight.history import history_for
-    from django_ai_sdk.oversight.judges.base import Judge, ask_judge, build_judge, judge_label
+    from django_ai_sdk.oversight.judges.base import Judge, ask_judge, build_judge
     from django_ai_sdk.oversight.judges.classifier import Classifier, certainty
     from django_ai_sdk.oversight.judges.local import LocalClassifier, load_local_classifier
     from django_ai_sdk.oversight.judges.typesafe import TypeSafe
@@ -138,20 +134,15 @@ if typing.TYPE_CHECKING:
         RecordUsageHook,
     )
     from django_ai_sdk.oversight.retention import prune
-    from django_ai_sdk.oversight.stream import CONTENT_FILTER, StreamTurn
     from django_ai_sdk.oversight.trial import DryRunResult, dry_run
 
 # Each name loaded on first use, by the module that defines it. Loading them with the
 # package would import model clients, Haystack and the app's models with a policy file.
 _LAZY = {
     **dict.fromkeys(["forget_actor", "forget_thread", "forget_turns"], "content"),
-    **dict.fromkeys(
-        ["TurnGuard", "closing_turn", "current_guard", "guarding", "outlived_turn", "unguarded"],
-        "guard",
-    ),
+    **dict.fromkeys(["TurnGuard", "current_guard", "unguarded"], "guard"),
     "StageResult": "guard.stages",
-    "history_for": "history",
-    **dict.fromkeys(["Judge", "ask_judge", "build_judge", "judge_label"], "judges.base"),
+    **dict.fromkeys(["Judge", "ask_judge", "build_judge"], "judges.base"),
     **dict.fromkeys(["Classifier", "certainty"], "judges.classifier"),
     **dict.fromkeys(["LocalClassifier", "load_local_classifier"], "judges.local"),
     "TypeSafe": "judges.typesafe",
@@ -218,7 +209,6 @@ _LAZY = {
         "plugin.hooks",
     ),
     "prune": "retention",
-    **dict.fromkeys(["CONTENT_FILTER", "StreamTurn"], "stream"),
     **dict.fromkeys(["DryRunResult", "dry_run"], "trial"),
 }
 
@@ -233,115 +223,12 @@ def __dir__() -> list[str]:
     return sorted({*globals(), *_LAZY})
 
 
-__all__ = [
-    "CONTENT_FILTER",
-    "EmptyRetrievalLens",
-    "LanguageLens",
-    "LengthLens",
-    "PII_PATTERNS",
-    "RefusalLens",
-    "SECRET_PATTERNS",
-    "ToolErrorsLens",
-    "DEFAULT_PII_KINDS",
-    "EXFILTRATION_PATTERNS",
-    "INJECTION_PATTERNS",
-    "LLMJudge",
-    "PIILens",
-    "Alert",
-    "Answer",
-    "AnswerRelevance",
-    "Block",
-    "Capture",
-    "CheckLens",
-    "Choice",
-    "Classifier",
-    "ContextRelevance",
-    "DefaultPolicy",
-    "DryRunResult",
-    "EnforceTurnLimitsHook",
-    "Entities",
-    "Exfiltration",
-    "Flag",
-    "GateQuestionHook",
-    "Groundedness",
-    "HarmInput",
-    "HarmOutput",
-    "Helpfulness",
-    "Judge",
-    "JudgeAnswerHook",
-    "JudgeLens",
-    "JudgeToolCallsHook",
-    "L",
-    "Lens",
-    "LocalClassifier",
-    "LogNotifier",
-    "Mask",
-    "MaskToolResultsHook",
-    "Mode",
-    "Notifier",
-    "Notify",
-    "Outcome",
-    "OversightHook",
-    "PatternLens",
-    "Patterns",
-    "Policy",
-    "PromptInjection",
-    "QualityPack",
-    "Queue",
-    "RecordUsageHook",
-    "ResolvedPolicy",
-    "RestrictTools",
-    "Rule",
-    "SafetyPack",
-    "Score",
-    "SecretsLens",
-    "SecurityPack",
-    "SelfHarm",
-    "Severity",
-    "Stage",
-    "StageResult",
-    "StreamTurn",
-    "Subject",
-    "TakenFrom",
-    "TextSpan",
-    "TurnContext",
-    "TurnGuard",
-    "TurnRequest",
-    "TypeSafe",
-    "Violation",
-    "WebhookNotifier",
-    "add_policy_loader",
-    "apply_oversight",
-    "ask_judge",
-    "build_judge",
-    "build_oversight_hooks",
-    "build_policy",
-    "certainty",
-    "closing_turn",
-    "current_guard",
-    "dry_run",
-    "forget_actor",
-    "forget_thread",
-    "forget_turns",
-    "guarding",
-    "history_for",
-    "invalidate_policy",
-    "judge_label",
-    "load_local_classifier",
-    "mask",
-    "mask_all",
-    "mask_secrets",
-    "merge_oversight_hooks",
-    "needs_own_turn",
-    "needs_own_turn_sync",
-    "outlived_turn",
-    "pick",
-    "prune",
-    "register_policy",
-    "register_validator",
-    "run_with_oversight",
-    "run_with_oversight_sync",
-    "send_to_notifiers",
-    "unguarded",
-    "unregister_policy",
-]
+# Every name bound from a submodule above, and every name loaded on first use.
+__all__ = sorted(
+    {
+        name
+        for name, value in globals().items()
+        if getattr(value, "__module__", "").startswith(f"{__name__}.")
+    }
+    | _LAZY.keys()
+)
