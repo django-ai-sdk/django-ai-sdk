@@ -34,13 +34,14 @@ from django_ai_sdk.oversight.conf import is_enabled
 from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
 from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT, merge_restrict
 from django_ai_sdk.oversight.plugin.hooks import (
-    EnforceTurnLimitsHook,
     GateQuestionHook,
     JudgeAnswerHook,
-    JudgeToolCallsHook,
-    MaskToolResultsHook,
+    JudgeToolCallHook,
+    LimitToolChoiceHook,
+    MaskToolResultHook,
     OversightHook,
     RecordUsageHook,
+    StopClosedTurnHook,
 )
 from django_ai_sdk.oversight.plugin.request import TurnRequest
 from django_ai_sdk.oversight.registry import policy_name
@@ -142,9 +143,9 @@ def build_oversight_hooks() -> dict[str, list[Any]]:
     """The oversight hooks, at the points they run. The run's TurnRequest names the agent."""
     return {
         "before_run": [GateQuestionHook()],
-        "before_llm": [EnforceTurnLimitsHook()],
-        "before_tool": [JudgeToolCallsHook()],
-        "after_tool": [MaskToolResultsHook()],
+        "before_llm": [StopClosedTurnHook(), LimitToolChoiceHook()],
+        "before_tool": [JudgeToolCallHook()],
+        "after_tool": [MaskToolResultHook()],
         "after_run": [RecordUsageHook(), JudgeAnswerHook()],
     }
 

@@ -156,7 +156,7 @@ class TestHaystackLoop:
         assert model.offered == [["lookup", "send"], ["lookup"]]
 
     async def test_tools_filtered_in_place_before_the_model_call_are_gone_for_the_step(self):
-        # EnforceTurnLimitsHook relies on it: Haystack hands this same list to the model and the ToolInvoker.
+        # LimitToolChoiceHook relies on it: Haystack hands this same list to the model and the ToolInvoker.
         ran: list[str] = []
 
         @hook

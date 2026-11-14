@@ -135,8 +135,8 @@ turn, and oversight runs inside the Haystack Agent as hooks
 `TurnRequest` says whose turn it is. `run_with_oversight` opens its
 turn, the gate judges the history and the question before the
 first model call (`GateQuestionHook`), every tool call is checked before it runs
-(`JudgeToolCallsHook`), every result is masked before the model reads it
-(`MaskToolResultsHook`), and finish judges what the loop wrote before the
+(`JudgeToolCallHook`), every result is masked before the model reads it
+(`MaskToolResultHook`), and finish judges what the loop wrote before the
 answer is returned (`JudgeAnswerHook`). A refusal raises
 `django_ai_sdk.errors.Blocked`.
 

@@ -332,9 +332,10 @@ For whoever works on the SDK itself. Oversight is a Haystack plugin, `django_ai_
 | Hook point | Hook | What it does |
 | --- | --- | --- |
 | `before_run` | `GateQuestionHook` | Judges the history and the question in the run's messages; masks them, or ends the run with the block message before the first model call. |
-| `before_llm` | `EnforceTurnLimitsHook` | Stops a run whose turn has closed, and offers the model only the tools the turn still allows, checked again each step. |
-| `before_tool` | `JudgeToolCallsHook` | Blocks a tool call the policy says no to. |
-| `after_tool` | `MaskToolResultsHook` | Masks a tool result before the model reads it. |
+| `before_llm` | `StopClosedTurnHook` | Stops a run whose turn has closed. |
+| `before_llm` | `LimitToolChoiceHook` | Offers the model only the tools the turn still allows, checked again each step. |
+| `before_tool` | `JudgeToolCallHook` | Blocks a tool call the policy says no to. |
+| `after_tool` | `MaskToolResultHook` | Masks a tool result before the model reads it. |
 | `after_run` | `RecordUsageHook` | Adds the run's model and token usage to its turn, in a sync run too. |
 | `after_run` | `JudgeAnswerHook` | Gives the sources to the turn, and judges the answer (pass, mask or withhold). |
 

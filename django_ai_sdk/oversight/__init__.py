@@ -125,13 +125,14 @@ if typing.TYPE_CHECKING:
         run_with_oversight_sync,
     )
     from django_ai_sdk.oversight.plugin.hooks import (
-        EnforceTurnLimitsHook,
         GateQuestionHook,
         JudgeAnswerHook,
-        JudgeToolCallsHook,
-        MaskToolResultsHook,
+        JudgeToolCallHook,
+        LimitToolChoiceHook,
+        MaskToolResultHook,
         OversightHook,
         RecordUsageHook,
+        StopClosedTurnHook,
     )
     from django_ai_sdk.oversight.retention import prune
     from django_ai_sdk.oversight.trial import DryRunResult, dry_run
@@ -198,13 +199,14 @@ _LAZY = {
     ),
     **dict.fromkeys(
         [
-            "EnforceTurnLimitsHook",
             "GateQuestionHook",
             "JudgeAnswerHook",
-            "JudgeToolCallsHook",
-            "MaskToolResultsHook",
+            "JudgeToolCallHook",
+            "LimitToolChoiceHook",
+            "MaskToolResultHook",
             "OversightHook",
             "RecordUsageHook",
+            "StopClosedTurnHook",
         ],
         "plugin.hooks",
     ),

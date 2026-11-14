@@ -292,7 +292,7 @@ class TestToolsTakenAwayInChat:
         from haystack.components.agents.state.state import State
 
         from django_ai_sdk.oversight.guard import guarding
-        from django_ai_sdk.oversight.plugin.hooks import EnforceTurnLimitsHook
+        from django_ai_sdk.oversight.plugin.hooks import LimitToolChoiceHook
 
         from tests.oversight.helpers import lookup_tool
 
@@ -303,7 +303,7 @@ class TestToolsTakenAwayInChat:
             # Haystack hands each step a fresh list of the agent's tools.
             state = State(schema={})
             state.data["tools"] = [lookup, send]
-            EnforceTurnLimitsHook().run(state)
+            LimitToolChoiceHook().run(state)
             return [t.name for t in state.data["tools"]]
 
         guard = await start("test-guard")
@@ -313,3 +313,23 @@ class TestToolsTakenAwayInChat:
             assert offered() == ["lookup"]
             guard.restrict = []
             assert offered() == []
+
+    async def test_a_closed_turn_stops_the_run_and_limits_no_tools(self):
+        from haystack.components.agents.state.state import State
+
+        from django_ai_sdk.oversight.guard import guarding
+        from django_ai_sdk.oversight.plugin.hooks import LimitToolChoiceHook, StopClosedTurnHook
+
+        from tests.oversight.helpers import lookup_tool
+
+        lookup, _ = lookup_tool()
+        guard = await start("test-guard")
+        guard.restrict = []
+        await closed_turn(guard)
+        state = State(schema={"stop_run": {"type": str}})
+        state.data["tools"] = [lookup]
+        with guarding(guard):
+            StopClosedTurnHook().run(state)
+            LimitToolChoiceHook().run(state)
+        assert state.get("stop_run") == "turn closed"
+        assert state.data["tools"] == [lookup]

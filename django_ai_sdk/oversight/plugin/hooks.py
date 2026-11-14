@@ -1,9 +1,10 @@
 """The oversight hooks a Haystack Agent runs.
 
     before_run   GateQuestionHook       judge the history and question; mask them, or block the run
-    before_llm   EnforceTurnLimitsHook  stop a run whose turn has closed; offer only the tools it allows
-    before_tool  JudgeToolCallsHook     block a tool call the policy says no to
-    after_tool   MaskToolResultsHook    mask a tool result before the model reads it
+    before_llm   StopClosedTurnHook     stop a run whose turn has closed
+    before_llm   LimitToolChoiceHook    offer only the tools the turn allows
+    before_tool  JudgeToolCallHook      block a tool call the policy says no to
+    after_tool   MaskToolResultHook     mask a tool result before the model reads it
     after_run    RecordUsageHook        add the run's model and token usage to its turn
     after_run    JudgeAnswerHook        give the sources to the turn; judge the answer, pass, mask or withhold it
 
@@ -86,20 +87,33 @@ class OversightHook:
         return default_from_dict(cls, data)
 
 
-class EnforceTurnLimitsHook(OversightHook):
-    """Before each model call: stop a run whose turn has closed, and offer only the tools it allows."""
+class StopClosedTurnHook(OversightHook):
+    """Before each model call: stop a run whose turn has closed."""
 
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
         if outlived_turn():
             state.set("stop_run", "turn closed")
-        elif (guard := current_guard()) is not None:
-            # Haystack hands this same list to the model and the ToolInvoker for
-            # the step, so filtering it in place takes the tools away. The tool
-            # hook blocks a call to a removed tool anyway.
-            tools = state.data["tools"]
-            tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
+
+    async def run_async(self, state: State) -> None:
+        self.run(state)
+
+
+class LimitToolChoiceHook(OversightHook):
+    """Before each model call: offer only the tools the turn allows."""
+
+    allowed_hook_points = ["before_llm"]  # noqa: RUF012
+
+    def run(self, state: State) -> None:
+        # No guard once the turn has closed: StopClosedTurnHook stops that run.
+        if (guard := current_guard()) is None:
+            return
+        # Haystack hands this same list to the model and the ToolInvoker for
+        # the step, so filtering it in place takes the tools away. The tool
+        # hook blocks a call to a removed tool anyway.
+        tools = state.data["tools"]
+        tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
 
     async def run_async(self, state: State) -> None:
         self.run(state)
@@ -209,7 +223,7 @@ UNGUARDABLE_CALL_MESSAGE = gettext_lazy(
 )
 
 
-class JudgeToolCallsHook(OversightHook):
+class JudgeToolCallHook(OversightHook):
     """Block tool calls the turn's policy says no to, before they run."""
 
     allowed_hook_points = ["before_tool"]  # noqa: RUF012
@@ -308,7 +322,7 @@ def _block_tool_step(
     )
 
 
-class MaskToolResultsHook(OversightHook):
+class MaskToolResultHook(OversightHook):
     """Mask tool results before the model reads them, like the gate masks the question.
 
     A tool can return data the gate would hide, such as a record number or a
