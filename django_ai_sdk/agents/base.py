@@ -252,9 +252,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
 
-    # The policy for every turn of this agent, in chat and in run(). A Policy
-    # subclass or a registered policy name. None uses
-    # AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
+    # The policy for every turn, in chat and run(): a Policy subclass or a name.
+    # None uses AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
     oversight: type[Policy] | str | Literal[False] | None = None
 
     # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
@@ -515,13 +514,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     ) -> type[Policy] | str | Literal[False] | None:
         """Return the policy for this turn. Defaults to `oversight`.
 
-        Override to pick a policy per instance, per user or per channel: the SDK's
-        own ("chat", "api", "subagent", "workflow:<workflow>:<step>", "dry_run"),
-        a name the app passed to `run()`, or "default" (`DEFAULT_CHANNEL`) when the
-        caller named none. `channel` is never None: a run with no channel is turned
-        into "default" before this is called.
-        It may query the database.
-        Keep `**kwargs`, since more turn details may be passed later.
+        Override to pick a policy per instance, user or channel ("chat", "api",
+        "subagent", "workflow:<workflow>:<step>", "dry_run", an app's own, or
+        "default"; never None). It may query the database. Keep `**kwargs`.
 
         If this raises, or names a policy that cannot load, the turn is blocked unless
         AI_SDK_OVERSIGHT["FAIL_MODE"] is "open".
@@ -870,19 +865,13 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 turn is recorded under it and `get_oversight()` receives it. None
                 records "default".
             oversight: A policy for this call only (a Policy subclass or a name).
-                False runs without oversight. None (the default) applies
-                `get_oversight()`. Only for trusted code. The
-                HTTP endpoints never pass it.
+                False runs without oversight. None applies `get_oversight()`.
+                Only for trusted code; the HTTP endpoints never pass it.
 
-        The policy checks the history and the question first, then each tool call,
-        then the answer before it is returned. If a rule masks the question, the
-        last user message in the caller's list is masked in place, so the caller
-        stores the masked copy.
-
-        A run inside another turn joins that turn when the policy is the same (or
-        there is none). Otherwise it opens a child turn. The checks are Haystack
-        hooks on the run (see `oversight.plugin`), so an override of `run()` that
-        calls its own model is not checked.
+        If a rule masks the question, the last user message in the caller's list
+        is masked in place, so the caller stores the masked copy. The checks are
+        Haystack hooks on the run, so an override of `run()` that calls its own
+        model is not checked.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
@@ -912,7 +901,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     f"{type(self).__name__}.get_run_adapter() must return a Run, "
                     f"not {type(adapter).__name__}."
                 )
-            # Oversight: the stored thread may stand for the history, so it is not judged again.
             sent, vouched = await history_for(
                 self,
                 await thread_storage(self, thread_id),
@@ -931,7 +919,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 else None,
                 max_agent_steps=self.max_agent_steps if with_tools else None,
                 hooks=default_hooks(self),
-                # Oversight: the run gates, checks and finishes this turn (see oversight.plugin).
                 request=TurnRequest(
                     agent=self,
                     channel=channel,

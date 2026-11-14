@@ -1,9 +1,4 @@
-"""Write a turn's row, answers, matches and content.
-
-The guard calls `record_turn` when its gate ends and again at close. Reflect
-adds answers later through `record_answers`. The rows keep values, labels,
-scores, counts and errors. Anything that can quote the turn goes into its content.
-"""
+"""Write a turn's row, answers, matches and content (anything that can quote the turn)."""
 
 from __future__ import annotations
 
@@ -50,15 +45,10 @@ if TYPE_CHECKING:
 
 
 def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
-    """Write the turn row and any answers and matches not written yet.
+    """Write the turn row and any answers and matches not written yet, in one transaction.
 
-    Called twice per turn, each time in one transaction. When the gate ends
-    (`closing=False`) the row is inserted as OPEN with the gate's answers and
-    matches. A turn that never closes still leaves a row for `oversight_sweep` to
-    mark INTERRUPTED. At close the row is updated (or inserted if missing), the
-    remaining answers and matches are added, and the content is written.
-
-    A turn forgotten while open (`content.forget_turns`) stores no content and no judge text.
+    Called after the gate (`closing=False`, row OPEN) and at close, which writes the
+    content. A turn forgotten while open stores no content and no judge text.
     """
     # Imported here: tasks imports reflection, which imports this module.
     from django_ai_sdk.oversight import tasks
@@ -75,7 +65,7 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
         keep = capture_masker(policy.capture, found)
         # PostgreSQL rejects NUL characters in text, so strip them.
         content = without_nul(capture_content(guard, policy.capture, keep))
-    # Answer texts go with the content. Rows written earlier keep their ids.
+    # Rows written earlier keep their ids.
     answer_rows, texts = _build_answers(guard.answered, keep=keep, ids=guard.record.answer_ids)
     texts = without_nul(texts)
     added = answer_rows[saved_answered:]
@@ -125,7 +115,6 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
 
 
 def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str, Any]:
-    """Build the turn row's columns from the guard's current state."""
     from django_ai_sdk.oversight.models import Turn
 
     policy = guard.resolved
@@ -162,12 +151,7 @@ def _turn_columns(guard: TurnGuard, *, closing: bool, created: Any) -> dict[str,
 
 
 def _outcome_columns(guard: TurnGuard, *, closing: bool) -> tuple[str, str]:
-    """Return the outcome and report outcome to store on the row.
-
-    "allowed" is stored as blank while the turn is open or when its run failed
-    (a crash, a disconnect, no result), since nothing got through. Outcomes from
-    rules that acted are always kept.
-    """
+    """ "allowed" is stored blank while open or when the run failed: nothing got through."""
     ended = closing and not guard.run_error
 
     def column(outcome: Outcome) -> str:
@@ -182,11 +166,7 @@ def _build_answers(
     keep: Masker | None,
     ids: list[str] | None = None,
 ) -> tuple[list[LensAnswer], dict[str, dict[str, Any]]]:
-    """Build unsaved LensAnswer rows and their content texts, keyed by row id.
-
-    `keep` decides how texts are kept. None keeps no texts. `ids` are the ids of
-    leading rows that were already written.
-    """
+    """Unsaved LensAnswer rows and their content texts by row id. `keep` None keeps no texts."""
     from django_ai_sdk.oversight.models import LensAnswer
 
     ids = ids or []
@@ -208,9 +188,7 @@ def split_answer(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split an answer into LensAnswer columns and the parts that can quote the turn.
 
-    `value` in the columns is what the record keeps and the client sees. The
-    quoting parts go to the content through `keep`: the rationale, entity names,
-    per-item scores, and the same for answers on the trail. None keeps none of them.
+    The quoting parts (rationale, entity names, item scores, trail) go through `keep`.
     """
     from django_ai_sdk.oversight.models import LensAnswer
 
@@ -246,7 +224,6 @@ def split_answer(
 
 
 def fit_column(model: Any, name: str, value: str) -> str:
-    """Strip NUL characters and truncate `value` to fit the column."""
     return value.replace("\x00", "")[: model._meta.get_field(name).max_length]
 
 
@@ -273,14 +250,9 @@ def record_answers(
 ) -> dict[str, Any]:
     """Add later answers and matches to a written turn and update its labels.
 
-    Answer texts go into the content, as at close. With MASKED capture they are
-    masked using what the lenses found in `context`, the text reflect judged, and
-    `found`, what the turn masked at close. Returns the texts by answer id as
-    stored, empty when the turn keeps no text or its content is gone.
-
-    The turn is locked first. Rules that already matched are removed from
-    `matched` in place, because a retried reflect may record twice and a rule
-    matches a turn only once (PROD-9).
+    Returns the texts by answer id as stored. Rules that already matched are removed
+    from `matched` in place: a retried reflect may record twice, and a rule matches
+    a turn once (PROD-9).
     """
     from django_ai_sdk.oversight.models import RuleMatch, Turn
 
@@ -312,14 +284,9 @@ def _record_judgments(
     *,
     floor: str = "",
 ) -> None:
-    """Save answers, matches and review items, and merge labels and severity into the turn.
+    """Save answers, matches and reviews; merge labels and severity into `locked`.
 
-    Labels hold the turn's own answers (`Answered.about_turn`): a finding in a
-    tool result or an earlier message is recorded, but never relabels the turn.
-
-    Run inside a transaction. `rows` come from `_build_answers(answered)`. `locked`
-    is the turn's row as read under the lock; it gets the merged labels and
-    severity. `floor` is the least severity to record.
+    Run inside a transaction. Aside findings are recorded but never relabel the turn.
     """
     from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 

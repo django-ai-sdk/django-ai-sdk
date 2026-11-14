@@ -1,19 +1,4 @@
-"""Dry runs: run a policy over one exchange as a turn would, without recording it.
-
-    from django_ai_sdk.oversight import dry_run
-
-    result = await dry_run("support", input="Where is my refund?", output="It is on its way.")
-    assert result.outcome == "allowed"
-    assert result.blocked_stage == ""
-    result.stage("gate").answers["injection_question"].value  # what the gate's lens said
-
-A dry run opens a real TurnGuard and runs the gate, each tool call and finish.
-It then runs reflect right away as the worker would, ignoring sample rates. The
-guard is never closed, so no turn is stored.
-
-Judges are real, so a model judge makes real calls. In tests, use a CheckLens, or
-give a judge lens an `LLMJudge(llm=FakeLLM(...))` from `django_ai_sdk.testing`.
-"""
+"""Dry runs: run a policy over one exchange as a turn would, without recording it."""
 
 from __future__ import annotations
 
@@ -39,19 +24,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class DryRunResult:
-    """The result of a dry run."""
-
     policy: str
     stages: list[StageResult] = field(default_factory=list)
-    # "gate" or "finish" when that stage blocked, else "". A blocked tool call does
-    # not end the turn. Only its own stage result is blocked.
+    # "gate" or "finish" when that stage blocked. A blocked tool call does not end the turn.
     blocked_stage: str = ""
     outcome: Outcome = Outcome.ALLOWED
-    # What the turn would have become with every report-mode rule enforced.
+    # As if every report-mode rule were enforced.
     report_outcome: Outcome = Outcome.ALLOWED
 
     def stage(self, name: Stage | str) -> StageResult:
-        """The last result for stage `name`. KeyError if the run never reached it."""
+        """The last result for stage `name`; KeyError if never reached."""
         for result in reversed(self.stages):
             if result.stage == name:
                 return result
@@ -70,12 +52,15 @@ async def dry_run(
     tool_calls: Sequence[ToolCall | dict[str, Any]] | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> DryRunResult:
-    """Run `policy` over one exchange as a turn would, without recording it.
+    """Run `policy` over one exchange as a turn would, then reflect, without recording it.
 
-    `policy` is a registered policy name, or a `ResolvedPolicy` from
-    `build_policy(name, policy_class=Draft)` so a draft can run before it is registered.
-    `tool_calls` ({"name", "arguments"} or ToolCall) are checked in order before the answer. Raises LookupError when a
-    named policy does not load.
+        result = await dry_run("support", input="Where is my refund?", output="On its way.")
+        result.stage("gate").answers["injection_question"].value
+
+    `policy` is a name or a `ResolvedPolicy` (e.g. a draft from `build_policy`).
+    `tool_calls` are checked in order before the answer. Judges are real: in tests
+    use a CheckLens or `LLMJudge(llm=FakeLLM(...))`. Raises LookupError when a named
+    policy does not load.
     """
     if isinstance(policy, ResolvedPolicy):
         resolved = policy
@@ -107,7 +92,6 @@ async def _run_stages(
     result = DryRunResult(policy=resolved.name)
 
     def add_stage(stage_result: StageResult, before: int, matched_before: int) -> None:
-        # The stage's own result, holding only what this stage answered and matched.
         result.stages.append(
             replace(
                 stage_result,
@@ -150,7 +134,6 @@ async def _run_stages(
 
 
 async def _run_reflect_stage(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
-    """Run what reflect would on the open guard: its lenses, and inline lenses to ask again."""
     retry = {item.lens.name for item in guard.answered if item.needs_retry}
     answered, matched, _masks = await judge_reflect_stage(
         resolved,

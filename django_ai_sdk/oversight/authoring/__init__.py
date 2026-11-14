@@ -1,8 +1,4 @@
-"""Let operators define whole policies at runtime; they run like policies in code.
-
-An opt-in app; docs/content/oversight-authoring.md covers install, what a definition may
-set and the routes.
-"""
+"""Opt-in app that lets operators define whole policies at runtime; they run like code policies."""
 
 from __future__ import annotations
 

@@ -1,9 +1,4 @@
-"""Reflect judges a closed turn again in the background, with the policy's reflect lenses.
-
-A worker claims the turn under a lease, runs the lenses, and commits the answers
-and the rules' effects (mask the stored answer, notify the user) in one
-transaction. The task `tasks.reflect_turn` runs it.
-"""
+"""Reflect: judge a closed turn in the background under a lease, committing in one transaction."""
 
 from __future__ import annotations
 
@@ -55,9 +50,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# How long a claim lasts before another worker may take over the turn.
 REFLECT_LEASE = timedelta(minutes=10)
-# Claims allowed per turn before it is marked failed.
 REFLECT_ATTEMPTS = 3
 
 # A rule's mask on the stored answer: the match, and its (spans, template).
@@ -65,7 +58,6 @@ MaskGroup = tuple[Matched, tuple[list[Any], str]]
 
 
 def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
-    """Return the latest usable answer per lens."""
     answers: dict[str, Answer] = {}
     for row in sorted(answer_rows, key=lambda row: row.created_at):
         if row.error or row.value is None:
@@ -84,16 +76,10 @@ def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
 async def run_reflection(turn_id: str) -> int:
     """Run the policy's reflect lenses on a closed turn. Returns the number of answers added.
 
-    The turn is claimed first with a lease (`REFLECT_LEASE`), so a duplicate task
-    finds it claimed and returns 0. If a worker dies, its lease runs out and
-    `oversight_sweep` can queue the turn again.
-
-    All results are written in one transaction, and only while this run still
-    holds the lease. A failed run gives its claim back so a retry can reflect,
-    and so does a run whose judge was down or out of time, while it has
-    attempts left: the last attempt keeps what it found, and FAIL_MODE decides
-    for the lens that did not answer. After `REFLECT_ATTEMPTS` failed runs the
-    turn is marked failed. Notifications are sent after the commit.
+    A lease makes a duplicate task return 0; a dead worker's lease runs out for
+    `oversight_sweep`. Results are written only while the lease holds. A failed run,
+    or one whose judge was down with attempts left, gives its claim back; the last
+    attempt keeps what it found and FAIL_MODE decides the rest.
     """
     from django_ai_sdk.oversight.models import Turn
 
@@ -106,7 +92,6 @@ async def run_reflection(turn_id: str) -> int:
             return 0
         judged = await judge_stored_turn(turn)
         if judged is None:
-            # The policy did not load. Give the claim back so a later run can try.
             await release_reflect_claim(turn_id, lease)
             return 0
         policy, context, answered, matched, found, masks = judged
@@ -118,17 +103,15 @@ async def run_reflection(turn_id: str) -> int:
             turn, policy, context, answered, matched, found, masks, lease=lease
         )
     except BaseException:
-        # Nothing was written. Give the claim back so a retry can reflect.
         await release_reflect_claim(turn_id, lease)
         raise
     return len(answered) if kept else 0
 
 
 def claimable_q(now: datetime, pending_before: datetime | None = None) -> Q:
-    """Turns reflect may claim: pending, or running with an expired lease, with attempts left.
+    """Pending, or running with an expired lease, with attempts left.
 
-    `pending_before` keeps only pending turns created before it, so a sweep leaves
-    fresh turns to the task queued at close.
+    `pending_before` lets a sweep leave fresh turns to the task queued at close.
     """
     from django_ai_sdk.oversight.models import Turn
 
@@ -141,11 +124,7 @@ def claimable_q(now: datetime, pending_before: datetime | None = None) -> Q:
 
 
 async def claim_for_reflect(turn_id: str) -> Any:
-    """Claim `turn_id` for reflection. Returns the lease end time, or None if not claimed.
-
-    A turn can be claimed when `claimable_q` matches it. The lease end time
-    identifies this run's claim.
-    """
+    """Returns the lease end time, which identifies this run's claim, or None."""
     from django_ai_sdk.oversight.models import Turn
 
     now = timezone.now()
@@ -160,7 +139,7 @@ async def claim_for_reflect(turn_id: str) -> Any:
 
 
 async def release_reflect_claim(turn_id: str, lease: Any) -> None:
-    """Release a claim. The turn goes back to pending, or to failed when out of attempts."""
+    """Back to pending, or failed when out of attempts."""
     from django_ai_sdk.oversight.models import Turn
 
     released = Turn.objects.filter(
@@ -186,10 +165,7 @@ def commit_reflection(
     *,
     lease: Any,
 ) -> bool:
-    """Write all of reflect's results in one transaction. False when the lease was lost.
-
-    Notifications are queued to send after the commit.
-    """
+    """Write all of reflect's results in one transaction. False when the lease was lost."""
     from django_ai_sdk.oversight.models import Turn
 
     state = Turn.ReflectState
@@ -208,8 +184,7 @@ def commit_reflection(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
         if events:
-            # Imported here: tasks imports this module. Looked up at call time, so tests
-            # silence notifications by patching tasks.
+            # Imported here: tasks imports this module.
             from django_ai_sdk.oversight import tasks
 
             transaction.on_commit(lambda: tasks.enqueue_notifications(events))
@@ -217,11 +192,7 @@ def commit_reflection(
 
 
 def mark_reflect_failed(turns: QuerySet) -> int:
-    """Mark `turns` as out of reflect attempts, noting "reflect failed" on each. Returns how many.
-
-    Reflect gives up this way after its last failed attempt, and so does the
-    `oversight_sweep` for a worker that died on it.
-    """
+    """Mark `turns` failed, noting "reflect failed" on each. Returns how many."""
     from django_ai_sdk.oversight.models import Turn
 
     with transaction.atomic():
@@ -243,7 +214,7 @@ async def judge_stored_turn(
     ]
     | None
 ):
-    """Run reflect's lenses and rules on `turn`. None when its policy does not load."""
+    """None when the policy does not load."""
     from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
 
     policy = await get_resolved_policy(turn.policy)
@@ -253,10 +224,8 @@ async def judge_stored_turn(
     context = context_from_turn(turn, content)
     found: dict[str, str] = {}
     if content is not None and turn.content is not None and turn.content.capture == "masked":
-        # The record keeps a masked copy, but the thread keeps the text as shown.
-        # Judge the thread's text so mask spans point into the stored answer.
-        # What reflect finds there is masked before it is kept, and so is what
-        # the turn masked at close, which a judge's reason may quote.
+        # Judge the thread's text (as shown) so mask spans point into the stored answer;
+        # what the turn masked at close is masked again before a judge's reason is kept.
         masked = (context.input, context.output)
         context.input = await _stored_text(turn.user_message_id) or context.input
         context.output = await _stored_text(turn.message_id) or context.output
@@ -269,7 +238,6 @@ async def judge_stored_turn(
     has_text = content is not None and "input" in content and "output" in content
     if not has_text:
         logger.info("Turn {} kept no text; reflect judges only what it kept", turn.id)
-    # Ask again lenses that missed the deadline inline or found their service down.
     retry = {
         row.lens
         for row in existing
@@ -301,24 +269,20 @@ async def judge_reflect_stage(
     has_text: bool = True,
     sample: bool = True,
 ) -> tuple[list[Answered], list[Matched], list[MaskGroup]]:
-    """Ask reflect's lenses on `context` and match its rules. The dry run calls this too.
+    """Ask reflect's lenses and match its rules; also returns masks for the stored answer.
 
-    Also returns the masks for the stored answer (see `_reflect_masks`). `retry` names the inline lenses to ask again, `done` the rules that already
-    matched. `outcome` is the turn's outcome so far. `sample=False` asks every
-    reflect lens, ignoring sample rates.
+    `retry` names inline lenses to ask again, `done` rules that already matched.
     """
-    # When the gate blocked the question there is no answer to judge.
     has_answer = bool(context.output.strip()) or outcome != Outcome.BLOCKED
     lenses, late = reflect_lenses(
         policy, retry, answered=has_answer, content=content, has_text=has_text
     )
     with unguarded():
         answered = await answer_lenses(lenses, context, Stage.REFLECT, sample=sample)
-        # No sampling, since these were due inline on every turn.
+        # Not sampled: these were due inline on every turn.
         answered += await answer_lenses(late, context, Stage.REFLECT, sample=False)
     for item in answered:
         context.answers[item.lens.name] = item.answer
-    # Rules treat a failed answer as unknown, not as "no".
     failed = {name for name, answer in context.answers.items() if answer.error}
     matched = match_rules(
         policy,
@@ -340,11 +304,7 @@ def reflect_lenses(
     content: dict[str, Any] | None = None,
     has_text: bool = True,
 ) -> tuple[list[Lens], list[Lens]]:
-    """Choose what reflect judges: the policy's reflect lenses, and inline lenses to ask again.
-
-    `retry` names the inline lenses to ask again. Both lists keep only the lenses
-    reflect can answer from what the turn kept (see `_judgeable`).
-    """
+    """The policy's reflect lenses, and the `retry` inline lenses, that the turn's record allows."""
     lenses = [
         lens
         for lens in policy.active_lenses(Stage.REFLECT)
@@ -363,11 +323,10 @@ def reflect_lenses(
 def _reflect_masks(
     context: TurnContext, answered: list[Answered], matched: list[Matched], *, closed: bool
 ) -> list[MaskGroup]:
-    """Return (match, group) for each mask in the stored answer. Drop masks that change nothing.
+    """(match, group) per mask in the stored answer.
 
-    A mask that cannot locate what it found masks the whole answer, where finish
-    would have withheld it: masking around it would leave what it found. So
-    does one whose lens failed, when the policy fails closed.
+    An unpointed mask (or a failed lens under a closed policy) masks the whole
+    answer, where finish would have withheld it.
     """
     groups, unpointed = collect_masks(
         matched, answered, subject=Subject.ANSWER, context=context, closed=closed
@@ -382,7 +341,6 @@ def _reflect_masks(
 
 
 async def _stored_text(message_id: str) -> str | None:
-    """Return a thread message's stored text, or None when there is no such message."""
     messages = _messages(message_id)
     message = await messages.afirst() if messages is not None else None
     result = message.result if message is not None else None
@@ -391,7 +349,6 @@ async def _stored_text(message_id: str) -> str | None:
 
 
 def _messages(message_id: str, *, lock: bool = False) -> QuerySet | None:
-    """The thread message `message_id` as a queryset, or None when the id is empty or invalid."""
     from django_ai_sdk.conversation.models import Message
 
     if (pk := as_uuid(message_id)) is None:
@@ -403,12 +360,7 @@ def _messages(message_id: str, *, lock: bool = False) -> QuerySet | None:
 def _judgeable(
     lens: Lens, content: dict[str, Any] | None, has_text: bool, *, answered: bool = True
 ) -> bool:
-    """Whether reflect can answer `lens` from what the turn kept.
-
-    Tool call lenses never apply, since reflect has no call to show. Answer
-    lenses need an answer. Without the turn's text, only a sources lens applies,
-    and only when the sources were kept.
-    """
+    """Whether reflect can answer `lens` from what the turn kept (never a tool call lens)."""
     if lens.subject is Subject.TOOL_CALL:
         return False
     if not answered and lens.subject in {Subject.ANSWER, Subject.EXCHANGE}:
@@ -421,11 +373,7 @@ def _judgeable(
 def apply_reflect_actions(
     turn: Turn, context: TurnContext, matched: list[Matched], groups: list[MaskGroup]
 ) -> list[tuple[dict[str, Any], list[str]]]:
-    """Apply what reflect's rules can still do: mask the stored answer and notify the user.
-
-    Runs inside reflect's transaction. Returns (event, notifier names) pairs to
-    send after the commit.
-    """
+    """Mask the stored answer and attach notices; return events to send after the commit."""
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
     events = notify_events(
@@ -444,10 +392,9 @@ def _update_stored_message(
     rules: list[str],
     notes: list[dict[str, Any]],
 ) -> None:
-    """Mask the stored answer and attach reflect's notices, which a reloaded thread shows.
+    """Spans index the judged text, so they apply only if the stored text still matches.
 
-    Spans index the text reflect judged, so they only apply when the stored text
-    still matches it. The reasoning cannot be masked this way, so it is dropped.
+    The reasoning cannot be masked this way, so it is dropped.
     """
     messages = _messages(turn.message_id, lock=True)
     message = messages.first() if messages is not None else None
@@ -461,7 +408,7 @@ def _update_stored_message(
     if masks and result.get("content") != judged:
         logger.warning("Turn {}: stored text differs from its content; not masked", turn.id)
     elif masks:
-        # The user sees this notice, so include rule names only in developer detail mode.
+        # Rule names only in developer detail mode: the user sees this notice.
         detail = {"rules": rules} if setting("CLIENT_DETAIL") == "full" else {}
         notices.append(
             {**notice_base(turn.id, Stage.REFLECT, Outcome.MASKED), "replaced": True, **detail}

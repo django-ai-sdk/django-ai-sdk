@@ -1,8 +1,4 @@
-"""The authoring app: its AI_SDK_OVERSIGHT_AUTHORING setting, its system checks, and what it
-adds to oversight on start (permissions, routes and the policy loader).
-
-docs/content/oversight-authoring.md lists the setting's keys and the check ids.
-"""
+"""The authoring app: its setting, its system checks, and what it adds to oversight on start."""
 
 from __future__ import annotations
 
@@ -24,7 +20,6 @@ AUTHORING_DEFAULTS: dict[str, Any] = {
 
 
 def authoring_setting(key: str) -> Any:
-    """AI_SDK_OVERSIGHT_AUTHORING[key], or its default."""
     return setting_from(SETTING, AUTHORING_DEFAULTS, key)
 
 
@@ -76,7 +71,6 @@ def check_authoring(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 
 
 def settings_checks() -> list[Error]:
-    """E012 for AI_SDK_OVERSIGHT_AUTHORING when it is not a dict, and for each unknown key or bad value."""
     user_settings = configured(SETTING)
     if not isinstance(user_settings, dict):
         return [

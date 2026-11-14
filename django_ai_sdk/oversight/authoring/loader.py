@@ -1,13 +1,8 @@
 """Keep each process's policy registry in sync with the authored policies in the database.
 
-`AuthoredPolicyLoader.load` runs before policy lookups, at most once per
-RUNTIME_CACHE_SECONDS. It reads every authored policy and registers or unregisters it.
-A policy that is off registers with its parents and options only.
-
-A definition that no longer validates (for example, a parent was removed in a deploy)
-is unregistered, so turns that name it are blocked instead of running without it. If
-the database cannot be read, the registered policies stay, for as long as it cannot be
-read. Authored policies extend only code policies, so they load in any order.
+A definition that no longer validates is unregistered, so turns naming it are
+blocked rather than running without it; if the database cannot be read, the
+registered policies stay.
 """
 
 from __future__ import annotations
@@ -28,23 +23,19 @@ logger = get_logger(__name__)
 
 
 class AuthoredPolicyLoader:
-    """Policy loader for authored policies. One instance per process."""
+    """One instance per process."""
 
     def __init__(self) -> None:
-        # name -> updated_at of every row at the last read. Unchanged means nothing to do.
-        # Each row is compared, so a save that commits late or with a skewed clock counts.
+        # name -> updated_at of every row at the last read. Each row is compared, so a
+        # save that commits late or with a skewed clock counts.
         self.stamp: dict[str, Any] | None = None
-        # name -> when the loaded definition was saved
         self.loaded: dict[str, Any] = {}
-        # name -> why it failed to load
         self.broken: dict[str, str] = {}
 
     async def load(self) -> None:
-        """Read the authored policies now and register any changes."""
         await sync_to_async(self.load_sync)()
 
     def load_sync(self) -> None:
-        """Read the authored policies now and register any changes, from sync code."""
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         stamp = dict(AuthoredPolicy.objects.values_list("name", "updated_at"))
@@ -69,8 +60,7 @@ class AuthoredPolicyLoader:
             logger.error("Authored policy {!r} does not load: {}", name, exc)
             self._unregister(name, keep_broken=True)
             return
-        # Replace the old class explicitly: the registry keeps the first of two classes
-        # with one name.
+        # Explicitly: the registry keeps the first of two classes with one name.
         if is_authored(get_policy_class(name)):
             unregister_policy(name)
         register_policy(cls)

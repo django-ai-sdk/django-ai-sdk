@@ -1,10 +1,6 @@
 """Save, toggle, delete, dry-run and list authored policies.
 
-A save replaces the policy's definition. Toggles change only what the policy itself
-declares: its rules' modes, its lenses, or the whole policy. What it extends always runs.
-A policy cannot be deleted while an agent names it in code, or while it is
-DEFAULT_POLICY: turns that use it would be blocked.
-
+Toggles change only what the policy itself declares; what it extends always runs.
 Every write locks the row, so a save and a toggle never overwrite each other.
 """
 
@@ -55,11 +51,8 @@ AUTHOR = Operation.AUTHOR_OVERSIGHT
 
 
 class AuthoringService(OversightAccess):
-    """Manage policies that operators define at runtime."""
-
     @classmethod
     async def catalog(cls, *, user: UserType) -> CatalogOut:
-        """List the building blocks a definition may use."""
         await cls.has_perms(user, VIEW)
         await run_policy_loaders()
         return CatalogOut(
@@ -82,7 +75,6 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def list_policies(cls, *, user: UserType) -> list[PolicyOut]:
-        """Return every authored policy, on or off."""
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         await cls.has_perms(user, VIEW)
@@ -91,7 +83,6 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def get_policy(cls, name: str, *, user: UserType) -> PolicyOut | None:
-        """Return one authored policy, or None."""
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         await cls.has_perms(user, VIEW)
@@ -101,7 +92,7 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def save_policy(cls, name: str, change: PolicyIn, *, user: UserType) -> PolicyOut:
-        """Create `name`, or replace its definition. Raises UserError if it is invalid."""
+        """Create or replace `name`'s definition. UserError if invalid."""
         await cls.has_perms(user, AUTHOR)
         definition = change.model_dump()
 
@@ -115,17 +106,13 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def set_active(cls, name: str, active: bool, *, user: UserType) -> PolicyOut | None:
-        """Turn the policy's own lenses and rules on or off. None if it does not exist."""
         return await _change_policy(name, user, lambda row: setattr(row, "active", active))
 
     @classmethod
     async def set_rule_mode(
         cls, name: str, rule: str, mode: Mode, *, user: UserType
     ) -> PolicyOut | None:
-        """Set the mode of one of the policy's own rules. None if the policy does not exist.
-
-        A rule it inherits cannot be changed: UserError.
-        """
+        """Only the policy's own rules; an inherited one raises UserError."""
 
         def change(row: AuthoredPolicy) -> None:
             row.rules = _set_values(row.rules, rule, "rule", {"mode": str(mode)})
@@ -136,8 +123,6 @@ class AuthoringService(OversightAccess):
     async def set_lens_enabled(
         cls, name: str, lens: str, enabled: bool, *, user: UserType
     ) -> PolicyOut | None:
-        """Turn one of the policy's own lenses on or off. None if the policy does not exist."""
-
         def change(row: AuthoredPolicy) -> None:
             row.lenses = _set_values(row.lenses, lens, "lens", {"enabled": enabled})
 
@@ -145,16 +130,13 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def delete_policy(cls, name: str, *, user: UserType) -> bool:
-        """Delete `name`, so turns that use it are blocked. False if it does not exist."""
+        """Refused while an agent or DEFAULT_POLICY names it: those turns would be blocked."""
         await cls.has_perms(user, AUTHOR)
         return await sync_to_async(_delete_unused_policy)(name)
 
     @classmethod
     async def try_policy(cls, name: str, run: TryIn, *, user: UserType) -> TryOut:
-        """Dry-run a draft, or the saved policy, over one exchange. Nothing is recorded.
-
-        Judges run for real, so any judge it names is called.
-        """
+        """Dry-run a draft or the saved policy; nothing is recorded, but judges run for real."""
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         await cls.has_perms(user, AUTHOR)
@@ -207,11 +189,9 @@ def _save_definition(
     *,
     create: bool = False,
 ) -> AuthoredPolicy | None:
-    """Lock the row, apply `mutate`, check the result, save.
+    """Lock the row, apply `mutate`, check, save. None when missing and not `create`.
 
-    None when the row does not exist and `create` is False. Raises UserError instead of
-    saving a change that does not check. A new name has no row to lock: when another
-    request creates it first, this one raises ConflictError.
+    A new name has no row to lock: when another request creates it first, ConflictError.
     """
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
@@ -237,7 +217,6 @@ def _save_definition(
 
 
 def _delete_unused_policy(name: str) -> bool:
-    """Delete `name` unless something still uses it. False if it does not exist."""
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
     with transaction.atomic():
@@ -253,14 +232,12 @@ def _delete_unused_policy(name: str) -> bool:
 
 
 def _set_values(items: list[dict[str, Any]], name: str, what: str, values: dict[str, Any]) -> list:
-    """`items` with `values` set on the one named `name`. UserError when it is not there."""
     if not any(item.get("name") == name for item in items):
         raise UserError(f"No {what} {name!r} of its own: a {what} it extends changes only in code.")
     return [{**item, **values} if item.get("name") == name else item for item in items]
 
 
 def _dependents(name: str) -> list[str]:
-    """List what still depends on `name`: agents that name it in code, and DEFAULT_POLICY."""
     found = []
     if oversight_setting("DEFAULT_POLICY") == name:
         found.append("it is DEFAULT_POLICY")

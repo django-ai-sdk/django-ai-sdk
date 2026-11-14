@@ -1,22 +1,9 @@
-"""Turn a saved definition into a Policy class and validate it.
+"""Turn a saved definition into a Policy class (`origin = "authored"`) and validate it.
 
-An authored policy is a normal `Policy` subclass with `origin = "authored"`, so it is
-registered, built and run like a code policy. It gets the same checks as code, plus
-these. A definition may not:
-
-- use the name of a code policy, or a name that is not a slug
-- extend another authored policy: only code policies and packs
-- declare a lens or rule named like one it inherits, or extend parents where a later
-  one replaces an earlier one's: a lens or rule declared in code never changes at runtime
-- configure a lens beyond `INLINE_ARGS` (no regex, code or import path): keywords,
-  presets, judge aliases and registered validators only. Models, classifiers and
-  regexes must be aliases set by the deployment.
-- skip a policy listed in `MUST_EXTEND`
-- exceed MAX_EXTENDS parents, MAX_LENSES lenses, MAX_RULES rules or MAX_BYTES of JSON
-- keep more than a parent: a higher `capture`, a longer `retention`, or `fail_mode`
-  "open" over a parent that fails closed
-- build into what the system checks flag (`policy_errors`): the checks never see
-  an authored policy, so it is held to them here
+Beyond the code checks, a definition may extend only code policies, never replace
+an inherited lens or rule, configure lenses only within `INLINE_ARGS` (no regex,
+code or import path), never keep more than a parent (capture, retention, fail
+mode), and is held to the system checks, which never see authored policies.
 """
 
 from __future__ import annotations
@@ -52,9 +39,8 @@ MAX_EXTENDS = 20
 MAX_LENSES = 50
 MAX_RULES = 100
 MAX_BYTES = 256 * 1024
-# What a lens may configure inline, and the arguments each takes on top of a lens's
-# own. None of them take code or a regex, because authored config runs on every turn
-# and a bad regex could backtrack for seconds. A regex or a model needs an alias.
+# No code or regex: authored config runs on every turn and a bad regex could
+# backtrack for seconds. A regex or a model needs a deployment alias.
 INLINE_ARGS: dict[str, frozenset[str]] = {
     "keywords": frozenset({"keywords"}),
     "pii": frozenset({"kinds"}),
@@ -65,8 +51,7 @@ INLINE_ARGS: dict[str, frozenset[str]] = {
 }
 RULE_KEYS = frozenset({"name", "when", "then", "mode", "message", "notice", "description"})
 POLICY_OPTIONS = frozenset({"capture", "stream_mode", "fail_mode", "retention"})
-# What any authored lens may set, and what each kind adds. Nothing here takes a
-# regex or names code: validators are names a developer registered.
+# Validators are names a developer registered.
 LENS_KEYS = frozenset(
     {"kind", "preset", "name", "label", "subject", "stages", "sample", "enabled"}
     | {"needs_grounding", "answer", *OPTIONS}
@@ -92,11 +77,7 @@ def is_authored(cls: type[Policy] | None) -> bool:
 
 
 def _judge_spec(spec: Any) -> Any:
-    """Return `spec` if a lens may use it: a known alias, an optional one, or keywords.
-
-    An optional alias, {"alias": ..., "optional": true}, may be undefined: the lens
-    skips it. `lens_from_dict` checks its form.
-    """
+    """`spec` if a lens may use it: a known alias, an optional one, or keywords."""
     if isinstance(spec, str):
         if not alias_defined(spec):
             raise ValueError(f"no judge alias {spec!r} in AI_SDK_OVERSIGHT['JUDGES']")
@@ -173,12 +154,7 @@ def build_policy_class(name: str, definition: dict[str, Any]) -> type[Policy]:
 
 
 def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy], ResolvedPolicy]:
-    """Validate `definition` and return its class and resolved policy.
-
-    Raises DefinitionError with the problems found. Shape problems stop it early.
-    Inheritance and build problems are reported together. Validation runs only when
-    both pass.
-    """
+    """Return the class and resolved policy, or raise DefinitionError with every problem."""
     extends = [str(p) for p in definition.get("extends") or []]
     _fail_on(_shape_problems(name, definition, extends))
     parents, problems = _parents(extends)
@@ -200,7 +176,6 @@ def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy
 
 
 def _shape_problems(name: str, definition: dict[str, Any], extends: list[str]) -> list[str]:
-    """Problems with the name, size and parents, found without building anything."""
     problems: list[str] = []
     if not NAME.match(name or ""):
         problems.append("the name is lowercase letters, digits, '-' and '_', up to 100")
@@ -230,7 +205,6 @@ def _shape_problems(name: str, definition: dict[str, Any], extends: list[str]) -
 
 
 def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
-    """Build each parent, and list a missing MUST_EXTEND or a parent that does not load."""
     problems: list[str] = []
     inherited = {*extends, *(ancestor for parent in extends for ancestor in ancestors(parent))}
     required = [p for p in authoring_setting("MUST_EXTEND") if p not in inherited]
@@ -263,11 +237,7 @@ def _inherited_names(parents: dict[str, ResolvedPolicy], cls: type[Policy]) -> l
 def _changed_from_parents(
     parents: dict[str, ResolvedPolicy], resolved: ResolvedPolicy
 ) -> list[str]:
-    """Every lens and rule a parent has must come out of the build unchanged.
-
-    Own names are refused before the build, so this catches a later parent replacing
-    an earlier one's.
-    """
+    """Catches a later parent replacing an earlier one's lens or rule."""
     problems: list[str] = []
     for parent, built in parents.items():
         for lens_name, lens in built.lenses.items():
@@ -287,11 +257,7 @@ def _changed_from_parents(
 
 
 def _looser_than_parents(parents: dict[str, ResolvedPolicy], resolved: ResolvedPolicy) -> list[str]:
-    """A policy may keep less than each parent, never more.
-
-    Each value is the built one, so a parent's retention includes the RETENTION setting
-    for a kind it does not set, and the policy's own includes what another parent sets.
-    """
+    """A policy may keep less than each parent, never more (compared as built)."""
     problems: list[str] = []
     for parent, built in parents.items():
         if rank(tuple(Capture), resolved.capture) > rank(tuple(Capture), built.capture):

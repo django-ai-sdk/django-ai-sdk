@@ -1,8 +1,4 @@
-"""Background tasks for oversight, run by a django-tasks worker on the `default` queue.
-
-`enqueue_reflect` and `enqueue_notifications` queue them. A missing task backend
-must not fail the turn, so a failure to queue is only logged.
-"""
+"""Oversight's django-tasks. A missing backend must not fail the turn, so queueing only logs."""
 
 from __future__ import annotations
 
@@ -20,22 +16,17 @@ logger = get_logger(__name__)
 
 @task(queue_name="default")
 def reflect_turn(turn_id: str) -> None:
-    """Reflect on a finished turn."""
     async_to_sync(run_reflection)(turn_id)
 
 
 @task(queue_name="default")
 def send_notifications(events: list[list[Any]]) -> None:
-    """Send a turn's notifications outside the chat stream.
-
-    Each item in `events` is a pair of [event, notifier names].
-    """
+    """Each item in `events` is [event, notifier names]."""
     for event, names in events:
         async_to_sync(send_to_notifiers)(event, names=names)
 
 
 def enqueue_notifications(events: list[tuple[dict[str, Any], list[str]]]) -> None:
-    """Queue notifications for the worker, so a slow notifier cannot hold the stream open."""
     try:
         send_notifications.enqueue([[event, names] for event, names in events])
     except Exception:
@@ -43,7 +34,7 @@ def enqueue_notifications(events: list[tuple[dict[str, Any], list[str]]]) -> Non
 
 
 def enqueue_reflect(turn_id: Any) -> bool:
-    """Queue reflection of `turn_id`. False, and logged, when it could not be queued."""
+    """False, and logged, when it could not be queued."""
     try:
         reflect_turn.enqueue(str(turn_id))
     except Exception:

@@ -1,11 +1,4 @@
-"""System checks for oversight. docs/content/manual/oversight.md lists the ids.
-
-A broken policy fails no request, so these checks are the only place it shows up.
-They cover each policy (it registers and builds; enforced rules a judge can
-answer; gate deadlines; answers masked at finish while they stream live), the
-policy each agent class names, AI_SDK_OVERSIGHT and the deployment (judge
-aliases, the default policy, unmasked content, the task backend and pruning).
-"""
+"""System checks for oversight: a broken policy fails no request, so this is where it shows up."""
 
 from __future__ import annotations
 
@@ -73,7 +66,7 @@ def check_oversight_deploy(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 def check_oversight_retention(
     app_configs: Any = None, databases: Any = None, **kwargs: Any
 ) -> list[Any]:
-    """Warn when expired rows are never deleted or open turns never swept. Reads the databases it is given."""
+    """Reads only the databases it is given."""
     if not isinstance(configured(), dict) or not is_enabled():
         return []
     return [*retention_checks(databases), *sweep_checks(databases)]
@@ -145,7 +138,6 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
 
 
 def settings_checks() -> list[Error]:
-    """E012 for AI_SDK_OVERSIGHT when it is not a dict, and for each unknown key or bad value."""
     user_settings = configured()
     if not isinstance(user_settings, dict):
         return [
@@ -191,7 +183,6 @@ def policies_in_use() -> set[str]:
 
 
 def agent_runtime_bases() -> list[type]:
-    """The classes AgentSettings rows build agents on, or none when they do not import."""
     from django_ai_sdk.agents.config import get_runtime_agent_bases
 
     try:
@@ -201,16 +192,12 @@ def agent_runtime_bases() -> list[type]:
 
 
 def agent_policy_name(cls: type) -> str:
-    """The policy an agent class names itself, or "" when it names none or opts out.
-
-    Raises TypeError for a value that names no policy.
-    """
+    """ "" when the class names none or opts out. TypeError for a value naming no policy."""
     name, source = attribute_policy(cls)
     return name if source == "agent" else ""
 
 
 def agent_checks() -> list[Any]:
-    """Flag agents that name an unregistered policy or an invalid value."""
     from django_ai_sdk.agents.registry import registered_agent_classes
 
     messages: list[Any] = []
@@ -242,10 +229,7 @@ def agent_checks() -> list[Any]:
 
 
 def policy_checks(in_use: set[str]) -> list[Any]:
-    """Check that every policy registers and builds, and its rules and lenses can run.
-
-    Warnings about notifiers and streaming are only reported for policies in `in_use`.
-    """
+    """Notifier and streaming warnings only for policies in `in_use`."""
     notifiers = {notifier.name for notifier in configured_notifiers()}
     messages: list[Any] = []
     for name, reason in get_invalid_policies().items():
@@ -277,11 +261,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
 
 
 def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool) -> list[Any]:
-    """Find Notify rules that would send to no one.
-
-    A name in `to` that no notifier has is an error. An enforced Notify while no
-    notifier is configured is a warning, for policies in use.
-    """
+    """Notify rules that would send to no one."""
     messages: list[Any] = []
     for rule in resolved.active_rules():
         for action in rule.then:
@@ -309,7 +289,6 @@ def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool
 
 
 def stream_mode_checks(name: str, resolved: Any) -> list[Any]:
-    """Warn when a policy changes the answer at finish but streams it live."""
     if resolved.stream_mode != "live":
         return []
     acting = resolved.changes_answer_at_finish()
@@ -327,10 +306,9 @@ def stream_mode_checks(name: str, resolved: Any) -> list[Any]:
 
 
 def lens_checks(name: str, resolved: Any) -> list[Any]:
-    """Report undefined judge aliases, and enforced rules that read lenses no judge here answers.
+    """Undefined aliases, and enforced rules whose lenses no judge here answers.
 
-    Such a rule is an error, or a warning when every judge of those lenses is an
-    optional alias left undefined: that is a deliberate choice.
+    Only a warning when every such judge is an undefined optional alias: a deliberate choice.
     """
     messages: list[Any] = []
     dead: set[str] = set()
@@ -375,7 +353,6 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
 
 
 def built_judges(lens: Any) -> list[Any]:
-    """The judges `lens` may ask that build here. E004 and E005 report the others."""
     judges = []
     for spec in lens.usable_judges():
         try:
@@ -386,11 +363,9 @@ def built_judges(lens: Any) -> list[Any]:
 
 
 def deadline_checks() -> list[Any]:
-    """Find enforced gate and tool rules whose lenses may wait on a judge slower than the deadline.
+    """Enforced gate and tool rules whose judge may outlast the deadline.
 
-    At the deadline the stage abandons the judge and the lens fails. With FAIL_MODE
-    "closed" the rule then blocks the turn or the tool call. With "open" it lets it
-    through unjudged.
+    The lens then fails: under "closed" the rule blocks, under "open" it lets through unjudged.
     """
     messages: list[Any] = []
     for name in sorted(policies_in_use()):
@@ -401,10 +376,7 @@ def deadline_checks() -> list[Any]:
 
 
 def deadline_warnings(name: str, resolved: Any) -> list[Any]:
-    """E013 for one built policy: see deadline_checks.
-
-    Any judge with `external` set counts, a user's own too. `LocalClassifier` doesn't.
-    """
+    """Any judge with `external` set counts; `LocalClassifier` doesn't."""
     messages: list[Any] = []
     for stage in (Stage.GATE, Stage.TOOL):
         deadline = deadline_ms(stage)
@@ -447,23 +419,14 @@ def deadline_warnings(name: str, resolved: Any) -> list[Any]:
 
 
 def policy_errors(name: str, resolved: Any) -> list[str]:
-    """What the system checks would flag in one built policy, as messages.
-
-    Rules that can never act (E007), protective rules a slow judge fails (E013) and
-    answers masked after they stream (W011). The checks run at deploy and see code
-    policies only, so an authored policy is held to this on save.
-    """
+    """What the checks would flag in one built policy; authored policies are held to it on save."""
     found = [m for m in lens_checks(name, resolved) if m.is_serious()]
     found += [*stream_mode_checks(name, resolved), *deadline_warnings(name, resolved)]
     return [m.msg for m in found]
 
 
 def build_or_none(name: str) -> Any:
-    """Build policy `name`, or None when it does not build (E002 reports why).
-
-    Not cached: each check is registered on its own, and a policy registered at
-    runtime would leave a cache stale.
-    """
+    """Not cached: a policy registered at runtime would leave a cache stale."""
     try:
         return build_policy(name)
     except Exception:
@@ -471,7 +434,6 @@ def build_or_none(name: str) -> Any:
 
 
 def judge_checks() -> list[Any]:
-    """Check that every judge alias builds (E005) and can run here (W005)."""
     messages: list[Any] = []
     for alias in setting("JUDGES") or {}:
         try:
@@ -492,7 +454,6 @@ def judge_checks() -> list[Any]:
 
 
 def default_policy_checks() -> list[Any]:
-    """Check that DEFAULT_POLICY names a registered policy (E006)."""
     default = setting("DEFAULT_POLICY")
     if default and default not in get_policies():
         return [
@@ -505,7 +466,6 @@ def default_policy_checks() -> list[Any]:
 
 
 def capture_checks() -> list[Any]:
-    """Warn when CAPTURE is "full", so the stored content is unmasked."""
     if str(setting("CAPTURE")) != "full":
         return []
     return [
@@ -519,7 +479,6 @@ def capture_checks() -> list[Any]:
 
 
 def task_backend_checks() -> list[Any]:
-    """Warn when the task backend runs reflect inline, or never."""
     from django_tasks.backends.dummy import DummyBackend
     from django_tasks.backends.immediate import ImmediateBackend
 
@@ -547,18 +506,13 @@ def task_backend_checks() -> list[Any]:
     ]
 
 
-# How long expired rows may stay before W007.
 PRUNE_DUE = timedelta(days=2)
-# How long a turn may stay open before W017. A run that crashed outside run_with_oversight, or
-# whose process died, leaves its turn open until oversight_sweep marks it interrupted.
+# A crashed process leaves its turn open until oversight_sweep marks it interrupted.
 SWEEP_DUE = timedelta(days=1)
 
 
 def retention_checks(databases: Any) -> list[Any]:
-    """Warn when rows expired more than PRUNE_DUE ago are still there: nothing prunes.
-
-    Retention only stamps `expires_at`. Runs under `manage.py check --deploy --database <alias>`.
-    """
+    """Retention only stamps `expires_at`, so overdue rows mean nothing prunes."""
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
     due = timezone.now() - PRUNE_DUE
@@ -583,10 +537,6 @@ def retention_checks(databases: Any) -> list[Any]:
 
 
 def sweep_checks(databases: Any) -> list[Any]:
-    """Warn when turns open longer than SWEEP_DUE are still open: nothing sweeps.
-
-    Runs under `manage.py check --deploy --database <alias>`.
-    """
     from django_ai_sdk.oversight.models import Turn
 
     due = timezone.now() - SWEEP_DUE
@@ -610,10 +560,7 @@ def sweep_checks(databases: Any) -> list[Any]:
 def _per_database[T](
     databases: Iterable[str] | None, read: Callable[[str], T]
 ) -> Iterator[tuple[str, T]]:
-    """Yield (alias, read(alias)) for each database a check is given.
-
-    A database whose tables are not migrated yet has nothing to check, so it is skipped.
-    """
+    """Skips databases whose tables are not migrated yet."""
     for alias in databases or ():
         try:
             found = read(alias)

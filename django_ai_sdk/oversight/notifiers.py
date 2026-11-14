@@ -1,16 +1,7 @@
 """Notifiers send rule matches somewhere besides the oversight record.
 
-    AI_SDK_OVERSIGHT = {"NOTIFIERS": [
-        {"class": "django_ai_sdk.oversight.notifiers.WebhookNotifier", "name": "siem",
-         "url": "https://siem.example/hook", "secret": env("SIEM_SECRET")},
-    ]}
-
-Notifiers never fail a turn. Errors are logged. Notifications are sent from the
-task worker (`tasks.send_notifications`), so a slow receiver never holds a chat
-stream open.
-
-Each event has a stable `id` (see `event_id`), sent by the webhook as
-`webhook-id`. A retried delivery keeps the same id, so receivers can drop repeats.
+They never fail a turn and run on the task worker, so a slow receiver never holds a
+stream open. Each event has a stable `id`, so receivers can drop retried repeats.
 """
 
 from __future__ import annotations
@@ -41,7 +32,6 @@ EVENT_NAMESPACE = uuid.UUID("5b0f6f2e-3c1d-4f43-9a55-7d3c0e0f1a11")
 
 
 def event_id(turn_id: Any, rule: str, stage: str) -> str:
-    """Return a stable id for `rule` acting on turn `turn_id` at `stage`."""
     return str(uuid.uuid5(EVENT_NAMESPACE, f"{turn_id}:{rule}:{stage}"))
 
 
@@ -54,10 +44,7 @@ def notify_events(
     stage: str = "",
     outcome: str | None = None,
 ) -> list[tuple[dict[str, Any], list[str]]]:
-    """Return (the "oversight.match" event, notifier names) for each Notify that acted.
-
-    `stage` defaults to each match's own.
-    """
+    """(the "oversight.match" event, notifier names) for each Notify that acted."""
     events = []
     for match in matched:
         for action in match.acted:
@@ -81,12 +68,10 @@ def notify_events(
 
 
 class Notifier:
-    """Subclass and implement `send`.
+    """Subclass and implement `send`, which may raise (errors are logged).
 
-    `send` may raise, since `send_to_notifiers` logs the error and carries on.
-
-    `Notify(to=[...])` selects notifiers by `name`. It defaults to the class name,
-    lowercased, without "Notifier" ("log", "webhook").
+    `Notify(to=[...])` selects by `name`, default the lowercased class name without
+    "Notifier" ("log", "webhook").
     """
 
     name: str = ""
@@ -95,7 +80,6 @@ class Notifier:
         self.name = name or type(self).__name__.removesuffix("Notifier").lower()
 
     async def send(self, event: dict[str, Any]) -> None:
-        """Send one event."""
         raise NotImplementedError
 
 
@@ -109,9 +93,8 @@ class LogNotifier(Notifier):
 class WebhookNotifier(Notifier):
     """POST events as JSON, signed per Standard Webhooks when `secret` is set.
 
-    webhook-signature is "v1," + base64 HMAC-SHA256 of "{webhook-id}.{webhook-timestamp}.{body}".
     The timestamp lets receivers reject replays as well as forgeries. A secret
-    starting with "whsec_" is base64. webhook-id is the event's `id`.
+    starting with "whsec_" is base64.
     """
 
     def __init__(self, url: str, *, secret: str = "", timeout: float = 5.0, **kwargs: Any) -> None:
@@ -147,7 +130,6 @@ class WebhookNotifier(Notifier):
 
 
 def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
-    """Build the NOTIFIERS setting's notifiers, or only those named in `names`."""
     notifiers: list[Notifier] = []
     for spec in setting("NOTIFIERS") or []:
         try:
@@ -168,7 +150,7 @@ def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
 
 
 async def send_to_notifiers(event: dict[str, Any], *, names: list[str] | None = None) -> None:
-    """Send `event` to all notifiers, or only to `names`. Failures are logged."""
+    """Failures are logged."""
     for notifier in configured_notifiers(names):
         try:
             await notifier.send(event)

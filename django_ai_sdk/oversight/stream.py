@@ -1,8 +1,4 @@
-"""Oversight in a streamed chat turn, and the stream events for its interventions.
-
-Every intervention reaches the client as a `data-oversight` part. A UI can then
-show that a question was masked, a tool blocked, or an answer withheld or replaced.
-"""
+"""Oversight in a streamed chat turn; every intervention reaches the client as `data-oversight`."""
 
 from __future__ import annotations
 
@@ -49,11 +45,9 @@ if TYPE_CHECKING:
 # The guard a stream reads before the run opened its turn: allows everything.
 _INERT = TurnGuard()
 
-# The finish reason sent when oversight withholds an answer.
 CONTENT_FILTER = "content-filter"
 
-# While an answer is held, tool cards show that a tool ran but not its input or
-# output: just this line. After the check they get the real data, or WITHHELD_OUTPUT.
+# While an answer is held, tool cards show only that a tool ran.
 HELD_OUTPUT = gettext_lazy("Checking the answer first. The result shows here once it passes.")
 WITHHELD_OUTPUT = gettext_lazy("Not shown: oversight withheld this answer.")
 
@@ -63,7 +57,6 @@ def notice_event(notice: dict[str, Any]) -> DataEvent:
 
 
 def blocked_reply(message: str) -> list[StreamEvent]:
-    """The policy's message as the whole answer, then the end of the stream."""
     return [
         TextChunkEvent(content=message),
         TextEndEvent(),
@@ -73,11 +66,7 @@ def blocked_reply(message: str) -> list[StreamEvent]:
 
 
 def stored_notices(notices: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Turn notices into the form stored on the message. "replace" becomes "replaced": True.
-
-    The stored content already holds the replacement. A second copy in the
-    metadata would go stale when reflect masks the message later.
-    """
+    """ "replace" becomes "replaced": True; a stored copy would go stale when reflect masks."""
     return [
         {**{k: v for k, v in n.items() if k != "replace"}, "replaced": True}
         if "replace" in n
@@ -87,7 +76,7 @@ def stored_notices(notices: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class BlockedStream:
-    """The full reply when the gate blocks a question. Streams the policy's message and stores nothing."""
+    """The full reply when the gate blocks a question. Stores nothing."""
 
     model: str | None = None
     instructions: str | None = None
@@ -105,7 +94,7 @@ class BlockedStream:
 
 
 async def close_unguardable(guard: TurnGuard) -> BlockedStream | None:
-    """Close a chat turn whose adapter is not a Stream, so it cannot be guarded past the gate.
+    """Close a turn whose adapter is not a Stream (unguardable past the gate).
 
     Returns the blocked reply to stream instead, unless the policy fails open.
     """
@@ -121,10 +110,9 @@ async def close_unguardable(guard: TurnGuard) -> BlockedStream | None:
 
 
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
-    """Run a side task of a turn, such as suggestions, citations or a title, on an Agent or a Run."""
+    """Run a side task (suggestions, citations, a title) unguarded: the turn itself is judged."""
     from django_ai_sdk.agents.base import Agent
 
-    # Oversight: off on purpose. The turn itself is judged, not its side tasks.
     if isinstance(runner, Agent):
         kwargs["oversight"] = False
     else:
@@ -133,7 +121,6 @@ async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any)
 
 
 def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[StreamEvent]:
-    """Stop grounding a withheld answer and clear the citations card shown while it streamed."""
     if grounder is not None:
         grounder.cancel()
     if not call_id:
@@ -143,15 +130,10 @@ def withdrawn_citations(grounder: Grounder | None, call_id: str | None) -> list[
 
 
 class StreamTurn:
-    """The oversight side of one streamed chat turn.
+    """The oversight side of one streamed chat turn: the run decides, this shows it.
 
-    The run opens and decides the turn (see `oversight.plugin`); this shows
-    what it decided. The Stream runs the agent with `turn`, the run's
-    TurnRequest, sends the `start()` events, passes every event through
-    `pass_event`, then calls `finish`, or `blocked_reply_events()` when the gate
-    blocked, or `end_early` when the turn ends before that, and always `aclose`,
-    which closes the turn once the answer is stored. Until the run opened a turn,
-    and without a policy, every call passes the stream through unchanged.
+    Order: `start()`, `pass_event` per event, then `finish` (or
+    `blocked_reply_events`, or `end_early`), and always `aclose` once stored.
     """
 
     def __init__(
@@ -168,12 +150,10 @@ class StreamTurn:
         # Artifacts stored during this answer, deleted if the answer is withheld.
         self.artifact_ids = artifact_ids
         self.finished = False
-        # Notices sent this turn. Stored on the message so a reload shows them,
-        # even after an error or a disconnect.
+        # Stored on the message so a reload shows them, even after an error or disconnect.
         self.sent: list[dict[str, Any]] = []
-        # Tool events of a held answer, sent after the check.
         self.held: list[StreamEvent] = []
-        # Ids of blocked tool calls, whose arguments are neither stored nor released.
+        # Their arguments are neither stored nor released.
         self.blocked_call_ids: set[str] = set()
 
         async def stream_blocked_results(stubs: list[Any]) -> None:
@@ -187,8 +167,7 @@ class StreamTurn:
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
-        # A copy, so the adapter's TurnRequest is never shared between streams. The
-        # stream closes the turn itself, after storing.
+        # A copy, so the adapter's TurnRequest is never shared between streams.
         self.turn = dataclasses.replace(turn or TurnRequest())
         self.turn.message_id = message_id
         self.turn.keep_open = True
@@ -196,12 +175,11 @@ class StreamTurn:
 
     @property
     def guard(self) -> TurnGuard:
-        """The run's own turn, or an inert guard until it opened one."""
         return self.turn.guard or _INERT
 
     @property
     def hold(self) -> bool:
-        """Whether the answer streams only progress until it is checked."""
+        """The answer streams only progress until it is checked."""
         policy = self.guard.policy
         return policy is not None and policy.holds_answer()
 
@@ -210,14 +188,12 @@ class StreamTurn:
         return notice_event(notice)
 
     async def start(self) -> list[StreamEvent]:
-        """Return the notices raised before the answer started, and mask the seeded sources."""
         if not self.guard.active:
             return []
         await mask_sources(self.guard, self.registry)
         return self._emit_pending_notices()
 
     def _emit_pending_notices(self) -> list[StreamEvent]:
-        """Send the notices raised since the last event, such as the gate's."""
         events: list[StreamEvent] = [
             self._emit_notice(notice) for notice in self.guard.notices.pending
         ]
@@ -226,11 +202,9 @@ class StreamTurn:
 
     @property
     def blocked_gate_result(self) -> StageResult | None:
-        """The gate's result, when the run's gate hook blocked the question."""
         return self.turn.gate_result if self.turn.question_blocked else None
 
     def blocked_reply_events(self) -> list[StreamEvent]:
-        """The rest of the reply when the gate blocked: the policy's message, stored nowhere."""
         gate_result = self.blocked_gate_result
         assert gate_result is not None
         self.finished = True
@@ -242,7 +216,6 @@ class StreamTurn:
         ]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
-        """Report `event` to the guard and return what to send now."""
         if not self.guard.active:
             return [event]
         pending = self._emit_pending_notices()
@@ -259,22 +232,20 @@ class StreamTurn:
         return [] if self.hold else [event]
 
     async def mask_tool_result(self, result: ToolCallResult) -> ToolCallResult:
-        """Mask a tool result once, so the card, storage and model all see the same text."""
+        """Once, so the card, storage and model all see the same text."""
         if not self.guard.active:
             return result
         masked = await mask_tool_result(self.guard, result.origin.id or "", result.result)
         if masked is not result.result:
             result = ToolCallResult(result=masked, origin=result.origin, error=result.error)
-        # Mask new citation sources before any card shows them.
         await mask_sources(self.guard, self.registry)
         return result
 
     async def finish(self) -> tuple[list[StreamEvent], StageResult]:
-        """Pass, mask or withhold the answer as the run's finish decided. Returns the events to send."""
+        """Apply the run's finish decision to the answer. Returns the events to send."""
         guard, writer = self.guard, self.writer
         if not guard.active:
             return [], StageResult(Stage.FINISH)
-        # The run's finish hook finished the turn; this reads that decision.
         finished = await guard.finish(writer.text if writer else guard.context.output)
         self.finished = True
         if writer and finished.changed:
@@ -300,7 +271,7 @@ class StreamTurn:
         return events, finished
 
     def _drop_blocked_inputs(self) -> None:
-        """Clear the arguments of blocked calls: the block may be about what they hold."""
+        """The block may be about what the arguments hold."""
         if not self.blocked_call_ids:
             return
         for call in self.writer.message.tool_calls if self.writer else []:
@@ -314,7 +285,7 @@ class StreamTurn:
         ]
 
     async def drop_artifacts(self) -> None:
-        """Delete this answer's artifacts. They may hold what the tools found."""
+        """They may hold what the tools found."""
         if not self.artifact_ids:
             return
         from django_ai_sdk.artifacts.models import Artifact
@@ -323,11 +294,7 @@ class StreamTurn:
         self.artifact_ids.clear()
 
     def end_early(self) -> None:
-        """Prepare a turn that ended early for storage.
-
-        Keeps the notices already sent, so a reload shows them. Clears an answer
-        that oversight did not finish checking.
-        """
+        """Keep sent notices; clear an answer oversight did not finish checking."""
         if self.writer is None or not self.guard.active:
             return
         if self.sent:
@@ -338,13 +305,12 @@ class StreamTurn:
             self.writer.drop_tool_details()
 
     async def aclose(self, error: str) -> None:
-        """Close the turn, saying why it ended early, if it did."""
         if self.turn.guard is not None:
             await self.turn.guard.close(error=error or ("" if self.finished else "disconnected"))
 
 
 def _held_progress(event: StreamEvent) -> StreamEvent | None:
-    """Strip a held tool event down to its name and progress. None hides it."""
+    """A held tool event stripped to its name and progress. None hides it."""
     if isinstance(event, ToolCallStartEvent):
         return event
     if isinstance(event, ToolInputCompleteEvent):
@@ -355,7 +321,6 @@ def _held_progress(event: StreamEvent) -> StreamEvent | None:
 
 
 def _released(held: list[StreamEvent], *, withheld: bool) -> list[StreamEvent]:
-    """Return the held tool events to send after the check, or WITHHELD outputs."""
     if withheld:
         output = {"result": str(WITHHELD_OUTPUT)}
         return [

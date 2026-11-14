@@ -220,7 +220,6 @@ class TurnGuard:
         self.note_error(error)
 
     def set_history(self, messages: list[ChatMessage]) -> None:
-
         self.context.history = [
             HistoryItem(role=m.role, content=m.content or "")
             for m in messages[:-1]

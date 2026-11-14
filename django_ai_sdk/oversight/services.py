@@ -1,14 +1,8 @@
 """The review API over the oversight record, which the HTTP layers are built on.
 
-Optional: core never imports it. Every method checks the `oversight` permission domain and
-its scope hooks (docs/content/manual/oversight.md, Review API).
-
-`VIEW_OVERSIGHT_METRICS` shows a turn's columns, labels, answer values and rule matches. Its
-content (question, answer, sources, reasons, reviewers' notes and who asked) also needs
-`VIEW_OVERSIGHT_CONTENT` for that turn.
-
-Lists are keyset-paged: a cursor is the sort values of a page's last row, base64-encoded
-JSON. It is opaque to clients and survives rows being added in between.
+METRICS shows a turn's columns, labels, answer values and matches; its content
+(text, reasons, notes, who asked) also needs CONTENT for that turn. Lists are
+keyset-paged with opaque cursors that survive rows being added in between.
 """
 
 from __future__ import annotations
@@ -62,9 +56,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.policy import ResolvedPolicy
     from django_ai_sdk.types import UserType
 
-# Upper bound on rows per read, whatever `limit` asks for.
 MAX_LIMIT = 100
-# The longest window `get_metrics` counts over.
 MAX_DAYS = 365
 PREVIEW_CHARS = 160
 # Label filters become part of an ORM lookup, so only allow plain lens names.
@@ -88,8 +80,6 @@ CONTENT_KEYS = frozenset(
 
 
 class OversightService(OversightAccess):
-    """Read turns, work the review queues, count what happened."""
-
     @classmethod
     async def list_turns(
         cls,
@@ -99,7 +89,7 @@ class OversightService(OversightAccess):
         limit: int = 50,
         cursor: str = "",
     ) -> Page[TurnOut]:
-        """List turns newest first. There is no total because paging is keyset-based."""
+        """Newest first. No total: paging is keyset-based."""
         from django_ai_sdk.oversight.models import ReviewItem, Turn
 
         await cls.has_perms(user, METRICS)
@@ -124,7 +114,7 @@ class OversightService(OversightAccess):
 
     @classmethod
     async def get_turn(cls, turn_id: str, *, user: UserType) -> TurnDetail | None:
-        """Get one turn with its answers, matches and reviews. None outside the reader's scope."""
+        """None outside the reader's scope."""
         from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, Turn
 
         await cls.has_perms(user, METRICS)
@@ -166,11 +156,7 @@ class OversightService(OversightAccess):
         limit: int = 50,
         cursor: str = "",
     ) -> Page[ReviewOut]:
-        """List review items, oldest first.
-
-        The turn's row is included only for readers with VIEW_OVERSIGHT_METRICS.
-        Its content, and the reviewer's note, only where the reader may see it.
-        """
+        """Oldest first. The turn's row needs METRICS; its content and the note need CONTENT."""
         from django_ai_sdk.oversight.models import ReviewItem, Turn
 
         await cls.has_perms(user, REVIEW)
@@ -209,11 +195,7 @@ class OversightService(OversightAccess):
 
     @classmethod
     async def list_queues(cls, *, user: UserType) -> dict[str, int]:
-        """Count open review items per queue.
-
-        `get_metrics` counts the same under VIEW_OVERSIGHT_METRICS. This one is for
-        reviewers, who may lack that permission.
-        """
+        """Open items per queue, for reviewers who may lack METRICS."""
         from django_ai_sdk.oversight.models import ReviewItem
 
         await cls.has_perms(user, REVIEW)
@@ -228,11 +210,8 @@ class OversightService(OversightAccess):
     ) -> ReviewOut | None:
         """Close a review item with the reviewer's verdict, or dismiss it.
 
-        The reviewer says whether the rule that queued the turn was right (`agree`), or
-        dismisses the item. Returns None for an item outside the reader's scope. The item is
-        claimed with a conditional update, so if anyone already closed it this raises
-        ConflictError. Nobody reviews a turn of their own; a subagent's turn carries the actor
-        of the turn that delegated it.
+        None outside the reader's scope. A conditional update claims the item, so a
+        concurrent close raises ConflictError. Nobody reviews a turn of their own.
         """
         from django_ai_sdk.oversight.models import ReviewItem
 
@@ -270,10 +249,7 @@ class OversightService(OversightAccess):
     async def get_metrics(
         cls, *, user: UserType, days: int = 14, agent_id: str = "", policy: str = ""
     ) -> MetricsOut:
-        """Count the last `days` of turns, optionally for one agent or policy.
-
-        Everything is a SQL aggregate over the turns the reader may reach (`scope_turns`).
-        """
+        """SQL aggregates over the last `days` of turns the reader may reach."""
         from django_ai_sdk.oversight.models import ReviewItem, RuleMatch, Turn
 
         await cls.has_perms(user, METRICS)
@@ -315,7 +291,6 @@ class OversightService(OversightAccess):
 
 
 async def _count_by(qs: QuerySet, field: str) -> dict[str, Any]:
-    """Count the rows of `qs` per value of `field`."""
     return {
         row[field]: row["n"] async for row in qs.order_by().values(field).annotate(n=Count("pk"))
     }
@@ -324,7 +299,6 @@ async def _count_by(qs: QuerySet, field: str) -> dict[str, Any]:
 async def _keyset_page(
     qs: QuerySet, order: tuple[str, ...], limit: int, cursor: str = ""
 ) -> tuple[list[Any], str]:
-    """Return up to `limit` rows of `qs` in `order` after `cursor`, and the next cursor or ""."""
     fields = [key.lstrip("-") for key in order]
     if cursor:
         values = _decode_cursor(cursor, qs.model, fields)
@@ -420,7 +394,6 @@ def _filter_by_label(qs: QuerySet, label: str, value: str) -> QuerySet:
 
 
 def _typed_value(value: str) -> Any:
-    """Convert a query-string value to the JSON type labels store."""
     lowered = value.lower()
     if lowered in {"true", "yes"}:
         return True
@@ -433,10 +406,7 @@ def _typed_value(value: str) -> Any:
 
 
 async def _turn_rows(turns: list[Turn], shown: set[Any], reviews: QuerySet) -> list[TurnOut]:
-    """Build feed rows for `turns`, with content only for ids in `shown`.
-
-    `reviews` is the review items the reader's METRICS scope keeps, for the open counts.
-    """
+    """Feed rows, with content only for ids in `shown`."""
     from django_ai_sdk.oversight.models import ReviewItem, RuleMatch
 
     ids = [t.id for t in turns]
@@ -495,7 +465,6 @@ def _turn_out(
 
 
 def _content_state(turn: Turn) -> tuple[dict[str, Any] | None, ContentState]:
-    """Load the turn's content and its state (see `TurnDetail.content_state`)."""
     row = turn.content
     if row is None:
         return None, "none"
@@ -508,7 +477,6 @@ def _content_state(turn: Turn) -> tuple[dict[str, Any] | None, ContentState]:
 
 
 def visible_content(content: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Keep only the content keys a reader sees on the turn itself (`CONTENT_KEYS`)."""
     if content is None:
         return None
     return {key: value for key, value in content.items() if key in CONTENT_KEYS}
@@ -517,10 +485,7 @@ def visible_content(content: dict[str, Any] | None) -> dict[str, Any] | None:
 def _answer_out(
     row: Any, resolved: ResolvedPolicy | None, texts: dict[str, Any] | None
 ) -> LensAnswerOut:
-    """Build one answer. `texts` adds its words from the content, keyed by answer id.
-
-    Pass None for a reader who may not see the content.
-    """
+    """`texts` None for a reader who may not see the content."""
     lens = resolved.lenses.get(row.lens) if resolved else None
     kept: dict[str, Any] = (texts or {}).get(str(row.id)) or {}
     trail = row.trail
@@ -549,8 +514,7 @@ def _answer_out(
 
 
 def _review_out(item: Any, row: TurnOut | None = None, *, shown: bool) -> ReviewOut:
-    """Build one review item. `shown` is whether the reader may see the turn's content,
-    which includes the reviewer's note."""
+    """`shown`: the reader may see the turn's content, which includes the note."""
     return ReviewOut(
         id=str(item.id),
         turn_id=str(item.turn_id),

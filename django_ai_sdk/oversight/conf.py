@@ -1,7 +1,4 @@
-"""The AI_SDK_OVERSIGHT setting. Only this module reads it; docs/content/manual/oversight.md lists the keys.
-
-The E012 check in checks.py validates it.
-"""
+"""The AI_SDK_OVERSIGHT setting. Only this module reads it; check E012 validates it."""
 
 from __future__ import annotations
 
@@ -15,7 +12,6 @@ from django_ai_sdk.oversight.types import Capture
 
 APP_LABEL = "django_ai_sdk_oversight"
 
-# Allowed values, shared with policy.py, which checks a policy's own options.
 STREAM_MODES = ("auto", "live")
 FAIL_MODES = ("closed", "open")
 RETENTION_KINDS = ("content", "metadata")
@@ -45,15 +41,12 @@ DEFAULTS: dict[str, Any] = {
 
 
 def configured(name: str = "AI_SDK_OVERSIGHT") -> Any:
-    """The setting `name` as the project set it, {} when unset. It may not be a dict."""
+    """{} when unset. It may not be a dict."""
     return getattr(settings, name, None) or {}
 
 
 def setting_from(name: str, defaults: dict[str, Any], key: str) -> Any:
-    """The setting `name`'s `key`, or its default in `defaults`.
-
-    A dict value merges one level deep into a dict default.
-    """
+    """A dict value merges one level deep into a dict default."""
     user_settings = configured(name)
     if not isinstance(user_settings, dict):
         raise ImproperlyConfigured(f"{name} must be a dict, not a {type(user_settings).__name__}.")
@@ -65,22 +58,17 @@ def setting_from(name: str, defaults: dict[str, Any], key: str) -> Any:
 
 
 def setting(key: str) -> Any:
-    """AI_SDK_OVERSIGHT[key], or its default. A dict value merges one level deep into a dict default."""
     return setting_from("AI_SDK_OVERSIGHT", DEFAULTS, key)
 
 
 def is_retention(value: Any) -> bool:
-    """Whether `value` maps "content" and/or "metadata" to whole days of at least 1."""
     return isinstance(value, dict) and all(
         kind in RETENTION_KINDS and type(days) is int and days >= 1 for kind, days in value.items()
     )
 
 
 def validate_retention(value: Any) -> dict[str, int]:
-    """Return `value` as retention days, or raise ValueError.
-
-    The system check does not stop a turn or a prune, so runtime checks the same rule again.
-    """
+    """Raise ValueError; the system check does not stop a turn or prune, so runtime checks too."""
     if not is_retention(value):
         raise ValueError(
             f"retention must map 'content' and/or 'metadata' to whole days of at least 1, not {value!r}"
@@ -89,7 +77,6 @@ def validate_retention(value: Any) -> dict[str, int]:
 
 
 def deadline_ms(stage: str) -> float | None:
-    """The deadline in milliseconds for `stage`, or None for no limit."""
     return (setting("DEADLINE_MS") or {}).get(str(stage))
 
 
@@ -98,5 +85,4 @@ def is_installed() -> bool:
 
 
 def is_enabled() -> bool:
-    """Whether the app is installed and ENABLED is true."""
     return is_installed() and bool(setting("ENABLED"))

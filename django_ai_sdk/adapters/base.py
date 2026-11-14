@@ -188,7 +188,7 @@ class Stream:
     suggestion_generator: SuggestionGenerator | None = None
     # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
-    # The turn the run is for (see oversight.plugin); set per run by chat.
+    # Set per run by chat.
     turn_request: TurnRequest | None = None
     # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
     # user they are stored for; set per run by Agent.stream.
@@ -201,7 +201,6 @@ class Stream:
     _grounder: Grounder | None = None
     # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
-    # The oversight side of the turn being streamed.
     _turn: StreamTurn | None = None
 
     # Message processing configuration
@@ -546,7 +545,6 @@ class Stream:
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
         from django_ai_sdk.oversight.plugin import run_with_oversight
 
-        # Oversight: the run opens, gates, checks and finishes the turn.
         turn = self._turn.turn if self._turn is not None else self.turn_request
         return await run_with_oversight(
             agent,
@@ -763,7 +761,6 @@ class Stream:
             await asyncio.to_thread(self.generator.warm_up)
 
         pipeline_task: asyncio.Task[Any] | None = None
-        # Oversight: the run's turn learns the message id and streams the calls it blocks.
         turn = self._turn = StreamTurn(
             self.turn_request,
             message_id,
@@ -777,7 +774,6 @@ class Stream:
 
         try:
             yield MessageStartEvent(message_id=message_id)
-            # Oversight: send the notices raised before the answer started.
             for event in await turn.start():
                 yield event
             # take snapshots of current contextvars
@@ -833,13 +829,12 @@ class Stream:
                 return
 
             if turn.blocked_gate_result is not None:
-                # Oversight: the gate blocked the question. Nothing is stored.
+                # The gate blocked the question: nothing is stored.
                 _finalize_called = True
                 for event in turn.blocked_reply_events():
                     yield event
                 return
 
-            # Oversight: pass, mask or withhold the answer the run finished.
             events, finished = await turn.finish()
             for event in events:
                 yield event

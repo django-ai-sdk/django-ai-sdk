@@ -1,10 +1,7 @@
-"""The oversight app. On start it loads the packs, each app's `oversight.py` and the
-system checks, and connects its signals: deleting a thread or a user forgets what oversight
-holds about it (the oversight guide's Forgetting says what goes and what stays), and a
-changed AI_SDK_OVERSIGHT drops the cached policies.
+"""The oversight app: deleting a thread or user forgets what oversight holds about it.
 
-The opt-in apps on top of it call `require_apps` and `extend` from their own `ready()`,
-so core never names them.
+Opt-in apps on top call `require_apps` and `extend` from their own `ready()`, so
+core never names them.
 """
 
 from __future__ import annotations
@@ -30,8 +27,6 @@ logger = get_logger(__name__)
 
 
 class OversightConfig(AppConfig):
-    """Opt-in app that checks and records agent turns."""
-
     default_auto_field = "django.db.models.BigAutoField"
     name = "django_ai_sdk.oversight"
     label = "django_ai_sdk_oversight"
@@ -69,7 +64,6 @@ class OversightConfig(AppConfig):
 
 
 def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
-    """Forget a deleted thread's oversight content."""
     from django_ai_sdk.oversight.content import forget_thread
     from django_ai_sdk.oversight.models import Turn
 
@@ -84,7 +78,6 @@ def forget_deleted_thread(sender: Any, instance: Any, **kwargs: Any) -> None:
 
 
 def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
-    """Forget a deleted user on the record and the content of their threadless turns."""
     from django_ai_sdk.oversight.content import forget_actor
 
     actor_id = str(instance.pk)
@@ -109,7 +102,6 @@ def drop_cached_policies(setting: str, **kwargs: Any) -> None:
 
 
 def require_apps(app_name: str, *needed: str) -> None:
-    """Refuse to start `app_name` without each app in `needed`."""
     from django.apps import apps
 
     for name in needed:
@@ -123,11 +115,10 @@ ROUTE_MODULES: list[str] = []
 
 
 def extend(*, permissions: Mapping[Any, str] | None = None, routes: str = "") -> None:
-    """Add an opt-in app's operations and routes. Call it from the app's `ready()`.
+    """Add an opt-in app's operations and routes from its `ready()`. Idempotent.
 
-    `permissions` maps each operation the app brings to the model permission
-    `OversightDefaultPermission` checks for it. `routes` is the dotted path of a module
-    whose `routes` table `get_oversight_router()` mounts. Calling it again is harmless.
+    `permissions` maps each operation to the model permission it needs; `routes` is
+    a module whose `routes` table `get_oversight_router()` mounts.
     """
     MODEL_PERMISSIONS.update(permissions or {})
     if routes and routes not in ROUTE_MODULES:

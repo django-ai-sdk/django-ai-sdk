@@ -16,14 +16,9 @@ Add "django_ai_sdk.oversight" to INSTALLED_APPS and give an agent a policy::
 Every turn the agent runs through the SDK is then judged by the policy's lenses,
 acted on by its rules, and recorded. See docs/content/oversight.md.
 
-Everything an app uses imports from here; the submodules are internal. Code
-that runs a turn by hand (an adapter), builds an Agent's hooks itself, or asks a
-judge directly imports that plumbing from the submodule that defines it. The
-declaration API loads with the package, so importing it needs no app registry.
-The rest (judges, packs, the run plugin, the guard, the stream, the dry run,
-notifiers and retention) loads on first use. The review API (`services`,
-`schemas`, `permissions`) and the authoring app are opt-in layers with their own
-modules.
+Everything an app uses imports from here; plumbing (running a turn by hand,
+building hooks) imports from the submodule that defines it. The declaration API
+loads with the package and needs no app registry; the rest loads on first use.
 """
 
 # ruff: noqa: F401  (re-exports: ruff cannot read the derived __all__ below)
@@ -127,8 +122,8 @@ if typing.TYPE_CHECKING:
     from django_ai_sdk.oversight.retention import prune
     from django_ai_sdk.oversight.trial import DryRunResult, dry_run
 
-# Each name loaded on first use, by the module that defines it. Loading them with the
-# package would import model clients, Haystack and the app's models with a policy file.
+# Loading these with the package would import model clients, Haystack and the app's
+# models with a policy file.
 _LAZY = {
     "DEFAULT_CHANNEL": "agents",
     **dict.fromkeys(["forget_actor", "forget_thread", "forget_turns"], "content"),
@@ -201,7 +196,6 @@ def __dir__() -> list[str]:
     return sorted({*globals(), *_LAZY})
 
 
-# Every name bound from a submodule above, and every name loaded on first use.
 __all__ = sorted(
     {
         name

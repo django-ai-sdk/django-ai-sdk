@@ -280,11 +280,8 @@ def _with_final_response(hooks: dict[str, list[Any]], generator: Any) -> dict[st
 class SubagentStreamFilter:
     """Wrap a subagent Agent so only its tool calls and results reach the stream.
 
-    When `subagent` is given, each delegation runs under that agent's policy. It
-    joins the coordinator's turn when the policy is the same (or there is none).
-    Otherwise it opens a child turn that checks the task, the tool calls and the
-    response before the coordinator reads it. On a block the coordinator reads
-    the policy's message.
+    With `subagent`, each delegation runs under that agent's policy, checked before
+    the coordinator reads it; on a block the coordinator reads the policy's message.
     """
 
     def __init__(
@@ -336,12 +333,10 @@ class SubagentStreamFilter:
         from django_ai_sdk.oversight.plugin import needs_own_turn_sync, run_with_oversight_sync
 
         turn = self._build_turn()
-        # Oversight: a sync run cannot open the child turn this delegation needs.
         if needs_own_turn_sync(turn):
             return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
-            # Oversight: the sync tool hooks block every call inside a turn.
             result = run_with_oversight_sync(
                 self._agent,
                 _handoff_context(messages),
@@ -378,9 +373,8 @@ class SubagentStreamFilter:
         from django_ai_sdk.oversight.plugin import needs_own_turn, run_with_oversight
 
         turn = self._build_turn()
-        # Oversight: under a policy of its own, the subagent's run opens a child turn
-        # that judges only the task (see oversight.plugin), so it reads only the
-        # task, not the coordinator's conversation and tool results.
+        # A child turn judges only the task, so the subagent reads only the task,
+        # not the coordinator's conversation and tool results.
         seen: set[str] = set()
         with self._span():
             result = await run_with_oversight(

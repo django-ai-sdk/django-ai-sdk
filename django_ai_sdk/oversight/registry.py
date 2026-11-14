@@ -1,16 +1,7 @@
-"""Finding policies: the registry of Policy classes, building one by name, and the cache.
-
-Each installed app's `oversight` module is imported on startup, so decorating a
-Policy subclass there with `register_policy` is enough.
+"""The registry of Policy classes, building one by name, and the cache.
 
 An invalid policy is left out and reported by the system check, so one app's
-typo does not stop the site from booting. When two classes use the same name, the
-first keeps it and the check fails until one is renamed.
-
-`get_resolved_policy(name)` builds the policy from the registry (`build_policy`)
-and caches it until `invalidate_policy()` clears it. A lens or rule declared in code
-never changes at runtime. Apps that register whole policies at runtime (the
-authoring app) add a loader with `add_policy_loader`.
+typo does not stop the site from booting.
 """
 
 from __future__ import annotations
@@ -50,8 +41,6 @@ _registry: dict[str, type[Policy]] = {}
 
 # Rejected policies by name, with the reason. Read by the system check.
 _invalid: dict[str, str] = {}
-
-# Names used by more than one class, with every class path that uses them.
 _duplicates: dict[str, list[str]] = {}
 
 
@@ -60,7 +49,7 @@ def _path(cls: type) -> str:
 
 
 def _declaration(cls: type) -> tuple[str, str]:
-    """Identify where a class is declared, so a file imported under two module names counts once."""
+    """So a file imported under two module names counts once."""
     try:
         where = inspect.getfile(cls)
     except (TypeError, OSError):
@@ -69,7 +58,6 @@ def _declaration(cls: type) -> tuple[str, str]:
 
 
 def register_policy[T: type[Policy]](cls: T) -> T:
-    """Class decorator that registers a Policy, unless it is invalid."""
     try:
         validate_policy(cls)
     except ImproperlyConfigured as exc:
@@ -94,10 +82,7 @@ def register_policy[T: type[Policy]](cls: T) -> T:
 
 
 def unregister_policy(name: str) -> None:
-    """Remove a policy registered at runtime.
-
-    Later turns naming it find no policy and are blocked, unless FAIL_MODE is "open".
-    """
+    """Later turns naming it find no policy and are blocked, unless FAIL_MODE is "open"."""
     _registry.pop(name, None)
     _invalid.pop(name, None)
     invalidate_policy(name)
@@ -108,11 +93,7 @@ def get_policy_class(name: str) -> type[Policy] | None:
 
 
 def policy_name(policy: type[Policy] | str) -> str:
-    """Return the name of `policy`, a name or a Policy subclass.
-
-    An unregistered subclass is registered here, so `oversight = SupportPolicy` on
-    an agent is enough.
-    """
+    """An unregistered subclass is registered here, so `oversight = SupportPolicy` is enough."""
     if isinstance(policy, str):
         return policy
     if not (isinstance(policy, type) and issubclass(policy, Policy)):
@@ -135,27 +116,21 @@ def get_invalid_policies() -> dict[str, str]:
 
 
 def get_duplicate_policies() -> dict[str, list[str]]:
-    """Names used by more than one Policy class, with their class paths."""
     return {name: list(paths) for name, paths in _duplicates.items()}
 
 
 def reset_registry() -> None:
-    """Clear the registry and every cached resolution. For tests."""
+    """For tests."""
     _registry.clear()
     _invalid.clear()
     _duplicates.clear()
     invalidate_policy()
 
 
-# Building.
-
-
 def build_policy(name: str, *, policy_class: type[Policy] | None = None) -> ResolvedPolicy:
-    """Resolve `name` from the registry, with its parents and the settings.
+    """Resolve `name` with its parents and the settings; `policy_class` builds a draft instead.
 
-    `policy_class` builds that class instead of the registered one, to check a draft
-    before registering it. Raises LookupError for an unknown policy and
-    ImproperlyConfigured for a cycle.
+    Raises LookupError for an unknown policy and ImproperlyConfigured for a cycle.
     """
     resolved = _from_code(name, (), policy_class=policy_class)
     ceiling = Capture(setting("CAPTURE"))
@@ -235,16 +210,10 @@ def _from_code(
     return resolved
 
 
-# The system check reports bad settings (conf.problems), but does not stop a turn.
-# So every value that reaches a built policy is checked again here: the settings
-# it inherits, and a code or authored policy's own.
-
-
-# Resolving, cached.
+# The system check does not stop a turn, so _from_code checks every value again.
 
 # name -> (ResolvedPolicy or None if it failed, ancestor names)
 _cache: dict[str, tuple[ResolvedPolicy | None, frozenset[str]]] = {}
-# name -> why it failed to load
 _broken: dict[str, str] = {}
 # Each loader registers or unregisters its app's policies when awaited.
 _loaders: list[Callable[[], Awaitable[None]]] = []
@@ -257,7 +226,7 @@ _locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
 
 
 def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
-    """Await `loader` before policy lookups. Adding it twice has no effect."""
+    """Await `loader` before policy lookups. Idempotent."""
     global _loaded_at
     if loader not in _loaders:
         _loaders.append(loader)
@@ -265,11 +234,7 @@ def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
 
 
 async def run_policy_loaders() -> None:
-    """Run every loader, at most once per RUNTIME_CACHE_SECONDS.
-
-    Failures are logged, and already registered policies stay. Lookups that arrive
-    while it runs wait for it, so a burst reads the database once.
-    """
+    """At most once per RUNTIME_CACHE_SECONDS; concurrent lookups wait, so a burst reads once."""
     global _loaded_at
     if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
         return
@@ -286,12 +251,7 @@ async def run_policy_loaders() -> None:
 
 
 async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
-    """Return the effective policy, cached. Policy loaders run first.
-
-    Returns None for an unknown or broken policy. The reason is logged once and
-    kept for `broken_reason()`. The caller decides what happens next.
-    `TurnGuard.start` blocks the turn unless FAIL_MODE is "open".
-    """
+    """The effective policy, cached. None for an unknown or broken one: the caller decides."""
     await run_policy_loaders()
     cached = _cache.get(name)
     if cached:
@@ -303,14 +263,12 @@ async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
 
 
 def _load_policy(name: str) -> ResolvedPolicy | None:
-    """Call build_policy(). On failure, record why and return None."""
     try:
         resolved = build_policy(name)
     except Exception as exc:
         _broken[name] = str(exc) or type(exc).__name__
         if isinstance(exc, LookupError) and get_policy_class(name) is None:
-            # The policy does not exist. A missing parent is different: then the
-            # policy exists but is broken.
+            # Unknown; a missing parent instead means the policy is broken.
             logger.info("Oversight policy {!r} is unknown", name)
         else:
             logger.exception("Oversight policy {!r} cannot be loaded: {}", name, exc)
@@ -320,12 +278,11 @@ def _load_policy(name: str) -> ResolvedPolicy | None:
 
 
 def broken_reason(name: str) -> str:
-    """Why `name` failed to load last time, or ""."""
     return _broken.get(name, "")
 
 
 def ancestors(name: str) -> list[str]:
-    """Every policy `name` extends, nearest first. build_policy() reports cycles."""
+    """Nearest first. build_policy() reports cycles."""
     found: list[str] = []
     todo = list(getattr(get_policy_class(name), "extends", []) or [])
     while todo:
@@ -338,10 +295,7 @@ def ancestors(name: str) -> list[str]:
 
 
 def invalidate_policy(name: str | None = None) -> None:
-    """Clear cached policies so the next turn resolves again.
-
-    Clearing a policy also clears every policy that extends it.
-    """
+    """Clearing a policy also clears every policy that extends it."""
     global _loaded_at
     if name is None:
         _cache.clear()
