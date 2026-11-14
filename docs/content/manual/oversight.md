@@ -20,7 +20,7 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 | Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `Maybe` (an alias a lens skips while `JUDGES` does not define it), `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmQuestion`, `HarmAnswer`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
 | Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
-| Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
+| Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `DEFAULT_CHANNEL` (`"default"`, the channel of a run that names none), `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
 | Hooks | `OversightHook`, `GateQuestionHook`, `StopClosedTurnHook`, `LimitToolChoiceHook`, `JudgeToolCallHook`, `MaskToolResultHook`, `RecordUsageHook`, `JudgeAnswerHook` |
 | The guard | `TurnGuard`, `StageResult`, `current_guard`, `unguarded` |
 | Testing | `dry_run`, `DryRunResult` |
@@ -69,7 +69,7 @@ Outside the dict:
 | On `Agent` | Meaning |
 | --- | --- |
 | `oversight` | A `Policy` subclass (registered when the agent class is defined), a registered policy's name, `None` (the default: `DEFAULT_POLICY`) or `False` (no oversight). Anything else (an instance, `True`, `""`) raises `ImproperlyConfigured` when the class is defined. |
-| `async get_oversight(*, channel, user, **kwargs)` | The policy for this turn; returns `oversight` unless overridden. It may read the database; keep `**kwargs`, as more about the turn may be passed later. Channels: `chat`, `api`, `subagent`, `workflow:<workflow>:<step>`, `workflow:adhoc:<step>` (a submitted definition), `dry_run`, a name the app passed, or `default` when the caller passed none. A policy only this returns is registered when a turn first uses it: `@register_policy` it, so the checks see it. |
+| `async get_oversight(*, channel, user, **kwargs)` | The policy for this turn; returns `oversight` unless overridden. It may read the database; keep `**kwargs`, as more about the turn may be passed later. Channels: `chat`, `api`, `subagent`, `workflow:<workflow>:<step>`, `workflow:adhoc:<step>` (a submitted definition), `dry_run`, a name the app passed, or `default` (`DEFAULT_CHANNEL`) when the caller passed none; `channel` is never `None`. A policy only this returns is registered when a turn first uses it: `@register_policy` it, so the checks see it. |
 | `run(messages, ..., *, channel=None, oversight=None)` | One turn under the policy, on `channel` (a name the app picks; `None` records `default`). `None` is the agent's own; a class or a name replaces it for this call; `False` runs unguarded (trusted code only). Raises `Blocked`. |
 | `as_view(...)` | Chat: one turn on channel `chat`. A block streams the policy's message. |
 

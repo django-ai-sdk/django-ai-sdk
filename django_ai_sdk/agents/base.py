@@ -509,7 +509,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     async def get_oversight(
         self,
         *,
-        channel: str | None = None,
+        channel: str = "default",
         user: AbstractBaseUser | AnonymousUser | None = None,
         **kwargs: Any,
     ) -> type[Policy] | str | Literal[False] | None:
@@ -517,7 +517,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         Override to pick a policy per instance, per user or per channel: the SDK's
         own ("chat", "api", "subagent", "workflow:<workflow>:<step>", "dry_run"),
-        a name the app passed to `run()`, or "default" when the caller named none.
+        a name the app passed to `run()`, or "default" (`DEFAULT_CHANNEL`) when the
+        caller named none. `channel` is never None: a run with no channel is turned
+        into "default" before this is called.
         It may query the database.
         Keep `**kwargs`, since more turn details may be passed later.
 

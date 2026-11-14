@@ -77,6 +77,7 @@ from django_ai_sdk.oversight.types import (
 )
 
 if typing.TYPE_CHECKING:
+    from django_ai_sdk.oversight.agents import DEFAULT_CHANNEL
     from django_ai_sdk.oversight.content import forget_actor, forget_thread, forget_turns
     from django_ai_sdk.oversight.guard import TurnGuard, current_guard, unguarded
     from django_ai_sdk.oversight.guard.stages import StageResult
@@ -141,6 +142,7 @@ if typing.TYPE_CHECKING:
 # Each name loaded on first use, by the module that defines it. Loading them with the
 # package would import model clients, Haystack and the app's models with a policy file.
 _LAZY = {
+    "DEFAULT_CHANNEL": "agents",
     **dict.fromkeys(["forget_actor", "forget_thread", "forget_turns"], "content"),
     **dict.fromkeys(["TurnGuard", "current_guard", "unguarded"], "guard"),
     "StageResult": "guard.stages",
@@ -163,7 +165,7 @@ _LAZY = {
         ],
         "packs.quality",
     ),
-    **dict.fromkeys(["HarmQuestion", "HarmAnswer", "SafetyPack", "SelfHarm"], "packs.safety"),
+    **dict.fromkeys(["HarmAnswer", "HarmQuestion", "SafetyPack", "SelfHarm"], "packs.safety"),
     **dict.fromkeys(
         [
             "EXFILTRATION_PATTERNS",

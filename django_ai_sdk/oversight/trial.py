@@ -73,8 +73,8 @@ async def dry_run(
     """Run `policy` over one exchange as a turn would, without recording it.
 
     `policy` is a registered policy name, or a `ResolvedPolicy` from
-    `build_policy(policy)` so a draft can run before it is registered. `tool_calls` ({"name", "arguments"}
-    or ToolCall) are checked in order before the answer. Raises LookupError when a
+    `build_policy(name, policy_class=Draft)` so a draft can run before it is registered.
+    `tool_calls` ({"name", "arguments"} or ToolCall) are checked in order before the answer. Raises LookupError when a
     named policy does not load.
     """
     if isinstance(policy, ResolvedPolicy):
