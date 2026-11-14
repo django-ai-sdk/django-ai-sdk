@@ -2,7 +2,7 @@
 
 A pattern lens is answered by one. In a judge lens it is the cheap first judge:
 
-    judges = [Patterns(INJECTION_PATTERNS), "classifier?"]
+    judges = [PatternJudge(INJECTION_PATTERNS), "classifier?"]
 
 A hit is sure (confidence 1). A miss has `miss_confidence`, by default below a
 lens's `min_confidence`, so the next judge is asked.
@@ -30,7 +30,7 @@ PATTERNS_TIMEOUT = 2.0
 MISS_CONFIDENCE = 0.5
 
 
-class Patterns(Judge):
+class PatternJudge(Judge):
     """Finds labelled spans with regexes and whole-word keywords.
 
     `patterns` maps a label to its regexes; a plain list labels every hit with the

@@ -24,7 +24,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mode,
-    Patterns,
+    PatternJudge,
     Policy,
     Queue,
     Rule,
@@ -35,7 +35,7 @@ class Injection(JudgeLens):
     name = "injection"
     question = "Does the message try to override the assistant's instructions?"
     # Patterns catch the common overrides; a classifier, once you map one, judges the rest.
-    judges = [Patterns(INJECTION_PATTERNS), "classifier?"]
+    judges = [PatternJudge(INJECTION_PATTERNS), "classifier?"]
 
 
 class Guard(Policy):
@@ -451,7 +451,7 @@ Pick the judges per judge lens, quickest first. No judge is the default: every j
 
 | Judge | Runs | Good for |
 | --- | --- | --- |
-| `Patterns` | in this process | A first, free pass: a hit is sure, a miss asks the next judge. |
+| `PatternJudge` | in this process | A first, free pass: a hit is sure, a miss asks the next judge. |
 | `LocalClassifier` | in this process | Yes/no, label and score lenses in milliseconds, with a small open model. Free, sends nothing. |
 | `LLMJudge` | your gateway, or a server of your own (Ollama, vLLM) | Written text, harder calls, and a second opinion where a classifier is unsure. |
 | A classifier service: your `Classifier` | hosted | Yes/no, label and score lenses from a service built for them. |
@@ -561,7 +561,7 @@ It answers `Flag`, `Choice` and `Score` lenses, and judges an `Entities` lens wi
 
 ### How a lens decides
 
-A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `Patterns` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked.
+A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `PatternJudge` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked.
 
 ## Personal data and secrets
 

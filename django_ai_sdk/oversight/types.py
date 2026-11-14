@@ -130,7 +130,7 @@ class Answer(BaseModel):
     """
 
     value: Any = None
-    # How sure the answerer is, 0..1. A pattern lens is always 1; a Patterns judge's miss is not.
+    # How sure the answerer is, 0..1. A pattern lens is always 1; a PatternJudge's miss is not.
     confidence: float = 1.0
     rationale: str = ""
     spans: list[TextSpan] = Field(default_factory=list)

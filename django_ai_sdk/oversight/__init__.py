@@ -34,7 +34,7 @@ import importlib
 import typing
 
 from django_ai_sdk.oversight.judges.llm import LLMJudge
-from django_ai_sdk.oversight.judges.patterns import Patterns
+from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.lenses import (
     CheckLens,
     Choice,

@@ -17,7 +17,7 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 | Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
 | Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
-| Judges | `Judge`, `Classifier`, `certainty`, `Patterns`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
+| Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
 | Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
 | Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
@@ -127,7 +127,7 @@ Each has a default `name`; subclass it to name your own.
 | --- | --- | --- |
 | `PIILens` | pattern | Personal data. `kinds` defaults to `patterns.DEFAULT_PII_KINDS`: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format), `ip_address`. Country kinds (`COUNTRY_PII_KINDS`), only when named: `bsn` (11-check), `phone_nl`, `postcode_nl`. `patterns` adds your own, unchecked. |
 | `SecretsLens` | pattern | `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key`, `password_assignment` (`patterns.SECRET_PATTERNS`). |
-| `RefusalLens` | judge | Answers that decline: `Patterns(REFUSAL_PATTERNS)` (English and Dutch), then `classifier?`. |
+| `RefusalLens` | judge | Answers that decline: `PatternJudge(REFUSAL_PATTERNS)` (English and Dutch), then `classifier?`. |
 | `LengthLens` | check | A `Flag`: the subject is longer than `max_chars`. |
 | `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `lenses.guess_language`. |
 | `EmptyRetrievalLens`, `ToolErrorsLens` | check | A tool call that found no sources (a `Flag`); the share of tool calls that failed (a `Score`: `L("tool_errors") > 0` when any did). |
@@ -142,7 +142,7 @@ Local (`external = ""`: nothing leaves the process):
 
 | Class | Answers |
 | --- | --- |
-| `Patterns(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked. |
+| `PatternJudge(patterns=(), *, keywords=(), verify=None, flags=re.IGNORECASE, miss_confidence=0.5, timeout=None)` | Regexes and keywords, as a pattern lens reads them. A hit is sure; a miss is `miss_confidence` sure, by default below `min_confidence`, so the next judge is asked. A miss at or above it ends the lens, and the judges after it are never asked. |
 | `LocalClassifier(model=ENGLISH, *, file="onnx/model_quantized.onnx", positive="", timeout=None)` | An ONNX model from the Hugging Face Hub, run by onnxruntime in this process (the `local` extra, no torch). Zero-shot by default: yes/no (entails the lens's `yes`), label (the criterion it entails most, as "This text is about <criterion>." unless it starts with "This text") and score lenses, about 20 ms each on a CPU. `ENGLISH` (87 MB) and `MULTILINGUAL` (340 MB) are MIT-licensed NLI models; `positive=` makes a model trained for one question (a prompt-injection detector) answer yes/no lenses. Reads one text, the question or the answer, of at most 1,600 characters: lenses on sources or tool calls, lenses that need grounding and "taken from" go to the next judge. Until its model is loaded it answers `unavailable` and loads it in the background, so the next judge is asked, `FAIL_MODE` applies and reflect asks again; a failed load is logged and tried again a minute later. `judges.local.load()` loads it at startup. |
 
 Remote (`external` names who receives the turn's content; secrets are masked first):
@@ -216,7 +216,7 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 
 | Pack | Lens | Kind, answer, subject | Stage | Answered by |
 | --- | --- | --- | --- | --- |
-| `security` | `prompt_injection` | judge, Flag, input | gate | `Patterns(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `classifier?` |
+| `security` | `prompt_injection` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `classifier?` |
 | | `pii_input` | pattern, Entities, input | gate | `PIILens` |
 | | `secrets_input` | pattern, Entities, input | gate | `SecretsLens` |
 | | `secrets_tool` | pattern, Entities, tool call | tool | `SecretsLens` |
@@ -231,7 +231,7 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 | | `taken_from` | judge, Entities, output, `per_source` | reflect | `classifier?` |
 | | `answer_relevance` | judge, Score, exchange | reflect | `classifier?` |
 | | `helpfulness` | judge, Score, exchange | reflect | `classifier?`, `judge?` |
-| | `refusal` | judge, Flag, output | finish | `Patterns(REFUSAL_PATTERNS)` (a hit is sure, a miss asks on), `classifier?` |
+| | `refusal` | judge, Flag, output | finish | `PatternJudge(REFUSAL_PATTERNS)` (a hit is sure, a miss asks on), `classifier?` |
 | | `language` | check, Flag, exchange | finish | `LanguageLens` |
 | | `empty_retrieval` | check, Flag, sources | finish | `EmptyRetrievalLens` |
 | | `tool_errors` | check, Score, exchange | finish | `ToolErrorsLens` |
@@ -269,7 +269,7 @@ A blocked question or withheld answer ends with finish reason `content-filter` (
 | --- | --- |
 | `Turn` | `status` (`open` from the end of the gate until it closes, `closed`, or `interrupted` when `oversight_sweep` found it never closed), channel, agent, agent fingerprint, policy, thread and message ids (no foreign keys), `actor_id` (the user's primary key, `""` without one), model, tokens, cost, latency, `outcome`, `report_outcome` (what report-mode rules would have made it; both blank while the turn is open, and when it closed on an error of its run with no rule acting), `error`; labels (the lens answers' values, below) and severity (denormalized); `expires_at`, when the policy's metadata retention runs out; `content_forgotten`, set when the turn was forgotten while open, so it stores no content when it closes. |
 | `TurnContent` | The content at the policy's capture level (`stored`), with an expiry: past it, the content reads as none (`load_content`) and reflect adds nothing to it. Beside it: `texts`, by answer id, what each answer said in words (its reason, the names a judge gave for an `Entities` lens, its per-item scores by key, the same of the answers on its trail). Reflect adds to it, and it goes when the content goes. |
-| `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `Patterns` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
+| `LensAnswer` | One answer to one lens: answerer (who answered), model, value, confidence, spans (offsets and labels), trail, error, cost, latency. Nothing that can quote the turn: an `Entities` value keeps a label the lens declares, or a kind its patterns report (a pattern lens, or a `PatternJudge` judge), while any other name (a judge's, `TypeSafe`'s source titles, a person's) is `"[found]"`, one per name, so `.is_true` and counts still hold. The words are in the content's `texts`. |
 | `RuleMatch` | A rule that matched: stage, mode, actions, whether it acted, the condition. Inline a rule may match more than once (the history and the question, each tool call); after close it matches once: reflect locks the turn before it looks. |
 | `ReviewItem` | A turn a rule queued for a person, per queue and rule, created by a `Queue` action. When closed it holds who closed it (`resolved_by_id`, a user id), whether they agreed with the rule (`agree`) and their `note`. The note is content: forgetting the thread, or the content expiring, blanks it. Core creates items; the [review API](#review-api) closes them. |
 

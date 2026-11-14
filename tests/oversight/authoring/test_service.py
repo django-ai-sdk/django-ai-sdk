@@ -78,7 +78,7 @@ class TestSaving:
                 raise Violation("No account numbers here.")
 
         lenses = [
-            judged({"class": "Patterns", "keywords": ["refund"]}),
+            judged({"class": "PatternJudge", "keywords": ["refund"]}),
             {
                 "kind": "check",
                 "name": "iban",
@@ -205,11 +205,11 @@ class TestWhatADefinitionMayNotDo:
         assert "does not take ['patterns']" in await self.refused(lenses=lenses)
 
     async def test_give_a_patterns_judge_a_regex(self):
-        regex = {"class": "Patterns", "patterns": ["(a+)+$"]}
+        regex = {"class": "PatternJudge", "patterns": ["(a+)+$"]}
         assert "only keywords" in await self.refused(lenses=[judged(regex)])
 
     async def test_import_any_class(self):
-        assert "an alias, or Patterns" in await self.refused(
+        assert "an alias, or PatternJudge" in await self.refused(
             lenses=[judged({"class": "os.system"})]
         )
 

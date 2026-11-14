@@ -11,7 +11,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mask,
-    Patterns,
+    PatternJudge,
     PIILens,
     Policy,
     Rule,
@@ -81,7 +81,7 @@ class TestMasksThatCannotPoint:
                     answer=Choice,
                     labels=["hr", "other"],
                     stages=[Stage.GATE],
-                    judges=[Patterns(keywords={"hr": ["salary"]})],
+                    judges=[PatternJudge(keywords={"hr": ["salary"]})],
                 ),
                 PIILens(name="mail", stages=[Stage.GATE], kinds=["email"]),
             ]

@@ -147,14 +147,14 @@ class TestInjectionWithoutAModel:
 
 
 def compiled_in(value, found):
-    """Every compiled regex in `value`: a Patterns judge's, lists, tuples and dicts."""
+    """Every compiled regex in `value`: a PatternJudge's, lists, tuples and dicts."""
     import re
 
-    from django_ai_sdk.oversight.judges.patterns import Patterns
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
     if isinstance(value, re.Pattern):
         found.add(value)
-    elif isinstance(value, Patterns):
+    elif isinstance(value, PatternJudge):
         compiled_in(value.patterns, found)
     elif isinstance(value, dict):
         for item in value.values():
@@ -171,7 +171,7 @@ def builtin_patterns():
 
     from django_ai_sdk.oversight import lenses, patterns
     from django_ai_sdk.oversight.judges import llm, local
-    from django_ai_sdk.oversight.judges.patterns import Patterns
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
     from django_ai_sdk.oversight import QualityPack, SafetyPack, SecurityPack
     from django_ai_sdk.oversight.lenses import PIILens, RefusalLens, SecretsLens
 
@@ -182,7 +182,7 @@ def builtin_patterns():
     for lens in every:
         judges = [lens.finder] if hasattr(lens, "finder") else getattr(lens, "judges", [])
         for judge in judges:
-            if isinstance(judge, Patterns):
+            if isinstance(judge, PatternJudge):
                 compiled_in(judge, found)
     for module in (patterns, lenses, llm, local):
         compiled_in(list(vars(module).values()), found)
@@ -254,15 +254,15 @@ class TestEveryBuiltInPatternIsLinear:
 
 class TestPatternsFind:
     def test_keywords_follow_flags(self):
-        from django_ai_sdk.oversight.judges.patterns import Patterns
+        from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
-        assert Patterns(keywords=["Acme"], flags=0).find("acme") == []
-        assert Patterns(keywords=["Acme"]).find("acme")
+        assert PatternJudge(keywords=["Acme"], flags=0).find("acme") == []
+        assert PatternJudge(keywords=["Acme"]).find("acme")
 
     def test_spans_come_by_position_with_or_without_a_verifier(self):
-        from django_ai_sdk.oversight.judges.patterns import Patterns
+        from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
         table = {"late": r"b", "early": r"a"}
-        plain = Patterns(table).find("a b")
-        checked = Patterns(table, verify={"late": lambda _: True}).find("a b")
+        plain = PatternJudge(table).find("a b")
+        checked = PatternJudge(table, verify={"late": lambda _: True}).find("a b")
         assert [s.label for s in plain] == [s.label for s in checked] == ["early", "late"]

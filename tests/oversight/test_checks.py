@@ -14,7 +14,7 @@ from django_ai_sdk.oversight import (
     L,
     LLMJudge,
     Mode,
-    Patterns,
+    PatternJudge,
     Policy,
     Rule,
     register_policy,
@@ -190,7 +190,7 @@ class TestPolicyAndDeployChecks:
                     name="j",
                     stages=[Stage.GATE],
                     judges=[
-                        Patterns([r"ignore"], miss_confidence=miss_confidence),
+                        PatternJudge([r"ignore"], miss_confidence=miss_confidence),
                         LLMJudge(model="m"),
                     ],
                 )
@@ -253,7 +253,7 @@ class TestChecks:
         from django_ai_sdk.oversight.rules import Notify
         from django_ai_sdk.oversight.checks import policy_checks
 
-        lens = JudgeLens(name="j", judges=[Patterns([r"x"])])
+        lens = JudgeLens(name="j", judges=[PatternJudge([r"x"])])
         when = L("j").is_true
         typo = policy("fc-notify-typo", [lens], [Rule("r", when=when, then=Notify(["siem"]))])
         loud = policy("fc-notify-none", [lens], [Rule("r", when=when, then=Notify(), mode=ENFORCE)])

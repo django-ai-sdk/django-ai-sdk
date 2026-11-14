@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from django.test import override_settings
-from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, Patterns, Rule, Score
+from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, PatternJudge, Rule, Score
 from django_ai_sdk.oversight.guard.judging import answer_lens, answer_lenses, should_retry
 from django_ai_sdk.oversight import TypeSafe
 from django_ai_sdk.oversight.judges.base import (
@@ -223,9 +223,9 @@ class TestCascade:
 
     async def test_a_patterns_hit_ends_the_chain_and_a_miss_asks_the_next(self):
         judge = Says(lambda lens, v: Answer(value=True, confidence=0.9), name="judge")
-        hit = await self.answer(Patterns([r"\bx\b"]), judge)
+        hit = await self.answer(PatternJudge([r"\bx\b"]), judge)
         assert (hit.value, hit.answerer, hit.trail) == (True, "patterns", [])
-        lens = JudgeLens(name="f", judges=[Patterns([r"\bx\b"]), judge])
+        lens = JudgeLens(name="f", judges=[PatternJudge([r"\bx\b"]), judge])
         missed = await answer_lens(lens, view("y"), Stage.GATE)
         assert (missed.value, missed.answerer) == (True, "judge")
         assert [(a.answerer, a.confidence) for a in missed.trail] == [("patterns", 0.5)]
@@ -237,7 +237,7 @@ class TestCascade:
             asked.append(v)
             return Answer(value=True, confidence=0.9)
 
-        sure = Patterns(["x"], miss_confidence=0.9)
+        sure = PatternJudge(["x"], miss_confidence=0.9)
         lens = JudgeLens(name="f", judges=[sure, Says(judged, name="judge")])
         missed = await answer_lens(lens, view("y"), Stage.GATE)
         assert (missed.value, missed.answerer, asked) == (False, "patterns", [])
@@ -342,7 +342,7 @@ class TestAsk:
     def test_every_judge_takes_a_name_and_a_timeout(self):
         from django_ai_sdk.oversight import LLMJudge, LocalClassifier
 
-        for cls in (Patterns, TypeSafe, LocalClassifier, LLMJudge):
+        for cls in (PatternJudge, TypeSafe, LocalClassifier, LLMJudge):
             judge = cls(name="n", timeout=1.5)
             assert (judge.label(), judge.timeout) == ("n", 1.5)
             assert cls().timeout == cls.timeout
@@ -352,32 +352,32 @@ class TestAliases:
     @override_settings(
         AI_SDK_OVERSIGHT={
             "JUDGES": {
-                "cheap": {"class": "Patterns", "keywords": {"yes": ["ok"]}},
+                "cheap": {"class": "PatternJudge", "keywords": {"yes": ["ok"]}},
                 "fast": "cheap",
             }
         }
     )
     def test_aliases_resolve_through_aliases(self):
         judge = build_judge("fast")
-        assert isinstance(judge, Patterns)
+        assert isinstance(judge, PatternJudge)
         # Named after the alias the lens used.
         assert judge.name == "fast"
 
     def test_a_shared_instance_is_not_renamed(self):
-        shared = Patterns(["x"])
+        shared = PatternJudge(["x"])
         with override_settings(AI_SDK_OVERSIGHT={"JUDGES": {"a": shared, "b": shared}}):
             a, b = build_judge("a"), build_judge("b")
         assert (a.name, b.name, shared.name) == ("a", "b", "patterns")
 
     def test_optional_aliases_drop_out_when_undefined(self):
-        lens = JudgeLens(name="f", question="?", judges=[Patterns(["x"]), "judge?"])
+        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), "judge?"])
         assert len(lens.usable_judges()) == 1
 
     @override_settings(
-        AI_SDK_OVERSIGHT={"JUDGES": {"judge": {"class": "Patterns", "keywords": {"x": ["y"]}}}}
+        AI_SDK_OVERSIGHT={"JUDGES": {"judge": {"class": "PatternJudge", "keywords": {"x": ["y"]}}}}
     )
     def test_optional_aliases_stay_when_defined(self):
-        lens = JudgeLens(name="f", question="?", judges=[Patterns(["x"]), "judge?"])
+        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), "judge?"])
         assert lens.usable_judges()[1] == "judge"
 
 

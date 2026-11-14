@@ -43,7 +43,7 @@ from django_ai_sdk.oversight import (
     Mask,
     Mode,
     PatternLens,
-    Patterns,
+    PatternJudge,
     PIILens,
     Policy,
     Queue,
@@ -95,7 +95,7 @@ class GuardPolicy(Policy):
             answer=Choice,
             labels=["hr", "other"],
             stages=[Stage.GATE],
-            judges=[Patterns(keywords={"hr": ["salary", "leave"]})],
+            judges=[PatternJudge(keywords={"hr": ["salary", "leave"]})],
         ),
         PatternLens(
             name="danger",

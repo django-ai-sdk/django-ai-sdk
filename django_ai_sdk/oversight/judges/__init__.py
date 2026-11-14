@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.judges.classifier import Classifier
     from django_ai_sdk.oversight.judges.llm import LLMJudge
     from django_ai_sdk.oversight.judges.local import LocalClassifier
-    from django_ai_sdk.oversight.judges.patterns import Patterns
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
     from django_ai_sdk.oversight.judges.typesafe import TypeSafe
 
 # Each judge by the module that declares it.
@@ -28,7 +28,7 @@ _MODULES = {
     "Classifier": "classifier",
     "LLMJudge": "llm",
     "LocalClassifier": "local",
-    "Patterns": "patterns",
+    "PatternJudge": "patterns",
     "TypeSafe": "typesafe",
 }
 
@@ -44,6 +44,6 @@ __all__ = [
     "Judge",
     "LLMJudge",
     "LocalClassifier",
-    "Patterns",
+    "PatternJudge",
     "TypeSafe",
 ]

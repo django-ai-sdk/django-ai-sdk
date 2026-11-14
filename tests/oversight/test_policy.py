@@ -18,7 +18,7 @@ from django_ai_sdk.oversight import (
     Mode,
     Notify,
     PatternLens,
-    Patterns,
+    PatternJudge,
     PIILens,
     Policy,
     RestrictTools,
@@ -55,7 +55,7 @@ def ans(value, confidence=1.0, error=""):
 class ParentPolicy(Policy):
     name = "test-parent"
     # A Flag, not Entities: it never says where, so it cannot be masked.
-    lenses = [JudgeLens(name="mentions_x", question="X?", judges=[Patterns(keywords={"x": ["x"]})])]
+    lenses = [JudgeLens(name="mentions_x", question="X?", judges=[PatternJudge(keywords={"x": ["x"]})])]
     rules = [Rule("block_x", when=L("mentions_x").is_true, then=Block("no x"))]
 
 
@@ -70,7 +70,7 @@ class ChildPolicy(Policy):
             answer=Choice,
             labels=["a", "b"],
             default="b",
-            judges=[Patterns(keywords={"a": ["a"]})],
+            judges=[PatternJudge(keywords={"a": ["a"]})],
         )
     ]
     rules = [Rule("note_b", when=L("topic") == "b", then=Alert(), mode=Mode.ENFORCE)]
@@ -341,7 +341,7 @@ class TestDeclarationsThatCannotWork:
     def test_a_mask_over_a_lens_that_never_says_where_is_refused(self):
         class FlagMask(Policy):
             name = "test-flag-mask"
-            lenses = [JudgeLens(name="f", judges=[Patterns(keywords={"x": ["x"]})])]  # noqa: RUF012
+            lenses = [JudgeLens(name="f", judges=[PatternJudge(keywords={"x": ["x"]})])]  # noqa: RUF012
             rules = [Rule("mask_f", when=L("f").is_true, then=Mask(), mode=Mode.ENFORCE)]  # noqa: RUF012
 
         with pytest.raises(ImproperlyConfigured, match="only an entities lens"):
@@ -397,7 +397,7 @@ class TestDeclarationsThatCannotWork:
                     answer=Choice,
                     labels=["a", "b"],
                     default="other",
-                    judges=[Patterns(keywords={"a": ["a"]})],
+                    judges=[PatternJudge(keywords={"a": ["a"]})],
                 )
             ]
 

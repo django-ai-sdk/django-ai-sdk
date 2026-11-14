@@ -86,18 +86,18 @@ def is_authored(cls: type[Policy] | None) -> bool:
 
 
 def _judge_spec(spec: Any) -> Any:
-    """Return `spec` if a lens may use it: a known alias, or Patterns of keywords."""
+    """Return `spec` if a lens may use it: a known alias, or PatternJudge of keywords."""
     if isinstance(spec, str):
         # A trailing "?" marks the alias optional. The lens skips it when it is not set up.
         if not alias_of(spec) or (not is_optional(spec) and not alias_defined(spec)):
             raise ValueError(f"no judge alias {alias_of(spec)!r} in AI_SDK_OVERSIGHT['JUDGES']")
         return spec
-    if isinstance(spec, dict) and spec.get("class") == "Patterns" and "keywords" in INLINE_ARGS:
+    if isinstance(spec, dict) and spec.get("class") == "PatternJudge" and "keywords" in INLINE_ARGS:
         extra = sorted(set(spec) - {"class", "name"} - INLINE_ARGS["keywords"])
         if extra:
-            raise ValueError(f"Patterns takes only keywords here, not {extra}")
+            raise ValueError(f"PatternJudge takes only keywords here, not {extra}")
         return dict(spec)
-    raise ValueError(f"judge {spec!r} is an alias, or Patterns with keywords")
+    raise ValueError(f"judge {spec!r} is an alias, or PatternJudge with keywords")
 
 
 def _lens(config: Any) -> Lens:

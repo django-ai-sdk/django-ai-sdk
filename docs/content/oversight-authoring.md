@@ -63,7 +63,7 @@ The catalog lists what a definition may use: lens kinds, answer types, actions, 
       "name": "refund",
       "question": "Does the person ask for a refund?",
       "stages": ["gate"],
-      "judges": [{"class": "Patterns", "keywords": ["refund", "money back"]}, "judge?"]
+      "judges": [{"class": "PatternJudge", "keywords": ["refund", "money back"]}, "judge?"]
     }
   ],
   "rules": [
@@ -97,7 +97,7 @@ An authored policy is checked as code's are (every lens has what answers it, eve
 - **extend an authored policy**: only code's policies and the packs;
 - **change an inherited lens or rule**: a lens or rule of its own may not take a name it inherits, a preset's default name (`pii`, `secrets`, …) included, and after the build every lens and rule of every parent must be exactly as that parent builds it, so a later parent cannot replace an earlier one's either. A lens or rule declared in code stays code's, mode included;
 - **keep more than a parent**: a higher `capture`, a longer `retention` (compared with what each parent builds, the `RETENTION` setting included for a kind it does not set), or `fail_mode: "open"` over a parent that fails closed;
-- **configure a lens beyond a safe set**: inline only keywords (a pattern lens, or a `Patterns` judge, of whole words) and the built-in lenses `pii` (by kind), `secrets`, `refusal`, `length` and `language`, with plain arguments; a check lens names validators the developers registered (`register_validator`). No regex, no code, no import path: a pattern an author writes would run on every turn and could backtrack for seconds. A model judge, a classifier or a regex comes as an alias in `AI_SDK_OVERSIGHT["JUDGES"]`, which the deployment sets;
+- **configure a lens beyond a safe set**: inline only keywords (a pattern lens, or a `PatternJudge` judge, of whole words) and the built-in lenses `pii` (by kind), `secrets`, `refusal`, `length` and `language`, with plain arguments; a check lens names validators the developers registered (`register_validator`). No regex, no code, no import path: a pattern an author writes would run on every turn and could backtrack for seconds. A model judge, a classifier or a regex comes as an alias in `AI_SDK_OVERSIGHT["JUDGES"]`, which the deployment sets;
 - **leave out what `MUST_EXTEND` names**;
 - **read a lens it does not have**, or **grow beyond** 20 parents, 50 lenses, 100 rules or 256 KiB.
 

@@ -10,7 +10,7 @@
 
     class PromptInjection(JudgeLens):     # judges, cheapest first
         name = "prompt_injection"
-        judges = [Patterns(INJECTION_PATTERNS), "classifier?", "judge?"]
+        judges = [PatternJudge(INJECTION_PATTERNS), "classifier?", "judge?"]
 
 The rules:
 
@@ -32,7 +32,7 @@ The rules:
 6. A JudgeLens asks its judges in order. An answer at or above `min_confidence`
    ends the chain; otherwise the next judge is asked, and the last usable answer
    counts. A pattern pre-filter is just the first judge: it answers the lens's
-   question, so a `Patterns` hit is sure (1) and a miss is not (0.5).
+   question, so a `PatternJudge` hit is sure (1) and a miss is not (0.5).
 7. A judge alias ending in "?" is optional: the lens skips it when the deployment
    does not define it, and system check E007 warns about an enforced rule
    left without a judge.
@@ -74,7 +74,7 @@ from django_ai_sdk.oversight.judges.base import (
     alias_of,
     is_optional,
 )
-from django_ai_sdk.oversight.judges.patterns import Patterns
+from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.patterns import (
     DEFAULT_PII_KINDS,
     PII_PATTERNS,
@@ -423,7 +423,8 @@ class Lens:
         person's answer on the lens names what they typed, not a kind.
         """
         return any(
-            isinstance(step, Patterns) and step.label() == answer.answerer for step in self.steps()
+            isinstance(step, PatternJudge) and step.label() == answer.answerer
+            for step in self.steps()
         )
 
     def describe(self) -> dict[str, Any]:
@@ -458,8 +459,8 @@ class PatternLens(Lens):
     flags: int = re.IGNORECASE
 
     @cached_property
-    def finder(self) -> Patterns:
-        return Patterns(
+    def finder(self) -> PatternJudge:
+        return PatternJudge(
             self.pattern_table(),
             keywords=self.keywords,
             verify=self.verify,
@@ -746,7 +747,7 @@ class RefusalLens(JudgeLens):
     no = "Answers, even partly."
     subject = Subject.OUTPUT
     # The shipped patterns answer a plain refusal, so this works without a classifier.
-    judges = [Patterns(REFUSAL_PATTERNS), "classifier?"]  # noqa: RUF012
+    judges = [PatternJudge(REFUSAL_PATTERNS), "classifier?"]  # noqa: RUF012
 
 
 class LengthLens(CheckLens):

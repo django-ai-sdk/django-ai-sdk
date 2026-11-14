@@ -1,6 +1,6 @@
 """Find labelled spans of text with regexes and keywords, and mask them.
 
-A `judges.Patterns` judge compiles its patterns once. The built-in patterns for
+A `judges.PatternJudge` judge compiles its patterns once. The built-in patterns for
 personal data, secrets and refusals live here, so any lens or code can reuse
 them. Personal data is checked by checksum where it can be: a number shaped like an IBAN that fails mod-97 is not reported, which
 keeps false positives low enough for the gate.
