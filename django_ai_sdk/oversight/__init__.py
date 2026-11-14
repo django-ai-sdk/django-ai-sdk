@@ -99,7 +99,7 @@ if typing.TYPE_CHECKING:
         QualityPack,
         TakenFrom,
     )
-    from django_ai_sdk.oversight.packs.safety import HarmInput, HarmOutput, SafetyPack, SelfHarm
+    from django_ai_sdk.oversight.packs.safety import HarmAnswer, HarmQuestion, SafetyPack, SelfHarm
     from django_ai_sdk.oversight.packs.security import (
         EXFILTRATION_PATTERNS,
         INJECTION_PATTERNS,
@@ -163,7 +163,7 @@ _LAZY = {
         ],
         "packs.quality",
     ),
-    **dict.fromkeys(["HarmInput", "HarmOutput", "SafetyPack", "SelfHarm"], "packs.safety"),
+    **dict.fromkeys(["HarmQuestion", "HarmAnswer", "SafetyPack", "SelfHarm"], "packs.safety"),
     **dict.fromkeys(
         [
             "EXFILTRATION_PATTERNS",

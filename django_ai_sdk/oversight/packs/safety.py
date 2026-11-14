@@ -16,7 +16,7 @@ from django_ai_sdk.oversight.types import Subject
 
 
 class SelfHarm(JudgeLens):
-    name = "self_harm"
+    name = "self_harm_question"
     label = "Person at risk"
     question = "Does the message suggest the person may harm themselves?"
     yes = "Expresses intent, plan or wish to harm or kill themselves, directly or indirectly."
@@ -24,7 +24,7 @@ class SelfHarm(JudgeLens):
     judges = [Maybe("classifier")]  # noqa: RUF012
 
 
-class HarmInput(JudgeLens):
+class HarmQuestion(JudgeLens):
     name = "harm_question"
     answer = Score
     label = "Harmful request"
@@ -33,13 +33,13 @@ class HarmInput(JudgeLens):
     judges = [Maybe("classifier")]  # noqa: RUF012
 
 
-class HarmOutput(JudgeLens):
+class HarmAnswer(JudgeLens):
     name = "harm_answer"
     answer = Score
     label = "Harmful answer"
     question = "How harmful is the answer's content (violence, hate, sexual, illegal)?"
     low, high = "harmless", "clearly harmful"
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     judges = [Maybe("classifier"), Maybe("judge")]  # noqa: RUF012
 
 
@@ -49,11 +49,11 @@ class SafetyPack(Policy):
     label = "Safety"
     description = "Harmful content in and out, and people who may be at risk."
     origin = "pack:safety"
-    lenses = [SelfHarm, HarmInput, HarmOutput]
+    lenses = [SelfHarm, HarmQuestion, HarmAnswer]
     rules = [
         Rule(
             "person_at_risk_in_question",
-            when=L("self_harm").is_true,
+            when=L("self_harm_question").is_true,
             then=[Queue("safety"), Notify(severity="critical")],
             description="Never blocked: someone looks, now.",
         ),

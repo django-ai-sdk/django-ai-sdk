@@ -239,10 +239,10 @@ def too_long(
     Context like history and sources is clipped to fit instead.
     """
     judged: list[tuple[str, int]] = []
-    if lens.subject in {Subject.INPUT, Subject.EXCHANGE}:
+    if lens.subject in {Subject.QUESTION, Subject.EXCHANGE}:
         judged.append((view.input, input_chars))
     per_source = lens.answer.kind == "entities" and lens.per_source
-    if lens.subject in {Subject.OUTPUT, Subject.EXCHANGE} or per_source:
+    if lens.subject in {Subject.ANSWER, Subject.EXCHANGE} or per_source:
         judged.append((view.output, output_chars))
     if lens.subject is Subject.TOOL_CALL and view.tool_call:
         arguments = json.dumps(view.tool_call.arguments, ensure_ascii=False, default=str)

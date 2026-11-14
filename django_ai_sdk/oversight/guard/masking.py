@@ -100,7 +100,7 @@ class TurnMasks:
             fail_closed=guard.fails_closed,
         )
         groups, unpointed = collect_masks(
-            matched, judged.answered, subject=Subject.INPUT, view=view, closed=guard.fails_closed
+            matched, judged.answered, subject=Subject.QUESTION, view=view, closed=guard.fails_closed
         )
         for match in matched:
             acting: list[Action] = [
@@ -180,7 +180,7 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
     }
     return [
         lens
-        for lens in policy.active_lenses(Stage.GATE, Subject.INPUT)
+        for lens in policy.active_lenses(Stage.GATE, Subject.QUESTION)
         if lens.answer.kind == "entities" and lens.name in names
     ]
 
@@ -197,7 +197,7 @@ def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
     }
     return [
         lens
-        for lens in policy.active_lenses(Stage.GATE, Subject.INPUT)
+        for lens in policy.active_lenses(Stage.GATE, Subject.QUESTION)
         if lens in masking or lens.name in names
     ]
 
@@ -288,13 +288,13 @@ def spans_for(
     for item in _latest(answered, names):
         if item.lens.subject is subject:
             spans.extend(item.answer.spans)
-        elif item.lens.subject is Subject.EXCHANGE and subject is Subject.OUTPUT:
+        elif item.lens.subject is Subject.EXCHANGE and subject is Subject.ANSWER:
             spans.extend(
                 s.model_copy(update={"start": max(s.start - offset, 0), "end": s.end - offset})
                 for s in item.answer.spans
                 if s.end > offset
             )
-        elif item.lens.subject is Subject.EXCHANGE and subject is Subject.INPUT:
+        elif item.lens.subject is Subject.EXCHANGE and subject is Subject.QUESTION:
             spans.extend(
                 s.model_copy(update={"end": min(s.end, size)})
                 for s in item.answer.spans

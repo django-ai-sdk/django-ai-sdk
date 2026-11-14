@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 
 
 class Subject(StrEnum):
-    """What a lens looks at."""
+    """What a lens looks at. The values are stored in JSON and on rows, so they stay."""
 
-    INPUT = "input"
-    OUTPUT = "output"
+    QUESTION = "input"
+    ANSWER = "output"
     # The question and the answer together.
     EXCHANGE = "exchange"
     # Retrieved sources, read together with the question.
@@ -207,9 +207,9 @@ class TurnContext(BaseModel):
 
     def text(self, subject: Subject) -> str:
         """Return the plain text a text-only answerer reads for `subject`."""
-        if subject is Subject.INPUT:
+        if subject is Subject.QUESTION:
             return self.input
-        if subject is Subject.OUTPUT:
+        if subject is Subject.ANSWER:
             return self.output
         if subject is Subject.TOOL_CALL:
             call = self.tool_call

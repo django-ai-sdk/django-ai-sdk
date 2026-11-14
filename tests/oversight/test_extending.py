@@ -123,7 +123,7 @@ class TestYourOwnClassifier:
             name="taken_from",
             answer=Entities,
             question="Which sources?",
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             per_source=True,
         )
         view = TurnContext(
@@ -167,7 +167,7 @@ class TestAJudgeOnYourOwnServer:
 class TestHoldWhenNeeded:
     def policy(self, mode: Mode, stream_mode: str = "auto") -> ResolvedPolicy:
         lens = JudgeLens(
-            name="pii", answer=Entities, subject=Subject.OUTPUT, stages=(Stage.FINISH,)
+            name="pii", answer=Entities, subject=Subject.ANSWER, stages=(Stage.FINISH,)
         )
         rule = Rule("mask_pii", when=L("pii").is_true, then=Mask(), mode=mode)
         return ResolvedPolicy(

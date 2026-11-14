@@ -65,7 +65,7 @@ class TestMasksThatCannotPoint:
         assert (await closed_turn(guard)).outcome == "allowed"
 
     async def test_an_answer_that_cannot_be_masked_is_withheld(self):
-        name = masking_policy("test-no-spans-out", found_without_spans, subject=Subject.OUTPUT)
+        name = masking_policy("test-no-spans-out", found_without_spans, subject=Subject.ANSWER)
         guard = await start(name)
         finished = await guard.finish("Ask Jan.")
         assert finished.blocked and finished.text == str(Block.DEFAULT_MESSAGE)
@@ -146,7 +146,7 @@ def test_a_span_across_question_and_answer_masks_both_sides():
     lens = JudgeLens(name="who", answer=Entities, subject=Subject.EXCHANGE)
     # "ask Jan" + "\n\n" + "Jansen here": one name across the blank line.
     found = Answered(lens, Stage.FINISH, Answer(value=["Jan Jansen"], spans=[TextSpan(start=4, end=15)]))
-    question = spans_for([found], {"who"}, Subject.INPUT, "ask Jan")
-    answer = spans_for([found], {"who"}, Subject.OUTPUT, "ask Jan")
+    question = spans_for([found], {"who"}, Subject.QUESTION, "ask Jan")
+    answer = spans_for([found], {"who"}, Subject.ANSWER, "ask Jan")
     assert [(s.start, s.end) for s in question] == [(4, 7)]
     assert [(s.start, s.end) for s in answer] == [(0, 6)]

@@ -323,7 +323,7 @@ class TestCheckLens:
         assert (await answer(lens, view("4"))).value is False
 
     async def test_a_validator_may_read_the_turn(self):
-        lens = CheckLens(name="short", subject=Subject.OUTPUT, validators=[short_answers_only])
+        lens = CheckLens(name="short", subject=Subject.ANSWER, validators=[short_answers_only])
         assert (await answer(lens, view(output="a long answer"))).value is True
         assert (await answer(lens, view(output="ok"))).value is False
 

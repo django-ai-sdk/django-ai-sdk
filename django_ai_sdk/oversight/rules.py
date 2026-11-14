@@ -2,7 +2,7 @@
 
     Rule(
         "injection_in_question",
-        when=L("prompt_injection").is_true & L("prompt_injection").confident(0.9),
+        when=L("injection_question").is_true & L("injection_question").confident(0.9),
         then=Block("I can't help with that request."),
         mode=Mode.ENFORCE,
     )
@@ -12,7 +12,7 @@ so its false-positive rate is known before it can block anyone.
 
 Conditions are written in Python, stored and edited as JSON:
 
-    L("prompt_injection").is_true & (L("toxicity") > 0.8)
+    L("injection_question").is_true & (L("toxicity") > 0.8)
     L("pii").contains("bsn") | L("topic").in_({"hr", "legal"})
     ~L("grounded").is_true & L("sources").confident(0.7)
 

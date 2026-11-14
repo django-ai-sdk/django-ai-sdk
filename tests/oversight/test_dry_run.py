@@ -72,7 +72,7 @@ class TestDryRun:
         # A rule on "not grounded" must not match when the reflect lens failed.
         name = policy(
             "dry-failed-reflect",
-            [FnLens(name="grounded", subject=Subject.OUTPUT, stages=[Stage.REFLECT], fn=broken)],
+            [FnLens(name="grounded", subject=Subject.ANSWER, stages=[Stage.REFLECT], fn=broken)],
             [Rule("ungrounded", when=~L("grounded").is_true, then=Alert(), mode=Mode.ENFORCE)],
         )
         result = await dry_run(name, input="hello", output="An answer.")

@@ -57,7 +57,7 @@ def slow_finish(seconds: float = 0.5) -> FnLens:
         await asyncio.sleep(seconds)
         return False
 
-    return FnLens(name="slow", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=slow)
+    return FnLens(name="slow", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=slow)
 
 
 @register_policy
@@ -72,7 +72,7 @@ class DurablePolicy(Policy):
         FnLens(name="banned", stages=[Stage.GATE], fn=lambda text, view: "forbidden" in view.input),
         FnLens(
             name="long",
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             stages=[Stage.FINISH],
             fn=lambda text, view: len(view.output) > 20,
         ),
@@ -122,7 +122,7 @@ class ReflectingPolicy(Policy):
     lenses = [  # noqa: RUF012
         FnLens(
             name="later",
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             stages=[Stage.REFLECT],
             fn=lambda text, view: "bad" in view.output,
         ),

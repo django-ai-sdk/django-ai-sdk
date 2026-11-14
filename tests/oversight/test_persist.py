@@ -62,7 +62,7 @@ class TestRecordingFailures:
     async def test_a_finish_that_broke_closed_is_recorded_blocked(self):
         name = policy(
             "fx-crash-finish",
-            [FnLens(name="f", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=yes)],
+            [FnLens(name="f", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=yes)],
             [Rule("r", when=L("f").is_true, then=Alert(), mode=ENFORCE)],
         )
         side = RuntimeError("bug")

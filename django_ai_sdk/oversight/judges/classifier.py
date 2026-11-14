@@ -275,7 +275,7 @@ class Classifier(Judge):
         """Build the state for `lens` from only the parts its subject covers."""
         subject = lens.subject
         state: dict[str, Any] = {}
-        if view.history and subject in {Subject.INPUT, Subject.EXCHANGE}:
+        if view.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
             state["history"] = [
                 {"role": h.role, "content": self.text(h.content, HISTORY_ITEM_CHARS)}
                 for h in view.history[-self.HISTORY :]
@@ -283,13 +283,13 @@ class Classifier(Judge):
         # Judge an answer against the question, as the model judge does.
         if subject is not Subject.TOOL_CALL or lens.reads_question:
             state["user_message"] = self.text(view.input, self.TEXT_CHARS)
-        if subject in {Subject.OUTPUT, Subject.EXCHANGE}:
+        if subject in {Subject.ANSWER, Subject.EXCHANGE}:
             state["assistant_reply"] = self.text(view.output, self.TEXT_CHARS)
         # An answer also sees earlier turns' sources. A search sees only its own.
         # Unlike the model judge, an exchange gets none: a classifier scores what it is
         # sent, so sources would turn an exchange score into a groundedness one.
-        if subject in {Subject.SOURCES, Subject.OUTPUT} and (
-            labelled := self.labelled_sources(view, earlier=subject is Subject.OUTPUT)
+        if subject in {Subject.SOURCES, Subject.ANSWER} and (
+            labelled := self.labelled_sources(view, earlier=subject is Subject.ANSWER)
         ):
             state["sources"] = [
                 {"id": label, "title": source.title, "content": source.content}

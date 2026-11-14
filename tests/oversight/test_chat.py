@@ -125,7 +125,7 @@ class TestChat:
             lenses = [
                 PatternLens(
                     name="danger",
-                    subject=Subject.OUTPUT,
+                    subject=Subject.ANSWER,
                     stages=[Stage.FINISH],
                     patterns=[r"\bself-destruct\b"],
                 )
@@ -158,7 +158,7 @@ class TestChat:
             lenses = [
                 PIILens(name="mail_in", stages=[Stage.GATE], kinds=["email"]),
                 PIILens(
-                    name="mail_out", subject=Subject.OUTPUT, stages=[Stage.FINISH], kinds=["email"]
+                    name="mail_out", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"]
                 ),
             ]
             rules = [

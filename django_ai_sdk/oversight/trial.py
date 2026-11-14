@@ -5,7 +5,7 @@
     result = await dry_run("support", input="Where is my refund?", output="It is on its way.")
     assert result.outcome == "allowed"
     assert result.blocked_stage == ""
-    result.stage("gate").answers["prompt_injection"].value  # what the gate's lens said
+    result.stage("gate").answers["injection_question"].value  # what the gate's lens said
 
 A dry run opens a real TurnGuard and runs the gate, each tool call and finish.
 It then runs reflect right away as the worker would, ignoring sample rates. The

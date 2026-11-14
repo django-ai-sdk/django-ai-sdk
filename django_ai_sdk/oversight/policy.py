@@ -85,7 +85,7 @@ class LensPack(list[Lens | type[Lens]]):
 
     List it in a policy's `lenses`, which takes its lenses in its place::
 
-        lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "pii_question"), Topic]
+        lenses = [LensPack(SecurityPack.lenses, "injection_question", "pii_question"), Topic]
 
     `overrides` set attributes on each lens taken, such as `stages`. The lenses are
     copies, so the pack keeps its own.
@@ -253,7 +253,7 @@ class ResolvedPolicy:
         reads = {
             "block": {lens.name for lens in finish},
             "mask": {
-                lens.name for lens in finish if lens.subject in {Subject.OUTPUT, Subject.EXCHANGE}
+                lens.name for lens in finish if lens.subject in {Subject.ANSWER, Subject.EXCHANGE}
             },
         }
         return sorted(

@@ -45,12 +45,12 @@ def held_policy(policy: str, withhold: bool) -> None:
         lenses = [
             FnLens(
                 name="withhold",
-                subject=Subject.OUTPUT,
+                subject=Subject.ANSWER,
                 stages=[Stage.FINISH],
                 fn=lambda text, v: withhold,
             ),
             PIILens(
-                name="mail_out", subject=Subject.OUTPUT, stages=[Stage.FINISH], kinds=["email"]
+                name="mail_out", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"]
             ),
         ]
         rules = [
@@ -138,7 +138,7 @@ class TestAutoHoldsTheAnswer:
             lenses = [
                 FnLens(
                     name="bad",
-                    subject=Subject.OUTPUT,
+                    subject=Subject.ANSWER,
                     stages=[Stage.FINISH],
                     fn=slow,
                 )

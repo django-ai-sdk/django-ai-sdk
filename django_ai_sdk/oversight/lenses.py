@@ -9,7 +9,7 @@
         validators = [validate_even]      # raise Violation("...") to say yes
 
     class PromptInjection(JudgeLens):     # judges, cheapest first
-        name = "prompt_injection"
+        name = "injection_question"
         judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier"), Maybe("judge")]
 
 The rules:
@@ -96,10 +96,10 @@ if TYPE_CHECKING:
 
 # The subjects each stage reads. A lens never runs at a stage that skips its subject.
 STAGE_SUBJECTS: dict[Stage, frozenset[Subject]] = {
-    Stage.GATE: frozenset({Subject.INPUT}),
+    Stage.GATE: frozenset({Subject.QUESTION}),
     Stage.TOOL: frozenset({Subject.TOOL_CALL}),
-    Stage.FINISH: frozenset({Subject.OUTPUT, Subject.EXCHANGE, Subject.SOURCES}),
-    Stage.REFLECT: frozenset({Subject.INPUT, Subject.OUTPUT, Subject.EXCHANGE, Subject.SOURCES}),
+    Stage.FINISH: frozenset({Subject.ANSWER, Subject.EXCHANGE, Subject.SOURCES}),
+    Stage.REFLECT: frozenset({Subject.QUESTION, Subject.ANSWER, Subject.EXCHANGE, Subject.SOURCES}),
 }
 # Default stages per subject: the first stage that reads it.
 DEFAULT_STAGES: dict[Subject, tuple[Stage, ...]] = {
@@ -332,7 +332,7 @@ class Lens:
     name: str = ""
     # Shown for the lens. Empty means its name.
     label: str = ""
-    subject: Subject = Subject.INPUT
+    subject: Subject = Subject.QUESTION
     # Empty means the default for the subject (see DEFAULT_STAGES).
     stages: tuple[Stage, ...] = ()
     # Fraction of turns the reflect stage judges, 0 to 1. Inline stages always run.
@@ -747,7 +747,7 @@ class RefusalLens(JudgeLens):
     question = "Does the assistant decline to answer?"
     yes = "Declines, deflects or says it cannot help."
     no = "Answers, even partly."
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     # The shipped patterns answer a plain refusal, so this works without a classifier.
     judges = [PatternJudge(REFUSAL_PATTERNS), Maybe("classifier")]  # noqa: RUF012
 

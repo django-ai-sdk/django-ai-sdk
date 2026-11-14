@@ -126,9 +126,9 @@ class LocalClassifier(Classifier):
 
     def question(self, lens: JudgeLens) -> dict[str, Any] | None:
         # Only one text at a time. Lenses that need sources or a tool call go elsewhere.
-        if lens.subject not in {Subject.INPUT, Subject.OUTPUT} or lens.needs_grounding:
+        if lens.subject not in {Subject.QUESTION, Subject.ANSWER} or lens.needs_grounding:
             return None
-        reads = "output" if lens.subject is Subject.OUTPUT else "input"
+        reads = "output" if lens.subject is Subject.ANSWER else "input"
         kind = lens.answer.kind
         if self.positive:
             # A fixed classifier only answers yes/no lenses.

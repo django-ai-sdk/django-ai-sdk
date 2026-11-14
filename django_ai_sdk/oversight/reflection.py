@@ -370,7 +370,7 @@ def _reflect_masks(
     does one whose lens failed, when the policy fails closed.
     """
     groups, unpointed = collect_masks(
-        matched, answered, subject=Subject.OUTPUT, view=view, closed=closed
+        matched, answered, subject=Subject.ANSWER, view=view, closed=closed
     )
     whole = [TextSpan(start=0, end=len(view.output), label="withheld")]
     for match, mask in unpointed:
@@ -411,7 +411,7 @@ def _judgeable(
     """
     if lens.subject is Subject.TOOL_CALL:
         return False
-    if not answered and lens.subject in {Subject.OUTPUT, Subject.EXCHANGE}:
+    if not answered and lens.subject in {Subject.ANSWER, Subject.EXCHANGE}:
         return False
     if has_text:
         return True

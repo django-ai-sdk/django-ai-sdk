@@ -89,7 +89,7 @@ class GuardPolicy(Policy):
             patterns=[r"ignore (all )?previous instructions"],
         ),
         PIILens(name="pii", stages=[Stage.GATE]),
-        PIILens(name="pii_out", subject=Subject.OUTPUT, stages=[Stage.FINISH]),
+        PIILens(name="pii_out", subject=Subject.ANSWER, stages=[Stage.FINISH]),
         JudgeLens(
             name="topic",
             answer=Choice,
@@ -99,7 +99,7 @@ class GuardPolicy(Policy):
         ),
         PatternLens(
             name="danger",
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             stages=[Stage.FINISH],
             patterns=[r"\bself-destruct\b"],
         ),
@@ -107,7 +107,7 @@ class GuardPolicy(Policy):
         FnLens(
             name="length",
             answer=Score,
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             stages=[Stage.REFLECT],
             fn=lambda text, v: min(1.0, len(v.output) / 100),
         ),
@@ -138,10 +138,10 @@ class MaskingPolicy(Policy):
     lenses = [
         SecretsLens(name="key_in", stages=[Stage.GATE]),
         PIILens(name="mail_in", stages=[Stage.GATE], kinds=["email"]),
-        SecretsLens(name="key_out", subject=Subject.OUTPUT, stages=[Stage.FINISH]),
-        PIILens(name="mail_live", subject=Subject.OUTPUT, stages=[Stage.FINISH], kinds=["email"]),
+        SecretsLens(name="key_out", subject=Subject.ANSWER, stages=[Stage.FINISH]),
+        PIILens(name="mail_live", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"]),
         PIILens(name="mail_both", subject=Subject.EXCHANGE, stages=[Stage.FINISH], kinds=["iban"]),
-        PIILens(name="mail_later", subject=Subject.OUTPUT, stages=[Stage.REFLECT], kinds=["phone"]),
+        PIILens(name="mail_later", subject=Subject.ANSWER, stages=[Stage.REFLECT], kinds=["phone"]),
     ]
     rules = [
         Rule(f"mask_{name}", when=L(name).is_true, then=Mask(), mode=ENFORCE)
@@ -152,7 +152,7 @@ class MaskingPolicy(Policy):
 class WithholdPolicy(Policy):
     name = "test-withhold"
     lenses = [
-        FnLens(name="bad", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=lambda text, v: True)
+        FnLens(name="bad", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=lambda text, v: True)
     ]
     rules = [Rule("withhold", when=L("bad").is_true, then=Block("No."), mode=ENFORCE)]
 
@@ -179,10 +179,10 @@ class RunPolicy(Policy):
             patterns=[r"ignore (all )?previous instructions"],
         ),
         PIILens(name="pii", stages=[Stage.GATE]),
-        PIILens(name="pii_out", subject=Subject.OUTPUT, stages=[Stage.FINISH]),
+        PIILens(name="pii_out", subject=Subject.ANSWER, stages=[Stage.FINISH]),
         PatternLens(
             name="refuses",
-            subject=Subject.OUTPUT,
+            subject=Subject.ANSWER,
             stages=[Stage.FINISH],
             patterns=[r"\bclassified\b"],
         ),
@@ -208,9 +208,9 @@ def policy(name: str, lenses: list, rules: list, **attrs: Any) -> str:
     return name
 
 
-def masking_policy(name: str, fn: Any, *, subject: Subject = Subject.INPUT) -> str:
+def masking_policy(name: str, fn: Any, *, subject: Subject = Subject.QUESTION) -> str:
     """A policy `name` that masks what `fn(text, view)` finds, at the gate or at finish."""
-    stage = Stage.GATE if subject is Subject.INPUT else Stage.FINISH
+    stage = Stage.GATE if subject is Subject.QUESTION else Stage.FINISH
     lens = FnLens(name="names", answer=Entities, subject=subject, stages=[stage], fn=fn)
     rule = Rule("mask_names", when=L("names").is_true, then=Mask(), mode=ENFORCE)
     return policy(name, [lens], [rule])

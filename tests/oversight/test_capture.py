@@ -104,11 +104,11 @@ class PrivacyPolicy(Policy):
     lenses = [  # noqa: RUF012
         PIILens(name="pii_in", stages=[Stage.GATE], kinds=[*DEFAULT_PII_KINDS, "bsn"]),
         FnLens(name="who", answer=Entities, stages=[Stage.GATE], fn=_naming_judge),
-        FnLens(name="judged", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=_judged),
+        FnLens(name="judged", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_judged),
         FnLens(
-            name="taken", answer=Entities, subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=_taken
+            name="taken", answer=Entities, subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_taken
         ),
-        FnLens(name="later", subject=Subject.OUTPUT, stages=[Stage.REFLECT], fn=_later),
+        FnLens(name="later", subject=Subject.ANSWER, stages=[Stage.REFLECT], fn=_later),
     ]
     rules = [  # noqa: RUF012
         # Report mode: nothing is masked by a rule, so capture alone decides.

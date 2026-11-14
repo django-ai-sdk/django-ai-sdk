@@ -43,7 +43,7 @@ class TestReflect:
                 FnLens(
                     name="names",
                     answer=Entities,
-                    subject=Subject.OUTPUT,
+                    subject=Subject.ANSWER,
                     stages=[Stage.REFLECT],
                     fn=answerer,
                 )

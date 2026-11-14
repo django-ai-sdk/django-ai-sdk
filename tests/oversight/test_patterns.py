@@ -94,7 +94,7 @@ class TestInjectionWithoutAModel:
 
         return policy(
             "fc-readme",
-            LensPack(SecurityPack.lenses, "prompt_injection"),
+            LensPack(SecurityPack.lenses, "injection_question"),
             RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE),
         )
 

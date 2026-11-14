@@ -18,7 +18,7 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 | Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
 | Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `Maybe` (an alias a lens skips while `JUDGES` does not define it), `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
-| Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
+| Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmQuestion`, `HarmAnswer`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
 | Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
 | Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
 | Hooks | `OversightHook`, `GateQuestionHook`, `StopClosedTurnHook`, `LimitToolChoiceHook`, `JudgeToolCallHook`, `MaskToolResultHook`, `RecordUsageHook`, `JudgeAnswerHook` |
@@ -94,7 +94,7 @@ Every lens:
 | `name` | required | Key within the policy. Answers key on it, so renaming starts a new series. |
 | `label` | `""` | A readable name; defaults to the name. |
 | `answer` | per kind | `Flag`, `Choice`, `Score` or `Entities` (below), or its name in JSON. |
-| `subject` | `Subject.INPUT` | `input`, `output`, `exchange`, `sources`, `tool_call`. |
+| `subject` | `Subject.QUESTION` | `input`, `output`, `exchange`, `sources`, `tool_call`. |
 | `stages` | by subject | Any of `gate`, `tool`, `finish`, `reflect`. Empty: where the subject is first there to judge (`lenses.DEFAULT_STAGES`): the question at `gate`, a tool call at `tool`, the answer, the exchange and the sources at `finish`. Gate reads the question, `tool` tool calls, finish the answer, the exchange and the sources, reflect all but tool calls (`lenses.STAGE_SUBJECTS`). |
 | `sample` | `1.0` | Share of turns the reflect stage judges. Inline stages never sample. |
 | `enabled` | `True` | Off: the lens never runs. |
@@ -202,7 +202,7 @@ class Policy:
 
 A policy is registered by `@register_policy` (in any module; an installed app's `oversight.py` is imported on startup), or by naming the class on an agent (`oversight = SupportPolicy`) or in `run(oversight=...)`. A policy that fails validation is not registered (`ai_sdk.oversight.E001`); its agents' turns are blocked. Two classes that declare one name are an error (`ai_sdk.oversight.E010`): the first one registered keeps the name.
 
-`LensPack(lenses, *names, **overrides)` and `RulePack(rules, *names, mode=None, notice=None)` take single lenses or rules out of a pack instead of extending it whole: `LensPack(SecurityPack.lenses, "prompt_injection")`, `RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE)`. With no names they take every one. They come back in the order named, as copies, so `overrides` (lens attributes such as `stages`), `mode` and `notice` leave the pack's own alone. An unknown name, or an override a lens does not have, raises `ImproperlyConfigured`. When a policy class is built it flattens its `lenses` and `rules` one level: a pack, or a list such as another policy's `rules`, gives its items in its place.
+`LensPack(lenses, *names, **overrides)` and `RulePack(rules, *names, mode=None, notice=None)` take single lenses or rules out of a pack instead of extending it whole: `LensPack(SecurityPack.lenses, "injection_question")`, `RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE)`. With no names they take every one. They come back in the order named, as copies, so `overrides` (lens attributes such as `stages`), `mode` and `notice` leave the pack's own alone. An unknown name, or an override a lens does not have, raises `ImproperlyConfigured`. When a policy class is built it flattens its `lenses` and `rules` one level: a pack, or a list such as another policy's `rules`, gives its items in its place.
 
 `ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached until settings change or a policy registers; `invalidate_policy(name)` clears it and every policy that extends it.
 
@@ -216,14 +216,14 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 
 | Pack | Lens | Kind, answer, subject | Stage | Answered by |
 | --- | --- | --- | --- | --- |
-| `security` | `prompt_injection` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `Maybe("classifier")` |
+| `security` | `injection_question` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `Maybe("classifier")` |
 | | `pii_question` | pattern, Entities, input | gate | `PIILens` |
 | | `secrets_question` | pattern, Entities, input | gate | `SecretsLens` |
 | | `secrets_tool_call` | pattern, Entities, tool call | tool | `SecretsLens` |
 | | `pii_tool_call` | pattern, Entities, tool call | tool | `PIILens` |
 | | `pii_answer` | pattern, Entities, output | finish | `PIILens` |
-| | `exfiltration` | pattern, Entities, output | finish | `EXFILTRATION_PATTERNS`: Markdown images, links and reference links, and HTML images, that carry data in their URL's query |
-| `safety` | `self_harm` | judge, Flag, input | gate | `Maybe("classifier")` |
+| | `exfiltration_answer` | pattern, Entities, output | finish | `EXFILTRATION_PATTERNS`: Markdown images, links and reference links, and HTML images, that carry data in their URL's query |
+| `safety` | `self_harm_question` | judge, Flag, input | gate | `Maybe("classifier")` |
 | | `harm_question` | judge, Score, input | gate | `Maybe("classifier")` |
 | | `harm_answer` | judge, Score, output | finish | `Maybe("classifier")`, `Maybe("judge")` |
 | `quality` | `context_relevance` | judge, Score, sources | reflect | `Maybe("classifier")` |

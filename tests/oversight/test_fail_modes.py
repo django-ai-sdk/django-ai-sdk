@@ -268,7 +268,7 @@ class TestFailModeAtEachStage:
             "fx-cross",
             [
                 gate_flag(broken),
-                FnLens(name="f", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=yes),
+                FnLens(name="f", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=yes),
             ],
             [Rule("r", when=L("g").is_true & L("f").is_true, then=Block("no"), mode=ENFORCE)],
         )

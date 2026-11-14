@@ -80,7 +80,7 @@ class ChildPolicy(Policy):
 @register_policy
 class PickedPolicy(Policy):
     name = "test-picked"
-    lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "secrets_question")]
+    lenses = [LensPack(SecurityPack.lenses, "injection_question", "secrets_question")]
     rules = [
         RulePack(SecurityPack.rules, "injection_in_question"),
         RulePack(SecurityPack.rules, "secrets_in_question", mode=Mode.ENFORCE),
@@ -171,7 +171,7 @@ class TestPolicies:
         # Each value names the policy that declared it.
         assert resolved.sources["rule:block_x"] == "test-parent"
         assert resolved.sources["lens:topic"] == "test-child"
-        assert build_policy("default").sources["lens:prompt_injection"] == "security"
+        assert build_policy("default").sources["lens:injection_question"] == "security"
         assert resolved.capture is Capture.MASKED
 
     def test_inherited_rules_start_in_report_mode(self):
@@ -197,7 +197,7 @@ class TestPolicies:
 
     def test_a_policy_picks_single_lenses_and_rules_from_a_pack(self):
         resolved = build_policy("test-picked")
-        assert list(resolved.lenses) == ["prompt_injection", "secrets_question"]
+        assert list(resolved.lenses) == ["injection_question", "secrets_question"]
         assert list(resolved.rules) == ["injection_in_question", "secrets_in_question"]
         assert resolved.rules["secrets_in_question"].mode is Mode.ENFORCE
         assert not get_invalid_policies().get("test-picked")
@@ -208,12 +208,12 @@ class TestPolicies:
         assert RulePack(SecurityPack.rules, "injection_in_question")[0] is not pack["injection_in_question"]
 
     def test_picking_an_unknown_name_says_what_there_is(self):
-        with pytest.raises(ImproperlyConfigured, match="prompt_injection"):
+        with pytest.raises(ImproperlyConfigured, match="injection_question"):
             LensPack(SecurityPack.lenses, "prompt_injektion")
 
     def test_mode_only_applies_to_rules(self):
         with pytest.raises(ImproperlyConfigured, match="mode"):
-            LensPack(SecurityPack.lenses, "prompt_injection", mode=Mode.ENFORCE)
+            LensPack(SecurityPack.lenses, "injection_question", mode=Mode.ENFORCE)
 
     def test_a_pack_without_names_takes_everything(self):
         assert [rule.name for rule in RulePack(SecurityPack.rules)] == [
@@ -238,13 +238,13 @@ class TestPolicies:
         ]
         assert [getattr(lens, "name", "") for lens in Nested.lenses] == [
             "pii_answer",
-            "prompt_injection",
+            "injection_question",
             "secrets_question",
         ]
 
     def test_the_packs_are_registered_and_resolve(self):
         resolved = build_policy("default")
-        assert {"prompt_injection", "pii_question", "groundedness", "self_harm"} <= set(
+        assert {"injection_question", "pii_question", "groundedness", "self_harm_question"} <= set(
             resolved.lenses
         )
         assert all(rule.mode is Mode.REPORT for rule in resolved.rules.values())
@@ -509,7 +509,7 @@ class TestAnswerChains:
 class TestDeclarations:
     def test_default_stages_follow_the_subject(self):
         assert JudgeLens(name="a").stages == (Stage.GATE,)
-        assert JudgeLens(name="b", subject=Subject.OUTPUT).stages == (Stage.FINISH,)
+        assert JudgeLens(name="b", subject=Subject.ANSWER).stages == (Stage.FINISH,)
         assert JudgeLens(name="c", subject=Subject.EXCHANGE).stages == (Stage.FINISH,)
         assert JudgeLens(name="d", subject=Subject.SOURCES).stages == (Stage.FINISH,)
         assert JudgeLens(name="e", subject=Subject.TOOL_CALL).stages == (Stage.TOOL,)
@@ -522,7 +522,7 @@ class TestDeclarations:
 
     def test_a_lens_at_a_stage_that_never_reads_its_subject_is_refused(self):
         misplaced = [
-            {"subject": Subject.OUTPUT, "stages": [Stage.TOOL]},
+            {"subject": Subject.ANSWER, "stages": [Stage.TOOL]},
             {"stages": [Stage.FINISH]},
             {"subject": Subject.TOOL_CALL, "stages": [Stage.REFLECT]},
         ]
@@ -530,7 +530,7 @@ class TestDeclarations:
             with pytest.raises(ImproperlyConfigured, match="never reads it"):
                 JudgeLens(name="a", judges=["judge"], **kwargs).validate()
         JudgeLens(
-            name="d", judges=["judge"], subject=Subject.OUTPUT, stages=[Stage.REFLECT]
+            name="d", judges=["judge"], subject=Subject.ANSWER, stages=[Stage.REFLECT]
         ).validate()
         JudgeLens(name="e", judges=["judge"], subject=Subject.TOOL_CALL).validate()
 
@@ -561,7 +561,7 @@ class TestDeclarations:
                 Answer(value=["person"], spans=[TextSpan(start=22, end=25, label="person")]),
             ),
         ]
-        assert found_literals(answered, {Subject.INPUT: text}) == {"Jan": "person"}
+        assert found_literals(answered, {Subject.QUESTION: text}) == {"Jan": "person"}
 
     def test_a_mask_over_a_tool_call_lens_is_refused(self):
         from django_ai_sdk.oversight.policy import validate_rule

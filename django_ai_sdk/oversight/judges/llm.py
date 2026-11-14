@@ -79,14 +79,14 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
     """
     parts: list[str] = []
     subject = lens.subject
-    if view.history and subject in {Subject.INPUT, Subject.EXCHANGE}:
+    if view.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
         recent = view.history[-HISTORY_MESSAGES:]
         lines = "\n".join(f"{h.role}: {_evidence(h.content, HISTORY_ITEM_CHARS)}" for h in recent)
         parts.append(f"<history>\n{lines}\n</history>")
-    if subject in {Subject.INPUT, Subject.EXCHANGE, Subject.SOURCES, Subject.OUTPUT}:
+    if subject in {Subject.QUESTION, Subject.EXCHANGE, Subject.SOURCES, Subject.ANSWER}:
         parts.append(f"<question>\n{_evidence(view.input, INPUT_CHARS)}\n</question>")
     # An answer also sees earlier turns' sources. A search sees only its own.
-    if subject in {Subject.SOURCES, Subject.OUTPUT, Subject.EXCHANGE} and (
+    if subject in {Subject.SOURCES, Subject.ANSWER, Subject.EXCHANGE} and (
         evidence := view.grounding(earlier=subject is not Subject.SOURCES)
     ):
         rendered = "\n".join(
@@ -95,7 +95,7 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
             for n, s in enumerate(evidence[:MAX_SOURCES], start=1)
         )
         parts.append(f"<sources>\n{rendered}\n</sources>")
-    if subject in {Subject.OUTPUT, Subject.EXCHANGE}:
+    if subject in {Subject.ANSWER, Subject.EXCHANGE}:
         parts.append(f"<answer>\n{_evidence(view.output, OUTPUT_CHARS)}\n</answer>")
     if subject is Subject.TOOL_CALL and view.tool_call:
         call = view.tool_call

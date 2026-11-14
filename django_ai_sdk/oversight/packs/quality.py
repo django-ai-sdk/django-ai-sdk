@@ -50,7 +50,7 @@ class Groundedness(JudgeLens):
         "pleasantries neither help nor hurt."
     )
     low, high = "unsupported", "fully supported"
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     stages = (Stage.REFLECT,)
     needs_grounding = True
     judges = [Maybe("classifier")]  # noqa: RUF012
@@ -62,7 +62,7 @@ class TakenFrom(JudgeLens):
     label = "Taken from"
     question = "Which of the retrieved sources is the answer taken from?"
     guidance = "Name each source a fact in the answer comes from; none when it rests on none."
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     stages = (Stage.REFLECT,)
     # The labels are the turn's sources. A classifier rates each one.
     per_source = True

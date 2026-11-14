@@ -103,10 +103,10 @@ async def judge_question(guard: TurnGuard) -> StageResult:
         return _block_question(guard, result, str(TOO_LONG_MESSAGE))
     try:
         matched = await judge_stage(
-            guard, Stage.GATE, subjects={Subject.INPUT}, deadline=deadline_ms(Stage.GATE)
+            guard, Stage.GATE, subjects={Subject.QUESTION}, deadline=deadline_ms(Stage.GATE)
         )
         guard.matched.extend(matched)
-        masks = guard.masks.mask_groups(matched, Subject.INPUT)
+        masks = guard.masks.mask_groups(matched, Subject.QUESTION)
         block = first_block_message(matched)
         # Tools taken away by judge_history stay taken away.
         guard.restrict = restricted_tools(matched, guard.restrict)
@@ -166,7 +166,7 @@ async def judge_history(
     guard.set_history(messages)
     if guard.policy_unloaded:
         return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
-    lenses = guard.resolved.active_lenses(Stage.GATE, Subject.INPUT)
+    lenses = guard.resolved.active_lenses(Stage.GATE, Subject.QUESTION)
     items = _history_items(messages, history=history) if lenses else []
     if not items:
         return result
@@ -315,11 +315,11 @@ async def judge_answer(guard: TurnGuard, output: str | None) -> StageResult:
         matched = await judge_stage(
             guard,
             Stage.FINISH,
-            subjects={Subject.OUTPUT, Subject.EXCHANGE, Subject.SOURCES},
+            subjects={Subject.ANSWER, Subject.EXCHANGE, Subject.SOURCES},
             deadline=deadline_ms(Stage.FINISH),
         )
         guard.matched.extend(matched)
-        masks = guard.masks.mask_groups(matched, Subject.OUTPUT)
+        masks = guard.masks.mask_groups(matched, Subject.ANSWER)
         block = first_block_message(matched)
         if block is not None:
             result.block(block)

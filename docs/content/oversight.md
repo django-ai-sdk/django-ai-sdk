@@ -200,8 +200,8 @@ from django_ai_sdk.oversight import (
 class SupportPolicy(Policy):
     name = "support"
     lenses = [
-        LensPack(SecurityPack.lenses, "prompt_injection"),
-        PIILens(name="pii", subject=Subject.OUTPUT, stages=(Stage.FINISH,)),
+        LensPack(SecurityPack.lenses, "injection_question"),
+        PIILens(name="pii", subject=Subject.ANSWER, stages=(Stage.FINISH,)),
     ]
     rules = [
         RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE),
@@ -393,7 +393,7 @@ class SupportPolicy(Policy):
     lenses = [Topic]
     rules = [
         Rule("hr_goes_to_people", when=L("topic") == "hr", then=Queue("hr")),
-        Rule("injection_in_question", when=L("prompt_injection").is_true, then=Block(), mode=Mode.ENFORCE),
+        Rule("injection_in_question", when=L("injection_question").is_true, then=Block(), mode=Mode.ENFORCE),
     ]
 ```
 
@@ -420,7 +420,7 @@ def even_amount(text):
 
 class EvenAmount(CheckLens):             # plain Python
     name = "even_amount"
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     validators = [even_amount]           # each raises Violation to say yes
 ```
 
@@ -439,7 +439,7 @@ from django_ai_sdk.oversight import LensPack, Mode, Policy, QualityPack, RulePac
 class SupportPolicy(Policy):
     name = "support"
     lenses = [
-        LensPack(SecurityPack.lenses, "prompt_injection", "pii_question", "secrets_question", "pii_answer"),
+        LensPack(SecurityPack.lenses, "injection_question", "pii_question", "secrets_question", "pii_answer"),
         LensPack(QualityPack.lenses, "groundedness"),
         Topic,
     ]

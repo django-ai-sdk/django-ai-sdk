@@ -173,8 +173,8 @@ def turn_literals(guard: TurnGuard) -> dict[str, str]:
     said_output = guard.original_output or view.output
     texts = {
         # Gate lenses read the question before the gate masked it.
-        Subject.INPUT: guard.original_input or view.input,
-        Subject.OUTPUT: said_output,
+        Subject.QUESTION: guard.original_input or view.input,
+        Subject.ANSWER: said_output,
         Subject.EXCHANGE: f"{view.input}\n\n{said_output}",
         Subject.SOURCES: "\n\n".join(s.content for s in view.fresh_sources()),
     }
