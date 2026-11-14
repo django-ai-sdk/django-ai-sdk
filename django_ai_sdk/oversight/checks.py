@@ -104,7 +104,8 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
         ),
         (
             'a dict by alias of {"class": ..., **kwargs} dicts, Judge instances or another'
-            ' alias\'s name, such as {"judge": {"class": "LLMJudge"}}'
+            " alias's name, where \"class\" is a built-in judge's name or a dotted path, such as"
+            ' {"judge": {"class": "LLMJudge"}}'
         ),
     ),
     "DEADLINE_MS": (
@@ -126,8 +127,9 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
     "NOTIFIERS": (
         lambda value: isinstance(value, list | tuple),
         (
-            'a list of {"class": "<dotted path>", **kwargs} dicts, Notifier instances or dotted'
-            ' paths, such as ["django_ai_sdk.oversight.notifiers.LogNotifier"]'
+            'a list of {"class": ..., **kwargs} dicts, Notifier instances or class names,'
+            ' where a class name or "class" is a built-in notifier\'s name or a dotted path, such as'
+            ' ["LogNotifier", {"class": "WebhookNotifier", "url": ...}]'
         ),
     ),
     "RUNTIME_CACHE_SECONDS": (

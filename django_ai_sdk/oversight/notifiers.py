@@ -14,10 +14,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from django.utils.module_loading import import_string
-
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.conf import setting
+from django_ai_sdk.oversight.conf import build_configured, setting
 from django_ai_sdk.oversight.rules import Notify
 
 if TYPE_CHECKING:
@@ -133,13 +131,7 @@ def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
     notifiers: list[Notifier] = []
     for spec in setting("NOTIFIERS") or []:
         try:
-            if isinstance(spec, Notifier):
-                notifier = spec
-            elif isinstance(spec, str):
-                notifier = import_string(spec)()
-            else:
-                config = dict(spec)
-                notifier = import_string(config.pop("class"))(**config)
+            notifier = build_configured(spec, Notifier, __name__)
         except Exception:
             logger.exception("Oversight notifier {!r} could not be built", spec)
             continue

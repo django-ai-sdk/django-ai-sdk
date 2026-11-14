@@ -619,6 +619,20 @@ class TestStableEventIds:
             "severity": "warning",
         }
 
+    def test_a_built_in_notifier_is_named_by_its_class_name(self):
+        from django_ai_sdk.oversight.notifiers import (
+            LogNotifier,
+            WebhookNotifier,
+            configured_notifiers,
+        )
+
+        url = "https://example.test/hook"
+        notifiers = ["LogNotifier", {"class": "WebhookNotifier", "url": url}]
+        with override_settings(AI_SDK_OVERSIGHT={"NOTIFIERS": notifiers}):
+            log, hook = configured_notifiers()
+        assert isinstance(log, LogNotifier)
+        assert (type(hook), hook.url) == (WebhookNotifier, url)
+
 
 class TestTaskBackendCheck:
     def ids(self) -> list[str]:

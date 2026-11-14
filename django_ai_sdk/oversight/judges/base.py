@@ -14,10 +14,9 @@ from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.module_loading import import_string
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.conf import setting
+from django_ai_sdk.oversight.conf import build_configured, setting
 from django_ai_sdk.oversight.patterns import mask_secrets
 from django_ai_sdk.oversight.types import Answer, Subject
 from django_ai_sdk.utils import resolve_setting
@@ -252,7 +251,7 @@ def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
     if isinstance(spec, str):
         return _build_alias(spec, alias_table())
     if isinstance(spec, dict):
-        return _from_config(spec)
+        return build_configured(spec, Judge, "django_ai_sdk.oversight.judges")
     raise ImproperlyConfigured(f"{spec!r} is not a judge, an alias or a config")
 
 
@@ -282,17 +281,3 @@ def _build_alias(alias: str, aliases: Mapping[str, Any]) -> Judge:
         # Name it after the alias the lens used. Each answer records the model anyway.
         judge.name = alias
     return judge
-
-
-def _from_config(config: dict[str, Any]) -> Judge:
-    config = dict(config)
-    path = config.pop("class", "")
-    if not path:
-        raise ImproperlyConfigured(f"Judge config {config!r} has no 'class'")
-    if isinstance(path, str) and "." not in path:
-        # A bare name like "LLMJudge" means one of the SDK's own judges.
-        path = f"django_ai_sdk.oversight.judges.{path}"
-    cls = import_string(path) if isinstance(path, str) else path
-    if not (isinstance(cls, type) and issubclass(cls, Judge)):
-        raise ImproperlyConfigured(f"{path!r} is not a Judge subclass")
-    return cls(**config)

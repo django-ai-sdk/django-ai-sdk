@@ -7,6 +7,7 @@ from typing import Any
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.module_loading import import_string
 
 from django_ai_sdk.oversight.types import Capture
 
@@ -33,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "CLIENT_DETAIL": "actions",
     "FAIL_MODE": "closed",
     "RETENTION": {"content": 90, "metadata": 730},
-    # Dotted paths or Notifier instances.
+    # Notifiers as JUDGES names its judges: ["LogNotifier"].
     "NOTIFIERS": [],
     # How long each process caches authored policies. 0 reads them every turn.
     "RUNTIME_CACHE_SECONDS": 10,
@@ -59,6 +60,28 @@ def setting_from(name: str, defaults: dict[str, Any], key: str) -> Any:
 
 def setting(key: str) -> Any:
     return setting_from("AI_SDK_OVERSIGHT", DEFAULTS, key)
+
+
+def build_configured[T](spec: Any, base: type[T], package: str) -> T:
+    """A `base` from an instance, a class name, or {"class": class, **kwargs}.
+
+    A class name is a dotted path, or a bare name of one of `package`'s own classes.
+    """
+    if isinstance(spec, base):
+        return spec
+    config = {"class": spec} if isinstance(spec, str) else spec
+    if not isinstance(config, dict):
+        raise ImproperlyConfigured(f"{spec!r} is not a {base.__name__}, a class or a config")
+    config = dict(config)
+    path = config.pop("class", "")
+    if not path:
+        raise ImproperlyConfigured(f"{base.__name__} config {config!r} has no 'class'")
+    if isinstance(path, str) and "." not in path:
+        path = f"{package}.{path}"
+    cls = import_string(path) if isinstance(path, str) else path
+    if not (isinstance(cls, type) and issubclass(cls, base)):
+        raise ImproperlyConfigured(f"{path!r} is not a {base.__name__} subclass")
+    return cls(**config)
 
 
 def is_retention(value: Any) -> bool:
