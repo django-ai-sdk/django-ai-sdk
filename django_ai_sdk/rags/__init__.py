@@ -37,9 +37,6 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
-    "RAGBase",
-    "RAGConfig",
-    "RAGProvider",
     "BM25QueryExpanderRAG",
     "BM25QueryExpanderRAGConfig",
     "ChromaDBQueryExpanderRAG",
@@ -49,6 +46,9 @@ __all__ = [
     "MultiQueryQdrantHybridRetriever",
     "QdrantBM25HybridRAG",
     "QdrantBM25HybridRAGConfig",
+    "RAGBase",
+    "RAGConfig",
+    "RAGProvider",
     "RagDocument",
     "ToolSpec",
     "queryset_to_rag_documents",

@@ -128,7 +128,7 @@ class TestAgentRunToolsDefault:
         assert result == "done"
         tools.assert_awaited_once()
         assert agent_cls.call_args.kwargs["tools"] == [tool]
-        # run_agent installs oversight on the agent it built (see test_haystack_native).
+        # run_with_oversight installs oversight on the agent it built (see test_haystack_native).
         installs_as_is.assert_called_once_with(fake_agent)
         # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
         # generic constant.

@@ -1,11 +1,11 @@
 """The oversight hooks a Haystack Agent runs, and the TurnRequest they read and fill in.
 
-    before_run   GateHook           judge the history and question; mask them, or refuse the run
-    before_llm   OversightStopHook  stop a run whose turn has closed; offer only the tools it allows
-    before_tool  OversightToolHook  refuse a tool call the policy says no to
-    after_tool   OversightToolResultHook  mask a tool result before the model reads it
-    after_run    RecordUsageHook    add the run's model and token usage to its turn
-    after_run    FinishHook         give the sources to the turn; judge the answer, pass, mask or withhold it
+    before_run   GateQuestionHook       judge the history and question; mask them, or refuse the run
+    before_llm   EnforceTurnLimitsHook  stop a run whose turn has closed; offer only the tools it allows
+    before_tool  JudgeToolCallsHook     refuse a tool call the policy says no to
+    after_tool   MaskToolResultsHook    mask a tool result before the model reads it
+    after_run    RecordUsageHook        add the run's model and token usage to its turn
+    after_run    JudgeAnswerHook        give the sources to the turn; judge the answer, pass, mask or withhold it
 
 The run's `hook_context` carries the `TurnRequest`, so the hooks read and fill in
 the same object the caller holds. Each hook does nothing when the turn's policy
@@ -71,7 +71,7 @@ REQUEST_KEY = "django_ai_sdk.oversight"
 class TurnRequest:
     """A run's turn: what the caller wants of it, then what oversight decided.
 
-    Pass it to `run_agent(request=...)`. Once the run started, `guard` is the
+    Pass it to `run_with_oversight(request=...)`. Once the run started, `guard` is the
     turn it opened, or None when it joined an outer turn or has no policy.
     """
 
@@ -153,7 +153,7 @@ class OversightHook:
         return default_from_dict(cls, data)
 
 
-class OversightStopHook(OversightHook):
+class EnforceTurnLimitsHook(OversightHook):
     """Before each model call: stop a run whose turn has closed, and offer only the tools it allows."""
 
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
@@ -176,7 +176,7 @@ class OversightStopHook(OversightHook):
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
-class GateHook(OversightHook):
+class GateQuestionHook(OversightHook):
     """Judge the run's history and question, then mask them in place or refuse the run.
 
     The history is every earlier user and assistant message, judged unless the
@@ -274,7 +274,7 @@ SKIPPED = gettext_lazy(
 UNGUARDABLE = gettext_lazy("This tool cannot be checked in a sync run, so it is not run.")
 
 
-class OversightToolHook(OversightHook):
+class JudgeToolCallsHook(OversightHook):
     """Refuse tool calls the turn's policy says no to, before they run."""
 
     allowed_hook_points = ["before_tool"]  # noqa: RUF012
@@ -367,7 +367,7 @@ def _refuse_tool_step(
     )
 
 
-class OversightToolResultHook(OversightHook):
+class MaskToolResultsHook(OversightHook):
     """Mask tool results before the model reads them, like the gate masks the question.
 
     A tool can return data the gate would hide, such as a record number or a
@@ -479,7 +479,7 @@ class RecordUsageHook(OversightHook):
         self.run(state)
 
 
-class FinishHook(OversightHook):
+class JudgeAnswerHook(OversightHook):
     """Judge the answer of a run with a turn of its own: pass, mask or withhold it.
 
     The citation sources are masked and given to the turn first, so finish can

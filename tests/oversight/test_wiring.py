@@ -28,10 +28,10 @@ from django_ai_sdk.oversight.guard import TurnGuard, guarding
 from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 from django_ai_sdk.oversight.plugin import merge_oversight_hooks
 from django_ai_sdk.oversight.plugin.hooks import (
-    FinishHook,
-    GateHook,
-    OversightToolHook,
-    OversightToolResultHook,
+    JudgeAnswerHook,
+    GateQuestionHook,
+    JudgeToolCallsHook,
+    MaskToolResultsHook,
     masked_result,
 )
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
@@ -64,25 +64,25 @@ class TestHooks:
         built = ToolAgent(config, generator=MockChatGenerator(responses=["x"])).pipeline()
         hooks = merge_oversight_hooks(merge_oversight_hooks(built.get_component("agent").hooks))
         before, after = hooks["before_tool"], hooks["after_tool"]
-        assert isinstance(before[0], OversightToolHook)
-        assert sum(isinstance(h, OversightToolHook) for h in before) == 1
+        assert isinstance(before[0], JudgeToolCallsHook)
+        assert sum(isinstance(h, JudgeToolCallsHook) for h in before) == 1
         assert sum(isinstance(h, ToolCallBudgetHook) for h in before) == 1
         [limit] = [h for h in after if isinstance(h, ToolOutputLimitHook)]
         assert limit.max_chars == 1234
         # Masked before the cut, so the stream and the hook mask the same text.
-        [mask] = [h for h in after if isinstance(h, OversightToolResultHook)]
+        [mask] = [h for h in after if isinstance(h, MaskToolResultsHook)]
         assert after.index(mask) < after.index(limit)
-        assert isinstance(hooks["before_run"][0], GateHook)
-        assert isinstance(hooks["after_run"][-1], FinishHook)
+        assert isinstance(hooks["before_run"][0], GateQuestionHook)
+        assert isinstance(hooks["after_run"][-1], JudgeAnswerHook)
 
     def test_any_haystack_agent_gets_the_oversight_hooks_when_it_runs(self):
-        # Built by hand, not through ToolAgent: run_agent still adds every check.
+        # Built by hand, not through ToolAgent: run_with_oversight still adds every check.
         hooks = merge_oversight_hooks(HaystackAgent(chat_generator=MockChatGenerator(responses=["x"])).hooks)
-        assert any(isinstance(h, OversightToolHook) for h in hooks["before_tool"])
-        assert any(isinstance(h, OversightToolResultHook) for h in hooks["after_tool"])
-        # run_agent is the one place they join: not default_hooks.
+        assert any(isinstance(h, JudgeToolCallsHook) for h in hooks["before_tool"])
+        assert any(isinstance(h, MaskToolResultsHook) for h in hooks["after_tool"])
+        # run_with_oversight is the one place they join: not default_hooks.
         assert not any(
-            isinstance(h, OversightToolHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
+            isinstance(h, JudgeToolCallsHook) for h in default_hooks(agent_with("x")[0])["before_tool"]
         )
 
 
@@ -102,12 +102,12 @@ class TestToolCallsInTheTurn:
         state = State(schema={"messages": {"type": list[HaystackChatMessage]}})
         state.set("messages", [HaystackChatMessage.from_assistant(tool_calls=[call])])
         with guarding(guard):
-            await OversightToolHook().run_async(state)
+            await JudgeToolCallsHook().run_async(state)
             state.set(
                 "messages",
                 [HaystackChatMessage.from_tool(tool_result=f"IBAN {IBAN}", origin=call)],
             )
-            await OversightToolResultHook().run_async(state)
+            await MaskToolResultsHook().run_async(state)
         [seen] = guard.context.tool_calls
         assert (seen.id, seen.name, seen.arguments) == ("c1", "lookup", {"name": "Jan"})
         assert IBAN not in str(seen.result)
@@ -126,8 +126,8 @@ class TestToolCallsInTheTurn:
         ran.set("messages", [HaystackChatMessage.from_tool(f"IBAN {IBAN}", origin=call)])
         with guarding(guard):
             await guard.close()
-            await OversightToolHook().run_async(state)
-            await OversightToolResultHook().run_async(ran)
+            await JudgeToolCallsHook().run_async(state)
+            await MaskToolResultsHook().run_async(ran)
         assert str(TOOL_UNAVAILABLE) in state.get("messages")[-1].tool_call_result.result
         assert ran.get("messages")[-1].tool_call_result.result == str(UNCHECKED_TEXT)
         assert guard.context.tool_calls == []
@@ -307,20 +307,20 @@ class TestSyncHooks:
 
         from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
         from django_ai_sdk.oversight.guard import guarding
-        from django_ai_sdk.oversight.plugin.hooks import OversightToolHook, OversightToolResultHook
+        from django_ai_sdk.oversight.plugin.hooks import JudgeToolCallsHook, MaskToolResultsHook
 
         call = HaystackCall(tool_name="lookup", arguments={"q": 1}, id="c1")
         asked = HaystackMessage.from_assistant(tool_calls=[call])
         guard = await start("test-guard")
         state = self._state([asked])
         with guarding(guard):
-            await asyncio.to_thread(OversightToolHook().run, state)
+            await asyncio.to_thread(JudgeToolCallsHook().run, state)
         stub = state.data["messages"][-1]
         assert stub.meta[REFUSED_META_KEY] is True
         assert "sync run" in stub.tool_call_result.result
         ran = self._state([asked, HaystackMessage.from_tool("secret", origin=call)])
         with guarding(guard):
-            await asyncio.to_thread(OversightToolResultHook().run, ran)
+            await asyncio.to_thread(MaskToolResultsHook().run, ran)
         assert ran.data["messages"][-1].tool_call_result.result == str(UNCHECKED_TEXT)
         assert "tool called in a sync run" in guard.error
 
@@ -328,9 +328,9 @@ class TestSyncHooks:
         from haystack.dataclasses import ChatMessage as HaystackMessage
         from haystack.dataclasses import ToolCall as HaystackCall
 
-        from django_ai_sdk.oversight.plugin.hooks import OversightToolHook
+        from django_ai_sdk.oversight.plugin.hooks import JudgeToolCallsHook
 
         call = HaystackCall(tool_name="lookup", arguments={}, id="c1")
         state = self._state([HaystackMessage.from_assistant(tool_calls=[call])])
-        OversightToolHook().run(state)
+        JudgeToolCallsHook().run(state)
         assert len(state.data["messages"]) == 1

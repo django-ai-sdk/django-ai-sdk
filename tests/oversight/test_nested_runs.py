@@ -196,13 +196,13 @@ class TestSubagents:
         handed: list[list[Any]] = []
         from django_ai_sdk.oversight import plugin as runs
 
-        run_agent = runs.run_agent
+        run_with_oversight = runs.run_with_oversight
 
         async def spy(agent: Any, messages: list[Any], **kwargs: Any) -> Any:
             handed.append(messages)
-            return await run_agent(agent, messages, **kwargs)
+            return await run_with_oversight(agent, messages, **kwargs)
 
-        monkeypatch.setattr(runs, "run_agent", spy)
+        monkeypatch.setattr(runs, "run_with_oversight", spy)
         context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
         await component.run_async(messages=context, task="who")
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")

@@ -127,7 +127,7 @@ class TestNothingPrunes:
         assert await sync_to_async(self.ids)() == []
 
     async def test_a_turn_open_for_more_than_a_day_warns_until_swept(self):
-        # W017: a run that crashed outside run_agent leaves its turn open until the sweep.
+        # W017: a run that crashed outside run_with_oversight leaves its turn open until the sweep.
         turn_id = await a_turn()
         await Turn.objects.filter(id=turn_id).aupdate(
             status="open", created_at=timezone.now() - timedelta(days=2)

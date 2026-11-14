@@ -131,13 +131,13 @@ first real caller.
 
 Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
 turn, and oversight runs inside the Haystack Agent as hooks
-(`django_ai_sdk.oversight.plugin`), which `run_agent` adds on every run. The
-`TurnRequest` says whose turn it is. `run_agent` opens its
+(`django_ai_sdk.oversight.plugin`), which `run_with_oversight` adds on every run. The
+`TurnRequest` says whose turn it is. `run_with_oversight` opens its
 turn, the gate judges the history and the question before the
-first model call (`GateHook`), every tool call is checked before it runs
-(`OversightToolHook`), every result is masked before the model reads it
-(`OversightToolResultHook`), and finish judges what the loop wrote before the
-answer is returned (`FinishHook`). A refusal raises
+first model call (`GateQuestionHook`), every tool call is checked before it runs
+(`JudgeToolCallsHook`), every result is masked before the model reads it
+(`MaskToolResultsHook`), and finish judges what the loop wrote before the
+answer is returned (`JudgeAnswerHook`). A refusal raises
 `django_ai_sdk.errors.Blocked`.
 
 What oversight does not guard (`stream_response()` from your own view, an adapter

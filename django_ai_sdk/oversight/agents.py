@@ -31,7 +31,7 @@ def agent_key(agent: Agent) -> str:
     return str(getattr(agent, "agent_id", "") or "")
 
 
-async def acode_policy(agent: Agent, *, channel: str = "", user: Any = None) -> tuple[str, str]:
+async def declared_policy(agent: Agent, *, channel: str = "", user: Any = None) -> tuple[str, str]:
     """Return the policy name the agent's code asks for, and the reason.
 
     The reason is "agent", "off" or "default". Calls `get_oversight()` when the
@@ -45,15 +45,15 @@ async def acode_policy(agent: Agent, *, channel: str = "", user: Any = None) -> 
             chosen = await chosen
     else:
         chosen = getattr(agent, "oversight", None)
-    return _code_choice(chosen)
+    return _policy_name_and_reason(chosen)
 
 
-def code_policy(agent: Any) -> tuple[str, str]:
-    """Like `acode_policy`, but reads only the `oversight` attribute. Used by checks."""
-    return _code_choice(getattr(agent, "oversight", None))
+def declared_policy_sync(agent: Any) -> tuple[str, str]:
+    """Like `declared_policy`, but reads only the `oversight` attribute. Used by checks."""
+    return _policy_name_and_reason(getattr(agent, "oversight", None))
 
 
-def policy_needs_await(agent: Any) -> bool:
+def overrides_get_oversight(agent: Any) -> bool:
     """Whether only an async run can tell the agent's policy: it overrides
     `get_oversight()`."""
     from django_ai_sdk.agents.base import Agent
@@ -64,7 +64,7 @@ def policy_needs_await(agent: Any) -> bool:
     )
 
 
-def _code_choice(chosen: Any) -> tuple[str, str]:
+def _policy_name_and_reason(chosen: Any) -> tuple[str, str]:
     if chosen is False:
         return "", "off"
     if chosen is None:

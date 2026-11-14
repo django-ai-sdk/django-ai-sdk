@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.policy import ResolvedPolicy
-from django_ai_sdk.oversight.reflect import ajudge_turn
+from django_ai_sdk.oversight.reflect import judge_reflect_stage
 from django_ai_sdk.oversight.registry import broken_reason, get_resolved_policy
 from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
 
@@ -163,7 +163,7 @@ async def _run(
 async def _reflect(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
     """Run what reflect would on the open guard: its lenses, and inline lenses to ask again."""
     retry = {item.lens.name for item in guard.answered if item.needs_retry}
-    answered, matched, _masks = await ajudge_turn(
+    answered, matched, _masks = await judge_reflect_stage(
         resolved,
         guard.context,
         retry,

@@ -125,10 +125,10 @@ class TestToolOutputLimitWiring:
         class Agent:
             max_tool_calls = None
 
-        from django_ai_sdk.oversight.plugin.hooks import OversightToolResultHook
+        from django_ai_sdk.oversight.plugin.hooks import MaskToolResultsHook
         from django_ai_sdk.oversight.plugin import merge_oversight_hooks
 
         # Oversight masks the full result first, then the cut.
         mask, limit = merge_oversight_hooks(default_hooks(Agent()))["after_tool"]
         assert isinstance(limit, ToolOutputLimitHook)
-        assert isinstance(mask, OversightToolResultHook)
+        assert isinstance(mask, MaskToolResultsHook)

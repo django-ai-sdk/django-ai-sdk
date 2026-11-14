@@ -147,7 +147,7 @@ class StreamTurn:
     The run opens and decides the turn (see `oversight.plugin`); this shows
     what it decided. The Stream runs the agent with `request`, the run's
     TurnRequest, sends the `start()` events, passes every event through
-    `pass_event`, then calls `afinish`, or `refusal_events()` when the gate
+    `pass_event`, then calls `finish`, or `refusal_events()` when the gate
     refused, or `end_early` when the turn ends before that, and always `aclose`,
     which closes the turn once the answer is stored. Until the run opened a turn,
     and without a policy, every call passes the stream through unchanged.
@@ -262,7 +262,7 @@ class StreamTurn:
         await mask_sources(self.guard, self.registry)
         return result
 
-    async def afinish(self) -> tuple[list[StreamEvent], StageResult]:
+    async def finish(self) -> tuple[list[StreamEvent], StageResult]:
         """Pass, mask or withhold the answer as the run's finish decided. Returns the events to send."""
         guard, writer = self.guard, self.writer
         if not guard.active:

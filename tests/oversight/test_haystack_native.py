@@ -19,12 +19,12 @@ from django_ai_sdk.oversight.guard import TurnGuard, current_guard, guarding
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.plugin import (
     TurnRequest,
-    needs_own_turn,
+    needs_own_turn_sync,
     build_oversight_hooks,
-    run_agent,
-    run_agent_sync,
+    run_with_oversight,
+    run_with_oversight_sync,
 )
-from django_ai_sdk.oversight.plugin.hooks import GateHook
+from django_ai_sdk.oversight.plugin.hooks import GateQuestionHook
 from django_ai_sdk.permissions import AllowAll
 from haystack import Pipeline, component
 from haystack.components.agents import Agent as HaystackAgent
@@ -156,7 +156,7 @@ class TestHaystackLoop:
         assert model.offered == [["lookup", "send"], ["lookup"]]
 
     async def test_tools_filtered_in_place_before_the_model_call_are_gone_for_the_step(self):
-        # OversightStopHook relies on it: Haystack hands this same list to the model and the ToolInvoker.
+        # EnforceTurnLimitsHook relies on it: Haystack hands this same list to the model and the ToolInvoker.
         ran: list[str] = []
 
         @hook
@@ -247,7 +247,7 @@ class TestOversightInTheRun:
         sdk_agent, _ = agent_with("x", policy="test-guard")
         agent = HaystackAgent(chat_generator=Scripted(["Mail jan@example.com"]))
         request = TurnRequest(agent=sdk_agent, channel="api")
-        result = await run_agent(agent, [ChatMessage.from_user("Who?")], request=request)
+        result = await run_with_oversight(agent, [ChatMessage.from_user("Who?")], request=request)
         assert result["last_message"].text == "Mail [EMAIL]"
         assert request.guard is not None
         assert (await Turn.objects.aget(id=request.guard.id)).channel == "api"
@@ -256,7 +256,7 @@ class TestOversightInTheRun:
         # Run with no TurnRequest: secure by default, not skipped.
         agent = HaystackAgent(chat_generator=Scripted(["Mail jan@example.com"]))
         with override_settings(AI_SDK_OVERSIGHT={"DEFAULT_POLICY": "test-guard"}):
-            result = await run_agent(agent, [ChatMessage.from_user("Who?")])
+            result = await run_with_oversight(agent, [ChatMessage.from_user("Who?")])
         assert result["last_message"].text == "Mail [EMAIL]"
         turn = await Turn.objects.aget()
         assert (turn.policy, turn.agent_name) == ("test-guard", "Haystack agent")
@@ -273,7 +273,7 @@ class TestOversightInTheRun:
         # The SDK's own side calls, such as titles, say so: they are not turns of their own.
         agent = HaystackAgent(chat_generator=Scripted(["Mail jan@example.com"]))
         with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
-            result = await run_agent(
+            result = await run_with_oversight(
                 agent, [ChatMessage.from_user("Who?")], request=TurnRequest(oversight=False)
             )
         assert result["last_message"].text == "Mail jan@example.com"
@@ -289,14 +289,14 @@ class TestOversightInTheRun:
 
         agent = HaystackAgent(chat_generator=Scripted(["fine"]), hooks={"before_llm": [look]})
         with guarding(guard):
-            await run_agent(
+            await run_with_oversight(
                 agent, [ChatMessage.from_user("Who?")], request=TurnRequest(oversight=False)
             )
             assert current_guard() is guard
         assert seen == [None]
 
     async def test_a_failed_run_leaves_no_turn_for_the_next_run_to_join(self):
-        # Haystack skips after_run when a run raises: run_agent keeps its turn
+        # Haystack skips after_run when a run raises: run_with_oversight keeps its turn
         # from the caller, and closes it with the error.
         @hook
         async def boom(state: State) -> None:
@@ -305,10 +305,10 @@ class TestOversightInTheRun:
         with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
             failing = HaystackAgent(chat_generator=Scripted(["x"]), hooks={"before_llm": [boom]})
             with pytest.raises(RuntimeError):
-                await run_agent(failing, [ChatMessage.from_user("Who?")])
+                await run_with_oversight(failing, [ChatMessage.from_user("Who?")])
             assert current_guard() is None
             agent = HaystackAgent(chat_generator=Scripted(["Mail jan@example.com"]))
-            result = await run_agent(agent, [ChatMessage.from_user("Who?")])
+            result = await run_with_oversight(agent, [ChatMessage.from_user("Who?")])
             out = await Run(generator=Scripted(["Mail jan@example.com"])).run(
                 [SdkMessage(role="user", content="Who?")]
             )
@@ -325,7 +325,7 @@ class TestOversightInTheRun:
         agent = HaystackAgent(chat_generator=Scripted(["x"]), hooks={"before_llm": [boom]})
         request = TurnRequest()
         with override_settings(AI_SDK_OVERSIGHT=DEFAULT), pytest.raises(RuntimeError):
-            await run_agent(agent, [ChatMessage.from_user("Who?")], request=request, hook_context=context)
+            await run_with_oversight(agent, [ChatMessage.from_user("Who?")], request=request, hook_context=context)
         assert [t.error async for t in Turn.objects.all()] == ["RuntimeError"]
         assert request.guard is not None
 
@@ -339,7 +339,7 @@ class TestOversightInTheRun:
             tools=[tool("lookup", [])],
         )
         with guarding(guard):
-            await run_agent(agent, [ChatMessage.from_user("go")], request=TurnRequest(agent=researcher))
+            await run_with_oversight(agent, [ChatMessage.from_user("go")], request=TurnRequest(agent=researcher))
         assert [(c.name, c.agent) for c in guard.context.tool_calls] == [
             ("lookup", researcher.name)
         ]
@@ -355,20 +355,20 @@ class TestOversightInTheRun:
 def test_a_sync_run_whose_policy_needs_a_turn_must_not_run():
     # Only an async run opens a turn, so a sync caller asks first.
     with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
-        assert needs_own_turn(TurnRequest())
-    assert not needs_own_turn(TurnRequest())
+        assert needs_own_turn_sync(TurnRequest())
+    assert not needs_own_turn_sync(TurnRequest())
 
 
 def test_a_sync_run_without_a_policy_runs():
     agent = HaystackAgent(chat_generator=Scripted(["fine"]))
-    result = run_agent_sync(agent, [ChatMessage.from_user("Who?")], request=TurnRequest())
+    result = run_with_oversight_sync(agent, [ChatMessage.from_user("Who?")], request=TurnRequest())
     assert result["last_message"].text == "fine"
 
 
 def test_the_hooks_save_and_load_with_the_agent():
     agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), hooks=build_oversight_hooks())
     again = HaystackAgent.from_dict(agent.to_dict())
-    assert [type(h) for h in again.hooks["before_run"]] == [GateHook]
+    assert [type(h) for h in again.hooks["before_run"]] == [GateQuestionHook]
 
 
 def test_the_test_generator_is_a_real_chat_generator():

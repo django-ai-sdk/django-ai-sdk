@@ -33,7 +33,7 @@ from django_ai_sdk.oversight.rules import Block, Queue
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.notifiers import event_id
-from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS, aclaim_reflect, areflect
+from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS, claim_for_reflect, run_reflection
 from django_ai_sdk.oversight.testing import dry_run
 from django_ai_sdk.oversight.types import Stage, Subject
 from django_tasks.backends.base import BaseTaskBackend
@@ -248,7 +248,7 @@ class TestCrashedTurns:
         assert turn.outcome == "flagged"
 
     async def test_a_run_that_raised_is_recorded_with_its_error(self):
-        # Haystack skips after_run on an exception: run_agent closes the turn then.
+        # Haystack skips after_run on an exception: run_with_oversight closes the turn then.
         agent, model = agent_with("never", policy="test-durable")
 
         with (
@@ -410,9 +410,9 @@ class TestReflectLease:
     async def test_a_reflected_turn_is_done_once(self):
         turn_id = await self.closed()
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            assert await areflect(turn_id) == 1
+            assert await run_reflection(turn_id) == 1
             # A duplicate delivery finds it done.
-            assert await areflect(turn_id) == 0
+            assert await run_reflection(turn_id) == 0
         turn = await Turn.objects.aget(id=turn_id)
         assert (turn.reflect_state, turn.reflect_attempts) == ("done", 1)
         assert turn.reflected_at is not None and turn.reflect_lease_until is None
@@ -421,22 +421,22 @@ class TestReflectLease:
     async def test_two_deliveries_at_once_reflect_it_once(self):
         turn_id = await self.closed()
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            results = await asyncio.gather(areflect(turn_id), areflect(turn_id))
+            results = await asyncio.gather(run_reflection(turn_id), run_reflection(turn_id))
         assert sorted(results) == [0, 1]
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
 
     async def test_a_claim_held_by_a_live_worker_is_not_taken(self):
         turn_id = await self.closed()
-        assert await aclaim_reflect(turn_id) is not None
-        assert await areflect(turn_id) == 0
+        assert await claim_for_reflect(turn_id) is not None
+        assert await run_reflection(turn_id) == 0
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "running"
 
     async def test_a_lease_that_ran_out_is_claimed_again(self):
         turn_id = await self.closed()
-        assert await aclaim_reflect(turn_id) is not None  # its worker dies here
+        assert await claim_for_reflect(turn_id) is not None  # its worker dies here
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            assert await areflect(turn_id) == 1
+            assert await run_reflection(turn_id) == 1
         turn = await Turn.objects.aget(id=turn_id)
         assert (turn.reflect_state, turn.reflect_attempts) == ("done", 2)
 
@@ -444,14 +444,14 @@ class TestReflectLease:
         from django_ai_sdk.oversight.reflect import _commit_reflection, _judge
 
         turn_id = await self.closed()
-        stale_lease = await aclaim_reflect(turn_id)
+        stale_lease = await claim_for_reflect(turn_id)
         turn = await Turn.objects.select_related("content").aget(id=turn_id)
         judged = await _judge(turn)
         assert judged is not None
         # Too slow: the lease ran out, and another run reflected the turn.
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            assert await areflect(turn_id) == 1
+            assert await run_reflection(turn_id) == 1
         kept = await sync_to_async(_commit_reflection)(turn, *judged, lease=stale_lease)
         assert kept is False
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
@@ -460,9 +460,9 @@ class TestReflectLease:
         turn_id = await self.closed("fine")
         with patch("django_ai_sdk.oversight.reflect.save_answers", side_effect=RuntimeError("db")):
             with pytest.raises(RuntimeError):
-                await areflect(turn_id)
+                await run_reflection(turn_id)
         assert (await Turn.objects.aget(id=turn_id)).reflected_at is None
-        assert await areflect(turn_id) == 1
+        assert await run_reflection(turn_id) == 1
 
     async def test_an_after_effect_that_fails_writes_nothing_and_is_retried(self):
         turn_id = await self.closed()
@@ -470,21 +470,21 @@ class TestReflectLease:
             patch("django_ai_sdk.oversight.reflect._after_effects", side_effect=RuntimeError("x")),
             pytest.raises(RuntimeError),
         ):
-            await areflect(turn_id)
+            await run_reflection(turn_id)
         # Its answers and matches went with it: the reflection is all or nothing.
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
         assert not await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").aexists()
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            assert await areflect(turn_id) == 1
+            assert await run_reflection(turn_id) == 1
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").aexists()
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "done"
 
     async def test_a_policy_that_did_not_load_gives_the_claim_back(self):
         turn_id = await self.closed("fine")
         with patch("django_ai_sdk.oversight.reflect.get_resolved_policy", return_value=None):
-            assert await areflect(turn_id) == 0
+            assert await run_reflection(turn_id) == 0
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
-        assert await areflect(turn_id) == 1
+        assert await run_reflection(turn_id) == 1
 
     async def test_a_turn_that_cannot_be_read_gives_the_claim_back(self):
         turn_id = await self.closed("fine")
@@ -492,7 +492,7 @@ class TestReflectLease:
             patch.object(Turn.objects, "select_related", side_effect=OperationalError("db")),
             pytest.raises(OperationalError),
         ):
-            await areflect(turn_id)
+            await run_reflection(turn_id)
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
 
     async def test_a_turn_that_keeps_failing_is_marked_failed(self):
@@ -500,11 +500,11 @@ class TestReflectLease:
         with patch("django_ai_sdk.oversight.reflect.save_answers", side_effect=RuntimeError("db")):
             for _ in range(REFLECT_ATTEMPTS):
                 with pytest.raises(RuntimeError):
-                    await areflect(turn_id)
+                    await run_reflection(turn_id)
         turn = await Turn.objects.aget(id=turn_id)
         assert (turn.reflect_state, turn.reflect_attempts) == ("failed", REFLECT_ATTEMPTS)
         assert turn.error == "reflect failed"
-        assert await areflect(turn_id) == 0
+        assert await run_reflection(turn_id) == 0
 
     async def test_a_turn_without_reflect_lenses_is_never_claimed(self):
         guard = await start("test-durable", "hello")
@@ -512,7 +512,7 @@ class TestReflectLease:
         await guard.finish("Fine.")
         turn = await close(guard)
         assert turn.reflect_state == ""
-        assert await areflect(str(turn.id)) == 0
+        assert await run_reflection(str(turn.id)) == 0
 
 
 @pytest.mark.django_db(transaction=True)
@@ -535,7 +535,7 @@ class TestReflectPending:
 
     async def test_a_dead_workers_turn_is_queued_again(self):
         turn_id = await self.lost()
-        await aclaim_reflect(turn_id)
+        await claim_for_reflect(turn_id)
         assert await reflect_pending() == "0 turns queued"
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
@@ -545,7 +545,7 @@ class TestReflectPending:
     async def test_a_dead_workers_last_attempt_is_marked_failed(self):
         turn_id = await self.lost()
         await Turn.objects.filter(id=turn_id).aupdate(reflect_attempts=REFLECT_ATTEMPTS - 1)
-        await aclaim_reflect(turn_id)
+        await claim_for_reflect(turn_id)
         await expire_lease(turn_id)
         assert await reflect_pending() == "0 turns queued"
         turn = await Turn.objects.aget(id=turn_id)
@@ -571,7 +571,7 @@ class TestStableEventIds:
             "django_ai_sdk.oversight.persist.enqueue_notifications",
             side_effect=lambda events: sent.extend(e for e, _ in events),
         ):
-            await areflect(turn_id)
+            await run_reflection(turn_id)
         assert [e["id"] for e in sent] == [event_id(turn_id, "tell_later", "reflect")]
 
     async def test_the_gates_notifications_repeat_their_ids(self):
@@ -665,7 +665,7 @@ class TestRacesOnPostgres:
         from asgiref.sync import async_to_sync
 
         turn_id = self.closed()
-        leases = race(*[lambda: async_to_sync(aclaim_reflect)(turn_id)] * 8)
+        leases = race(*[lambda: async_to_sync(claim_for_reflect)(turn_id)] * 8)
         assert sum(lease is not None for lease in leases) == 1
         turn = Turn.objects.get(id=turn_id)
         assert (turn.reflect_state, turn.reflect_attempts) == ("running", 1)
@@ -675,7 +675,7 @@ class TestRacesOnPostgres:
 
         turn_id = self.closed()
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
-            added = race(*[lambda: async_to_sync(areflect)(turn_id)] * 6)
+            added = race(*[lambda: async_to_sync(run_reflection)(turn_id)] * 6)
         assert sorted(added) == [0, 0, 0, 0, 0, 1]
         assert RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").count() == 1
         assert Turn.objects.get(id=turn_id).reflect_state == "done"

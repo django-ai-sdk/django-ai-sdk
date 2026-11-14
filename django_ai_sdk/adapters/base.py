@@ -544,11 +544,11 @@ class Stream:
         return asyncio.create_task(coro)
 
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
-        from django_ai_sdk.oversight.plugin import run_agent
+        from django_ai_sdk.oversight.plugin import run_with_oversight
 
         # Oversight: the run opens, gates, checks and finishes the turn.
         request = self._turn.request if self._turn is not None else self.turn_request
-        return await run_agent(
+        return await run_with_oversight(
             agent,
             messages,
             request=request,
@@ -840,7 +840,7 @@ class Stream:
                 return
 
             # Oversight: pass, mask or withhold the answer the run finished.
-            events, finished = await turn.afinish()
+            events, finished = await turn.finish()
             for event in events:
                 yield event
             finish_reason = CONTENT_FILTER if finished.blocked else None

@@ -39,7 +39,7 @@ from django.utils import timezone
 from django_ai_sdk.common import last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.agents import acode_policy, agent_key, fingerprint
+from django_ai_sdk.oversight.agents import agent_key, declared_policy, fingerprint
 from django_ai_sdk.oversight.conf import is_enabled, setting, validate_retention
 from django_ai_sdk.oversight.content import as_source
 from django_ai_sdk.oversight.guard import stages
@@ -410,7 +410,7 @@ class TurnGuard:
 
         `oversight` overrides the agent's policy for this turn. It can be a Policy
         subclass or a name. False or "" (no policy) opens no turn. None uses the
-        agent's code (`acode_policy`).
+        agent's code (`declared_policy`).
 
         If the policy cannot be chosen (`get_oversight` raised) or loaded (unknown
         or broken), every stage refuses with Block.DEFAULT_MESSAGE and the turn is
@@ -436,7 +436,7 @@ class TurnGuard:
         try:
             name = policy_name(oversight) if oversight else ""
             if not name:
-                name = (await acode_policy(agent, channel=channel, user=user))[0]
+                name = (await declared_policy(agent, channel=channel, user=user))[0]
         except Exception:
             logger.exception("Oversight could not choose a policy for {!r}", agent_key(agent))
             return cls.refusing_all(name="", error="policy could not be chosen", **opening)

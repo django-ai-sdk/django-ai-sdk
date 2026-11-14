@@ -333,16 +333,16 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        from django_ai_sdk.oversight.plugin import needs_own_turn, run_agent_sync
+        from django_ai_sdk.oversight.plugin import needs_own_turn_sync, run_with_oversight_sync
 
         request = self._request()
         # Oversight: a sync run cannot open the child turn this delegation needs.
-        if needs_own_turn(request):
+        if needs_own_turn_sync(request):
             return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
             # Oversight: the sync tool hooks refuse every call inside a turn.
-            result = run_agent_sync(
+            result = run_with_oversight_sync(
                 self._agent,
                 _handoff_context(messages),
                 request=request,
@@ -375,7 +375,7 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        from django_ai_sdk.oversight.plugin import opens_own_turn, run_agent
+        from django_ai_sdk.oversight.plugin import needs_own_turn, run_with_oversight
 
         request = self._request()
         # Oversight: under a policy of its own, the subagent's run opens a child turn
@@ -383,9 +383,9 @@ class SubagentStreamFilter:
         # task, not the coordinator's conversation and tool results.
         seen: set[str] = set()
         with self._span():
-            result = await run_agent(
+            result = await run_with_oversight(
                 self._agent,
-                _handoff_context([] if await opens_own_turn(request) else messages),
+                _handoff_context([] if await needs_own_turn(request) else messages),
                 request=request,
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,

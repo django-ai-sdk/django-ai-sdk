@@ -270,12 +270,12 @@ def _compact(value: Any) -> str:
 
 __all__ = [
     "INLINE_STAGES",
+    "SEVERITY_ORDER",
     "Answer",
     "Capture",
     "HistoryItem",
     "Mode",
     "Outcome",
-    "SEVERITY_ORDER",
     "Severity",
     "Source",
     "Stage",

@@ -81,7 +81,7 @@ def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
     return answers
 
 
-async def areflect(turn_id: str) -> int:
+async def run_reflection(turn_id: str) -> int:
     """Run the policy's reflect lenses on a closed turn. Returns the number of answers added.
 
     The turn is claimed first with a lease (`REFLECT_LEASE`), so a duplicate task
@@ -97,7 +97,7 @@ async def areflect(turn_id: str) -> int:
     """
     from django_ai_sdk.oversight.models import Turn
 
-    lease = await aclaim_reflect(turn_id)
+    lease = await claim_for_reflect(turn_id)
     if lease is None:
         return 0
     try:
@@ -107,19 +107,19 @@ async def areflect(turn_id: str) -> int:
         judged = await _judge(turn)
         if judged is None:
             # The policy did not load. Give the claim back so a later run can try.
-            await arelease_reflect(turn_id, lease)
+            await release_reflect_claim(turn_id, lease)
             return 0
         policy, view, answered, matched, found, masks = judged
         if turn.reflect_attempts < REFLECT_ATTEMPTS and any(item.needs_retry for item in answered):
             # A judge was down or out of time: ask again later rather than settle without it.
-            await arelease_reflect(turn_id, lease)
+            await release_reflect_claim(turn_id, lease)
             return 0
         kept = await sync_to_async(_commit_reflection)(
             turn, policy, view, answered, matched, found, masks, lease=lease
         )
     except BaseException:
         # Nothing was written. Give the claim back so a retry can reflect.
-        await arelease_reflect(turn_id, lease)
+        await release_reflect_claim(turn_id, lease)
         raise
     return len(answered) if kept else 0
 
@@ -140,7 +140,7 @@ def claimable_q(now: datetime, pending_before: datetime | None = None) -> Q:
     ) & Q(reflect_attempts__lt=REFLECT_ATTEMPTS)
 
 
-async def aclaim_reflect(turn_id: str) -> Any:
+async def claim_for_reflect(turn_id: str) -> Any:
     """Claim `turn_id` for reflection. Returns the lease end time, or None if not claimed.
 
     A turn can be claimed when `claimable_q` matches it. The lease end time
@@ -159,7 +159,7 @@ async def aclaim_reflect(turn_id: str) -> Any:
     return lease if claimed else None
 
 
-async def arelease_reflect(turn_id: str, lease: Any) -> None:
+async def release_reflect_claim(turn_id: str, lease: Any) -> None:
     """Release a claim. The turn goes back to pending, or to failed when out of attempts."""
     from django_ai_sdk.oversight.models import Turn
 
@@ -277,7 +277,7 @@ async def _judge(
     done = {
         rule async for rule in RuleMatch.objects.filter(turn=turn).values_list("rule", flat=True)
     }
-    answered, matched, masks = await ajudge_turn(
+    answered, matched, masks = await judge_reflect_stage(
         policy,
         view,
         retry,
@@ -289,7 +289,7 @@ async def _judge(
     return policy, view, answered, matched, found, masks
 
 
-async def ajudge_turn(
+async def judge_reflect_stage(
     policy: ResolvedPolicy,
     view: TurnContext,
     retry: Iterable[str],
@@ -477,9 +477,9 @@ def _update_stored(
 __all__ = [
     "REFLECT_ATTEMPTS",
     "REFLECT_LEASE",
-    "aclaim_reflect",
-    "areflect",
-    "arelease_reflect",
+    "claim_for_reflect",
     "claimable_q",
     "mark_reflect_failed",
+    "release_reflect_claim",
+    "run_reflection",
 ]

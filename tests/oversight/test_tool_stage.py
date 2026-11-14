@@ -292,7 +292,7 @@ class TestToolsTakenAwayInChat:
         from haystack.components.agents.state.state import State
 
         from django_ai_sdk.oversight.guard import guarding
-        from django_ai_sdk.oversight.plugin.hooks import OversightStopHook
+        from django_ai_sdk.oversight.plugin.hooks import EnforceTurnLimitsHook
 
         from tests.oversight.helpers import lookup_tool
 
@@ -303,7 +303,7 @@ class TestToolsTakenAwayInChat:
             # Haystack hands each step a fresh list of the agent's tools.
             state = State(schema={})
             state.data["tools"] = [lookup, send]
-            OversightStopHook().run(state)
+            EnforceTurnLimitsHook().run(state)
             return [t.name for t in state.data["tools"]]
 
         guard = await start("test-guard")

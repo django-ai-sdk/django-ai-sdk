@@ -83,7 +83,7 @@ def match_events(
 class Notifier:
     """Subclass and implement `send`.
 
-    `send` may raise, since `anotify` logs the error and carries on.
+    `send` may raise, since `send_to_notifiers` logs the error and carries on.
 
     `Notify(to=[...])` selects notifiers by `name`. It defaults to the class name,
     lowercased, without "Notifier" ("log", "webhook").
@@ -169,7 +169,7 @@ def _build_notifier(spec: str | dict[str, Any]) -> Notifier:
     return cls(**config)
 
 
-async def anotify(event: dict[str, Any], *, names: list[str] | None = None) -> None:
+async def send_to_notifiers(event: dict[str, Any], *, names: list[str] | None = None) -> None:
     """Send `event` to all notifiers, or only to `names`. Failures are logged."""
     for notifier in configured_notifiers(names):
         try:
@@ -182,8 +182,8 @@ __all__ = [
     "LogNotifier",
     "Notifier",
     "WebhookNotifier",
-    "anotify",
     "configured_notifiers",
     "event_id",
     "match_events",
+    "send_to_notifiers",
 ]

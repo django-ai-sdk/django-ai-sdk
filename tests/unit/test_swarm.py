@@ -1344,14 +1344,14 @@ class TestSubagentSynthesis:
         from haystack.components.agents import Agent as HaystackAgent
 
         from django_ai_sdk.oversight.plugin import merge_oversight_hooks
-        from django_ai_sdk.oversight.plugin.hooks import FinishHook, RecordUsageHook
+        from django_ai_sdk.oversight.plugin.hooks import JudgeAnswerHook, RecordUsageHook
 
         built = HaystackAgent(
             chat_generator=MockChatGenerator(responses=["x"]),
             hooks=_with_final_response(default_hooks(MagicMock()), MagicMock()),
         )
         after = merge_oversight_hooks(built.hooks)["after_run"]
-        assert [type(h) for h in after][-3:] == [FinalResponseHook, RecordUsageHook, FinishHook]
+        assert [type(h) for h in after][-3:] == [FinalResponseHook, RecordUsageHook, JudgeAnswerHook]
 
 
 class TestUnstreamedResults:

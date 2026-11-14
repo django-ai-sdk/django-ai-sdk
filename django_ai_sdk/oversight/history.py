@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.agents import acode_policy
+from django_ai_sdk.oversight.agents import declared_policy
 from django_ai_sdk.oversight.conf import is_enabled
 from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
 from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
@@ -85,7 +85,7 @@ async def resolve_policy(
         return None
     try:
         name = policy_name(oversight) if oversight else ""
-        name = name or (await acode_policy(agent, channel=channel, user=user))[0]
+        name = name or (await declared_policy(agent, channel=channel, user=user))[0]
         return await get_resolved_policy(name) if name else None
     except Exception:
         return None

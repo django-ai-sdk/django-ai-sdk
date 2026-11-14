@@ -36,7 +36,7 @@ from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
 from django_ai_sdk.oversight.persist import split_answer
-from django_ai_sdk.oversight.reflect import areflect
+from django_ai_sdk.oversight.reflect import run_reflection
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, TextSpan, ToolCall
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 
@@ -270,7 +270,7 @@ class TestWhatCaptureKeeps:
 
     async def test_reflect_keeps_its_words_like_close_did(self):
         turn = await run_turn("masked")
-        assert await areflect(str(turn.id)) == 1
+        assert await run_reflection(str(turn.id)) == 1
         later = await LensAnswer.objects.aget(turn=turn, lens="later")
         assert later.value is True
         assert (await _kept(turn))["texts"][str(later.id)] == {"rationale": "Later: [EMAIL] again"}

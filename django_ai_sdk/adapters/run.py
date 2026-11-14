@@ -113,11 +113,11 @@ class Run:
     ) -> T | str | None:
         """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
 
-        `request` names the turn (see `oversight.plugin`); `run_agent` runs
+        `request` names the turn (see `oversight.plugin`); `run_with_oversight` runs
         it under oversight. Raises `Blocked` when the turn's gate refused
         the question or its finish withheld the answer.
         """
-        from django_ai_sdk.oversight.plugin import TurnRequest, run_agent
+        from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
 
         request = request or TurnRequest()
         request.schema = response_format
@@ -134,7 +134,7 @@ class Run:
             if response_format
             else {}
         )
-        result = await run_agent(agent, converted, request=request, **schema)
+        result = await run_with_oversight(agent, converted, request=request, **schema)
         request.raise_if_blocked()
         replies = result.get("messages") or []
         text = replies[-1].text if replies else None

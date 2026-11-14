@@ -44,4 +44,4 @@ def get_logger(name: str) -> Logger:
     return logger.bind(name=name)
 
 
-__all__ = ["logger", "get_logger"]
+__all__ = ["get_logger", "logger"]

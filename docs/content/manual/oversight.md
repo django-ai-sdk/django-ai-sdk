@@ -60,7 +60,7 @@ Each agent runs under its own policy. A run inside an active turn joins it when 
 
 `run()` judges what the caller sent on copies: only the last user message of the list is masked in place, so what the caller stores is the masked copy. History the server stored itself is judged on its own turn, not again: with a `thread_id` whose thread is stored, under a policy whose gate masks, the stored messages are the history (the thread run endpoints, as chat); a history that is the stored thread as stored stands. Any other history is judged by `TurnGuard.gate_history()` before the question.
 
-The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: run it through `run_agent()` for that. `django_ai_sdk.oversight.history` holds the stored-thread rules `run()` and chat share.
+The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so a subclass's own `run()` that calls `super().run()` is checked, and one that calls its own model is not: run it through `run_with_oversight()` for that. `django_ai_sdk.oversight.history` holds the stored-thread rules `run()` and chat share.
 
 ## Lenses
 
@@ -223,7 +223,7 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `StageResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it refuses) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `OversightToolHook` (before each tool call) and `OversightToolResultHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the gate, stop and finish hooks. `run_agent` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `JudgeToolCallsHook` (before each tool call) and `MaskToolResultsHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the gate, stop and finish hooks. `run_with_oversight` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
 
 A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
@@ -341,7 +341,7 @@ python manage.py check --deploy --database default
 
 `django_ai_sdk.oversight.tasks`, `django-tasks` on the `default` queue: `reflect_turn`, queued on commit when the policy has reflect lenses or a lens is to be asked again, and `send_notifications`, which sends a turn's notifications from the worker so a slow receiver never holds a stream open. What reflect does is in `django_ai_sdk.oversight.reflect`.
 
-`Turn.reflect_state` follows reflection: `pending` when queued, `running` while a worker holds its claim, `done`, or `failed`. `areflect` claims the turn in one conditional update with a lease of `reflect.REFLECT_LEASE` (ten minutes) and counts `reflect_attempts`, so a doubled task does nothing. It writes its answers, matches, the stored answer's mask and notices, and `done`, in one transaction and only while the lease is still its own. A run that fails gives the claim back (`pending`); after `reflect.REFLECT_ATTEMPTS` (three) the turn is `failed` and its `error` says `reflect failed`. A lease that ran out (its worker died) may be claimed again.
+`Turn.reflect_state` follows reflection: `pending` when queued, `running` while a worker holds its claim, `done`, or `failed`. `run_reflection` claims the turn in one conditional update with a lease of `reflect.REFLECT_LEASE` (ten minutes) and counts `reflect_attempts`, so a doubled task does nothing. It writes its answers, matches, the stored answer's mask and notices, and `done`, in one transaction and only while the lease is still its own. A run that fails gives the claim back (`pending`); after `reflect.REFLECT_ATTEMPTS` (three) the turn is `failed` and its `error` says `reflect failed`. A lease that ran out (its worker died) may be claimed again.
 
 ## Commands
 

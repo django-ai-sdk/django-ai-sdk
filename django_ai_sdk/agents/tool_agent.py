@@ -202,7 +202,7 @@ class RequireToolsHook:
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
     """The tool hooks every Haystack Agent built for `agent` runs: logging and its limits.
 
-    Oversight's hooks join at run time (see `oversight.plugin.run_agent`).
+    Oversight's hooks join at run time (see `oversight.plugin.run_with_oversight`).
     """
     return _tool_hooks(
         {"before_tool": [LogToolCallsHook()]},

@@ -15,7 +15,7 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight import Entities, L, Mask, Rule
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import RuleMatch
-from django_ai_sdk.oversight.reflect import areflect
+from django_ai_sdk.oversight.reflect import run_reflection
 from django_ai_sdk.oversight.types import (
     Answer,
     Stage,
@@ -67,7 +67,7 @@ class TestReflect:
         turn_id = await self._finished(
             "fx-ref-nospan", lambda lens, view: Answer(value=["Jan"]), message_id
         )
-        await areflect(turn_id)
+        await run_reflection(turn_id)
         assert (await RuleMatch.objects.aget(turn_id=turn_id, rule="mask_names")).acted
         message = await Message.objects.aget(id=message_id)
         assert message.result["content"] == "[WITHHELD]"
@@ -88,11 +88,11 @@ class TestReflect:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "closed"}):
             turn_id = await self._finished("fx-ref-down", down, message_id)
             for _ in range(REFLECT_ATTEMPTS - 1):
-                assert await areflect(turn_id) == 0
+                assert await run_reflection(turn_id) == 0
                 turn = await Turn.objects.aget(id=turn_id)
                 assert turn.reflect_state == Turn.ReflectState.PENDING
                 assert not await RuleMatch.objects.filter(turn_id=turn_id).aexists()
-            await areflect(turn_id)
+            await run_reflection(turn_id)
         turn = await Turn.objects.aget(id=turn_id)
         assert turn.reflect_state == Turn.ReflectState.DONE
         assert (await RuleMatch.objects.aget(turn_id=turn_id, rule="mask_names")).acted
@@ -132,7 +132,7 @@ class TestReflect:
                 result=ChatMessage(role="user", content=question).model_dump(),
             )
             assert (await kept(turn))["input"] == "What does [PERSON] earn?"
-            await areflect(str(turn.id))
+            await run_reflection(str(turn.id))
         why = await LensAnswer.objects.aget(turn=turn, lens="why")
         assert (await kept(turn))["texts"][str(why.id)] == {
             "rationale": "Quotes: What does [PERSON] earn?"
@@ -163,7 +163,7 @@ class TestReflect:
             )
             # The record never held the number; the thread did, and reflect fixes that copy.
             assert (await kept(turn))["output"] == "Call [PHONE] for it."
-            await areflect(str(turn.id))
+            await run_reflection(str(turn.id))
         message = await Message.objects.aget(id=guard.message_id)
         assert message.result["content"] == "Call [PHONE] for it."
         assert message.result["reasoning"] == ""
