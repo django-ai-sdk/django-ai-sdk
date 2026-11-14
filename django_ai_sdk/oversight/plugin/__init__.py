@@ -6,16 +6,15 @@
     result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, turn=turn)
     turn.raise_if_blocked()
 
-`run_with_oversight` opens the turn under the agent's policy, or joins the outer one,
-runs a copy of the Agent with the oversight hooks (`hooks.py`) in their places,
-and closes the turn after the run, also when it raises.
+`run_with_oversight` opens the turn under the agent's policy, runs a copy of the
+Agent with the oversight hooks in their places, and closes the turn after the
+run, also when it raises.
 
-A turn inside another one joins it when its policy is the same (or there is
-none). Another policy opens a child turn, linked to the outer one. A run that
-names no SDK agent joins the turn it runs in, or runs under DEFAULT_POLICY
-outside one; a side call opts out with `TurnRequest(oversight=False)`. A sync
-run (`run_with_oversight_sync`) cannot open a turn, so one that needs its own must not
-run. The SDK runs every Haystack Agent through `run_with_oversight`.
+A run inside a turn of the same policy (or none) joins it; another policy opens
+a child turn linked to the outer one. A run that names no SDK agent joins the
+turn it runs in, or runs under DEFAULT_POLICY outside one; a side call opts out
+with `TurnRequest(oversight=False)`. A sync run cannot open a turn, so one that
+needs its own must not run. The SDK runs every Haystack Agent through here.
 """
 
 from __future__ import annotations
@@ -50,15 +49,11 @@ if TYPE_CHECKING:
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.policy import Policy
 
-# The agent of a Haystack run that names none: it has no policy of its own. So it
-# runs under DEFAULT_POLICY, like any agent without one, and is recorded under
-# this name. Without DEFAULT_POLICY it opens no turn.
+# A Haystack run that names no agent runs under DEFAULT_POLICY, recorded under this name.
 UNNAMED_AGENT = SimpleNamespace(name="Haystack agent", oversight=None)
 
 
 def policy_agent(turn: TurnRequest) -> Any:
-    """The agent whose policy the run is under. Named by nothing, outside a turn:
-    the unnamed agent, under DEFAULT_POLICY. Inside one, the run joins it."""
     if turn.agent is None and current_guard() is None:
         return UNNAMED_AGENT
     return turn.agent
@@ -74,11 +69,10 @@ async def open_turn(
     input: str | None = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
 ) -> tuple[TurnGuard, bool]:
-    """Start a turn of `agent`. Returns its guard, and whether it opened a turn of its own.
+    """Start a turn of `agent`. Returns its guard and whether it opened a turn of its own.
 
-    It opens none without a policy, or inside a turn of the same policy, which
-    it joins. Inside a turn of another policy it opens a child turn, which is
-    still the outer turn's person and keeps the tools the outer turn took away.
+    A child turn (another policy inside a turn) keeps the outer turn's person and
+    the tools the outer turn took away.
     """
     outer = current_guard()
     guard = await TurnGuard.start(
@@ -101,15 +95,14 @@ async def open_turn(
 
 
 def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
-    """Whether a run under `policy_name` joins the open turn `outer` instead of its own."""
     return outer is not None and outer.policy is not None and outer.policy.name == policy_name
 
 
 def needs_own_turn_sync(turn: TurnRequest) -> bool:
-    """Whether the run needs a turn of its own here, which only an async run opens.
+    """Whether the run needs a turn of its own, which only an async run opens.
 
-    Sync code cannot await `get_oversight()`, so an agent that overrides it is
-    assumed to need one, and so is a policy name that does not resolve.
+    Sync code cannot await `get_oversight()`, so an override of it, or a policy
+    name that does not resolve, is assumed to need one.
     """
     agent, oversight = policy_agent(turn), turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
@@ -127,7 +120,7 @@ def needs_own_turn_sync(turn: TurnRequest) -> bool:
 
 
 async def needs_own_turn(turn: TurnRequest) -> bool:
-    """Whether the run of `turn.agent` opens a turn of its own here. True when its policy cannot be told."""
+    """True also when the policy cannot be determined."""
     agent, oversight = turn.agent, turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
         return False
@@ -140,7 +133,6 @@ async def needs_own_turn(turn: TurnRequest) -> bool:
 
 
 def build_oversight_hooks() -> dict[str, list[Any]]:
-    """The oversight hooks, at the points they run. The run's TurnRequest names the agent."""
     return {
         "before_run": [GateQuestionHook()],
         "before_llm": [StopClosedTurnHook(), LimitToolChoiceHook()],
@@ -154,9 +146,8 @@ def merge_oversight_hooks(hooks: dict[str, list[Any]] | None) -> dict[str, list[
     """Merge the oversight hooks into `hooks`, once, where each must run.
 
     They come first, so a blocked call is neither budgeted nor logged and a
-    result is masked before any other hook reads or cuts it. Only finish comes
-    last, after any hook that completes the answer. Oversight hooks already in
-    `hooks` are moved to these places.
+    result is masked before any other hook reads or cuts it. Only after_run comes
+    last, after any hook that completes the answer.
     """
     merged = {
         point: [h for h in items if not isinstance(h, OversightHook)]
@@ -178,9 +169,8 @@ async def run_with_oversight(
 ) -> dict[str, Any]:
     """Run a Haystack Agent with oversight. Read what it decided on `turn` afterwards.
 
-    The turn opens before the run, under the policy of `turn.agent`, or the
-    run joins the turn it runs inside. It closes after the run, also when the
-    run raises, since Haystack then skips after_run.
+    The turn closes after the run, also when it raises, since Haystack then skips
+    after_run.
     """
     turn = turn or TurnRequest()
     kwargs["hook_context"] = turn.hook_context(**(hook_context or {}))
@@ -200,22 +190,20 @@ async def run_with_oversight(
 def run_with_oversight_sync(
     agent: Any, messages: list[Any], *, turn: TurnRequest, **kwargs: Any
 ) -> dict[str, Any]:
-    """Run a Haystack Agent with oversight from sync code, which cannot open a turn.
+    """Run with oversight from sync code, which cannot open a turn.
 
-    Inside a turn the run joins it, and its tool calls are blocked, since the
-    guard only works from async code. Ask `needs_own_turn_sync(turn)` first: a run
-    that needs a turn of its own must not run here.
+    Inside a turn its tool calls are blocked (the guard is async only). Ask
+    `needs_own_turn_sync(turn)` first: a run that needs its own turn must not run.
     """
     return apply_oversight(agent).run(messages=messages, hook_context=turn.hook_context(), **kwargs)
 
 
 def apply_oversight(agent: Any) -> Any:
-    """A copy of `agent` with the oversight hooks in their places."""
     return agent.clone(hooks=merge_oversight_hooks(agent.hooks))
 
 
 async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
-    """Open the run's own turn. None when it joins the turn it runs inside, or has no policy."""
+    """None when the run joins the turn it runs inside, or has no policy."""
     agent = policy_agent(turn)
     if agent is None:
         return None
@@ -237,11 +225,10 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
 
 
 def mask_stored_question(messages: list[ChatMessage], turn: TurnRequest) -> None:
-    """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
+    """Mask the caller's last user message as the gate did, so the caller stores that copy.
 
-    Only its content is stored. When the masked text no longer splits back into
-    the content and the attachments' context, the content is withheld rather
-    than stored with what may be unmasked.
+    When the masked text no longer splits back into content and attachment
+    context, the content is withheld rather than stored possibly unmasked.
     """
     gate = turn.gate_result
     if gate is not None and gate.changed and (question := last_user_message(messages)):

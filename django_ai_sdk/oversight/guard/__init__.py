@@ -14,13 +14,8 @@ the turn to the record (see `recording`) and queues the background stages.
     await guard.close()
     return finished.text
 
-A guard for an agent without a policy, or with oversight off, is inert. Every
-call returns at once and allows everything.
-
-TurnGuard holds the turn's state and its lifecycle. Its collaborators do the
-work, each in its own module: `stages` (how each stage judges and acts),
-`judging` (asking lenses, matching rules), `masking` (TurnMasks) and `notices`
-(TurnNotices).
+A guard for an agent without a policy, or with oversight off, is inert and
+allows everything.
 """
 
 from __future__ import annotations
@@ -86,12 +81,11 @@ def unguarded() -> contextlib.AbstractContextManager[None]:
 
 
 def is_unguarded() -> bool:
-    """True inside `unguarded()`."""
     return _unguarded.get()
 
 
 def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]:
-    """Make `guard` the current guard for tool hooks and get_tools(). Tasks inherit it."""
+    """Make `guard` current for tool hooks and get_tools(). Tasks inherit it."""
     return scoped(_current, guard if guard is not None and guard.active else None)
 
 
@@ -101,10 +95,8 @@ async def closing_turn(
 ) -> AsyncGenerator[None]:
     """Close `guard` when the block ends, recording an exception as the run's error.
 
-    A client that left is recorded as "disconnected". `Blocked` is not an error,
-    since the block is already on the turn. `error` gives the error to record
-    otherwise, read at close. With `keep_open` the guard is closed only when the
-    block raises, because something else (the Stream) takes the turn over.
+    A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
+    `keep_open` the guard closes only on an exception (the Stream takes it over).
     """
     try:
         yield
@@ -121,21 +113,13 @@ async def closing_turn(
 
 
 def current_guard() -> TurnGuard | None:
-    """Return the open guard this code runs under, or None.
-
-    A task started inside a turn inherits its guard and may outlive it, so a
-    closed guard counts as none.
-    """
+    """The open guard this code runs under. A task that outlived its turn gets None."""
     guard = _current.get()
     return guard if guard is not None and not guard._closed else None
 
 
 def outlived_turn() -> bool:
-    """True when this code runs under a guard that already closed.
-
-    A task started inside a turn can outlive it. Its tool calls are blocked,
-    since nothing would check or record them.
-    """
+    """True under a closed guard; its tool calls are blocked since nothing would record them."""
     guard = _current.get()
     return guard is not None and guard._closed
 
@@ -164,21 +148,15 @@ class Usage:
 class TurnRecordState:
     """What the record has of a turn so far. Only `recording` writes it."""
 
-    # The row was written ahead after the gate, so close updates it.
+    # Written ahead after the gate, so close updates the row.
     row_written: bool = False
-    # Ids of the answers already written, in order, and how many matches were saved.
     answer_ids: list[str] = field(default_factory=list)
     matches_saved: int = 0
 
 
 @dataclass
 class TurnGuard:
-    """One turn under a policy: its state and lifecycle. Build it with `start()`.
-
-    Inert when `active` is False. `gate`, `gate_history`, `tool_call` and `finish`
-    run the stages (stages.py); `mask_text` and `mask_result` mask tool results
-    (`masks`); `close` writes the turn to the record.
-    """
+    """One turn under a policy. Build it with `start()`; inert unless `active`."""
 
     active: bool = False
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -189,42 +167,33 @@ class TurnGuard:
     thread_id: str = ""
     user_message_id: str = ""
     message_id: str = ""
-    # The asking user's id, "" when nobody was signed in.
     actor_id: str = ""
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
     restrict: list[str] | None = None
     usage: Usage = field(default_factory=Usage)
     created_at: Any = None
-    # Errors in the turn, joined with "; ".
     error: str = ""
-    # The run's own error passed to close(), like a crash or disconnect. The turn
-    # never finished, so nothing was let through.
+    # The run's own error (crash, disconnect): the turn never finished, nothing was let through.
     run_error: str = ""
     # False for a dry run, which writes nothing.
     recording: bool = True
     # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
-    # Set when a stage failed closed, the policy did not load, or the caller called
-    # `block`. The turn is recorded as blocked.
     blocked: bool = False
     original_input: str = ""
     original_output: str = ""
-    # What finish decided. A turn is finished once, inside its run or after it.
+    # A turn is finished once, inside its run or after it.
     finish_result: StageResult | None = None
-    # The enclosing turn when this one has its own policy, like a subagent or nested run().
     parent_turn_id: str = ""
-    # Set by a streaming adapter to send stub results for blocked tool calls, so the
-    # chat shows them as blocked instead of still running.
+    # Set by a streaming adapter to send stub results for blocked tool calls.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     started_at: float = field(default_factory=time.perf_counter)
     _closed: bool = False
-    # Whether each lens's latest answer errored. An error carries over to later
-    # stages until the lens answers again.
+    # An errored answer carries over to later stages until the lens answers again.
     _lens_errored: dict[str, bool] = field(default_factory=dict)
-    # The policy could not be chosen or loaded under FAIL_MODE "closed". Every stage blocks.
+    # Policy could not be chosen or loaded under FAIL_MODE "closed": every stage blocks.
     policy_unloaded: bool = False
-    # What the record has of this turn so far. Only `recording` writes it.
     record: TurnRecordState = field(default_factory=TurnRecordState)
     masks: TurnMasks = field(init=False, repr=False)
     notices: TurnNotices = field(init=False, repr=False)
@@ -235,7 +204,7 @@ class TurnGuard:
 
     @property
     def resolved(self) -> ResolvedPolicy:
-        """The policy of an active guard, which always has one. Read it only when `active`."""
+        """The policy; read it only when `active`."""
         assert self.policy is not None
         return self.policy
 
@@ -244,18 +213,14 @@ class TurnGuard:
         self.error = join_error(self.error, error)
 
     def block(self, error: str = "") -> None:
-        """Mark the turn as blocked by the caller, recorded with `error`.
-
-        For results oversight allowed that the caller still cannot use, like a
-        masked result that no longer fits its schema.
-        """
+        """Block the turn from the caller, e.g. a masked result no longer fits its schema."""
         if not self.active:
             return
         self.blocked = True
         self.note_error(error)
 
     def set_history(self, messages: list[ChatMessage]) -> None:
-        """Set the earlier conversation the lenses see, keeping the latest HISTORY_TURNS."""
+
         self.context.history = [
             HistoryItem(role=m.role, content=m.content or "")
             for m in messages[:-1]
@@ -263,11 +228,7 @@ class TurnGuard:
         ][-HISTORY_TURNS:]
 
     def set_sources(self, sources: Iterable[Any], *, seeded: Iterable[Any] = ()) -> None:
-        """Set what retrieval found, as NumberedSource, Source or dicts.
-
-        `seeded` lists sources carried over from earlier turns, as sources or keys
-        (a SourceRegistry keeps keys).
-        """
+        """Set what retrieval found. `seeded`: sources or keys carried over from earlier turns."""
         if not self.active:
             return
         seeded_keys = {s if isinstance(s, str) else as_source(s).key for s in seeded}
@@ -277,7 +238,7 @@ class TurnGuard:
         self.context.sources = fresh
 
     def allows_tool(self, name: str) -> bool:
-        """Whether tool `name` is still available. `restrict` None keeps all, [] removes all."""
+        """`restrict` None keeps all tools, [] removes all."""
         return self.restrict is None or (bool(self.restrict) and name not in self.restrict)
 
     def add_tool_call(self, call: ToolCall | dict[str, Any]) -> None:
@@ -298,17 +259,11 @@ class TurnGuard:
             self.usage.add(model, prompt, completion)
 
     def add_text(self, chunk: str) -> None:
-        """Add streamed answer text; finish judges the whole answer."""
         if self.active and chunk:
             self.context.output += chunk
 
     def keep_answers(self, answered: list[Answered]) -> None:
-        """Store the stage's answers for the record and for rule evaluation.
-
-        Tool call lenses judge one call each. The record keeps every call's answer,
-        but rules never read them as the turn's answer or failure. Other lenses keep
-        their latest answer and failure state.
-        """
+        """Keep answers for the record; only turn-level answers (not per tool call) feed rules."""
         for item in answered:
             self.answered.append(item)
             if item.about_turn:
@@ -317,16 +272,10 @@ class TurnGuard:
 
     @property
     def fails_closed(self) -> bool:
-        """True when a failed lens should trigger the policy's protective rules."""
         return self.policy is None or self.policy.fails_closed
 
     def record_stage_error(self, error: str, *, block_turn: bool) -> bool:
-        """Log the exception being handled and note `error` on the turn.
-
-        Returns True when the policy fails closed, so the caller blocks. With
-        `block_turn` the whole turn is then blocked. Without it (a tool call or a
-        tool result) only that one call is.
-        """
+        """Log and note `error`. True when failing closed; `block_turn` then blocks the turn."""
         logger.exception("Oversight: {} in turn {}", error, self.id)
         self.note_error(error)
         if self.fails_closed and block_turn:
@@ -334,7 +283,6 @@ class TurnGuard:
         return self.fails_closed
 
     def errored_lenses(self) -> set[str]:
-        """Return lenses whose latest answer this turn errored."""
         return {name for name, errored in self._lens_errored.items() if errored}
 
     def record_aside(
@@ -342,9 +290,8 @@ class TurnGuard:
     ) -> list[Matched]:
         """Record findings on other text as aside, once per lens and rule per stage.
 
-        Spans are dropped because they point into the other text, so they never
-        place masks in the question or answer. Failed lenses are recorded too.
-        Returns the matches added by this call.
+        Spans are dropped: they point into the other text and must never mask the
+        question or answer. Returns the matches added.
         """
         seen = {(o.lens.name, o.stage) for o in self.answered if o.aside}
         for item in answered:
@@ -364,8 +311,6 @@ class TurnGuard:
         self.matched.extend(added)
         return added
 
-    # Recording.
-
     @property
     def outcome(self) -> Outcome:
         blocked = [Outcome.BLOCKED] if self.too_long or self.blocked else []
@@ -378,11 +323,9 @@ class TurnGuard:
         return worst_outcome(*blocked, *(m.outcome(report=True) for m in self.matched))
 
     async def write_ahead(self) -> None:
-        """Insert the turn's row now, still open, with the answers and matches so far.
+        """Insert the open turn's row so a turn that never closes is left for `oversight_sweep`.
 
-        The gate calls this so a turn that never closes (a killed worker, an unread
-        response) still leaves a row for `oversight_sweep` to mark interrupted.
-        Runs once and never raises. If it fails, close writes the whole turn.
+        Runs once and never raises; if it fails, close writes the whole turn.
         """
         if not self.active or self._closed or self.record.row_written or not self.recording:
             return
@@ -405,17 +348,11 @@ class TurnGuard:
     ) -> TurnGuard:
         """Open a guard for one turn of `agent`. Inert unless a policy applies.
 
-        `channel` says where the turn came from; None records it as DEFAULT_CHANNEL.
-        `oversight` overrides the agent's policy for this turn. It can be a Policy
-        subclass or a name. False or "" (no policy) opens no turn. None uses the
-        agent's code (`declared_policy`).
-
-        If the policy cannot be chosen (`get_oversight` raised) or loaded (unknown
-        or broken), every stage blocks with Block.DEFAULT_MESSAGE and the turn is
-        recorded as blocked with the error. With FAIL_MODE "open" the turn runs
-        unguarded instead, and the failure is logged.
+        `oversight` overrides the agent's policy (Policy subclass or name); False
+        or "" opens no turn. If the policy cannot be chosen or loaded, every stage
+        blocks and the turn is recorded as blocked; with FAIL_MODE "open" the turn
+        runs unguarded and the failure is logged.
         """
-        # An inert guard still knows the question, so `gate().input` is the question.
         if input is None:
             input = last_user_text(messages or [])
         inert = cls(context=TurnContext(input=input))
@@ -485,12 +422,7 @@ class TurnGuard:
 
     @classmethod
     def blocking_all(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
-        """Build the guard for a turn whose policy could not be chosen or loaded.
-
-        It blocks everything under an empty stand-in policy, so the block and
-        the error are still recorded. With FAIL_MODE "open" it is inert instead.
-        """
-
+        """Block all under a stand-in policy so the failure is recorded. Inert if FAIL_MODE open."""
         if default_fail_mode() == "open":
             logger.error(
                 "Oversight runs a turn of {!r} unguarded: its {} (FAIL_MODE is open)",
@@ -514,13 +446,8 @@ class TurnGuard:
         )
         return guard
 
-    # The stages. Their work is in stages.py.
-
     async def gate(self) -> StageResult:
-        """Judge the question before the model sees it (`stages.judge_question`).
-
-        Always writes the turn ahead (`write_ahead`) afterwards, blocked or not.
-        """
+        """Judge the question before the model sees it, then write the turn ahead."""
         result = await stages.judge_question(self)
         await self.write_ahead()
         return result
@@ -528,23 +455,15 @@ class TurnGuard:
     async def gate_history(
         self, messages: list[ChatMessage], *, history: bool = True
     ) -> StageResult:
-        """Judge the history that comes with the question (`stages.judge_history`).
-
-        Call it before `gate()` for history the server did not store itself, such
-        as a stateless run, a chat without a thread, or a workflow's `history` input.
-        """
+        """Judge history the server did not store itself. Call before `gate()`."""
         return await stages.judge_history(self, messages, history=history)
 
     async def tool_call(self, call: ToolCall) -> str | None:
-        """Judge one tool call (`stages.judge_tool_call`). Returns the block message, or None."""
+        """Judge one tool call. Returns the block message, or None."""
         return await stages.judge_tool_call(self, call)
 
     async def finish(self, output: str | None = None) -> StageResult:
-        """Judge the finished answer (`stages.judge_answer`). Later calls return the same result.
-
-        The run's after_run hook usually finishes the turn. The code around the run
-        then reads that decision instead of judging again.
-        """
+        """Judge the finished answer once; later calls return the same result."""
         if self.finish_result is not None:
             return self.finish_result
         result = await stages.judge_answer(self, output)
@@ -553,24 +472,17 @@ class TurnGuard:
         return result
 
     async def mask_text(self, text: str) -> str:
-        """Mask a tool result the way the gate masks the question (`TurnMasks.mask_text`)."""
         return await self.masks.mask_text(text)
 
     async def mask_result(self, call_id: str, text: str) -> str:
-        """Mask a tool result once per call id and text (`TurnMasks.mask_result`)."""
         return await self.masks.mask_result(call_id, text)
 
-    # Closing.
-
     async def close(self, *, error: str = "") -> str | None:
-        """Write the turn to the record and queue the background stages. Never raises.
+        """Record the turn and queue the background stages. Never raises.
 
-        Tool results still being masked are cancelled first, so nothing is added
-        to a closed turn. `error` is what went wrong in the run itself, such as the
-        caller's exception or a disconnect. It is recorded with oversight's own
-        errors. If set, a turn no rule acted on gets a blank outcome.
-
-        Returns the turn id, or None for an inert guard or a failed write.
+        Pending tool-result masking is cancelled first so nothing lands on a closed
+        turn. `error` is the run's own failure; with it, a turn no rule acted on
+        gets a blank outcome. Returns the turn id, or None (inert or failed write).
         """
         if not self.active or self._closed:
             return None
@@ -596,7 +508,6 @@ class TurnGuard:
 
 
 def _blocking_policy(name: str) -> ResolvedPolicy:
-    """Return an empty policy named `name`, used to block a turn whose policy failed to load."""
     return ResolvedPolicy(
         name=name,
         capture=Capture(setting("CAPTURE")),

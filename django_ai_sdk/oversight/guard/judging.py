@@ -1,7 +1,4 @@
-"""Judging: ask_judge a stage's lenses within a deadline, then find the rules that match.
-
-Used by every guard stage, by reflect and by `dry_run`.
-"""
+"""Ask a stage's lenses within a deadline, then find the rules that match."""
 
 from __future__ import annotations
 
@@ -49,36 +46,28 @@ class Answered:
     lens: Lens
     stage: Stage
     answer: Answer
-    # The chain hit an error or the deadline after only unsure answers. The lens
-    # counts as failed for FAIL_MODE, but the unsure answer is kept for the record.
+    # Error or deadline after only unsure answers: failed for FAIL_MODE, answer kept for the record.
     failed: bool = False
-    # About other text, like an earlier message or a tool result. Recorded, but
-    # never used to place masks in the question or answer.
+    # About other text (earlier message, tool result): never places masks in question or answer.
     aside: bool = False
 
     @property
     def errored(self) -> bool:
-        """True when the lens failed at this stage."""
         return self.failed or bool(self.answer.error)
 
     @property
     def needs_retry(self) -> bool:
-        """True when reflect should ask_judge the lens again (see `should_retry`)."""
         return should_retry(self.answer.error, [step.error for step in self.answer.trail])
 
     @property
     def about_turn(self) -> bool:
-        """True when this is the turn's own answer: not about other text, nor one tool call.
-
-        Only these are the turn's answers for its rules and its labels.
-        """
+        """The turn's own answer (not aside, not a tool call); only these feed rules and labels."""
         return not self.aside and self.lens.subject is not Subject.TOOL_CALL
 
 
-# The error of a lens none of whose judges can run here.
 NO_JUDGE = "no judge can run here"
 
-# Actions a failed lens may trigger under FAIL_MODE "closed". Only protective ones.
+# Only protective actions may fire for a failed lens under FAIL_MODE "closed".
 FAIL_CLOSED_ACTIONS = frozenset({"block", "mask", "restrict_tools"})
 
 
@@ -88,17 +77,15 @@ class Matched:
 
     rule: Rule
     stage: Stage
-    # Actions this stage can carry out. Empty unless the rule is enforced.
+    # Empty unless the rule is enforced.
     acted: list[Action] = field(default_factory=list)
-    # Matched on other text, like an earlier message or a tool result. It counts
-    # toward the outcome but does not stop the rule from judging the turn itself.
+    # Counts toward the outcome but does not stop the rule judging the turn itself.
     aside: bool = False
-    # Matched only because a lens failed under FAIL_MODE "closed". The person sees
-    # the generic block message, not the rule's message or notice.
+    # Matched only because a lens failed closed: the person sees the generic block message.
     failed: bool = False
 
     def outcome(self, *, report: bool = False) -> Outcome:
-        """The outcome this match gives the turn. With `report`, as if the rule were enforced."""
+        """With `report`, the outcome as if the rule were enforced."""
         actions = self.rule.then if report else self.acted
         return worst_outcome(*(a.outcome for a in actions))
 
@@ -111,13 +98,11 @@ async def answer_lens(
     sample: bool = True,
     progress: list[Answer] | None = None,
 ) -> Answer | None:
-    """Ask a lens's steps in order (its patterns, check or judges) until one is sure.
+    """Ask a lens's steps in order until one is sure.
 
-    A lens whose judges all cannot run here (`Judge.missing()`, such as an unset
-    API key) answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped.
-    Only reflect samples. Inline stages always ask_judge. `sample=False` ignores the
-    sample rate, for `dry_run`. `progress` collects each answer as it
-    arrives, so a caller that cancels still has them.
+    A lens none of whose judges can run here answers NO_JUDGE, an error, so
+    FAIL_MODE decides; it is not skipped. Only reflect samples. `progress`
+    collects answers as they arrive, so a caller that cancels still has them.
     """
     if not lens.applies(context):
         return None
@@ -137,7 +122,7 @@ async def answer_lens(
 
 
 def _cannot_run(step: Any) -> bool:
-    """Whether `step` is a judge that cannot run here. One that does not build answers an error."""
+    """A step that fails to build is not "cannot run": it answers an error instead."""
     try:
         return bool(build_judge(step).missing())
     except Exception:
@@ -147,11 +132,9 @@ def _cannot_run(step: Any) -> bool:
 async def _first_sure(
     steps: list[Any], lens: Lens, context: TurnContext, asked: list[Answer]
 ) -> Answer | None:
-    """Return the first answer above `min_confidence`, else the last usable one.
+    """Return the first sure answer, else the last usable one (judges go quick to thorough).
 
-    Confidence scales differ per judge, so they are never compared. Lenses list
-    judges from quick to thorough, so the last one is trusted most. Earlier
-    answers go in the result's `trail`, in the order asked.
+    Confidence scales differ per judge, so they are never compared.
     """
     for step in steps:
         result = await ask_judge(step, lens, context)
@@ -168,7 +151,6 @@ async def _first_sure(
 
 
 def _ended_unsure(lens: Lens, answer: Answer | None, asked: list[Answer]) -> bool:
-    """True when the chain ended on an error and `answer`, the last usable one, is unsure."""
     if answer is None or not answer.ok or lens.is_final(answer):
         return False
     last = asked[-1] if asked else None
@@ -176,11 +158,10 @@ def _ended_unsure(lens: Lens, answer: Answer | None, asked: list[Answer]) -> boo
 
 
 def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
-    """True when reflect should ask_judge a lens again because of the deadline or an outage.
+    """True when reflect should ask a lens again after the deadline or an outage.
 
-    `trail_errors` are the errors on the answer's trail; only the last one counts.
-    A usable answer kept at the deadline has "deadline" there. One kept while a
-    later judge was down has that judge's error.
+    Only the last trail error counts: a usable answer kept at the deadline or
+    while a later judge was down carries that error there.
     """
     last_error = trail_errors[-1] if trail_errors else ""
     return any(e == "deadline" or is_unavailable(e) for e in (error, last_error))
@@ -196,9 +177,8 @@ async def answer_lenses(
 ) -> list[Answered]:
     """Answer `lenses` concurrently. Lenses still running at the deadline answer "deadline".
 
-    A lens cut off after an unsure answer keeps it, with "deadline" last in its
-    trail, so reflect still asks the slower judges. It counts as failed.
-    Running tasks are cancelled and awaited, so no judge outlives its stage.
+    A lens cut off after an unsure answer keeps it (failed, "deadline" last in its
+    trail) so reflect still asks the slower judges. No judge outlives its stage.
     """
     if not lenses:
         return []
@@ -241,7 +221,6 @@ async def answer_lenses(
 
 
 async def cancel_all(tasks: Iterable[asyncio.Future]) -> None:
-    """Cancel `tasks` and wait until they have stopped."""
     running = [task for task in tasks if not task.done()]
     for task in running:
         task.cancel()
@@ -250,10 +229,7 @@ async def cancel_all(tasks: Iterable[asyncio.Future]) -> None:
 
 
 def _last_usable(asked: list[Answer], *extra: Answer) -> Answer:
-    """The last usable answer, with the others and then `extra` as its trail.
-
-    Without a usable one, the first of `extra` (at the deadline, the "deadline" error).
-    """
+    """The last usable answer with the rest and `extra` as trail; else `extra[0]`."""
     kept = next((a for a in reversed(asked) if a.ok), None)
     if kept is None:
         return extra[0]
@@ -261,7 +237,6 @@ def _last_usable(asked: list[Answer], *extra: Answer) -> Answer:
 
 
 def _still_to_answer(policy: ResolvedPolicy, name: str, stage: Stage, answered: set[str]) -> bool:
-    """True when lens `name` may still answer at a later stage of this turn."""
     lens = policy.lenses.get(name)
     if lens is None or not lens.enabled or name in answered:
         return False
@@ -280,14 +255,10 @@ def match_rules(
 ) -> list[Matched]:
     """Return rules that match now and have not matched earlier in this turn.
 
-    A rule waits until every lens it reads has had its chance, so a gate lens and
-    a reflect lens can share a rule.
-
-    `errored` names lenses that failed this turn. A test on one of them is
-    unknown, never true (`Condition.matches`), unless it asks whether the lens
-    answered. With `fail_closed`, a failed lens triggers an enforced rule that
-    reads it, but only when that rule would block, mask or restrict tools here.
-    Rules that only alert, queue or notify never fire because of a failure.
+    A rule waits until every lens it reads has had its chance, so gate and
+    reflect lenses can share a rule. A test on an `errored` lens is unknown,
+    never true. With `fail_closed`, a failed lens fires an enforced rule only
+    when it would block, mask or restrict tools here; alerts never fire on failure.
     """
     answered = set(answers) | set(errored)
     matched: list[Matched] = []
@@ -325,15 +296,13 @@ def match_rules(
 
 
 def errored_lenses(answered: list[Answered]) -> set[str]:
-    """Return the names of lenses whose answer failed."""
     return {o.lens.name for o in answered if o.errored}
 
 
 async def judge_stage(
     guard: TurnGuard, stage: Stage, *, subjects: set[Subject], deadline: float | None
 ) -> list[Matched]:
-    """Ask the stage's lenses on `subjects`, keep their answers on `guard`, and return
-    the rules that match now."""
+    """Ask the stage's lenses on `subjects`, keep answers on `guard`, return new matches."""
     lenses = [lens for lens in guard.resolved.active_lenses(stage) if lens.subject in subjects]
     answered = await answer_lenses(lenses, guard.context, stage, deadline_ms=deadline)
     guard.keep_answers(answered)

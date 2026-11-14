@@ -1,10 +1,4 @@
-"""How each inline stage judges its text and acts on the turn.
-
-The gate judges the question (`judge_question`) and the history that comes with
-it (`judge_history`), the tool stage each tool call (`judge_tool_call`), and
-finish the whole answer (`judge_answer`). Each one returns a `StageResult`.
-`TurnGuard.gate`, `gate_history`, `tool_call` and `finish` call them.
-"""
+"""How each inline stage (gate, history, tool call, finish) judges its text and acts on the turn."""
 
 from __future__ import annotations
 
@@ -41,28 +35,24 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.guard.judging import Answered, Matched
     from django_ai_sdk.oversight.types import Answer, ToolCall
 
-# How many of the latest history items judge_history judges. Older ones are withheld
-# unread, or passed as is when the policy fails open. Every gate lens judges each
-# item, so this caps the cost of one turn.
+# Caps one turn's cost: older items are withheld unread, or passed when failing open.
 MAX_HISTORY_JUDGED = 20
-# How many history items are judged at once.
 HISTORY_CONCURRENCY = 4
 
 
 @dataclass
 class StageResult:
-    """What one stage decided about its text: the question, the answer or other text."""
+    """What one stage decided about its text."""
 
     stage: Stage = Stage.GATE
     # The text as it may go on: masked, withheld or replaced by the block message.
     text: str = ""
-    # True when the text differs from what was judged.
     changed: bool = False
     blocked: bool = False
     message: str = ""
-    # The `data-oversight` payload for the client, if there is anything to say.
+    # The `data-oversight` payload, if there is anything to say.
     notice: dict[str, Any] | None = None
-    # Tools removed by an enforced rule. None means none, [] means all.
+    # None means no tools removed, [] means all.
     restrict: list[str] | None = None
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
@@ -71,7 +61,6 @@ class StageResult:
 
     @property
     def answers(self) -> dict[str, Answer]:
-        """The latest answer per lens at this stage."""
         return {o.lens.name: o.answer for o in self.answered}
 
     @property
@@ -80,17 +69,12 @@ class StageResult:
         return [m.rule.name for m in self.matched]
 
     def block(self, message: str) -> StageResult:
-        """Mark the result as blocked with `message`, and return it."""
         self.blocked = True
         self.message = message
         return self
 
 
-# The gate.
-
-
 async def judge_question(guard: TurnGuard) -> StageResult:
-    """Judge the question before the model sees it, masking or blocking it."""
     result = StageResult(Stage.GATE, text=guard.context.input)
     if not guard.active:
         return result
@@ -139,25 +123,16 @@ async def judge_history(
 ) -> StageResult:
     """Judge earlier messages and attachment context that come with the question.
 
-    Each earlier user or assistant message and each attachment context (file
-    names, summaries, captions, including the question's own) is judged
-    separately by the gate's input lenses and masked in place. Text a mask
-    cannot point into is withheld whole. With `history=False` only the last
-    message's attachments are judged, because a stored thread was already
-    judged turn by turn.
+    Each item is judged separately by the gate's lenses and masked in place, or
+    withheld whole when a mask cannot point into it. With `history=False` only
+    attachments are judged (a stored thread was judged turn by turn). Question
+    and items count together against MAX_INPUT_CHARS.
 
-    Only the latest MAX_HISTORY_JUDGED items are judged, HISTORY_CONCURRENCY
-    at a time. Older ones are withheld unless the policy fails open. The
-    question and the judged items count together against MAX_INPUT_CHARS.
-
-    The result is blocked when an enforced rule that blocks, or removes every
-    tool, matches any item. The gate runs such a question without tools
-    instead, but history is resent every turn, so the match would quietly
-    leave every later turn without tools. A failed lens counts as a match unless
-    the policy fails open. Removed tools stay removed for the turn. Findings are
-    recorded aside, once per lens and rule, and never steer masks or rules on the
-    question itself. Rules that only alert, queue or notify are skipped,
-    because clients resend history on every turn.
+    Blocks when an enforced rule that blocks or removes every tool matches any
+    item: history is resent every turn, so merely dropping tools would silently
+    leave every later turn without them. For the same reason alert, queue and
+    notify rules are skipped. Findings are recorded aside and never steer masks
+    or rules on the question itself.
     """
     result = StageResult(Stage.GATE, text=guard.context.input)
     if not guard.active:
@@ -212,11 +187,10 @@ async def judge_history(
 def _history_items(
     messages: list[ChatMessage], *, history: bool
 ) -> list[tuple[Callable[[], str], Callable[[str], None]]]:
-    """Return a (read, write back) pair for each text judge_history judges.
+    """(read, write back) pairs for each text to judge.
 
-    Earlier user and assistant messages (with `history`), plus the context of
-    every attachment. That context is rebuilt from the document on each turn and
-    never stored, so a vouched history does not cover it.
+    Attachment context is rebuilt from the document each turn and never stored,
+    so a vouched history does not cover it.
     """
     items: list[tuple[Callable[[], str], Callable[[str], None]]] = []
     for index, message in enumerate(messages):
@@ -239,11 +213,7 @@ def _history_items(
     return items
 
 
-# The tool stage.
-
-
 async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
-    """Judge one tool call before it runs. Returns the block message, or None to allow it."""
     if not guard.active:
         return None
     if guard.policy_unloaded:
@@ -280,7 +250,6 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         # One recorded match per rule, however many calls it blocked.
         recorded = {m.rule.name for m in guard.matched if not m.aside}
         guard.matched.extend(m for m in matched if m.rule.name not in recorded)
-        # Removed tools stay removed. Later calls are blocked and get_tools() leaves them out.
         block = first_block_message(matched)
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
@@ -298,11 +267,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         return str(Block.DEFAULT_MESSAGE) if fails_closed else None
 
 
-# Finish.
-
-
 async def judge_answer(guard: TurnGuard, output: str | None) -> StageResult:
-    """Judge the finished answer before it is stored: pass, mask or withhold it."""
     if output is not None:
         guard.context.output = output
     guard.original_output = guard.original_output or guard.context.output

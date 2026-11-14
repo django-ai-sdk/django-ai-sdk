@@ -1,8 +1,7 @@
-"""Masking: what a Mask rule hides in the turn's own text and in other text the model reads.
+"""What a Mask rule hides in the turn's own text and in other text the model reads.
 
-Other text, like an earlier message or a tool result, is judged by the gate's
-lenses the same way as the question. It is masked or withheld whole, and the
-findings are recorded aside. A tool result a gate rule blocks is withheld whole.
+Other text (earlier messages, tool results) is judged by the gate's lenses like
+the question, then masked or withheld whole; findings are recorded aside.
 """
 
 from __future__ import annotations
@@ -41,29 +40,22 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.policy import ResolvedPolicy
     from django_ai_sdk.oversight.rules import Action
 
-# The spans a mask hides and the template it puts in their place.
+# (spans to hide, replacement template)
 MaskGroup = tuple[list[TextSpan], str]
 
 
 class TurnMasks:
-    """What a turn masks: its own text, and other text the model reads.
-
-    Owns the tool results being masked, so the stream and the tool hook share one
-    masking per result, and the citation sources already masked.
-    """
+    """A turn's masking. The stream and the tool hook share one masking per tool result."""
 
     def __init__(self, guard: TurnGuard) -> None:
         self.guard = guard
         # In-flight tool result masking, keyed by call id and text hash.
         self.results: dict[str, asyncio.Future[str]] = {}
-        # Masked citation source text by source key, so each text is masked only once.
+        # Masked citation source text by source key.
         self.sources: dict[str, str] = {}
 
     def mask_groups(self, matched: list[Matched], subject: Subject) -> list[MaskGroup]:
-        """Collect the Mask actions' groups for `subject` (see `collect_masks`).
-
-        A mask that cannot locate what it should hide becomes a Block.
-        """
+        """Collect the Mask groups for `subject`; a mask that cannot locate its target blocks."""
         guard = self.guard
         groups, unpointed = collect_masks(
             matched,
@@ -79,12 +71,11 @@ class TurnMasks:
     async def mask_other_text(
         self, lenses: list[Lens], text: str, stage: Stage, *, blocks: bool = False
     ) -> StageResult:
-        """Judge `text` with `lenses` like the gate judges the question, and mask it.
+        """Judge `text` like the gate judges the question, and mask it.
 
-        `stage` picks the deadline. Text a mask cannot locate (see `_unpointed`) is
-        replaced whole with UNCHECKED_TEXT. With `blocks`, Block and RestrictTools
-        actions are kept as well. Only protective actions are kept, so other text
-        never triggers alerts or notifications.
+        Text a mask cannot locate is replaced whole with UNCHECKED_TEXT. Only
+        protective actions are kept (with `blocks`, also Block and RestrictTools),
+        so other text never triggers alerts or notifications.
         """
         guard = self.guard
         judged = StageResult(stage, text=text)
@@ -136,10 +127,9 @@ class TurnMasks:
     async def mask_text(self, text: str) -> str:
         """Mask a tool result the way the gate masks the question. Never raises.
 
-        Findings are recorded aside at the tool stage. A result an enforced gate
-        rule would block is withheld whole, and tools it takes away stay away.
-        If the result cannot be checked, a closed policy withholds it and an open
-        one passes it unchanged and records the error.
+        A result an enforced gate rule would block is withheld whole. If it cannot
+        be checked, a closed policy withholds it; an open one passes it and records
+        the error.
         """
         guard = self.guard
         try:
@@ -159,12 +149,7 @@ class TurnMasks:
             return str(UNCHECKED_TEXT) if withhold else text
 
     async def mask_result(self, call_id: str, text: str) -> str:
-        """Mask a tool result like `mask_text`, once per call id and text.
-
-        The stream and the tool hook both ask for the same result, and must get
-        the same masked text. A different text under the same call, like a
-        truncated result, is masked separately.
-        """
+        """`mask_text` once per call id and text, so stream and tool hook get the same result."""
         if not call_id:
             return await self.mask_text(text)
         key = f"{call_id}:{hashlib.sha256(text.encode()).hexdigest()[:FINGERPRINT_CHARS]}"
@@ -174,12 +159,10 @@ class TurnMasks:
         return await asyncio.shield(pending)
 
     async def cancel(self) -> None:
-        """Cancel the tool results still being masked, so nothing is added to a closed turn."""
         await cancel_all(self.results.values())
 
 
 def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
-    """Return the gate's entity lenses that an enforced mask rule reads."""
     names = {
         name
         for rule in policy.rules.values()
@@ -194,7 +177,7 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
 
 
 def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
-    """Return `gate_masking_lenses`, plus the gate's lenses an enforced block or tool rule reads."""
+    """`gate_masking_lenses` plus gate lenses an enforced block or restrict_tools rule reads."""
     masking = gate_masking_lenses(policy)
     names = {
         name
@@ -220,10 +203,8 @@ def collect_masks(
 ) -> tuple[list[tuple[Matched, MaskGroup]], list[tuple[Matched, Mask]]]:
     """Collect the (spans, template) group each Mask action in `matched` masks in `subject`.
 
-    A mask that would change nothing is dropped from its match, so the turn is
-    never recorded as masked when nothing was. A mask that cannot locate what it
-    should hide (see `_unpointed`) stays and is returned apart, for the caller to
-    block, withhold or ignore.
+    A mask that changes nothing is dropped, so the turn is never recorded as
+    masked when nothing was. Unpointed masks are returned apart for the caller.
     """
     groups: list[tuple[Matched, MaskGroup]] = []
     unpointed: list[tuple[Matched, Mask]] = []
@@ -246,7 +227,6 @@ def collect_masks(
 
 
 def _latest(answered: Iterable[Answered], names: set[str]) -> list[Answered]:
-    """Return the latest answer of each lens in `names`, leaving out aside answers."""
     latest: dict[str, Answered] = {}
     for item in answered:
         if item.lens.name in names and not item.aside:
@@ -262,11 +242,10 @@ def _unpointed(
     subject: Subject,
     context: TurnContext,
 ) -> bool:
-    """True when a mask over lenses `names` cannot locate everything to hide in `subject`.
+    """True when a mask cannot locate everything to hide; masking around it would leak.
 
-    That happens when a lens's latest answer failed under a closed policy, found
-    something without spans, or has spans outside the text it read. Masking
-    around it would leak what it found.
+    A lens failed under a closed policy, found something without spans, or has
+    spans outside the text it read.
     """
     for item in _latest(answered, names):
         if item.lens.subject not in {subject, Subject.EXCHANGE}:
@@ -284,11 +263,10 @@ def _unpointed(
 def spans_for(
     answered: Iterable[Answered], names: set[str], subject: Subject, input_text: str
 ) -> list[TextSpan]:
-    """Return the spans lenses `names` found in `subject`, from each lens's latest answer.
+    """Spans lenses `names` found in `subject`.
 
-    An EXCHANGE lens reads input, a blank line, then output. Its spans are clipped
-    to the requested part and shifted onto it, so a span across both parts masks
-    each side. Aside answers are ignored.
+    An EXCHANGE lens reads input, a blank line, then output; its spans are clipped
+    and shifted onto the requested part, so a span across both masks each side.
     """
     size = len(input_text)
     offset = size + 2

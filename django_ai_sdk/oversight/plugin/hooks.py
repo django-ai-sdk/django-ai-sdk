@@ -1,20 +1,15 @@
-"""The oversight hooks a Haystack Agent runs.
+"""The oversight hooks a Haystack Agent runs. Each does nothing outside a turn.
 
-    before_run   GateQuestionHook       judge the history and question; mask them, or block the run
-    before_llm   StopClosedTurnHook     stop a run whose turn has closed
-    before_llm   LimitToolChoiceHook    offer only the tools the turn allows
-    before_tool  JudgeToolCallHook      block a tool call the policy says no to
-    after_tool   MaskToolResultHook     mask a tool result before the model reads it
-    after_run    RecordUsageHook        add the run's model and token usage to its turn
-    after_run    JudgeAnswerHook        give the sources to the turn; judge the answer, pass, mask or withhold it
-
-The run's `hook_context` carries the `TurnRequest`, so the hooks read and fill in
-the same object the caller holds. Each hook does nothing when the turn's policy
-has nothing for its stage, or when there is no turn.
+    before_run   GateQuestionHook     judge history and question; mask, or block the run
+    before_llm   StopClosedTurnHook   stop a run whose turn has closed
+    before_llm   LimitToolChoiceHook  offer only the tools the turn allows
+    before_tool  JudgeToolCallHook    block a tool call the policy says no to
+    after_tool   MaskToolResultHook   mask a tool result before the model reads it
+    after_run    RecordUsageHook      add model and token usage to the turn
+    after_run    JudgeAnswerHook      judge the answer: pass, mask or withhold it
 
 If any tool call in a step is blocked, the whole step is answered with stubs,
-because Haystack runs a step's calls all together or not at all. The model is
-told which call was blocked and that it may retry the others.
+because Haystack runs a step's calls all together or not at all.
 """
 
 from __future__ import annotations
@@ -62,22 +57,19 @@ allow_deserialization_module(__name__)
 
 
 def turn_request(state: State) -> TurnRequest:
-    """The run's TurnRequest. A run started without one gets the defaults."""
     return (state.data.get("hook_context") or {}).get(REQUEST_KEY) or TurnRequest()
 
 
 class OversightHook:
-    """Base for the oversight hooks: serializable, so an Agent with them still saves to YAML.
+    """Serializable, so an Agent with them still saves to YAML.
 
-    Haystack calls `run_async` in an async run, and `run` in a sync one. A sync
-    run never opens a turn of its own (it cannot await the guard), so `run`
-    does nothing unless a hook overrides it.
+    A sync run never opens a turn of its own, so `run` does nothing unless overridden.
     """
 
     allowed_hook_points: list[str] = []  # noqa: RUF012
 
     def run(self, state: State) -> None:
-        """A sync run: nothing to do."""
+        """A sync run has no turn of its own."""
 
     def to_dict(self) -> dict[str, Any]:
         return default_to_dict(self)
@@ -88,8 +80,6 @@ class OversightHook:
 
 
 class StopClosedTurnHook(OversightHook):
-    """Before each model call: stop a run whose turn has closed."""
-
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
@@ -101,17 +91,14 @@ class StopClosedTurnHook(OversightHook):
 
 
 class LimitToolChoiceHook(OversightHook):
-    """Before each model call: offer only the tools the turn allows."""
-
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
         # No guard once the turn has closed: StopClosedTurnHook stops that run.
         if (guard := current_guard()) is None:
             return
-        # Haystack hands this same list to the model and the ToolInvoker for
-        # the step, so filtering it in place takes the tools away. The tool
-        # hook blocks a call to a removed tool anyway.
+        # Haystack hands this same list to the model and the ToolInvoker for the
+        # step, so filtering it in place takes the tools away.
         tools = state.data["tools"]
         tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
 
@@ -124,14 +111,10 @@ REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
 class GateQuestionHook(OversightHook):
-    """Judge the run's history and question, then mask them in place or block the run.
+    """Judge history and question, then mask them in place or block the run.
 
-    The history is every earlier user and assistant message, judged unless the
-    TurnRequest says the stored thread vouches for it (`history_vouched`). A
-    block ends the run before the first model call, with the policy's message
-    as the answer. Otherwise the gate's notice waits on the guard for the stream,
-    and the turn's `on_gated(turn)` runs, so a caller can store the question
-    only once it passed.
+    A block ends the run before the first model call. `on_gated` runs only once
+    the question passed, so a caller stores only gated questions.
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
@@ -147,7 +130,7 @@ class GateQuestionHook(OversightHook):
                 return
             if gate.notice:
                 guard.notices.pending.append(gate.notice)
-            # Mask the sources the thread already cited, before any citations card shows them.
+            # Before any citations card shows them.
             await mask_sources(guard, current_registry.get())
         turn.first_produced_index = len(state.data.get("messages") or [])
         if turn.on_gated is not None:
@@ -155,14 +138,9 @@ class GateQuestionHook(OversightHook):
 
 
 async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> StageResult:
-    """Judge the history, then the question, masking each in the run's messages.
-
-    A history the stored thread `vouched` for is not judged again, but attachment
-    context always is: it is rebuilt from the document each turn and the model reads it.
-    """
+    """Judge history, then question, masking each in the run's messages."""
     messages = list(state.data.get("messages") or [])
-    # The question as the run rendered it, such as a subagent's task from its
-    # user_prompt: the turn opened on the messages before Haystack rendered it.
+    # The question as rendered (e.g. a subagent's user_prompt); the turn opened before that.
     question = next((m.text or "" for m in reversed(messages) if m.is_from(ChatRole.USER)), "")
     guard.original_input = guard.context.input = question
     said = [
@@ -190,7 +168,6 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
 
 
 def masked_message(message: HaystackChatMessage, text: str) -> HaystackChatMessage:
-    """`message` with its text replaced, its images and other parts kept."""
     parts: list[Any] = []
     for part in message._content:
         if isinstance(part, TextContent):
@@ -206,13 +183,11 @@ def replacement_answer(text: str) -> HaystackChatMessage:
 
 
 def end_run_with_answer(state: State, text: str, *, stop: str) -> None:
-    """End the run with `text` as its answer."""
     messages = list(state.data.get("messages") or [])
     state.set("messages", [*messages, replacement_answer(text)], handler_override=replace_values)
     state.set("stop_run", stop)
 
 
-# Told to the model for a call skipped because another call in the step was blocked.
 SKIPPED_CALL_MESSAGE = gettext_lazy(
     "Not run: another call in this step was blocked. Call it again on its own if you still need it."
 )
@@ -224,15 +199,10 @@ UNGUARDABLE_CALL_MESSAGE = gettext_lazy(
 
 
 class JudgeToolCallHook(OversightHook):
-    """Block tool calls the turn's policy says no to, before they run."""
-
     allowed_hook_points = ["before_tool"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
-        """Block every call when inside a turn.
-
-        The guard only works from async code, so a sync call cannot be checked.
-        """
+        """Inside a turn, block every call: the guard cannot check sync calls."""
         if _blocked_after_turn(state):
             return
         step = _tool_step(state)
@@ -269,7 +239,6 @@ class JudgeToolCallHook(OversightHook):
 
 
 def _tool_step(state: State) -> tuple[TurnGuard, list[HaystackChatMessage]] | None:
-    """The guard and messages, when inside a turn and the last message calls tools."""
     guard = current_guard()
     messages = pending_tool_calls(state) if guard is not None else None
     if guard is None or messages is None:
@@ -278,7 +247,6 @@ def _tool_step(state: State) -> tuple[TurnGuard, list[HaystackChatMessage]] | No
 
 
 def _blocked_after_turn(state: State) -> bool:
-    """Block every pending call of a run that outlived its turn. True when it did."""
     if not outlived_turn():
         return False
     if (messages := pending_tool_calls(state)) is not None:
@@ -296,7 +264,7 @@ def _as_tool_call(call: Any, state: State) -> ToolCall:
 
 
 def _agent_name(state: State) -> str:
-    """The agent of a run that joined an outer turn, recorded with its tool calls."""
+    """The agent of a run that joined an outer turn, recorded on its tool calls."""
     turn = turn_request(state)
     if turn.guard is not None or turn.agent is None:
         return ""
@@ -306,7 +274,6 @@ def _agent_name(state: State) -> str:
 def _block_tool_step(
     state: State, messages: list[HaystackChatMessage], block_messages: dict[int, str]
 ) -> list[HaystackChatMessage]:
-    """Answer the step's calls with stubs. Blocked calls say why, the rest say skipped."""
     return answer_calls_with(
         state,
         messages,
@@ -323,26 +290,18 @@ def _block_tool_step(
 
 
 class MaskToolResultHook(OversightHook):
-    """Mask tool results before the model reads them, like the gate masks the question.
-
-    A tool can return data the gate would hide, such as a record number or a
-    client's name. Each result is checked once, when it arrives.
-    """
+    """Mask tool results before the model reads them. Each result is checked once."""
 
     allowed_hook_points = ["after_tool"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
-        """Withhold every result that is not a stub when inside a turn.
-
-        The sync before-tool hook blocks every call, so any other result ran unchecked.
-        """
+        """Inside a turn, withhold every non-stub result: it ran unchecked."""
         if current_guard() is not None or outlived_turn():
             _withhold_results(state)
 
     async def run_async(self, state: State) -> None:
         guard = current_guard()
         if guard is None:
-            # A run that outlived its turn: nothing can check its results.
             if outlived_turn():
                 _withhold_results(state)
             return
@@ -366,7 +325,6 @@ class MaskToolResultHook(OversightHook):
 
 
 def _withhold_results(state: State) -> None:
-    """Replace every unchecked result that is not a stub with UNCHECKED_TEXT."""
     messages = state.data.get("messages") or []
     withheld = {
         index: _with_result(message, result, str(UNCHECKED_TEXT))
@@ -379,7 +337,6 @@ def _withhold_results(state: State) -> None:
 def _with_result(
     message: HaystackChatMessage, result: ToolCallResult, content: Any
 ) -> HaystackChatMessage:
-    """`message` with new content, marked as checked so it is not checked again."""
     return HaystackChatMessage.from_tool(
         content,
         origin=result.origin,
@@ -389,10 +346,9 @@ def _with_result(
 
 
 async def mask_tool_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
-    """Mask the text in a tool result. Images and files pass through unchanged.
+    """Mask the text in a tool result; images and files pass through.
 
-    A result is a string or a list of content parts. Any other value is judged as
-    JSON, and is replaced by the masked text only when masking changed it.
+    Non-str, non-list values are judged as JSON and replaced only when masking changed them.
     """
     if isinstance(result, str):
         return await guard.mask_result(call_id, result)
@@ -411,8 +367,6 @@ async def mask_tool_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
 
 
 class RecordUsageHook(OversightHook):
-    """Add the run's model and token usage to the turn it runs in, sync or async."""
-
     allowed_hook_points = ["after_run"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
@@ -435,13 +389,9 @@ class RecordUsageHook(OversightHook):
 
 
 class JudgeAnswerHook(OversightHook):
-    """Judge the answer of a run with a turn of its own: pass, mask or withhold it.
+    """Judge the answer of a run with its own turn: pass, mask or withhold it.
 
-    The citation sources are masked and given to the turn first, so finish can
-    judge the answer against them. The answer is then passed, masked or withheld
-    in the run's messages. The TurnRequest's `read_answer` says which text that is. With
-    its `answer_schema` (a Pydantic model), a masked answer that no longer fits is withheld.
-    A sync run has no turn of its own, so it has nothing to finish.
+    Sources are masked and given to the turn first, so finish judges against them.
     """
 
     allowed_hook_points = ["after_run"]  # noqa: RUF012
@@ -477,10 +427,7 @@ class JudgeAnswerHook(OversightHook):
 
 
 def withhold_unfit(guard: TurnGuard, finished: StageResult, schema: type[BaseModel]) -> None:
-    """Withhold a masked structured answer whose JSON no longer fits `schema`.
-
-    Returning the unmasked original instead would leak what the mask hid.
-    """
+    """Withhold a masked answer that no longer fits `schema`; the original would leak."""
     if not finished.changed or finished.blocked:
         return
     try:
@@ -492,12 +439,7 @@ def withhold_unfit(guard: TurnGuard, finished: StageResult, schema: type[BaseMod
 
 
 async def mask_sources(guard: TurnGuard, registry: SourceRegistry | None) -> None:
-    """Mask source text in the citation registry, if there is one, like tool results.
-
-    The citations card, the stored citations artifact and the lenses all read
-    the registry, so none of them should see unmasked text. The gate, the stream
-    and the finish hook call this; each text is masked once.
-    """
+    """Mask source text in the citation registry; card, artifact and lenses all read it."""
     for source in registry.all if registry is not None else []:
         text = source.content or ""
         if not text or guard.masks.sources.get(source.key) == text:

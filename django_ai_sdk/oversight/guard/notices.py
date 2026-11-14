@@ -20,27 +20,21 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.guard.stages import StageResult
 
 TOO_LONG_MESSAGE = _("This message is too long to check. Shorten it and try again.")
-# Shown to the model instead of a tool result or earlier message that could not be checked.
 UNCHECKED_TEXT = _("[withheld: could not be checked]")
-# Shown to the model instead of a tool result an enforced gate rule blocks.
-# Its words stay as clients and stored threads already show them.
+# Keep the wording: clients and stored threads already show it.
 BLOCKED_TEXT = _("[withheld: blocked by oversight]")
-# The block message for a call to a tool removed this turn.
 TOOL_UNAVAILABLE_MESSAGE = _("This tool is not available for this request.")
 
 
 def notice_base(turn_id: Any, stage: Stage, outcome: Outcome) -> dict[str, Any]:
-    """Return the fields every `data-oversight` payload starts with."""
     return {"turn_id": str(turn_id), "stage": str(stage), "outcome": str(outcome)}
 
 
 def rule_notes(matched: list[Matched], told: set[str]) -> list[dict[str, Any]]:
-    """Build the notes shown to the person for rules that acted, each rule once per turn.
+    """Notes for rules that acted, each rule once per turn.
 
-    `kind` is the first visible (USER_FACING) action by ACTION_ORDER, for the
-    client's icon, and `also` lists the rest. When the rule acted only out of
-    sight (a queue, alert or notification), `kind` is "notice" so the client
-    never learns which. `stage` is where the rule acted.
+    `kind` is the first USER_FACING action; a rule that acted only out of sight
+    gets "notice", so the client never learns it queued, alerted or notified.
     """
     notes: list[dict[str, Any]] = []
     for match in matched:
@@ -62,9 +56,6 @@ def rule_notes(matched: list[Matched], told: set[str]) -> list[dict[str, Any]]:
 
 
 class TurnNotices:
-    """What a turn tells the person: the `data-oversight` payloads of its stages,
-    each rule's notice once, and the turn's Notify events."""
-
     def __init__(self, guard: TurnGuard) -> None:
         self.guard = guard
         # data-oversight payloads waiting to be streamed.
@@ -85,9 +76,7 @@ class TurnNotices:
         detail = level == "full"
         # Tool calls send no notice of their own, so the answer's notice covers them.
         notes = rule_notes([*acted, *self._tool_matches(stage, matched)], self.told)
-        # Hide invisible actions (queue, alert, notify) so the client cannot probe the
-        # policy. A rule's own notice may still reveal them.
-        # A rule is shown when the person may learn it acted: by its notice, or a visible action.
+        # Hide invisible actions (queue, alert, notify) so the client cannot probe the policy.
         shown = [
             m
             for m in acted
@@ -115,10 +104,9 @@ class TurnNotices:
         return notice
 
     def _detail(self, stage: Stage, matched: list[Matched]) -> dict[str, Any]:
-        """Return every answer and match of `stage`, for a developer view in the client.
+        """Answers and matches of `stage` for a developer view, valued as stored.
 
-        Values are shown as the record stores them (`content.stored_value`). Entity
-        names become "[found]", so the client never sees what a mask removed.
+        Entity names become "[found]", so the client never sees what a mask removed.
         """
         policy = self.guard.resolved
         matches = [*matched, *self._tool_matches(stage, matched)]
@@ -156,13 +144,11 @@ class TurnNotices:
         }
 
     def _tool_matches(self, stage: Stage, matched: list[Matched]) -> list[Matched]:
-        """Return tool-stage matches to include in the finish notice."""
         if stage is not Stage.FINISH:
             return []
         return [m for m in self.guard.matched if m.stage is Stage.TOOL and m not in matched]
 
     def notifications(self, matched: list[Matched]) -> list[tuple[dict[str, Any], list[str]]]:
-        """Return (event, notifier names) for each enforced Notify action in `matched`."""
         return notify_events(
             self.guard.id,
             matched,
@@ -173,7 +159,6 @@ class TurnNotices:
 
 
 def first_block_message(matched: Iterable[Matched]) -> str | None:
-    """Return the block message of the first Block that acted in `matched`, or None."""
     for match in matched:
         for action in match.acted:
             if isinstance(action, Block):
@@ -182,7 +167,6 @@ def first_block_message(matched: Iterable[Matched]) -> str | None:
 
 
 def restricted_tools(matched: Iterable[Matched], restrict: list[str] | None) -> list[str] | None:
-    """Return `restrict` with the tools of every RestrictTools that acted in `matched` added."""
     for match in matched:
         for action in match.acted:
             if isinstance(action, RestrictTools):
@@ -191,21 +175,20 @@ def restricted_tools(matched: Iterable[Matched], restrict: list[str] | None) -> 
 
 
 def merge_restrict(restrict: list[str] | None, names: list[str]) -> list[str]:
-    """Add `names` to the removed tools `restrict`. None means none removed, [] means all."""
+    """`restrict` None means none removed, [] means all."""
     if not names or restrict == []:
         return []
     return sorted({*(restrict or []), *names})
 
 
 def block_message(match: Matched, block: Block) -> str:
-    """Return the block message. A match caused only by a failure gets the generic one."""
+    """A match caused only by a failure gets the generic message."""
     if match.failed:
         return str(Block.DEFAULT_MESSAGE)
     return str(match.rule.message or block.message)
 
 
 def removed_tool_message(match: Matched) -> str:
-    """Return the block message for a tool `match` removed. Like `block_message`, a failure gets the generic one."""
     if match.failed:
         return str(TOOL_UNAVAILABLE_MESSAGE)
     return str(match.rule.message or TOOL_UNAVAILABLE_MESSAGE)
