@@ -17,8 +17,8 @@ Every turn the agent runs through the SDK is then judged by the policy's lenses,
 acted on by its rules, and recorded. See docs/content/oversight.md.
 
 Everything an app uses imports from here; the submodules are internal. Code
-that runs a turn by hand (an adapter) imports its plumbing from the submodule
-that defines it. The
+that runs a turn by hand (an adapter), builds an Agent's hooks itself, or asks a
+judge directly imports that plumbing from the submodule that defines it. The
 declaration API loads with the package, so importing it needs no app registry.
 The rest (judges, packs, the run plugin, the guard, the stream, the dry run,
 notifiers and retention) loads on first use. The review API (`services`,
@@ -81,7 +81,7 @@ if typing.TYPE_CHECKING:
     from django_ai_sdk.oversight.content import forget_actor, forget_thread, forget_turns
     from django_ai_sdk.oversight.guard import TurnGuard, current_guard, unguarded
     from django_ai_sdk.oversight.guard.stages import StageResult
-    from django_ai_sdk.oversight.judges.base import Judge, ask_judge, build_judge
+    from django_ai_sdk.oversight.judges.base import Judge
     from django_ai_sdk.oversight.judges.classifier import Classifier, certainty
     from django_ai_sdk.oversight.judges.local import LocalClassifier, load_local_classifier
     from django_ai_sdk.oversight.judges.typesafe import TypeSafe
@@ -119,22 +119,10 @@ if typing.TYPE_CHECKING:
     from django_ai_sdk.oversight.plugin import (
         TurnRequest,
         apply_oversight,
-        build_oversight_hooks,
-        merge_oversight_hooks,
         needs_own_turn,
         needs_own_turn_sync,
         run_with_oversight,
         run_with_oversight_sync,
-    )
-    from django_ai_sdk.oversight.plugin.hooks import (
-        GateQuestionHook,
-        JudgeAnswerHook,
-        JudgeToolCallHook,
-        LimitToolChoiceHook,
-        MaskToolResultHook,
-        OversightHook,
-        RecordUsageHook,
-        StopClosedTurnHook,
     )
     from django_ai_sdk.oversight.retention import prune
     from django_ai_sdk.oversight.trial import DryRunResult, dry_run
@@ -146,7 +134,7 @@ _LAZY = {
     **dict.fromkeys(["forget_actor", "forget_thread", "forget_turns"], "content"),
     **dict.fromkeys(["TurnGuard", "current_guard", "unguarded"], "guard"),
     "StageResult": "guard.stages",
-    **dict.fromkeys(["Judge", "ask_judge", "build_judge"], "judges.base"),
+    "Judge": "judges.base",
     **dict.fromkeys(["Classifier", "certainty"], "judges.classifier"),
     **dict.fromkeys(["LocalClassifier", "load_local_classifier"], "judges.local"),
     "TypeSafe": "judges.typesafe",
@@ -191,27 +179,12 @@ _LAZY = {
         [
             "TurnRequest",
             "apply_oversight",
-            "build_oversight_hooks",
-            "merge_oversight_hooks",
             "needs_own_turn",
             "needs_own_turn_sync",
             "run_with_oversight",
             "run_with_oversight_sync",
         ],
         "plugin",
-    ),
-    **dict.fromkeys(
-        [
-            "GateQuestionHook",
-            "JudgeAnswerHook",
-            "JudgeToolCallHook",
-            "LimitToolChoiceHook",
-            "MaskToolResultHook",
-            "OversightHook",
-            "RecordUsageHook",
-            "StopClosedTurnHook",
-        ],
-        "plugin.hooks",
     ),
     "prune": "retention",
     **dict.fromkeys(["DryRunResult", "dry_run"], "trial"),

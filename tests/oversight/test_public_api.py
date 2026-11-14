@@ -15,7 +15,7 @@ def test_judges_are_exported_from_the_package_and_load_on_first_use():
     assert {"TypeSafe", "LocalClassifier", "Judge", "Classifier", "certainty"} <= set(
         oversight.__all__
     )
-    assert {"ask_judge", "build_judge", "load_local_classifier"} <= set(oversight.__all__)
+    assert "load_local_classifier" in oversight.__all__
     # Each judge loads on first use, so declaring a lens never imports a model client.
     assert "TypeSafe" not in vars(oversight)
     assert oversight.TypeSafe.__name__ == "TypeSafe"
@@ -47,14 +47,26 @@ def test_the_settings_table_is_the_defaults():
 
 
 def test_adapter_plumbing_stays_in_its_modules():
-    from django_ai_sdk.oversight import guard, history, stream
+    from django_ai_sdk.oversight import guard, history, plugin, stream
     from django_ai_sdk.oversight.judges import base
+    from django_ai_sdk.oversight.plugin import hooks
 
     plumbing = {
         guard: ["guarding", "closing_turn", "outlived_turn"],
         stream: ["StreamTurn", "CONTENT_FILTER"],
         history: ["history_for"],
-        base: ["judge_label"],
+        base: ["judge_label", "ask_judge", "build_judge"],
+        plugin: ["build_oversight_hooks", "merge_oversight_hooks"],
+        hooks: [
+            "OversightHook",
+            "GateQuestionHook",
+            "StopClosedTurnHook",
+            "LimitToolChoiceHook",
+            "JudgeToolCallHook",
+            "MaskToolResultHook",
+            "RecordUsageHook",
+            "JudgeAnswerHook",
+        ],
     }
     for module, names in plumbing.items():
         for name in names:
