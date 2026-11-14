@@ -109,7 +109,10 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
                 for alias, spec in value.items()
             )
         ),
-        'a dict of judge specs by alias, such as {"judge": {"class": "LLMJudge"}}',
+        (
+            'a dict by alias of {"class": ..., **kwargs} dicts, Judge instances or another'
+            ' alias\'s name, such as {"judge": {"class": "LLMJudge"}}'
+        ),
     ),
     "DEADLINE_MS": (
         lambda value: (
@@ -129,7 +132,10 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
     ),
     "NOTIFIERS": (
         lambda value: isinstance(value, list | tuple),
-        "a list of dotted paths or Notifier instances",
+        (
+            'a list of {"class": "<dotted path>", **kwargs} dicts, Notifier instances or dotted'
+            ' paths, such as ["django_ai_sdk.oversight.notifiers.LogNotifier"]'
+        ),
     ),
     "RUNTIME_CACHE_SECONDS": (
         lambda value: _is_number(value) and value >= 0,

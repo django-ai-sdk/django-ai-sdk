@@ -50,9 +50,10 @@ from django_ai_sdk.oversight.lenses import (
     Violation,
     register_validator,
 )
-from django_ai_sdk.oversight.policy import Policy, pick
+from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, pick
 from django_ai_sdk.oversight.registry import (
     add_policy_loader,
+    build_policy,
     invalidate_policy,
     register_policy,
     unregister_policy,
@@ -66,6 +67,7 @@ from django_ai_sdk.oversight.types import (
     Severity,
     Stage,
     Subject,
+    TextSpan,
     TurnContext,
 )
 
@@ -287,6 +289,7 @@ __all__ = [
     "QualityPack",
     "Queue",
     "RecordUsageHook",
+    "ResolvedPolicy",
     "RestrictTools",
     "Rule",
     "SafetyPack",
@@ -300,6 +303,7 @@ __all__ = [
     "StreamTurn",
     "Subject",
     "TakenFrom",
+    "TextSpan",
     "TurnContext",
     "TurnGuard",
     "TurnRequest",
@@ -311,6 +315,7 @@ __all__ = [
     "ask_judge",
     "build_judge",
     "build_oversight_hooks",
+    "build_policy",
     "certainty",
     "closing_turn",
     "current_guard",

@@ -17,7 +17,7 @@ give a judge lens an `LLMJudge(llm=FakeLLM(...))` from `django_ai_sdk.testing`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -72,8 +72,8 @@ async def dry_run(
 ) -> DryRunResult:
     """Run `policy` over one exchange as a turn would, without recording it.
 
-    `policy` is a registered policy name or a `ResolvedPolicy` from `policy.build`,
-    so a draft can run before it is registered. `tool_calls` ({"name", "arguments"}
+    `policy` is a registered policy name, or a `ResolvedPolicy` from
+    `build_policy(policy)` so a draft can run before it is registered. `tool_calls` ({"name", "arguments"}
     or ToolCall) are checked in order before the answer. Raises LookupError when a
     named policy does not load.
     """
@@ -106,18 +106,18 @@ async def _run_stages(
 ) -> DryRunResult:
     result = DryRunResult(policy=resolved.name)
 
-    def add_stage(stage: Stage, before: int, matched_before: int, **extra: Any) -> None:
+    def add_stage(stage_result: StageResult, before: int, matched_before: int) -> None:
+        # The stage's own result, holding only what this stage answered and matched.
         result.stages.append(
-            StageResult(
-                stage=stage,
+            replace(
+                stage_result,
                 answered=guard.answered[before:],
                 matched=guard.matched[matched_before:],
-                **extra,
             )
         )
 
     gate = await guard.gate()
-    add_stage(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.text)
+    add_stage(gate, 0, 0)
     if gate.blocked:
         result.blocked_stage = "gate"
 
@@ -127,33 +127,22 @@ async def _run_stages(
             answered, matched = len(guard.answered), len(guard.matched)
             refused = await guard.tool_call(call)
             guard.context.tool_calls.append(call)
-            add_stage(
-                Stage.TOOL,
-                answered,
-                matched,
-                blocked=bool(refused),
-                message=refused or "",
-                tool=call.name,
-            )
+            tool_result = StageResult(stage=Stage.TOOL, tool=call.name)
+            if refused:
+                tool_result.block(refused)
+            add_stage(tool_result, answered, matched)
 
     if not result.blocked_stage and output:
         answered, matched = len(guard.answered), len(guard.matched)
-        finished = await guard.finish(output)
-        add_stage(
-            Stage.FINISH,
-            answered,
-            matched,
-            blocked=finished.blocked,
-            message=finished.message,
-            text=finished.text,
-        )
-        if finished.blocked:
+        finish = await guard.finish(output)
+        add_stage(finish, answered, matched)
+        if finish.blocked:
             result.blocked_stage = "finish"
 
     # Reflect runs on every closed turn, a blocked one too.
     answered, matched = len(guard.answered), len(guard.matched)
     await _run_reflect_stage(guard, resolved)
-    add_stage(Stage.REFLECT, answered, matched)
+    add_stage(StageResult(stage=Stage.REFLECT), answered, matched)
 
     result.outcome = guard.outcome
     result.report_outcome = guard.report_outcome

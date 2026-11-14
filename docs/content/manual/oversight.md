@@ -14,8 +14,8 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 
 | For | Names |
 | --- | --- |
-| Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
-| Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TurnContext` |
+| Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
+| Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
 | Judges | `Judge`, `Classifier`, `certainty`, `Patterns`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec), `judge_label` (a spec's name) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
@@ -356,7 +356,7 @@ python manage.py check --deploy --database default
 
 ## Testing
 
-`dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a policy, by its registered name or as a `ResolvedPolicy` from `build_policy(name, policy_class=Draft)` to try a draft before registering it, over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `changed`, `notice`, `restrict`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
