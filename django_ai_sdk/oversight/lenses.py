@@ -323,7 +323,7 @@ class Lens:
         return f"<{type(self).__name__} {self.name!r}>"
 
     @property
-    def display_label(self) -> str:
+    def display_name(self) -> str:
         return self.label or self.name.replace("_", " ")
 
     def applies(self, context: TurnContext) -> bool:
@@ -369,7 +369,7 @@ class Lens:
             "name": self.name,
             "kind": self.kind,
             "answer": self.answer.kind,
-            "label": self.display_label,
+            "label": self.display_name,
             "subject": str(self.subject),
             "stages": [str(s) for s in self.stages],
             "sample": self.sample,

@@ -495,7 +495,7 @@ def _answer_out(
     return LensAnswerOut(
         id=str(row.id),
         lens=row.lens,
-        label=lens.display_label if lens else row.lens,
+        label=lens.display_name if lens else row.lens,
         kind=lens.answer.kind if lens else "",
         stage=row.stage,
         answerer=row.answerer,

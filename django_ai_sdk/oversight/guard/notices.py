@@ -119,7 +119,7 @@ class TurnNotices:
             "answers": [
                 {
                     "lens": o.lens.name,
-                    "label": o.lens.display_label,
+                    "label": o.lens.display_name,
                     "kind": o.lens.answer.kind,
                     "value": stored_value(o.lens, o.answer),
                     "confidence": o.answer.confidence if o.answer.ok else None,
