@@ -73,28 +73,28 @@ MASTER = base64.b64encode(b"k" * 32).decode()
 OTHER = base64.b64encode(b"o" * 32).decode()
 
 
-def _naming_judge(text, view):
+def _naming_judge(text, context):
     # A judge that names who it found in its own words (no `labels`), and says where.
-    at = view.input.find(NAME)
+    at = context.input.find(NAME)
     if at < 0:
         return Answer(value=[])
     return Answer(value=[NAME], spans=[TextSpan(start=at, end=at + len(NAME), label="person")])
 
 
-def _judged(text, view):
+def _judged(text, context):
     return Answer(value=True, confidence=0.9, rationale=f"It quotes {NAME}, {EMAIL}, {BSN}, {KEY}")
 
 
-def _taken(text, view):
+def _taken(text, context):
     # Like TypeSafe.per_source: the titles of the sources, each one's score by its key.
     return Answer(
-        value=[s.title for s in view.sources],
+        value=[s.title for s in context.sources],
         confidence=0.9,
-        items={s.key: 0.9 for s in view.sources},
+        items={s.key: 0.9 for s in context.sources},
     )
 
 
-def _later(text, view):
+def _later(text, context):
     return Answer(value=True, rationale=f"Later: {EMAIL} again")
 
 

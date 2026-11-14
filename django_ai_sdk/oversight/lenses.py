@@ -473,7 +473,7 @@ class CheckLens(Lens):
         for validator in self.validators:
             run = get_validator(validator)
             try:
-                run(text, context) if _takes_view(run) else run(text)
+                run(text, context) if _takes_context(run) else run(text)
             except Violation as violation:
                 found.append(str(violation.message))
         return Answer(value=bool(found), rationale="; ".join(found))
@@ -520,7 +520,7 @@ class _Checker(Judge):
 
 
 @cache
-def _takes_view(validator: Callable[..., Any]) -> bool:
+def _takes_context(validator: Callable[..., Any]) -> bool:
     try:
         params = inspect.signature(validator).parameters.values()
     except (TypeError, ValueError):

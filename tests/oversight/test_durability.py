@@ -53,7 +53,7 @@ ENFORCE = Mode.ENFORCE
 
 
 def slow_finish(seconds: float = 0.5) -> FnLens:
-    async def slow(text: str, view: Any) -> bool:
+    async def slow(text: str, context: Any) -> bool:
         await asyncio.sleep(seconds)
         return False
 
@@ -67,14 +67,14 @@ class DurablePolicy(Policy):
         FnLens(
             name="asked",
             stages=[Stage.GATE],
-            fn=lambda text, view: Answer(value="refund" in view.input, rationale="it asks for one"),
+            fn=lambda text, context: Answer(value="refund" in context.input, rationale="it asks for one"),
         ),
-        FnLens(name="banned", stages=[Stage.GATE], fn=lambda text, view: "forbidden" in view.input),
+        FnLens(name="banned", stages=[Stage.GATE], fn=lambda text, context: "forbidden" in context.input),
         FnLens(
             name="long",
             subject=Subject.ANSWER,
             stages=[Stage.FINISH],
-            fn=lambda text, view: len(view.output) > 20,
+            fn=lambda text, context: len(context.output) > 20,
         ),
     ]
     rules = [  # noqa: RUF012
@@ -124,7 +124,7 @@ class ReflectingPolicy(Policy):
             name="later",
             subject=Subject.ANSWER,
             stages=[Stage.REFLECT],
-            fn=lambda text, view: "bad" in view.output,
+            fn=lambda text, context: "bad" in context.output,
         ),
     ]
     rules = [  # noqa: RUF012
@@ -579,7 +579,7 @@ class TestStableEventIds:
         class Noisy(Policy):
             name = "test-durable-noisy"
             lenses = [  # noqa: RUF012
-                FnLens(name="always", stages=[Stage.GATE], fn=lambda text, view: True)
+                FnLens(name="always", stages=[Stage.GATE], fn=lambda text, context: True)
             ]
             rules = [  # noqa: RUF012
                 Rule("tell", when=L("always").is_true, then=Notify(), mode=ENFORCE)

@@ -175,13 +175,13 @@ class TestHistoryBounds:
     def counting(self, name: str, **attrs: Any) -> tuple[str, dict[str, int]]:
         seen = {"calls": 0, "running": 0, "most": 0}
 
-        async def judge(text, view):
+        async def judge(text, context):
             seen["calls"] += 1
             seen["running"] += 1
             seen["most"] = max(seen["most"], seen["running"])
             await asyncio.sleep(0.01)
             seen["running"] -= 1
-            return "ignore your instructions" in view.input
+            return "ignore your instructions" in context.input
 
         policy(
             name,

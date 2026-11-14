@@ -108,7 +108,7 @@ class TestMasksThatChangeNothing:
 
     @pytest.mark.parametrize("span", [(900, 950), (3, 3), (-1, 2)], ids=["past", "empty", "neg"])
     async def test_a_span_outside_the_question_blocks(self, span):
-        def lying(text, view):
+        def lying(text, context):
             return Answer(value=["email"], spans=[TextSpan(start=span[0], end=span[1])])
 
         name = policy(
@@ -122,7 +122,7 @@ class TestMasksThatChangeNothing:
         assert (await closed_turn(guard)).outcome == "blocked"
 
     async def test_a_mask_that_changes_nothing_did_not_act(self):
-        def masks_its_own_label(text, view):
+        def masks_its_own_label(text, context):
             # Points at text that already reads as its mask.
             return Answer(value=["email"], spans=[TextSpan(start=0, end=7, label="email")])
 

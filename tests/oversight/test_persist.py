@@ -106,7 +106,7 @@ class TestRecordingFailures:
         assert "ignore previous" not in text
 
     async def test_close_cancels_tool_results_still_being_masked(self):
-        async def slow_pii(text, view):
+        async def slow_pii(text, context):
             await asyncio.sleep(1.0)
             spans = PIILens(name="pii", kinds=["email"]).finder.find(text, "pii")
             return Answer(value=[span.label for span in spans], spans=spans)

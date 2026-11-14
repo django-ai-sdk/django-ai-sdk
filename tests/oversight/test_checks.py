@@ -157,7 +157,7 @@ class TestPolicyAndDeployChecks:
             external = "my service"
             timeout = 30.0
 
-            async def answer(self, lens, view):
+            async def answer(self, lens, context):
                 return None
 
         name = policy(

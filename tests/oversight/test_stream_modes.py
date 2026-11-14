@@ -128,7 +128,7 @@ class TestAutoHoldsTheAnswer:
 
         from django_ai_sdk.views.schemas import Message
 
-        async def slow(text, view):
+        async def slow(text, context):
             await asyncio.sleep(0.5)
             return True
 

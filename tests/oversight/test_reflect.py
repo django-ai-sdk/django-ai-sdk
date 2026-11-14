@@ -65,7 +65,7 @@ class TestReflect:
             result=ChatMessage(id=message_id, role="assistant", content="Ask Jan.").model_dump(),
         )
         turn_id = await self._finished(
-            "fx-ref-nospan", lambda lens, view: Answer(value=["Jan"]), message_id
+            "fx-ref-nospan", lambda lens, context: Answer(value=["Jan"]), message_id
         )
         await run_reflection(turn_id)
         assert (await RuleMatch.objects.aget(turn_id=turn_id, rule="mask_names")).acted
@@ -84,7 +84,7 @@ class TestReflect:
             thread=await Thread.objects.acreate(),
             result=ChatMessage(id=message_id, role="assistant", content="Ask Jan.").model_dump(),
         )
-        down = lambda lens, view: Answer(error="unavailable: ConnectionError")  # noqa: E731
+        down = lambda lens, context: Answer(error="unavailable: ConnectionError")  # noqa: E731
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "closed"}):
             turn_id = await self._finished("fx-ref-down", down, message_id)
             for _ in range(REFLECT_ATTEMPTS - 1):
@@ -103,8 +103,8 @@ class TestReflect:
         from django_ai_sdk.conversation.models import Message, Thread
         from django_ai_sdk.oversight.models import LensAnswer
 
-        def who(text, view):
-            at = view.input.find("Jan Jansen")
+        def who(text, context):
+            at = context.input.find("Jan Jansen")
             spans = [TextSpan(start=at, end=at + 10, label="person")] if at >= 0 else []
             return Answer(value=["Jan Jansen"] if spans else [], spans=spans)
 
@@ -115,7 +115,7 @@ class TestReflect:
                 FnLens(
                     name="why",
                     stages=[Stage.REFLECT],
-                    fn=lambda text, view: Answer(value=True, rationale=f"Quotes: {view.input}"),
+                    fn=lambda text, context: Answer(value=True, rationale=f"Quotes: {context.input}"),
                 ),
             ],
             [],

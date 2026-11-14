@@ -16,7 +16,7 @@ from tests.oversight.helpers import gate, policy
 class Down(Judge):
     """A classifier that fails on every question."""
 
-    async def answer(self, lens, view):
+    async def answer(self, lens, context):
         raise RuntimeError("down")
 
 

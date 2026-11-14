@@ -87,7 +87,7 @@ class TestClosedByDefault:
             def missing(self) -> str:
                 return "no API key"
 
-            async def answer(self, lens, view):  # noqa: ANN001, ANN201
+            async def answer(self, lens, context):  # noqa: ANN001, ANN201
                 pytest.fail("a missing judge is never asked")
 
         name = policy(
@@ -311,14 +311,14 @@ class TestFailModeAtEachStage:
 
 
 class Said(Judge):
-    """A judge that answers what `fn(text, view)` returns."""
+    """A judge that answers what `fn(text, context)` returns."""
 
     def __init__(self, fn, name: str) -> None:
         self.fn = fn
         self.name = name
 
-    async def answer(self, lens, view):
-        result = self.fn(view.text(lens.subject), view)
+    async def answer(self, lens, context):
+        result = self.fn(context.text(lens.subject), context)
         return result if isinstance(result, Answer) else Answer(value=result)
 
 

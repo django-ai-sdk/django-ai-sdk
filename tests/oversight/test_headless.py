@@ -160,7 +160,7 @@ class TestHeadless:
     async def test_a_lens_that_misses_the_deadline_is_answered_in_reflect(self):
         import asyncio
 
-        async def slow(text, view):
+        async def slow(text, context):
             await asyncio.sleep(0.2)
             return True
 
@@ -185,7 +185,7 @@ class TestHeadless:
     async def test_reflect_does_not_ask_a_tool_lens_about_no_call(self):
         import asyncio
 
-        async def slow(text, view):
+        async def slow(text, context):
             await asyncio.sleep(0.2)
             return True
 

@@ -153,7 +153,7 @@ class TestQuickstartWithAModelJudge:
         from tests.oversight.helpers import gate
 
         class Slow(Judge):
-            async def answer(self, lens, view):
+            async def answer(self, lens, context):
                 await asyncio.sleep(5)
 
         configured = {"JUDGES": {"classifier": Slow()}, "DEADLINE_MS": {"gate": 200}}

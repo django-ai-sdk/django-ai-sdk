@@ -100,21 +100,21 @@ class HeldChild(Policy):
     extends = ["test-held-parent"]  # noqa: RUF012
 
 
-def down(lens, view):
+def down(lens, context):
     raise RuntimeError("down")
 
 
 class Said(Judge):
-    """A judge that answers what `fn(lens, view)` returns."""
+    """A judge that answers what `fn(lens, context)` returns."""
 
     def __init__(self, fn, name: str = "said") -> None:
         self.fn = fn
         self.name = name
 
-    async def answer(self, lens, view):
+    async def answer(self, lens, context):
         import inspect
 
-        result = self.fn(lens, view)
+        result = self.fn(lens, context)
         if inspect.isawaitable(result):
             result = await result
         return result if result is None or isinstance(result, Answer) else Answer(value=result)
