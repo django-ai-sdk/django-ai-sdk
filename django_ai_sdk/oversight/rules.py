@@ -98,9 +98,11 @@ class Condition:
     def lenses(self) -> set[str]:
         return set(_lenses(self.node))
 
-    def decide(self, answers: Mapping[str, Answer], unknown: Set[str] = frozenset()) -> bool | None:
+    def matches(
+        self, answers: Mapping[str, Answer], unknown: Set[str] = frozenset()
+    ) -> bool | None:
         """Return True, False, or None when a lens in `unknown` leaves it undecided."""
-        return _decide(self.node, answers, unknown)
+        return _node_matches(self.node, answers, unknown)
 
 
 def _parts(condition: Condition, key: str) -> list[dict[str, Any]]:
@@ -120,18 +122,18 @@ def _lenses(node: Mapping[str, Any]) -> Iterator[str]:
         yield from _lenses(child)
 
 
-def _decide(
+def _node_matches(
     node: Mapping[str, Any], answers: Mapping[str, Answer], unknown: Set[str]
 ) -> bool | None:
     if "all" in node or "any" in node:
         # Kleene logic: one False decides an `all`, one True an `any`.
         decisive = "any" in node
-        results = [_decide(child, answers, unknown) for child in _children(node)]
+        results = [_node_matches(child, answers, unknown) for child in _children(node)]
         if decisive in results:
             return decisive
         return None if None in results else not decisive
     if "not" in node:
-        result = _decide(node["not"], answers, unknown)
+        result = _node_matches(node["not"], answers, unknown)
         return None if result is None else not result
     lens, op, operand = node["lens"], node["op"], node.get("value")
     answer = answers.get(lens)

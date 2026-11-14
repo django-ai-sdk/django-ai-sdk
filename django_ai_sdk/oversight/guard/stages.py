@@ -21,7 +21,7 @@ from django_ai_sdk.oversight.guard.judging import (
 )
 from django_ai_sdk.oversight.guard.notices import (
     TOO_LONG_MESSAGE,
-    TOOL_UNAVAILABLE,
+    TOOL_UNAVAILABLE_MESSAGE,
     UNCHECKED_TEXT,
     first_refusal,
     merge_restrict,
@@ -250,7 +250,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         return str(Block.DEFAULT_MESSAGE)
     try:
         if not guard.allows_tool(call.name):
-            return str(TOOL_UNAVAILABLE)
+            return str(TOOL_UNAVAILABLE_MESSAGE)
         lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
         if not lenses:
             return None
@@ -289,7 +289,9 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
             restricting = next(
                 (m for m in matched if any(a.kind == "restrict_tools" for a in m.acted)), None
             )
-            return tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE)
+            return (
+                tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE_MESSAGE)
+            )
         return None
     except Exception:
         refuse = guard.record_stage_error("tool check failed", block_turn=False)

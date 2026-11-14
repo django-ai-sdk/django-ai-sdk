@@ -43,7 +43,7 @@ from django_ai_sdk.agents.tool_agent import (
 from django_ai_sdk.common import ChatMessage, last_user_message
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
-from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE, UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
 from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Stage, ToolCall
 from django_ai_sdk.pricing import token_counts
@@ -90,9 +90,9 @@ class TurnRequest:
     # what a coordinator reads of a subagent. A replaced answer then takes the
     # place of every produced message. By default finish judges all the text the
     # model wrote, as a stream shows it, and a replacement takes the last reply's place.
-    read: Callable[[list[HaystackChatMessage]], str] | None = None
+    read_answer: Callable[[list[HaystackChatMessage]], str] | None = None
     # A Pydantic model the answer must still fit once masked.
-    schema: type[BaseModel] | None = None
+    answer_schema: type[BaseModel] | None = None
     # The id of the message that will store the answer.
     message_id: str = ""
     # The caller closes the turn itself, such as a stream that still stores the answer.
@@ -268,12 +268,14 @@ def end_run_with_answer(state: State, text: str, *, stop: str) -> None:
 
 
 # Told to the model for a call skipped because another call in the step was refused.
-SKIPPED = gettext_lazy(
+SKIPPED_CALL_MESSAGE = gettext_lazy(
     "Not run: another call in this step was refused. Call it again on its own if you still need it."
 )
 
 # Sync hooks cannot await the guard, so every tool call in a sync run is refused.
-UNGUARDABLE = gettext_lazy("This tool cannot be checked in a sync run, so it is not run.")
+UNGUARDABLE_CALL_MESSAGE = gettext_lazy(
+    "This tool cannot be checked in a sync run, so it is not run."
+)
 
 
 class JudgeToolCallsHook(OversightHook):
@@ -296,7 +298,9 @@ class JudgeToolCallsHook(OversightHook):
         for call in calls:
             guard.add_tool_call(_as_tool_call(call, state))
         guard.note_error("tool called in a sync run")
-        _refuse_tool_step(state, messages, {i: str(UNGUARDABLE) for i in range(len(calls))})
+        _refuse_tool_step(
+            state, messages, {i: str(UNGUARDABLE_CALL_MESSAGE) for i in range(len(calls))}
+        )
 
     async def run_async(self, state: State) -> None:
         if _refused_after_turn(state):
@@ -334,7 +338,9 @@ def _refused_after_turn(state: State) -> bool:
         return False
     if (messages := pending_tool_calls(state)) is not None:
         calls = messages[-1].tool_calls
-        _refuse_tool_step(state, messages, {i: str(TOOL_UNAVAILABLE) for i in range(len(calls))})
+        _refuse_tool_step(
+            state, messages, {i: str(TOOL_UNAVAILABLE_MESSAGE) for i in range(len(calls))}
+        )
     return True
 
 
@@ -361,7 +367,9 @@ def _refuse_tool_step(
         messages,
         [
             (
-                {"refused": refusals[index]} if index in refusals else {"skipped": str(SKIPPED)},
+                {"refused": refusals[index]}
+                if index in refusals
+                else {"skipped": str(SKIPPED_CALL_MESSAGE)},
                 {REFUSED_META_KEY: index in refusals},
             )
             for index in range(len(messages[-1].tool_calls))
@@ -396,7 +404,7 @@ class MaskToolResultsHook(OversightHook):
         messages = state.data.get("messages") or []
         changed: dict[int, HaystackChatMessage] = {}
         for index, message, result in tool_results(messages, MASKED_META_KEY):
-            masked = await masked_result(guard, result.origin.id or "", result.result)
+            masked = await mask_tool_result(guard, result.origin.id or "", result.result)
             guard.add_tool_call(
                 ToolCall(
                     id=result.origin.id or "",
@@ -435,7 +443,7 @@ def _with_result(
     )
 
 
-async def masked_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
+async def mask_tool_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
     """Mask the text in a tool result. Images and files pass through unchanged.
 
     A result is a string or a list of content parts. Any other value is judged as
@@ -486,8 +494,8 @@ class JudgeAnswerHook(OversightHook):
 
     The citation sources are masked and given to the turn first, so finish can
     judge the answer against them. The answer is then passed, masked or withheld
-    in the run's messages. The TurnRequest's `read` says which text that is. With
-    its `schema` (a Pydantic model), a masked answer that no longer fits is withheld.
+    in the run's messages. The TurnRequest's `read_answer` says which text that is. With
+    its `answer_schema` (a Pydantic model), a masked answer that no longer fits is withheld.
     A sync run has no turn of its own, so it has nothing to finish.
     """
 
@@ -505,15 +513,15 @@ class JudgeAnswerHook(OversightHook):
             return
         messages = list(state.data.get("messages") or [])
         produced = messages[request.first :]
-        text = request.read(produced) if request.read else assistant_text(produced)
+        text = request.read_answer(produced) if request.read_answer else assistant_text(produced)
         if not text:
             guard.note_error("no result")
             return
         finished = await guard.finish(text)
-        if request.schema is not None:
-            withhold_unfit(guard, finished, request.schema)
+        if request.answer_schema is not None:
+            withhold_unfit(guard, finished, request.answer_schema)
         if finished.changed:
-            if request.read:
+            if request.read_answer:
                 messages = [*messages[: request.first], replacement_answer(finished.text)]
             else:
                 messages = replace_answer(messages, request.first, finished.text)

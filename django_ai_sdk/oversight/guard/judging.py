@@ -1,4 +1,4 @@
-"""Judging: ask a stage's lenses within a deadline, then find the rules that match.
+"""Judging: ask_judge a stage's lenses within a deadline, then find the rules that match.
 
 Used by every guard stage, by reflect and by `testing.dry_run`.
 """
@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.judges.base import (
-    ask,
+    ask_judge,
+    build_judge,
     is_unavailable,
-    resolve,
     sampled,
 )
 from django_ai_sdk.oversight.judges.classifier import batched
@@ -63,7 +63,7 @@ class Answered:
 
     @property
     def needs_retry(self) -> bool:
-        """True when reflect should ask the lens again (see `should_retry`)."""
+        """True when reflect should ask_judge the lens again (see `should_retry`)."""
         return should_retry(self.answer.error, [step.error for step in self.answer.trail])
 
     @property
@@ -115,7 +115,7 @@ async def answer_lens(
 
     A lens whose judges all cannot run here (`Judge.missing()`, such as an unset
     API key) answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped.
-    Only reflect samples. Inline stages always ask. `sample=False` ignores the
+    Only reflect samples. Inline stages always ask_judge. `sample=False` ignores the
     sample rate, for `testing.dry_run`. `progress` collects each answer as it
     arrives, so a caller that cancels still has them.
     """
@@ -139,7 +139,7 @@ async def answer_lens(
 def _cannot_run(step: Any) -> bool:
     """Whether `step` is a judge that cannot run here. One that does not build answers an error."""
     try:
-        return bool(resolve(step).missing())
+        return bool(build_judge(step).missing())
     except Exception:
         return False
 
@@ -154,10 +154,10 @@ async def _first_sure(
     answers go in the result's `trail`, in the order asked.
     """
     for step in steps:
-        result = await ask(step, lens, view)
+        result = await ask_judge(step, lens, view)
         if result is None:
             continue
-        if lens.settles(result):
+        if lens.is_final(result):
             result.trail = list(asked)
             asked.append(result)
             return result
@@ -169,14 +169,14 @@ async def _first_sure(
 
 def _ended_unsure(lens: Lens, answer: Answer | None, asked: list[Answer]) -> bool:
     """True when the chain ended on an error and `answer`, the last usable one, is unsure."""
-    if answer is None or not answer.ok or lens.settles(answer):
+    if answer is None or not answer.ok or lens.is_final(answer):
         return False
     last = asked[-1] if asked else None
     return last is not None and bool(last.error)
 
 
 def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
-    """True when reflect should ask a lens again because of the deadline or an outage.
+    """True when reflect should ask_judge a lens again because of the deadline or an outage.
 
     `trail_errors` are the errors on the answer's trail; only the last one counts.
     A usable answer kept at the deadline has "deadline" there. One kept while a
@@ -284,7 +284,7 @@ def match_rules(
     a reflect lens can share a rule.
 
     `errored` names lenses that failed this turn. A test on one of them is
-    unknown, never true (`Condition.decide`), unless it asks whether the lens
+    unknown, never true (`Condition.matches`), unless it asks whether the lens
     answered. With `fail_closed`, a failed lens triggers an enforced rule that
     reads it, but only when that rule would block, mask or restrict tools here.
     Rules that only alert, queue or notify never fire because of a failure.
@@ -313,7 +313,7 @@ def match_rules(
             and bool(reads & set(errored))
             and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
         )
-        if rule.when.decide(answers, errored):
+        if rule.when.matches(answers, errored):
             matched.append(Matched(rule, stage, acted))
         elif failed:
             matched.append(Matched(rule, stage, acted, failed=True))

@@ -8,7 +8,7 @@ typo does not stop the site from booting. When two classes use the same name, th
 first keeps it and the check fails until one is renamed.
 
 `get_resolved_policy(name)` builds the policy from the registry (`build_policy`)
-and caches it until `invalidate()` clears it. A lens or rule declared in code
+and caches it until `invalidate_policy()` clears it. A lens or rule declared in code
 never changes at runtime. Apps that register whole policies at runtime (the
 authoring app) add a loader with `add_policy_loader`.
 """
@@ -88,7 +88,7 @@ def register_policy[T: type[Policy]](cls: T) -> T:
         return cls
     # A re-import of the same declaration replaces the old class.
     _registry[cls.name] = cls
-    invalidate(cls.name)
+    invalidate_policy(cls.name)
     return cls
 
 
@@ -99,7 +99,7 @@ def unregister_policy(name: str) -> None:
     """
     _registry.pop(name, None)
     _invalid.pop(name, None)
-    invalidate(name)
+    invalidate_policy(name)
 
 
 def get_policy_class(name: str) -> type[Policy] | None:
@@ -143,7 +143,7 @@ def reset_registry() -> None:
     _registry.clear()
     _invalid.clear()
     _duplicates.clear()
-    invalidate()
+    invalidate_policy()
 
 
 # Building.
@@ -340,7 +340,7 @@ def ancestors(name: str) -> list[str]:
     return found
 
 
-def invalidate(name: str | None = None) -> None:
+def invalidate_policy(name: str | None = None) -> None:
     """Clear cached policies so the next turn resolves again.
 
     Clearing a policy also clears every policy that extends it.

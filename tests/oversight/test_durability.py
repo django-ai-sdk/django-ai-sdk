@@ -219,7 +219,7 @@ class TestWriteAhead:
 
     async def test_a_write_ahead_that_fails_is_written_whole_at_close(self):
         guard = await start("test-durable", "I want a refund")
-        with patch("django_ai_sdk.oversight.guard.persist_turn", side_effect=DatabaseError("down")):
+        with patch("django_ai_sdk.oversight.guard.record_turn", side_effect=DatabaseError("down")):
             await guard.gate()
         assert not await Turn.objects.filter(id=guard.id).aexists()
         await guard.finish("ok")
@@ -458,7 +458,7 @@ class TestReflectLease:
 
     async def test_a_run_that_fails_gives_its_claim_back(self):
         turn_id = await self.closed("fine")
-        with patch("django_ai_sdk.oversight.reflect.save_answers", side_effect=RuntimeError("db")):
+        with patch("django_ai_sdk.oversight.reflect.record_answers", side_effect=RuntimeError("db")):
             with pytest.raises(RuntimeError):
                 await run_reflection(turn_id)
         assert (await Turn.objects.aget(id=turn_id)).reflected_at is None
@@ -497,7 +497,7 @@ class TestReflectLease:
 
     async def test_a_turn_that_keeps_failing_is_marked_failed(self):
         turn_id = await self.closed()
-        with patch("django_ai_sdk.oversight.reflect.save_answers", side_effect=RuntimeError("db")):
+        with patch("django_ai_sdk.oversight.reflect.record_answers", side_effect=RuntimeError("db")):
             for _ in range(REFLECT_ATTEMPTS):
                 with pytest.raises(RuntimeError):
                     await run_reflection(turn_id)

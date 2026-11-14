@@ -183,9 +183,9 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 
 `pick(items, *names, mode=None, notice=None)` takes single lenses or rules out of a pack instead of extending it whole: `pick(SecurityPack.lenses, "prompt_injection")`, `pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. They come back in the order named, as copies, so `mode` and `notice` leave the pack's own alone. An unknown name raises `ImproperlyConfigured`, and `mode` or `notice` on lenses raises `TypeError`.
 
-`ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached (`django_ai_sdk.oversight.registry`) until settings change or a policy registers; `registry.invalidate(name)` clears it and every policy that extends it.
+`ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached (`django_ai_sdk.oversight.registry`) until settings change or a policy registers; `registry.invalidate_policy(name)` clears it and every policy that extends it.
 
-An app can register whole policies at runtime. It adds a loader with `registry.add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `registry.invalidate()`), that registers policies (`registry.register_policy`) and removes them (`registry.unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
+An app can register whole policies at runtime. It adds a loader with `registry.add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `registry.invalidate_policy()`), that registers policies (`registry.register_policy`) and removes them (`registry.unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
 
 A policy that fails to load (a missing parent, a cycle) refuses its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`registry.broken_reason(name)`).
 
@@ -271,9 +271,9 @@ The router signs readers in with django-ninja's `django_auth`: the session, with
 | `GET /oversight/turns/` | `list_turns(filters, user=, limit=, cursor=)` | metrics |
 | `GET /oversight/turns/{id}/` | `get_turn(turn_id, user=)` | metrics; the content takes content |
 | `GET /oversight/reviews/` | `list_reviews(user=, queue=, status=, limit=, cursor=)` | review |
-| `GET /oversight/queues/` | `queues(user=)` | review |
+| `GET /oversight/queues/` | `list_queues(user=)` | review |
 | `POST /oversight/reviews/{id}/` | `resolve_review(item_id, answer, user=)` | review |
-| `GET /oversight/metrics/` | `summarize(user=, days=, agent_id=, policy=)` | metrics |
+| `GET /oversight/metrics/` | `get_metrics(user=, days=, agent_id=, policy=)` | metrics |
 
 The turns feed filters on `outcome`, `report_outcome` (turns a report-mode rule would have changed), `status`, `agent_id`, `channel` (a prefix), `policy`, `severity`, `label` with an optional `value`, `rule`, `review` (`open`, `reviewed`, `unreviewed`), `thread_id` (content: it takes `VIEW_OVERSIGHT_CONTENT`, 403 without, and reaches only turns in the content scope), `since` and `until`. Lists are newest first (reviews: oldest first) and page by cursor: pass a page's `next_cursor` back as `cursor`; there is no total. On Postgres a GIN index on the labels answers the label filter.
 

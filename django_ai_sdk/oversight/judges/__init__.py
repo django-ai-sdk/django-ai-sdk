@@ -3,7 +3,7 @@
 Each is imported on first use to break an import cycle: lenses imports
 judges.base, which loads this package, and an eager import of classifier or llm
 here would import lenses again while it is half initialised. Helpers like
-`base.resolve` stay in their modules.
+`base.build_judge` stay in their modules.
 """
 
 from __future__ import annotations

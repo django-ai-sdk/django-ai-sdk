@@ -75,7 +75,7 @@ def capture_content(
 ) -> dict[str, Any] | None:
     """Build the turn's content to keep at `capture`. None for Capture.NONE.
 
-    `keep` is `masker_for_capture(capture, ...)`. It runs over every kept string,
+    `keep` is `capture_masker(capture, ...)`. It runs over every kept string,
     including the history, sources and tool calls.
     """
     view = guard.context
@@ -153,9 +153,7 @@ class Masker:
         return masked
 
 
-def masker_for_capture(
-    capture: Capture | str, found: Mapping[str, str] | None = None
-) -> Masker | None:
+def capture_masker(capture: Capture | str, found: Mapping[str, str] | None = None) -> Masker | None:
     """Return the masker for text kept at `capture`. None when no text is kept.
 
     FULL keeps text as is. MASKED masks it, using `found` from the turn's lenses.
@@ -168,7 +166,7 @@ def masker_for_capture(
     return None
 
 
-def turn_found(guard: TurnGuard) -> dict[str, str]:
+def turn_literals(guard: TurnGuard) -> dict[str, str]:
     """Map each text this turn's entity lenses found to its label (see `found_literals`)."""
     view = guard.context
     said_output = guard.original_output or view.output
@@ -372,6 +370,7 @@ __all__ = [
     "add_to_content",
     "as_source",
     "capture_content",
+    "capture_masker",
     "context_from_turn",
     "expired",
     "forget_actor",
@@ -379,8 +378,7 @@ __all__ = [
     "forget_turns",
     "found_literals",
     "load_content",
-    "masker_for_capture",
     "stored_value",
-    "turn_found",
+    "turn_literals",
     "without_nul",
 ]

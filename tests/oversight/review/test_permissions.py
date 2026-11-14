@@ -37,9 +37,9 @@ async def allowed(user, turn_id: str) -> dict[str, bool]:
         "list": await ok(OversightService.list_turns(user=user)),
         "view": detail is not None,
         "content": detail is not None and detail.content is not None,
-        "metrics": await ok(OversightService.summarize(user=user)),
+        "metrics": await ok(OversightService.get_metrics(user=user)),
         "reviews": await ok(OversightService.list_reviews(user=user)),
-        "queues": await ok(OversightService.queues(user=user)),
+        "queues": await ok(OversightService.list_queues(user=user)),
         "resolve": await ok(
             OversightService.resolve_review(
                 str(item.id), ResolveIn(dismiss=True), user=user
@@ -157,7 +157,7 @@ class TestScopeHooks:
         page = await OversightService.list_reviews(user=reviewer)
         assert outside not in {item.turn_id for item in page.items}
         assert len(page.items) == 1
-        assert await OversightService.queues(user=reviewer) == {"hr": 1}
+        assert await OversightService.list_queues(user=reviewer) == {"hr": 1}
         item = await ReviewItem.objects.aget(turn_id=outside)
         resolved = await OversightService.resolve_review(
             str(item.id), ResolveIn(dismiss=True), user=reviewer

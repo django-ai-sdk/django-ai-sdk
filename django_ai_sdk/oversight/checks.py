@@ -28,7 +28,7 @@ from django_ai_sdk.oversight.conf import (
     setting,
 )
 from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
-from django_ai_sdk.oversight.judges.base import Judge, alias_defined, is_optional, resolve
+from django_ai_sdk.oversight.judges.base import Judge, alias_defined, build_judge, is_optional
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.notifiers import configured_notifiers
 from django_ai_sdk.oversight.registry import (
@@ -260,7 +260,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
             resolved = build_policy(name)
         except Exception as exc:
             messages.append(
-                Error(f"Oversight policy {name!r} does not resolve: {exc}", id=f"{PREFIX}.E002")
+                Error(f"Oversight policy {name!r} does not build_judge: {exc}", id=f"{PREFIX}.E002")
             )
             continue
         messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
@@ -373,7 +373,7 @@ def built_judges(lens: Any) -> list[Any]:
     judges = []
     for spec in lens.usable_judges():
         try:
-            judges.append(resolve(spec))
+            judges.append(build_judge(spec))
         except Exception:
             continue
     return judges
@@ -469,7 +469,7 @@ def judge_checks() -> list[Any]:
     messages: list[Any] = []
     for alias in setting("JUDGES") or {}:
         try:
-            judge = resolve(alias)
+            judge = build_judge(alias)
         except Exception as exc:
             messages.append(
                 Error(f"Judge alias {alias!r} cannot be built: {exc}", id=f"{PREFIX}.E005")

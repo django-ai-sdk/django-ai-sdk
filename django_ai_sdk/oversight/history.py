@@ -36,7 +36,7 @@ async def history_for(
     """
     if storage is None:
         return messages, False
-    policy = await resolve_policy(agent, channel=channel, user=user, oversight=oversight)
+    policy = await policy_for(agent, channel=channel, user=user, oversight=oversight)
     vouched = await thread_history(policy, storage, messages)
     return (vouched, True) if vouched is not None else (messages, False)
 
@@ -69,7 +69,7 @@ async def thread_history(
     return None
 
 
-async def resolve_policy(
+async def policy_for(
     agent: Any,
     *,
     channel: str,
@@ -162,7 +162,7 @@ async def _stored_for(
 
 __all__ = [
     "history_for",
-    "resolve_policy",
+    "policy_for",
     "stored_history",
     "takes_stored_history",
     "thread_history",

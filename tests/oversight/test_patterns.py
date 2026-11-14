@@ -58,12 +58,12 @@ class TestPatterns:
         ],
     )
     async def test_exfiltration_markup_is_found(self, answer):
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.packs.security import Exfiltration
         from django_ai_sdk.oversight.types import TurnContext
 
         lens = Exfiltration()
-        found = await ask(lens.finder, lens, TurnContext(output=answer))
+        found = await ask_judge(lens.finder, lens, TurnContext(output=answer))
         assert found is not None and found.value
 
     @pytest.mark.parametrize(
@@ -75,12 +75,12 @@ class TestPatterns:
         ],
     )
     async def test_ordinary_links_are_not(self, answer):
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.packs.security import Exfiltration
         from django_ai_sdk.oversight.types import TurnContext
 
         lens = Exfiltration()
-        found = await ask(lens.finder, lens, TurnContext(output=answer))
+        found = await ask_judge(lens.finder, lens, TurnContext(output=answer))
         assert found is not None and found.value == []
 
 

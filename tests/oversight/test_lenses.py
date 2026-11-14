@@ -19,7 +19,7 @@ from django_ai_sdk.oversight import (
     Violation,
     register_validator,
 )
-from django_ai_sdk.oversight.judges.base import ask
+from django_ai_sdk.oversight.judges.base import ask_judge
 from django_ai_sdk.oversight.lenses import lens_from_dict
 from django_ai_sdk.oversight.patterns import (
     COUNTRY_PII_KINDS,
@@ -56,7 +56,7 @@ from tests.oversight.helpers import FnLens, view
 async def answer(lens, turn: TurnContext) -> Answer | None:
     """What the lens's one step answers about `turn`."""
     [step] = lens.steps()
-    return await ask(step, lens, turn)
+    return await ask_judge(step, lens, turn)
 
 
 class TestChecksums:
@@ -186,10 +186,10 @@ class TestPatternLens:
 
     def test_is_true_means_it_found_something(self):
         found, none = Answer(value=["email"]), Answer(value=[])
-        assert L("x").is_true.decide({"x": found})
-        assert not L("x").is_true.decide({"x": none})
-        assert L("x").is_false.decide({"x": none})
-        assert not L("x").is_false.decide({"x": found})
+        assert L("x").is_true.matches({"x": found})
+        assert not L("x").is_true.matches({"x": none})
+        assert L("x").is_false.matches({"x": none})
+        assert not L("x").is_false.matches({"x": found})
 
 
 class TestPatternsInTheWild:
@@ -272,7 +272,7 @@ class TestPIIKinds:
     TEXT = "BSN 111222333, bel 06-12345678 of +31 6 12345678, Damrak 1, 1012 LG Amsterdam"
 
     async def test_country_kinds_are_off_by_default(self):
-        assert not set(COUNTRY_PII_KINDS) & set(PIILens().finder.labels())
+        assert not set(COUNTRY_PII_KINDS) & set(PIILens().finder.kinds())
         assert (await answer(PIILens(), view(self.TEXT))).value == ["phone"]
 
     async def test_naming_them_turns_them_on(self):
@@ -281,7 +281,7 @@ class TestPIIKinds:
         assert found.value == ["bsn", "phone", "phone_nl", "postcode_nl"]
 
     def test_no_kinds_picked_means_the_defaults(self):
-        assert PIILens(kinds=[]).finder.labels() == list(DEFAULT_PII_KINDS)
+        assert PIILens(kinds=[]).finder.kinds() == list(DEFAULT_PII_KINDS)
 
     def test_the_docstring_lists_every_kind(self):
         assert all(kind in PIILens.__doc__ for kind in PII_PATTERNS)

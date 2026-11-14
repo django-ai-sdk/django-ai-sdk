@@ -178,7 +178,7 @@ class Classifier(Judge):
     """Base for judges that classify yes/no, label, score and per-source lenses.
 
     Subclasses implement `question` and `classify`, and set `external`. When an
-    external one raises, `ask` marks it unavailable, so FAIL_MODE applies and reflect
+    external one raises, `ask_judge` marks it unavailable, so FAIL_MODE applies and reflect
     retries. See the module docstring for what is read.
     """
 

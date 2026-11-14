@@ -103,9 +103,9 @@ def forget_deleted_user(sender: Any, instance: Any, **kwargs: Any) -> None:
 
 def drop_cached_policies(setting: str, **kwargs: Any) -> None:
     if setting == "AI_SDK_OVERSIGHT":
-        from django_ai_sdk.oversight.registry import invalidate
+        from django_ai_sdk.oversight.registry import invalidate_policy
 
-        invalidate()
+        invalidate_policy()
 
 
 def require_apps(app_name: str, *needed: str) -> None:

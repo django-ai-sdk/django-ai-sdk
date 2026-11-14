@@ -315,7 +315,7 @@ class SubagentStreamFilter:
             user=self._user,
             thread_id=self._thread_id or None,
             # The coordinator reads this, so finish judges it.
-            read=subagent_response,
+            read_answer=subagent_response,
         )
 
     def _span(self) -> Any:

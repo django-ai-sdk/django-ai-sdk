@@ -97,7 +97,7 @@ class TestRecordingFailures:
         assert (await guard.gate()).blocked
         with (
             log_lines() as lines,
-            patch("django_ai_sdk.oversight.guard.persist_turn", side_effect=DatabaseError("x")),
+            patch("django_ai_sdk.oversight.guard.record_turn", side_effect=DatabaseError("x")),
         ):
             assert await guard.close() is None
         text = "\n".join(lines)

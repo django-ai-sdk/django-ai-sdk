@@ -28,7 +28,7 @@ from django_ai_sdk.oversight import (
 from django_ai_sdk.oversight.content import (
     FOUND,
     load_content,
-    masker_for_capture,
+    capture_masker,
     stored_value,
     unmasked_literals,
 )
@@ -320,25 +320,25 @@ class TestTheRecordsValue:
             rationale=f"It quotes {IBAN}.",
             items={f"https://crm/{EMAIL}": 0.95},
         )
-        columns, masked = split_answer(lens, "finish", answer, keep=masker_for_capture("masked"))
+        columns, masked = split_answer(lens, "finish", answer, keep=capture_masker("masked"))
         assert "rationale" not in columns and "items" not in columns
         assert masked == {"rationale": "It quotes [IBAN].", "items": {"https://crm/[EMAIL]": 0.95}}
-        assert split_answer(lens, "finish", answer, keep=masker_for_capture("full"))[1] == {
+        assert split_answer(lens, "finish", answer, keep=capture_masker("full"))[1] == {
             "rationale": f"It quotes {IBAN}.",
             "items": {f"https://crm/{EMAIL}": 0.95},
         }
         for capture in ("metadata", "none"):
-            assert split_answer(lens, "finish", answer, keep=masker_for_capture(capture))[1] == {}
+            assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
 
     def test_a_found_name_is_masked_before_the_detectors_cut_it_apart(self):
-        keep = masker_for_capture("masked", {f"Jan Jansen <{EMAIL}>": "person"})
+        keep = capture_masker("masked", {f"Jan Jansen <{EMAIL}>": "person"})
         assert keep.text(f"Mail Jan Jansen <{EMAIL}> today.") == "Mail [PERSON] today."
 
     def test_an_earlier_answerers_names_stay_out_of_the_trail(self):
         lens = JudgeLens(name="who", answer=Entities)
         earlier = Answer(value=[NAME], confidence=0.4, answerer="judge")
         answer = Answer(value=[NAME, "Piet"], answerer="strong", trail=[earlier])
-        columns, kept = split_answer(lens, "reflect", answer, keep=masker_for_capture("full"))
+        columns, kept = split_answer(lens, "reflect", answer, keep=capture_masker("full"))
         assert [step["value"] for step in columns["trail"]] == [[FOUND]]
         assert kept == {"value": [NAME, "Piet"], "trail": [[NAME]]}
 

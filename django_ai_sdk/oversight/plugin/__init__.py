@@ -235,7 +235,7 @@ async def _open(request: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     return guard
 
 
-def keep_masked(messages: list[ChatMessage], request: TurnRequest) -> None:
+def mask_stored_question(messages: list[ChatMessage], request: TurnRequest) -> None:
     """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
 
     Only its content is stored. When the masked text no longer splits back into

@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 
 # Upper bound on rows per read, whatever `limit` asks for.
 MAX_LIMIT = 100
-# The longest window `summarize` counts over.
+# The longest window `get_metrics` counts over.
 MAX_DAYS = 365
 PREVIEW_CHARS = 160
 # Label filters become part of an ORM lookup, so only allow plain lens names.
@@ -208,10 +208,10 @@ class OversightService(OversightAccess):
         )
 
     @classmethod
-    async def queues(cls, *, user: UserType) -> dict[str, int]:
+    async def list_queues(cls, *, user: UserType) -> dict[str, int]:
         """Count open review items per queue.
 
-        `summarize` counts the same under VIEW_OVERSIGHT_METRICS. This one is for
+        `get_metrics` counts the same under VIEW_OVERSIGHT_METRICS. This one is for
         reviewers, who may lack that permission.
         """
         from django_ai_sdk.oversight.models import ReviewItem
@@ -267,7 +267,7 @@ class OversightService(OversightAccess):
         return _review_out(item, shown=shown)
 
     @classmethod
-    async def summarize(
+    async def get_metrics(
         cls, *, user: UserType, days: int = 14, agent_id: str = "", policy: str = ""
     ) -> MetricsOut:
         """Count the last `days` of turns, optionally for one agent or policy.

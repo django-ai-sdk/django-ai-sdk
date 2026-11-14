@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from django_ai_sdk.oversight.judges.base import Judge
-from django_ai_sdk.oversight.patterns import compile_patterns, verified
+from django_ai_sdk.oversight.patterns import compile_patterns, valid_spans
 from django_ai_sdk.oversight.types import Answer, TextSpan
 
 if TYPE_CHECKING:
@@ -65,17 +65,17 @@ class Patterns(Judge):
         self.verify = verify or {}
         self.miss_confidence = miss_confidence
 
-    def labels(self) -> list[str]:
+    def kinds(self) -> list[str]:
         """The labels this judge looks for, so a miss can name them."""
         return list(dict.fromkeys(label for label, _ in self.patterns if label))
 
     def find(self, text: str, default_label: str = "") -> list[TextSpan]:
-        """Every verified span in `text`, in order. Unlabelled ones get `default_label`."""
+        """Every valid_spans span in `text`, in order. Unlabelled ones get `default_label`."""
         spans: list[TextSpan] = []
         # Spans kept so far, sorted and never overlapping, so only the neighbours can overlap.
         taken: list[tuple[int, int]] = []
         for label, pattern in self.patterns:
-            for start, end in verified(pattern, self.verify.get(label), text):
+            for start, end in valid_spans(pattern, self.verify.get(label), text):
                 at = bisect.bisect(taken, (start, end))
                 if (at and taken[at - 1][1] > start) or (at < len(taken) and taken[at][0] < end):
                     continue
@@ -91,7 +91,7 @@ class Patterns(Judge):
         spans = await asyncio.to_thread(self.find, text, lens.name)
         labels = list(dict.fromkeys(span.label for span in spans))
         notes = [f"found {_listed(labels)}"] if labels else []
-        if not labels and (kinds := self.labels()):
+        if not labels and (kinds := self.kinds()):
             notes.append(f"found none of: {_listed(kinds)}")
         return Answer(
             value=lens.answer.from_detections(lens, labels),

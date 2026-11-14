@@ -36,7 +36,7 @@ from django_ai_sdk.oversight.packs.security import SecurityPack
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.policy import validate_policy
 from django_ai_sdk.oversight.registry import get_invalid_policies
-from django_ai_sdk.oversight.registry import invalidate
+from django_ai_sdk.oversight.registry import invalidate_policy
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,
@@ -122,21 +122,21 @@ class Said(Judge):
 class TestConditions:
     def test_operators(self):
         answers = {"inj": ans(True, 0.95), "tox": ans(0.9), "topic": ans("hr"), "pii": ans(["bsn"])}
-        assert (L("inj").is_true & L("inj").confident(0.9)).decide(answers)
-        assert (L("tox") > 0.8).decide(answers)
-        assert not (L("tox") < 0.8).decide(answers)
-        assert (L("topic") == "hr").decide(answers)
-        assert L("topic").in_({"hr", "legal"}).decide(answers)
-        assert L("pii").contains("bsn").decide(answers)
-        assert L("pii").is_true.decide(answers)
-        assert (~(L("topic") == "billing")).decide(answers)
+        assert (L("inj").is_true & L("inj").confident(0.9)).matches(answers)
+        assert (L("tox") > 0.8).matches(answers)
+        assert not (L("tox") < 0.8).matches(answers)
+        assert (L("topic") == "hr").matches(answers)
+        assert L("topic").in_({"hr", "legal"}).matches(answers)
+        assert L("pii").contains("bsn").matches(answers)
+        assert L("pii").is_true.matches(answers)
+        assert (~(L("topic") == "billing")).matches(answers)
 
     def test_a_missing_answer_matches_nothing_but_missing(self):
         answers = {"broken": ans(None, error="timeout")}
-        assert not L("broken").is_true.decide(answers)
-        assert not (L("absent") > 0).decide(answers)
-        assert L("broken").missing.decide(answers)
-        assert L("absent").missing.decide(answers)
+        assert not L("broken").is_true.matches(answers)
+        assert not (L("absent") > 0).matches(answers)
+        assert L("broken").missing.matches(answers)
+        assert L("absent").missing.matches(answers)
 
     def test_a_test_that_cannot_be_evaluated_is_refused(self):
         bad = [
@@ -298,7 +298,7 @@ class TestResolving:
 
     async def test_invalidating_a_parent_forgets_its_children(self):
         resolved = await resolution.get_resolved_policy("test-child")
-        invalidate("test-parent")
+        invalidate_policy("test-parent")
         assert await resolution.get_resolved_policy("test-child") is not resolved
 
 
@@ -552,8 +552,8 @@ class TestDeclarations:
             validate_rule(rule, {"src": lens})
 
     def test_reset_registry_forgets_cached_resolutions(self, registry_snapshot: Any):
-        from django_ai_sdk.oversight import registry as resolve
+        from django_ai_sdk.oversight import registry
 
-        resolve._cache["x"] = (None, frozenset())
+        registry._cache["x"] = (None, frozenset())
         registry_snapshot.reset_registry()
-        assert resolve._cache == {}
+        assert registry._cache == {}

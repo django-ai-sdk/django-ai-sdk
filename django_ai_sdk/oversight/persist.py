@@ -1,7 +1,7 @@
 """Write a turn's row, answers, matches and content.
 
-The guard calls `persist_turn` when its gate ends and again at close. Reflect
-adds answers later through `save_answers`. The rows keep values, labels,
+The guard calls `record_turn` when its gate ends and again at close. Reflect
+adds answers later through `record_answers`. The rows keep values, labels,
 scores, counts and errors. Anything that can quote the turn goes into its content.
 """
 
@@ -20,10 +20,10 @@ from django_ai_sdk.oversight.content import (
     Masker,
     add_to_content,
     capture_content,
+    capture_masker,
     found_literals,
-    masker_for_capture,
     stored_value,
-    turn_found,
+    turn_literals,
     without_nul,
 )
 from django_ai_sdk.oversight.rules import Alert, Notify, Queue
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
+def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     """Write the turn row and any answers and matches not written yet.
 
     Called twice per turn, each time in one transaction. When the gate ends
@@ -72,8 +72,8 @@ def persist_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     content: dict[str, Any] | None = None
     keep: Masker | None = None
     if closing:
-        found = turn_found(guard) if policy.capture is Capture.MASKED else None
-        keep = masker_for_capture(policy.capture, found)
+        found = turn_literals(guard) if policy.capture is Capture.MASKED else None
+        keep = capture_masker(policy.capture, found)
         # PostgreSQL rejects NUL characters in text, so strip them.
         content = without_nul(capture_content(guard, policy.capture, keep))
     # Answer texts go with the content. Rows written earlier keep their ids.
@@ -293,7 +293,7 @@ def _safe_enqueue(task_name: str, *args: Any, what: str) -> bool:
     return True
 
 
-def save_answers(
+def record_answers(
     turn: Turn,
     policy: ResolvedPolicy,
     answered: list[Answered],
@@ -317,7 +317,7 @@ def save_answers(
 
     if view is not None:
         found = {**(found or {}), **found_literals(answered, {s: view.text(s) for s in Subject})}
-    keep = masker_for_capture(turn.content.capture, found) if turn.content else None
+    keep = capture_masker(turn.content.capture, found) if turn.content else None
     answer_rows, texts = _build_answers(answered, keep=keep)
     texts = without_nul(texts)
     with transaction.atomic():

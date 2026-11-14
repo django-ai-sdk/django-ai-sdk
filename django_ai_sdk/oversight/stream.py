@@ -31,7 +31,7 @@ from django_ai_sdk.events import (
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
 from django_ai_sdk.oversight.guard.stages import StageResult
-from django_ai_sdk.oversight.plugin.hooks import TurnRequest, mask_sources, masked_result
+from django_ai_sdk.oversight.plugin.hooks import TurnRequest, mask_sources, mask_tool_result
 from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Outcome, Stage
 
@@ -204,7 +204,7 @@ class StreamTurn:
         policy = self.guard.policy
         return policy is not None and policy.holds_answer()
 
-    def _send(self, notice: dict[str, Any]) -> DataEvent:
+    def _emit_notice(self, notice: dict[str, Any]) -> DataEvent:
         self.sent.append(notice)
         return notice_event(notice)
 
@@ -217,7 +217,9 @@ class StreamTurn:
 
     def _pending(self) -> list[StreamEvent]:
         """Send the notices raised since the last event, such as the gate's."""
-        events: list[StreamEvent] = [self._send(notice) for notice in self.guard.notices.pending]
+        events: list[StreamEvent] = [
+            self._emit_notice(notice) for notice in self.guard.notices.pending
+        ]
         self.guard.notices.pending.clear()
         return events
 
@@ -232,7 +234,7 @@ class StreamTurn:
         assert refusal is not None
         self.finished = True
         notice = {**(refusal.notice or {}), "message": refusal.message}
-        return [*self._pending(), self._send(notice), *refusal_reply(refusal.message)]
+        return [*self._pending(), self._emit_notice(notice), *refusal_reply(refusal.message)]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
         """Report `event` to the guard and return what to send now."""
@@ -255,7 +257,7 @@ class StreamTurn:
         """Mask a tool result once, so the card, storage and model all see the same text."""
         if not self.guard.active:
             return result
-        masked = await masked_result(self.guard, result.origin.id or "", result.result)
+        masked = await mask_tool_result(self.guard, result.origin.id or "", result.result)
         if masked is not result.result:
             result = ToolCallResult(result=masked, origin=result.origin, error=result.error)
         # Mask new citation sources before any card shows them.
@@ -284,7 +286,7 @@ class StreamTurn:
         self._drop_refused_inputs()
         events: list[StreamEvent] = self._pending()
         if finished.notice:
-            events.append(self._send(finished.notice))
+            events.append(self._emit_notice(finished.notice))
         if self.sent and writer:
             writer.message.metadata["oversight"] = stored_notices(self.sent)
         events += _released(self.held, withheld=finished.blocked)

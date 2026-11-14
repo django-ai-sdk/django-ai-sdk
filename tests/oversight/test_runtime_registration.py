@@ -7,7 +7,7 @@ import pytest
 from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy, unregister_policy
-from django_ai_sdk.oversight.registry import _loaders, add_policy_loader, get_resolved_policy, invalidate
+from django_ai_sdk.oversight.registry import _loaders, add_policy_loader, get_resolved_policy, invalidate_policy
 from django_ai_sdk.oversight.testing import dry_run
 from django_ai_sdk.oversight.types import Outcome, Stage
 
@@ -68,7 +68,7 @@ class TestLoaders:
             await get_resolved_policy("missing")
             await get_resolved_policy("missing")
             assert len(calls) == 1
-            invalidate()
+            invalidate_policy()
             await get_resolved_policy("missing")
             assert len(calls) == 2
         finally:
@@ -99,7 +99,7 @@ async def test_lookups_during_a_load_wait_for_it(registry_snapshot):
     import asyncio
 
     from django_ai_sdk.oversight import Policy
-    from django_ai_sdk.oversight import registry as resolve
+    from django_ai_sdk.oversight import registry
     from django_ai_sdk.oversight.registry import register_policy
 
     class Late(Policy):
@@ -109,10 +109,10 @@ async def test_lookups_during_a_load_wait_for_it(registry_snapshot):
         await asyncio.sleep(0.01)
         register_policy(Late)
 
-    resolve._loaders.append(slow_loader)
-    resolve._loaded_at = float("-inf")
+    registry._loaders.append(slow_loader)
+    registry._loaded_at = float("-inf")
     try:
-        found = await asyncio.gather(resolve.get_resolved_policy("rt-late"), resolve.get_resolved_policy("rt-late"))
+        found = await asyncio.gather(registry.get_resolved_policy("rt-late"), registry.get_resolved_policy("rt-late"))
     finally:
-        resolve._loaders.remove(slow_loader)
+        registry._loaders.remove(slow_loader)
     assert all(policy is not None for policy in found)

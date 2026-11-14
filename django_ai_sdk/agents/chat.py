@@ -38,7 +38,7 @@ async def chat_turn(
 ) -> Any:
     """Pick the history, then stream. The run's hooks open the turn and gate it."""
     from django_ai_sdk.oversight.history import history_for
-    from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
+    from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
 
     # Prefer the stored thread over the client's history. The client's copy may
     # be unmasked or made up. If there is no usable stored copy, the client's
@@ -66,7 +66,7 @@ async def chat_turn(
         Oversight: the run's gate hook calls this once the question passed, so a
         refused question is never stored.
         """
-        keep_masked(messages, request)
+        mask_stored_question(messages, request)
         question_id = await _store_question(messages, storage_adapter, thread_id)
         if request.guard is not None and question_id:
             request.guard.user_message_id = question_id

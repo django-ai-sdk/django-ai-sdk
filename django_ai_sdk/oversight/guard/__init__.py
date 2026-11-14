@@ -46,7 +46,7 @@ from django_ai_sdk.oversight.guard import stages
 from django_ai_sdk.oversight.guard.judging import Answered, Matched
 from django_ai_sdk.oversight.guard.masking import TurnMasks
 from django_ai_sdk.oversight.guard.notices import TurnNotices
-from django_ai_sdk.oversight.persist import persist_turn
+from django_ai_sdk.oversight.persist import record_turn
 from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, default_fail_mode
 from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
 from django_ai_sdk.oversight.types import (
@@ -390,7 +390,7 @@ class TurnGuard:
         if not self.active or self._closed or self.record.row_written or not self.recording:
             return
         try:
-            await sync_to_async(persist_turn)(self, closing=False)
+            await sync_to_async(record_turn)(self, closing=False)
         except Exception:
             logger.exception("Oversight could not write turn {} ahead; close writes it", self.id)
 
@@ -583,7 +583,7 @@ class TurnGuard:
         if not self.recording:
             return None
         try:
-            turn_id = await sync_to_async(persist_turn)(self)
+            turn_id = await sync_to_async(record_turn)(self)
         except Exception:
             # Log the outcome and errors, never the content.
             logger.exception(

@@ -57,11 +57,11 @@ class TestFakeLLM:
     async def test_a_model_judge_runs_on_it(self):
         from django_ai_sdk.oversight import JudgeLens
         from django_ai_sdk.oversight.judges import LLMJudge
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.types import TurnContext
 
         fake = FakeLLM('{"value": true, "confidence": 0.9, "rationale": "r"}')
         lens = JudgeLens(name="f", question="Is it rude?")
-        answer = await ask(LLMJudge(llm=fake), lens, TurnContext(input="hi"))
+        answer = await ask_judge(LLMJudge(llm=fake), lens, TurnContext(input="hi"))
         assert answer is not None and (answer.value, answer.confidence) == (True, 0.9)
         assert len(fake.calls) == 1

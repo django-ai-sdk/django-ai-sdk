@@ -409,10 +409,10 @@ class Lens:
         self.answer.validate(self)
 
     def steps(self) -> list[Any]:
-        """What answers the lens, in order: judges, or specs for `judges.base.ask`."""
+        """What answers the lens, in order: judges, or specs for `judges.base.ask_judge`."""
         raise NotImplementedError
 
-    def settles(self, answer: Answer) -> bool:
+    def is_final(self, answer: Answer) -> bool:
         """Whether `answer` ends the lens's chain of steps."""
         return answer.ok
 
@@ -645,7 +645,7 @@ class JudgeLens(Lens):
     def steps(self) -> list[Any]:
         return self.usable_judges()
 
-    def settles(self, answer: Answer) -> bool:
+    def is_final(self, answer: Answer) -> bool:
         return answer.ok and answer.confidence >= self.min_confidence
 
     def answer_model(self) -> type[BaseModel]:

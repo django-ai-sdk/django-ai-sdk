@@ -150,7 +150,7 @@ def regex_spans(
     ]
 
 
-def verified(
+def valid_spans(
     pattern: re.Pattern[str], valid: Verifier | None, text: str
 ) -> Iterator[tuple[int, int]]:
     """Yield (start, end) for each match that passes `valid`.
@@ -257,5 +257,5 @@ __all__ = [
     "mask_json",
     "mask_secrets",
     "regex_spans",
-    "verified",
+    "valid_spans",
 ]

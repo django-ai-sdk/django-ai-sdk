@@ -16,7 +16,7 @@ def test_judges_are_exported_from_their_own_module():
 
     assert "TypeSafe" not in oversight.__all__ and not hasattr(oversight, "TypeSafe")
     assert "TypeSafe" in judges.__all__
-    assert not {"ask", "mask", "resolve"} & set(judges.__all__)
+    assert not {"ask_judge", "mask", "build_judge"} & set(judges.__all__)
     # Each judge loads on first use, so declaring a lens never imports a model client.
     assert judges.TypeSafe.__name__ == "TypeSafe"
 

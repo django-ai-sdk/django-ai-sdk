@@ -1,6 +1,6 @@
-"""Judges: models that answer a judge lens, and the shared machinery to ask them.
+"""Judges: models that answer a judge lens, and the shared machinery to ask_judge them.
 
-`ask` asks one judge with a timeout, so a slow or broken one becomes an error
+`ask_judge` asks one judge with a timeout, so a slow or broken one becomes an error
 answer instead of an exception. Lenses name judges by alias, and
 AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. A trailing "?" makes the
 alias optional: a lens skips it when the deployment did not define it.
@@ -95,7 +95,7 @@ class Judge(ABC):
         return self.name or type(self).__name__.lower()
 
     def missing(self) -> str:
-        """Why this judge can't run here, or "" when it can. `ask` abstains when set."""
+        """Why this judge can't run here, or "" when it can. `ask_judge` abstains when set."""
         return ""
 
     def describe(self) -> dict[str, Any]:
@@ -105,19 +105,21 @@ class Judge(ABC):
         return f"<{type(self).__name__} {self.label()!r}>"
 
 
-async def ask(judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext) -> Answer | None:
+async def ask_judge(
+    judge: Judge | str | dict[str, Any], lens: Lens, view: TurnContext
+) -> Answer | None:
     """Ask one judge with a timeout. Any failure comes back as an Answer with `error`.
 
-    `judge` may be a spec for `resolve`. A spec that fails to build is an error answer,
+    `judge` may be a spec for `build_judge`. A spec that fails to build is an error answer,
     so the lens keeps its other answers. A judge whose `missing()` is set abstains.
     An external judge that raises is marked unavailable. An answer without a value
     or an error is NO_VERDICT, so FAIL_MODE applies; return None to abstain. A task
     cancelled from outside re-raises; one that cancels itself is an error answer.
     """
     started = time.perf_counter()
-    label = spec_label(judge)
+    label = judge_label(judge)
     try:
-        judge = resolve(judge)
+        judge = build_judge(judge)
         if judge.missing():
             return None
     except Exception as exc:
@@ -186,7 +188,7 @@ def alias_of(spec: Any) -> str:
     return str(spec).removesuffix("?")
 
 
-def spec_label(spec: Any) -> str:
+def judge_label(spec: Any) -> str:
     """A name for a judge spec, for logs and checks, without building it."""
     if isinstance(spec, Judge):
         return spec.label()
@@ -256,7 +258,7 @@ def sampled(key: str, rate: float) -> bool:
     return int.from_bytes(digest[:8], "big") / 2**64 < rate
 
 
-def resolve(spec: Judge | str | dict[str, Any]) -> Judge:
+def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
     """Build a Judge from an instance, an alias, or a config dict.
 
     A config dict is {"class": dotted path, **kwargs}. An alias may point to another
@@ -293,7 +295,7 @@ def _build_alias(alias: str, aliases: Mapping[str, Any]) -> Judge:
         seen.add(target)
         target = aliases[target]
     # Copy a shared instance, so renaming it doesn't rename it for other aliases.
-    judge = copy.copy(target) if isinstance(target, Judge) else resolve(target)
+    judge = copy.copy(target) if isinstance(target, Judge) else build_judge(target)
     if not (isinstance(target, dict) and target.get("name")):
         # Name it after the alias the lens used. Each answer records the model anyway.
         judge.name = alias

@@ -8,7 +8,7 @@ from django.utils.translation import gettext_lazy as _
 
 from django_ai_sdk.oversight.conf import setting
 from django_ai_sdk.oversight.content import stored_value
-from django_ai_sdk.oversight.notifiers import match_events
+from django_ai_sdk.oversight.notifiers import notify_events
 from django_ai_sdk.oversight.rules import ACTION_ORDER, USER_FACING, Block, RestrictTools
 from django_ai_sdk.oversight.types import Outcome, Stage, worst_outcome
 
@@ -25,7 +25,7 @@ UNCHECKED_TEXT = _("[withheld: could not be checked]")
 # Shown to the model instead of a tool result an enforced gate rule refuses.
 REFUSED_TEXT = _("[withheld: refused by oversight]")
 # The refusal for a call to a tool removed this turn.
-TOOL_UNAVAILABLE = _("This tool is not available for this request.")
+TOOL_UNAVAILABLE_MESSAGE = _("This tool is not available for this request.")
 
 
 def notice_base(turn_id: Any, stage: Stage, outcome: Outcome) -> dict[str, Any]:
@@ -155,7 +155,7 @@ class TurnNotices:
 
     def notifications(self, matched: list[Matched]) -> list[tuple[dict[str, Any], list[str]]]:
         """Return (event, notifier names) for each enforced Notify action in `matched`."""
-        return match_events(
+        return notify_events(
             self.guard.id,
             matched,
             agent=self.guard.context.agent_name,
@@ -205,5 +205,5 @@ def refusal_message(match: Matched, block: Block) -> str:
 def tool_refusal_message(match: Matched) -> str:
     """Return the refusal for a tool `match` removed. Like `refusal_message`, a failure gets the generic one."""
     if match.failed:
-        return str(TOOL_UNAVAILABLE)
-    return str(match.rule.message or TOOL_UNAVAILABLE)
+        return str(TOOL_UNAVAILABLE_MESSAGE)
+    return str(match.rule.message or TOOL_UNAVAILABLE_MESSAGE)

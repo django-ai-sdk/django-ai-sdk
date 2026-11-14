@@ -889,14 +889,14 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         from django_ai_sdk.adapters.run import Run
         from django_ai_sdk.agents.tool_agent import default_hooks
         from django_ai_sdk.oversight.history import history_for, thread_storage
-        from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
+        from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
 
         resolved = self.response_format if response_format is self._UNSET else response_format
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
         given = as_chat_messages(messages)
 
         async def admit(request: TurnRequest) -> None:
-            keep_masked(given, request)
+            mask_stored_question(given, request)
 
         # Bind the thread so headless runs are traced to it.
         with bind_trace(thread_id=thread_id):

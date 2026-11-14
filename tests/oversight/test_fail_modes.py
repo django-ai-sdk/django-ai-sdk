@@ -162,7 +162,7 @@ class TestFailModeAtEachStage:
     async def test_a_tool_removed_only_by_a_failed_lens_gets_the_generic_refusal(self):
         """The rule's own message would tell the person a rule matched, which it did not."""
         from django_ai_sdk.common import ChatMessage
-        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE
 
         history_rule = policy(
             "fx-history-restrict-failed",
@@ -179,7 +179,7 @@ class TestFailModeAtEachStage:
         )
         messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
         checked = await (await start(history_rule)).gate_history(messages)
-        assert checked.blocked and checked.message == str(TOOL_UNAVAILABLE)
+        assert checked.blocked and checked.message == str(TOOL_UNAVAILABLE_MESSAGE)
         tool_rule = policy(
             "fx-tool-restrict-failed",
             [FnLens(name="t", subject=Subject.TOOL_CALL, stages=[Stage.TOOL], fn=broken)],
@@ -196,7 +196,7 @@ class TestFailModeAtEachStage:
         guard = await start(tool_rule)
         await guard.gate()
         refused = await guard.tool_call(ToolCall(name="send", arguments={}))
-        assert refused == str(TOOL_UNAVAILABLE)
+        assert refused == str(TOOL_UNAVAILABLE_MESSAGE)
 
     @pytest.mark.parametrize("action", [Queue("q"), Alert("high"), Notify()], ids=str)
     async def test_a_negated_test_on_a_failed_lens_does_not_hold(self, action):
@@ -254,14 +254,14 @@ class TestFailModeAtEachStage:
     async def test_conditions_are_three_valued(self):
         failed = Answer(error="RuntimeError")
         answers = {"a": failed, "b": Answer(value=True)}
-        assert (~L("a").is_true).decide(answers)  # failed, but not said to: false
-        assert not (~L("a").is_true).decide(answers, {"a"})
-        assert not (L("a").is_true | ~L("b").is_true).decide(answers, {"a"})
-        assert (L("a").is_true | L("b").is_true).decide(answers, {"a"})
-        assert not (L("a").is_false & L("b").is_true).decide(answers, {"a"})
-        assert L("a").missing.decide(answers, {"a"})
+        assert (~L("a").is_true).matches(answers)  # failed, but not said to: false
+        assert not (~L("a").is_true).matches(answers, {"a"})
+        assert not (L("a").is_true | ~L("b").is_true).matches(answers, {"a"})
+        assert (L("a").is_true | L("b").is_true).matches(answers, {"a"})
+        assert not (L("a").is_false & L("b").is_true).matches(answers, {"a"})
+        assert L("a").missing.matches(answers, {"a"})
         # An unsure answer kept after a later failure is usable: compared as usual.
-        assert L("a").is_true.decide({"a": Answer(value=True, confidence=0.4)}, {"a"})
+        assert L("a").is_true.matches({"a": Answer(value=True, confidence=0.4)}, {"a"})
 
     async def test_a_gate_failure_counts_at_finish(self):
         name = policy(

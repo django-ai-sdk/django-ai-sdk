@@ -135,7 +135,7 @@ class TurnMasks:
         """
         guard = self.guard
         try:
-            lenses = gate_guarding_lenses(guard.resolved) if guard.active else []
+            lenses = other_text_lenses(guard.resolved) if guard.active else []
             if not lenses or not text:
                 return text
             judged = await self.mask_other_text(lenses, text, Stage.TOOL, blocks=True)
@@ -185,7 +185,7 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
     ]
 
 
-def gate_guarding_lenses(policy: ResolvedPolicy) -> list[Lens]:
+def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
     """Return `gate_masking_lenses`, plus the gate's lenses an enforced block or tool rule reads."""
     masking = gate_masking_lenses(policy)
     names = {

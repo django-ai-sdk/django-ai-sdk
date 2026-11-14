@@ -32,7 +32,7 @@ from django_ai_sdk.oversight.plugin.hooks import (
     GateQuestionHook,
     JudgeToolCallsHook,
     MaskToolResultsHook,
-    masked_result,
+    mask_tool_result,
 )
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
 from tests.oversight.helpers import (
@@ -115,7 +115,7 @@ class TestToolCallsInTheTurn:
         assert IBAN not in handed_on
 
     async def test_a_run_that_outlived_its_turn_is_refused_and_withheld(self):
-        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE
 
         guard = await self.guard()
         call = HaystackToolCall(id="c1", tool_name="lookup", arguments={"name": "Jan"})
@@ -128,14 +128,14 @@ class TestToolCallsInTheTurn:
             await guard.close()
             await JudgeToolCallsHook().run_async(state)
             await MaskToolResultsHook().run_async(ran)
-        assert str(TOOL_UNAVAILABLE) in state.get("messages")[-1].tool_call_result.result
+        assert str(TOOL_UNAVAILABLE_MESSAGE) in state.get("messages")[-1].tool_call_result.result
         assert ran.get("messages")[-1].tool_call_result.result == str(UNCHECKED_TEXT)
         assert guard.context.tool_calls == []
 
     async def test_text_in_a_content_list_is_masked_and_images_pass(self):
         guard = await self.guard()
         image = ImageContent(base64_image="aGk=", mime_type="image/png")
-        masked = await masked_result(guard, "c2", [TextContent(text=f"IBAN {IBAN}"), image])
+        masked = await mask_tool_result(guard, "c2", [TextContent(text=f"IBAN {IBAN}"), image])
         assert IBAN not in masked[0].text
         assert masked[1] is image
 
@@ -261,13 +261,13 @@ class TestWhatJudgesSayIsKeptLikeTheTurn:
 
     async def test_an_unparsable_answer_records_the_failure_not_the_value(self):
         from django_ai_sdk.oversight import Score
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.types import TurnContext
         from tests.oversight.helpers import FnLens
 
         lens = FnLens(name="s", answer=Score, fn=lambda text, v: f"call {IBAN}")
         [step] = lens.steps()
-        answer = await ask(step, lens, TurnContext(input="x"))
+        answer = await ask_judge(step, lens, TurnContext(input="x"))
         assert answer.error.startswith("unparsable")
         assert IBAN not in answer.error
 

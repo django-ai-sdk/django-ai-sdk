@@ -45,7 +45,7 @@ def event_id(turn_id: Any, rule: str, stage: str) -> str:
     return str(uuid.uuid5(EVENT_NAMESPACE, f"{turn_id}:{rule}:{stage}"))
 
 
-def match_events(
+def notify_events(
     turn_id: Any,
     matched: Iterable[Matched],
     *,
@@ -184,6 +184,6 @@ __all__ = [
     "WebhookNotifier",
     "configured_notifiers",
     "event_id",
-    "match_events",
+    "notify_events",
     "send_to_notifiers",
 ]

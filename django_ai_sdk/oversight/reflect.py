@@ -28,9 +28,9 @@ from django_ai_sdk.oversight.guard.judging import (
 )
 from django_ai_sdk.oversight.guard.masking import collect_masks
 from django_ai_sdk.oversight.guard.notices import notice_base, rule_notes
-from django_ai_sdk.oversight.notifiers import match_events
+from django_ai_sdk.oversight.notifiers import notify_events
 from django_ai_sdk.oversight.patterns import mask_all
-from django_ai_sdk.oversight.persist import fit_column, save_answers
+from django_ai_sdk.oversight.persist import fit_column, record_answers
 from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.oversight.types import (
     Answer,
@@ -202,7 +202,7 @@ def _commit_reflection(
         if not held:
             logger.warning("Reflect lost its lease on turn {}; another run reflects it", turn.id)
             return False
-        save_answers(turn, policy, answered, matched, view=view, found=found)
+        record_answers(turn, policy, answered, matched, view=view, found=found)
         events = _after_effects(turn, view, matched, masks)
         Turn.objects.filter(pk=turn.pk).update(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
@@ -427,7 +427,7 @@ def _after_effects(
     """
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
-    events = match_events(
+    events = notify_events(
         turn.id, matched, agent=turn.agent_name, channel=turn.channel, stage=str(Stage.REFLECT)
     )
     notes = rule_notes(matched, set())

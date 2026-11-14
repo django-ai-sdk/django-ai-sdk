@@ -19,8 +19,8 @@ from django_ai_sdk.oversight.judges.base import (
     NO_VERDICT,
     TOO_LONG,
     Judge,
-    ask,
-    resolve,
+    ask_judge,
+    build_judge,
     sampled,
 )
 from django_ai_sdk.oversight.judges.llm import parse_json_reply, render_turn
@@ -312,7 +312,7 @@ class TestAsk:
 
     async def test_an_unparsable_answer_is_an_error(self):
         lens = JudgeLens(answer=Choice, name="c", question="?", labels=["a", "b"], judges=[])
-        answer = await ask(Says(lambda lens, v: "zebra"), lens, view("x"))
+        answer = await ask_judge(Says(lambda lens, v: "zebra"), lens, view("x"))
         assert answer.value is None
         assert answer.error.startswith("unparsable")
 
@@ -325,11 +325,11 @@ class TestAsk:
 
         judge = Says(slow)
         judge.timeout = 0.01
-        assert (await ask(judge, self.lens, view("x"))).error == "timeout"
+        assert (await ask_judge(judge, self.lens, view("x"))).error == "timeout"
 
     async def test_an_answer_without_a_value_is_no_verdict(self):
         # A model replying {"value": null} must not slip past FAIL_MODE.
-        answer = await ask(Says(lambda lens, v: Answer(confidence=0.9)), self.lens, view("x"))
+        answer = await ask_judge(Says(lambda lens, v: Answer(confidence=0.9)), self.lens, view("x"))
         assert answer.error == NO_VERDICT
 
     async def test_a_judge_with_something_missing_abstains(self):
@@ -337,7 +337,7 @@ class TestAsk:
             def missing(self):
                 return "KEY is not set"
 
-        assert await ask(Unset(lambda lens, v: pytest.fail("asked")), self.lens, view("x")) is None
+        assert await ask_judge(Unset(lambda lens, v: pytest.fail("asked")), self.lens, view("x")) is None
 
     def test_every_judge_takes_a_name_and_a_timeout(self):
         from django_ai_sdk.oversight.judges import LLMJudge, LocalClassifier
@@ -358,7 +358,7 @@ class TestAliases:
         }
     )
     def test_aliases_resolve_through_aliases(self):
-        judge = resolve("fast")
+        judge = build_judge("fast")
         assert isinstance(judge, Patterns)
         # Named after the alias the lens used.
         assert judge.name == "fast"
@@ -366,7 +366,7 @@ class TestAliases:
     def test_a_shared_instance_is_not_renamed(self):
         shared = Patterns(["x"])
         with override_settings(AI_SDK_OVERSIGHT={"JUDGES": {"a": shared, "b": shared}}):
-            a, b = resolve("a"), resolve("b")
+            a, b = build_judge("a"), build_judge("b")
         assert (a.name, b.name, shared.name) == ("a", "b", "patterns")
 
     def test_optional_aliases_drop_out_when_undefined(self):
@@ -611,7 +611,7 @@ class TestTypeSafe:
         ):
             answers = [
                 await answer_lens(flag, view("x"), Stage.GATE),
-                await ask(TypeSafe(), TakenFrom(), view("x", "y", ["z"])),
+                await ask_judge(TypeSafe(), TakenFrom(), view("x", "y", ["z"])),
             ]
         assert [a.error for a in answers] == ["unavailable: APIError"] * 2
         assert log.warning.called
@@ -811,7 +811,7 @@ class TestTakenFrom:
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
         with typesafe(typesafe_response()):
-            answer = await ask(TypeSafe(), TakenFrom(), view("Leave?", "25 days."))
+            answer = await ask_judge(TypeSafe(), TakenFrom(), view("Leave?", "25 days."))
         assert answer.error == NO_VERDICT
 
     async def test_a_per_source_request_stays_within_the_request_limit(self):
@@ -829,12 +829,12 @@ class TestTakenFrom:
 
     def test_an_answer_from_no_source_goes_to_review(self):
         rule = L("taken_from").present & ~L("taken_from").is_true
-        assert rule.decide({"taken_from": Answer(value=[], confidence=0.9)})
+        assert rule.matches({"taken_from": Answer(value=[], confidence=0.9)})
         # One source TypeSafe can't settle makes the answer unsure: reason to look, not to skip.
-        assert rule.decide({"taken_from": Answer(value=[], confidence=0.1)})
-        assert not rule.decide({"taken_from": Answer(value=["Leave · §1"], confidence=0.9)})
-        assert not rule.decide({"taken_from": Answer(error="unavailable: Timeout")})
-        assert not rule.decide({})
+        assert rule.matches({"taken_from": Answer(value=[], confidence=0.1)})
+        assert not rule.matches({"taken_from": Answer(value=["Leave · §1"], confidence=0.9)})
+        assert not rule.matches({"taken_from": Answer(error="unavailable: Timeout")})
+        assert not rule.matches({})
 
 
 class TestJudgeFence:
@@ -899,11 +899,11 @@ class TestOpenRelease:
                 raise ConnectionError("down")
 
         lens = JudgeLens(name="f", question="?", judges=[])
-        answer = await ask(Down(), lens, view("x"))
+        answer = await ask_judge(Down(), lens, view("x"))
         assert answer.error == "unavailable: ConnectionError"
         assert is_unavailable(answer.error)
         # A local judge's failure is a bug, not an outage: not asked again.
-        local = await ask(Says(lambda lens, v: 1 / 0), lens, view("x"))
+        local = await ask_judge(Says(lambda lens, v: 1 / 0), lens, view("x"))
         assert not is_unavailable(local.error)
 
     def test_messages_people_see_are_translatable(self):
@@ -961,7 +961,7 @@ class TestJudgeChain:
             def parse(cls, lens, value):
                 raise LookupError("odd")
 
-        answer = await ask(Says(yes), JudgeLens(name="o", question="?", answer=Odd), TurnContext())
+        answer = await ask_judge(Says(yes), JudgeLens(name="o", question="?", answer=Odd), TurnContext())
         assert answer is not None and answer.error == "unparsable: LookupError"
 
     async def test_a_check_cancelling_itself_is_an_error(self):
@@ -979,7 +979,7 @@ class TestJudgeChain:
 
     async def test_a_cancellation_from_outside_still_cancels(self):
         lens = gate_flag(slow_yes)
-        task = asyncio.ensure_future(ask(lens.steps()[0], lens, TurnContext()))
+        task = asyncio.ensure_future(ask_judge(lens.steps()[0], lens, TurnContext()))
         await asyncio.sleep(0.05)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -1014,7 +1014,7 @@ class TestTooLongToJudge:
         judge = LLMJudge(model="m")
         judge.get_generator = lambda: pytest.fail("must not be asked")  # type: ignore[method-assign]
         lens = JudgeLens(name="j", question="?", stages=[Stage.GATE])
-        answer = await ask(judge, lens, TurnContext(input="x" * 6_001))
+        answer = await ask_judge(judge, lens, TurnContext(input="x" * 6_001))
         assert answer is not None and answer.error == TOO_LONG
 
     async def test_typesafe_does_not_judge_part_of_the_answer(self):
@@ -1022,7 +1022,7 @@ class TestTooLongToJudge:
 
         lens = JudgeLens(name="t", question="?", subject=Subject.OUTPUT)
         with typesafe() as request:
-            answer = await ask(
+            answer = await ask_judge(
                 TypeSafe(), lens, TurnContext(output="a" * (TypeSafe.TEXT_CHARS + 1))
             )
         assert answer is not None and answer.error == TOO_LONG

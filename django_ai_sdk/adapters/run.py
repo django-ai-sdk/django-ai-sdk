@@ -120,7 +120,7 @@ class Run:
         from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
 
         request = request or TurnRequest()
-        request.schema = response_format
+        request.answer_schema = response_format
         options: dict[str, Any] = {"hooks": hooks}
         if max_agent_steps is not None:
             options["max_agent_steps"] = max_agent_steps
