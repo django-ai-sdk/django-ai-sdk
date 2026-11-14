@@ -303,7 +303,7 @@ class SubagentStreamFilter:
         self._thread_id = thread_id
         self._user = user
 
-    def _request(self) -> TurnRequest:
+    def _build_turn(self) -> TurnRequest:
         """The delegation's turn, under the subagent's policy, in the coordinator's channel."""
         from django_ai_sdk.oversight.guard import current_guard
         from django_ai_sdk.oversight.plugin import TurnRequest
@@ -335,9 +335,9 @@ class SubagentStreamFilter:
     ) -> dict[str, Any]:
         from django_ai_sdk.oversight.plugin import needs_own_turn_sync, run_with_oversight_sync
 
-        request = self._request()
+        turn = self._build_turn()
         # Oversight: a sync run cannot open the child turn this delegation needs.
-        if needs_own_turn_sync(request):
+        if needs_own_turn_sync(turn):
             return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
@@ -345,7 +345,7 @@ class SubagentStreamFilter:
             result = run_with_oversight_sync(
                 self._agent,
                 _handoff_context(messages),
-                request=request,
+                turn=turn,
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
                 ),
@@ -377,7 +377,7 @@ class SubagentStreamFilter:
     ) -> dict[str, Any]:
         from django_ai_sdk.oversight.plugin import needs_own_turn, run_with_oversight
 
-        request = self._request()
+        turn = self._build_turn()
         # Oversight: under a policy of its own, the subagent's run opens a child turn
         # that judges only the task (see oversight.plugin), so it reads only the
         # task, not the coordinator's conversation and tool results.
@@ -385,8 +385,8 @@ class SubagentStreamFilter:
         with self._span():
             result = await run_with_oversight(
                 self._agent,
-                _handoff_context([] if await needs_own_turn(request) else messages),
-                request=request,
+                _handoff_context([] if await needs_own_turn(turn) else messages),
+                turn=turn,
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,

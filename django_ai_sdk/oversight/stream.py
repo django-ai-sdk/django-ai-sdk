@@ -31,7 +31,8 @@ from django_ai_sdk.events import (
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.notices import notice_base
 from django_ai_sdk.oversight.guard.stages import StageResult
-from django_ai_sdk.oversight.plugin.hooks import TurnRequest, mask_sources, mask_tool_result
+from django_ai_sdk.oversight.plugin.hooks import mask_sources, mask_tool_result
+from django_ai_sdk.oversight.plugin.request import TurnRequest
 from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Outcome, Stage
 
@@ -226,7 +227,7 @@ class StreamTurn:
     @property
     def blocked_gate_result(self) -> StageResult | None:
         """The gate's result, when the run's gate hook blocked the question."""
-        return self.request.gate_result if self.request.blocked else None
+        return self.request.gate_result if self.request.question_blocked else None
 
     def blocked_reply_events(self) -> list[StreamEvent]:
         """The rest of the reply when the gate blocked: the policy's message, stored nowhere."""

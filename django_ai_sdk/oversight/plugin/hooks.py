@@ -1,4 +1,4 @@
-"""The oversight hooks a Haystack Agent runs, and the TurnRequest they read and fill in.
+"""The oversight hooks a Haystack Agent runs.
 
     before_run   GateQuestionHook       judge the history and question; mask them, or block the run
     before_llm   EnforceTurnLimitsHook  stop a run whose turn has closed; offer only the tools it allows
@@ -20,8 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from django.utils.translation import gettext_lazy
 from haystack.components.agents.state.state import replace_values
@@ -41,16 +40,14 @@ from django_ai_sdk.agents.tool_agent import (
     tool_results,
 )
 from django_ai_sdk.common import ChatMessage, last_user_message
-from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
+from django_ai_sdk.oversight.plugin.request import REQUEST_KEY, TurnRequest
 from django_ai_sdk.oversight.rules import Block
-from django_ai_sdk.oversight.types import Stage, ToolCall
+from django_ai_sdk.oversight.types import ToolCall
 from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from haystack.components.agents.state.state import State
     from haystack.dataclasses import ToolCallResult
     from pydantic import BaseModel
@@ -58,75 +55,9 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.oversight.guard import TurnGuard
     from django_ai_sdk.oversight.guard.stages import StageResult
-    from django_ai_sdk.oversight.policy import Policy
 
 # An Agent saved with these hooks loads again.
 allow_deserialization_module(__name__)
-
-# Where the run's hook_context holds its TurnRequest.
-REQUEST_KEY = "django_ai_sdk.oversight"
-
-
-@dataclass
-class TurnRequest:
-    """A run's turn: what the caller wants of it, then what oversight decided.
-
-    Pass it to `run_with_oversight(request=...)`. Once the run started, `guard` is the
-    turn it opened, or None when it joined an outer turn or has no policy.
-    """
-
-    # The SDK agent whose policy the run is under.
-    agent: Any = None
-    channel: str = "run"
-    user: Any = None
-    thread_id: str | None = None
-    # A policy for this run only, as in `Agent.run(oversight=...)`.
-    oversight: type[Policy] | str | Literal[False] | None = None
-    # The stored thread vouches for the history, so the gate does not judge it again.
-    history_vouched: bool = False
-    # Called once the gate passed the question, such as to store it.
-    on_gated: Callable[[TurnRequest], Awaitable[None]] | None = None
-    # Reads the answer finish judges off the messages the run produced, such as
-    # what a coordinator reads of a subagent. A replaced answer then takes the
-    # place of every produced message. By default finish judges all the text the
-    # model wrote, as a stream shows it, and a replacement takes the last reply's place.
-    read_answer: Callable[[list[HaystackChatMessage]], str] | None = None
-    # A Pydantic model the answer must still fit once masked.
-    answer_schema: type[BaseModel] | None = None
-    # The id of the message that will store the answer.
-    message_id: str = ""
-    # The caller closes the turn itself, such as a stream that still stores the answer.
-    keep_open: bool = False
-    # Called with the stubs of blocked tool calls, which never reach the ToolInvoker.
-    on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
-    guard: TurnGuard | None = None
-    gate_result: StageResult | None = None
-    # Index of the first message the run produced, after the gate.
-    first: int = 0
-
-    @property
-    def blocked(self) -> bool:
-        """Whether the gate blocked the question."""
-        return self.gate_result is not None and self.gate_result.blocked
-
-    @property
-    def finish_result(self) -> StageResult | None:
-        """What finish decided about the answer, once the run finished it."""
-        return self.guard.finish_result if self.guard is not None else None
-
-    def raise_if_blocked(self) -> None:
-        """Raise `Blocked` when the gate blocked the question or finish withheld the answer."""
-        if self.guard is None:
-            return
-        if self.blocked:
-            assert self.gate_result is not None
-            raise Blocked(self.gate_result.message, stage=str(Stage.GATE), turn_id=self.guard.id)
-        if (finish := self.finish_result) is not None and finish.blocked:
-            raise Blocked(finish.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
-
-    def context(self, **extra: Any) -> dict[str, Any]:
-        """A hook_context holding this request, beside `extra` for other hooks."""
-        return {**extra, REQUEST_KEY: self}
 
 
 def turn_request(state: State) -> TurnRequest:
@@ -509,7 +440,7 @@ class JudgeAnswerHook(OversightHook):
         if (registry := current_registry.get()) is not None:
             await mask_sources(guard, registry)
             guard.set_sources(registry.all, seeded=registry.seeded)
-        if request.blocked:
+        if request.question_blocked:
             return
         messages = list(state.data.get("messages") or [])
         produced = messages[request.first :]

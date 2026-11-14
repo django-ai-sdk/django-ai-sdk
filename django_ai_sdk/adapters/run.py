@@ -134,7 +134,7 @@ class Run:
             if response_format
             else {}
         )
-        result = await run_with_oversight(agent, converted, request=request, **schema)
+        result = await run_with_oversight(agent, converted, turn=request, **schema)
         request.raise_if_blocked()
         replies = result.get("messages") or []
         text = replies[-1].text if replies else None

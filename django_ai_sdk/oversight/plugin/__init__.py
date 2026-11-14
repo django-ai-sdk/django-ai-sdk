@@ -3,7 +3,7 @@
     from django_ai_sdk.oversight import TurnRequest, run_with_oversight
 
     turn = TurnRequest(agent=my_sdk_agent, user=user, channel="api")
-    result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, request=turn)
+    result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, turn=turn)
     turn.raise_if_blocked()
 
 `run_with_oversight` opens the turn under the agent's policy, or joins the outer one,
@@ -41,8 +41,8 @@ from django_ai_sdk.oversight.plugin.hooks import (
     MaskToolResultsHook,
     OversightHook,
     RecordUsageHook,
-    TurnRequest,
 )
+from django_ai_sdk.oversight.plugin.request import TurnRequest
 from django_ai_sdk.oversight.registry import policy_name
 
 if TYPE_CHECKING:
@@ -55,12 +55,12 @@ if TYPE_CHECKING:
 UNNAMED_AGENT = SimpleNamespace(name="Haystack agent", oversight=None)
 
 
-def policy_agent(request: TurnRequest) -> Any:
+def policy_agent(turn: TurnRequest) -> Any:
     """The agent whose policy the run is under. Named by nothing, outside a turn:
     the unnamed agent, under DEFAULT_POLICY. Inside one, the run joins it."""
-    if request.agent is None and current_guard() is None:
+    if turn.agent is None and current_guard() is None:
         return UNNAMED_AGENT
-    return request.agent
+    return turn.agent
 
 
 async def open_turn(
@@ -171,41 +171,41 @@ async def run_with_oversight(
     agent: Any,
     messages: list[Any],
     *,
-    request: TurnRequest | None = None,
+    turn: TurnRequest | None = None,
     hook_context: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """Run a Haystack Agent with oversight. Read what it decided on `request` afterwards.
+    """Run a Haystack Agent with oversight. Read what it decided on `turn` afterwards.
 
-    The turn opens before the run, under the policy of `request.agent`, or the
+    The turn opens before the run, under the policy of `turn.agent`, or the
     run joins the turn it runs inside. It closes after the run, also when the
     run raises, since Haystack then skips after_run.
     """
-    request = request or TurnRequest()
-    kwargs["hook_context"] = request.context(**(hook_context or {}))
+    turn = turn or TurnRequest()
+    kwargs["hook_context"] = turn.hook_context(**(hook_context or {}))
     agent = apply_oversight(agent)
-    if request.oversight is False:
+    if turn.oversight is False:
         # Unguarded on purpose: it does not join the outer turn either.
         with guarding(None):
             return await agent.run_async(messages=messages, **kwargs)
-    guard = request.guard = await _open(request, messages)
+    guard = turn.guard = await _open(turn, messages)
     if guard is None:
         return await agent.run_async(messages=messages, **kwargs)
-    async with closing_turn(guard, keep_open=request.keep_open):
+    async with closing_turn(guard, keep_open=turn.keep_open):
         with guarding(guard):
             return await agent.run_async(messages=messages, **kwargs)
 
 
 def run_with_oversight_sync(
-    agent: Any, messages: list[Any], *, request: TurnRequest, **kwargs: Any
+    agent: Any, messages: list[Any], *, turn: TurnRequest, **kwargs: Any
 ) -> dict[str, Any]:
     """Run a Haystack Agent with oversight from sync code, which cannot open a turn.
 
     Inside a turn the run joins it, and its tool calls are blocked, since the
-    guard only works from async code. Ask `needs_own_turn_sync(request)` first: a run
+    guard only works from async code. Ask `needs_own_turn_sync(turn)` first: a run
     that needs a turn of its own must not run here.
     """
-    return apply_oversight(agent).run(messages=messages, hook_context=request.context(), **kwargs)
+    return apply_oversight(agent).run(messages=messages, hook_context=turn.hook_context(), **kwargs)
 
 
 def apply_oversight(agent: Any) -> Any:
@@ -213,25 +213,25 @@ def apply_oversight(agent: Any) -> Any:
     return agent.clone(hooks=merge_oversight_hooks(agent.hooks))
 
 
-async def _open(request: TurnRequest, messages: list[Any]) -> TurnGuard | None:
+async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     """Open the run's own turn. None when it joins the turn it runs inside, or has no policy."""
-    agent = policy_agent(request)
+    agent = policy_agent(turn)
     if agent is None:
         return None
     # GateQuestionHook takes the question again once Haystack rendered any user_prompt.
     question = next((m.text or "" for m in reversed(messages) if m.is_from("user")), "")
     guard, opened = await open_turn(
         agent,
-        channel=request.channel,
-        user=request.user,
-        thread_id=request.thread_id,
+        channel=turn.channel,
+        user=turn.user,
+        thread_id=turn.thread_id,
         input=question,
-        oversight=request.oversight,
+        oversight=turn.oversight,
     )
     if not opened:
         return None
-    guard.message_id = request.message_id or guard.message_id
-    guard.on_tool_results = request.on_tool_results
+    guard.message_id = turn.message_id or guard.message_id
+    guard.on_tool_results = turn.on_tool_results
     return guard
 
 
