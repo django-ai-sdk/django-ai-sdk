@@ -39,7 +39,7 @@ from django.utils import timezone
 from django_ai_sdk.common import last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.agents import agent_key, declared_policy, fingerprint
+from django_ai_sdk.oversight.agents import agent_key, declared_policy, fingerprint, turn_channel
 from django_ai_sdk.oversight.conf import is_enabled, setting, validate_retention
 from django_ai_sdk.oversight.content import as_source
 from django_ai_sdk.oversight.guard import stages
@@ -396,7 +396,7 @@ class TurnGuard:
         cls,
         agent: Any,
         *,
-        channel: str,
+        channel: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str | None = None,
         messages: list[ChatMessage] | None = None,
@@ -405,6 +405,7 @@ class TurnGuard:
     ) -> TurnGuard:
         """Open a guard for one turn of `agent`. Inert unless a policy applies.
 
+        `channel` says where the turn came from; None records it as DEFAULT_CHANNEL.
         `oversight` overrides the agent's policy for this turn. It can be a Policy
         subclass or a name. False or "" (no policy) opens no turn. None uses the
         agent's code (`declared_policy`).
@@ -423,7 +424,7 @@ class TurnGuard:
 
         opening = {
             "agent": agent,
-            "channel": channel,
+            "channel": turn_channel(channel),
             "user": user,
             "thread_id": thread_id,
             "messages": messages,

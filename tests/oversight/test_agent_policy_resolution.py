@@ -106,6 +106,21 @@ class TestGetOversight:
             await agent.run([ChatMessage(role="user", content=INJECTION)])
         assert not model.asked
 
+    async def test_a_run_without_a_channel_chooses_and_records_the_default_one(self):
+        from django_ai_sdk.oversight.models import Turn
+
+        seen = []
+
+        async def choose(self, *, channel=None, user=None, **kwargs):  # noqa: ANN001, ANN202
+            seen.append(channel)
+            return RunPolicy
+
+        agent, _ = agent_with("Sure.", policy=None, get_oversight=choose)
+        with pytest.raises(Blocked) as refused:
+            await agent.run([ChatMessage(role="user", content=INJECTION)])
+        turn = await Turn.objects.aget(id=refused.value.turn_id)
+        assert (set(seen), turn.channel) == ({"default"}, "default")
+
 
     def test_the_old_name_is_gone(self):
         assert not hasattr(Agent, "get_oversight_policy")

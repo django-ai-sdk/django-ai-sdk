@@ -36,7 +36,9 @@ class TurnRequest:
 
     # The SDK agent whose policy the run is under.
     agent: Any = None
-    channel: str = "run"
+    # Where the turn came from, such as "api:extract"; the app picks its own names.
+    # None records it as "default".
+    channel: str | None = None
     user: Any = None
     thread_id: str | None = None
     # A policy for this run only, as in `Agent.run(oversight=...)`.

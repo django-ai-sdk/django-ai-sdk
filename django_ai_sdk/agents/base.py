@@ -509,14 +509,16 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     async def get_oversight(
         self,
         *,
-        channel: str = "",
+        channel: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         **kwargs: Any,
     ) -> type[Policy] | str | Literal[False] | None:
         """Return the policy for this turn. Defaults to `oversight`.
 
-        Override to pick a policy per instance, per user or per channel ("chat",
-        "api", "run", "workflow:<workflow>:<step>"). It may query the database.
+        Override to pick a policy per instance, per user or per channel: the SDK's
+        own ("chat", "api", "subagent", "workflow:<workflow>:<step>", "dry_run"),
+        a name the app passed to `run()`, or "default" when the caller named none.
+        It may query the database.
         Keep `**kwargs`, since more turn details may be passed later.
 
         If this raises, or names a policy that cannot load, the turn is blocked unless
@@ -841,7 +843,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         user: AbstractBaseUser | AnonymousUser | None = None,
         tools: bool = False,
         *,
-        channel: str = "run",
+        channel: str | None = None,
         oversight: type[Policy] | str | Literal[False] | None = None,
     ) -> T | str | None:
         """Run the agent to completion, as one turn under its oversight policy.
@@ -862,7 +864,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 extraction, ...) does not pay that cost unless it explicitly asks
                 for it. Ignored when response_format is set — tools and structured
                 output together are not supported yet (see Run.run).
-            channel: The channel the turn is recorded under, e.g. "api" or "cron".
+            channel: Where the turn came from, a name the app picks, e.g. "cron". The
+                turn is recorded under it and `get_oversight()` receives it. None
+                records "default".
             oversight: A policy for this call only (a Policy subclass or a name).
                 False runs without oversight. None (the default) applies
                 `get_oversight()`. Only for trusted code. The

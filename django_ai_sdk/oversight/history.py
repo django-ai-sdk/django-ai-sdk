@@ -26,7 +26,7 @@ async def history_for(
     storage: BaseStorageAdapter | None,
     messages: list[ChatMessage],
     *,
-    channel: str,
+    channel: str | None = None,
     user: Any = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
 ) -> tuple[list[ChatMessage], bool]:
@@ -72,7 +72,7 @@ async def thread_history(
 async def policy_for(
     agent: Any,
     *,
-    channel: str,
+    channel: str | None = None,
     user: Any = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
 ) -> ResolvedPolicy | None:

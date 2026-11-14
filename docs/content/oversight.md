@@ -264,10 +264,10 @@ A policy is a promise about an agent, not about one endpoint. If chat checked th
 | Entry point | Channel | When the policy blocks |
 | --- | --- | --- |
 | Chat, `Agent.as_view()` | `chat` | The policy's message streams as the reply, ending with finish reason `content-filter`. A blocked question is not stored. |
-| `Agent.run()` | `run`, or what you pass as `channel` | Raises `Blocked`. |
+| `Agent.run()` | What you pass as `channel`; `default` when you pass none | Raises `Blocked`. |
 | HTTP run endpoints (`POST /agents/{id}/run/`, `POST /threads/{id}/run/`, Ninja and DRF) | `api` | `{"result": <the policy's message>, "thread_id": ..., "blocked": true}`. Raised elsewhere, `Blocked` is an HTTP 400. |
 | Workflow `AgentStep` | `workflow:<workflow>:<step>`; `workflow:adhoc:<step>` for a definition a client submitted | The step fails: `refused by oversight: ...` or `withheld by oversight: ...`. |
-| `run_with_oversight()` | What you pass | `turn.raise_if_blocked()` on its `TurnRequest` raises `Blocked`. |
+| `run_with_oversight()` | What you pass; `default` when you pass none | `turn.raise_if_blocked()` on its `TurnRequest` raises `Blocked`. |
 
 ### `Agent.run()` and `Blocked`
 
@@ -291,7 +291,7 @@ Under a policy, `run()`:
 
 `run()` takes two keyword arguments for this:
 
-- `channel`: what the turn is recorded as on, such as `"api"` or `"run"`. `get_oversight()` sees it too.
+- `channel`: where the turn came from, a name you pick, such as `"cron"` or `"api:extract"`. The turn is recorded on it, and `get_oversight()` sees it too, so a policy can tell this caller apart. Leave it out (`None`) and the turn is recorded on `"default"`. The SDK's own entry points use `chat`, `api`, `subagent`, `workflow:<workflow>:<step>` and `dry_run`.
 - `oversight`: `None` (the default) keeps the agent's own policy; a class or a name replaces it for this call; `False` runs unguarded. Use `False` only in code you trust with the agent unguarded, such as the SDK's own title generation. The SDK's HTTP endpoints never pass it.
 
 ### Nested runs and subagents
@@ -341,7 +341,7 @@ For whoever works on the SDK itself. Oversight is a Haystack plugin, `django_ai_
 | `after_run` | `RecordUsageHook` | Adds the run's model and token usage to its turn, in a sync run too. |
 | `after_run` | `JudgeAnswerHook` | Gives the sources to the turn, and judges the answer (pass, mask or withhold). |
 
-`run_with_oversight(agent, messages, turn=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel, person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`turn.guard`, `turn.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and a caller asks `needs_own_turn_sync(turn)` first and runs nothing when it would need one of its own.
+`run_with_oversight(agent, messages, turn=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel (`None` records `default`), person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`turn.guard`, `turn.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and a caller asks `needs_own_turn_sync(turn)` first and runs nothing when it would need one of its own.
 
 The SDK joins the plugin in one place: `run_with_oversight()` runs a copy of every Haystack Agent with the hooks in their places, whether `ToolAgent` built it or someone did by hand. A run that names no SDK agent in its `TurnRequest` joins the turn it runs in; outside one it runs under `DEFAULT_POLICY` and is recorded as "Haystack agent", and without `DEFAULT_POLICY` it opens no turn. That includes a plain `Run(generator).run()`. A side call opts out on purpose with `TurnRequest(oversight=False)`, as `run_side_task` does for titles, suggestions, citations and artifact extraction; like `run(oversight=False)`, it does not join the outer turn either. The call sites carry an `# Oversight:` comment, so `grep -rn "Oversight:" django_ai_sdk` finds them. The modules of `django_ai_sdk.oversight` the SDK may import are listed, each with the reason, in `SEAMS` in `tests/oversight/test_layers.py`, which fails on any other import.
 

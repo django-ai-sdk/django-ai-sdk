@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 # Length of an agent's fingerprint in hex characters.
 FINGERPRINT_CHARS = 16
+# The channel of a turn whose caller named none: what it records and chooses its policy by.
+DEFAULT_CHANNEL = "default"
 
 
 def agent_key(agent: Agent) -> str:
@@ -31,7 +33,14 @@ def agent_key(agent: Agent) -> str:
     return str(getattr(agent, "agent_id", "") or "")
 
 
-async def declared_policy(agent: Agent, *, channel: str = "", user: Any = None) -> tuple[str, str]:
+def turn_channel(channel: str | None) -> str:
+    """The channel a turn records and chooses its policy by: `channel`, or DEFAULT_CHANNEL."""
+    return DEFAULT_CHANNEL if channel is None else channel
+
+
+async def declared_policy(
+    agent: Agent, *, channel: str | None = None, user: Any = None
+) -> tuple[str, str]:
     """Return the policy name the agent's code asks for, and the reason.
 
     The reason is "agent", "off" or "default". Calls `get_oversight()` when the
@@ -40,7 +49,7 @@ async def declared_policy(agent: Agent, *, channel: str = "", user: Any = None) 
     """
     getter = getattr(agent, "get_oversight", None)
     if callable(getter):
-        chosen = getter(channel=channel, user=user)
+        chosen = getter(channel=turn_channel(channel), user=user)
         if inspect.isawaitable(chosen):
             chosen = await chosen
     else:

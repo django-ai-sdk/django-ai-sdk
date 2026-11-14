@@ -67,7 +67,7 @@ def policy_agent(turn: TurnRequest) -> Any:
 async def open_turn(
     agent: Any,
     *,
-    channel: str,
+    channel: str | None,
     user: Any = None,
     thread_id: str | None = None,
     messages: list[ChatMessage] | None = None,
