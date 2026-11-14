@@ -47,14 +47,14 @@ class DryRunResult:
 async def dry_run(
     policy: str | ResolvedPolicy,
     *,
-    input: str,
-    output: str = "",
+    question: str,
+    answer: str = "",
     tool_calls: Sequence[ToolCall | dict[str, Any]] | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
 ) -> DryRunResult:
     """Run `policy` over one exchange as a turn would, then reflect, without recording it.
 
-        result = await dry_run("support", input="Where is my refund?", output="On its way.")
+        result = await dry_run("support", question="Where is my refund?", answer="On its way.")
         result.stage("gate").answers["injection_question"].value
 
     `policy` is a name or a `ResolvedPolicy` (e.g. a draft from `build_policy`).
@@ -76,17 +76,17 @@ async def dry_run(
         user=user,
         thread_id=None,
         messages=None,
-        input=input,
+        input=question,
     )
     guard.recording = False
-    return await _run_stages(guard, resolved, output=output, tool_calls=tool_calls or [])
+    return await _run_stages(guard, resolved, answer=answer, tool_calls=tool_calls or [])
 
 
 async def _run_stages(
     guard: TurnGuard,
     resolved: ResolvedPolicy,
     *,
-    output: str,
+    answer: str,
     tool_calls: Sequence[ToolCall | dict[str, Any]],
 ) -> DryRunResult:
     result = DryRunResult(policy=resolved.name)
@@ -116,9 +116,9 @@ async def _run_stages(
                 tool_result.block(message)
             add_stage(tool_result, answered, matched)
 
-    if not result.blocked_stage and output:
+    if not result.blocked_stage and answer:
         answered, matched = len(guard.answered), len(guard.matched)
-        finish = await guard.finish(output)
+        finish = await guard.finish(answer)
         add_stage(finish, answered, matched)
         if finish.blocked:
             result.blocked_stage = "finish"

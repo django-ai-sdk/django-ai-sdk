@@ -228,7 +228,7 @@ class TestWriteAhead:
         assert await RuleMatch.objects.filter(turn=turn, rule="refunds").acount() == 1
 
     async def test_a_dry_run_writes_nothing(self):
-        result = await dry_run("test-durable", input="I want a refund", output="ok")
+        result = await dry_run("test-durable", question="I want a refund", answer="ok")
         assert result.outcome == "flagged"
         assert await Turn.objects.acount() == 0
 

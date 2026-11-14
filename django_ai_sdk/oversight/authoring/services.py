@@ -153,7 +153,7 @@ class AuthoringService(OversightAccess):
         except DefinitionError as exc:
             raise UserError(f"This policy does not check: {exc}") from None
         result = await dry_run(
-            resolved, input=run.input, output=run.output, tool_calls=run.tool_calls, user=user
+            resolved, question=run.input, answer=run.output, tool_calls=run.tool_calls, user=user
         )
         return TryOut(
             outcome=str(result.outcome),

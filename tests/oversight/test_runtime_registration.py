@@ -34,7 +34,7 @@ class TestDrafts:
 
     @pytest.mark.django_db(transaction=True)
     async def test_dry_run_takes_a_built_draft(self, registry_snapshot):
-        result = await dry_run(build_policy("draft", policy_class=draft()), input="I want a refund")
+        result = await dry_run(build_policy("draft", policy_class=draft()), question="I want a refund")
         assert result.outcome is Outcome.BLOCKED
         assert result.stage(Stage.GATE).message == "No."
 

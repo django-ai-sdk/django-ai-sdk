@@ -355,7 +355,7 @@ python manage.py check --deploy --database default
 
 ## Testing
 
-`dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a policy, by its registered name or as a `ResolvedPolicy` from `build_policy(name, policy_class=Draft)` to try a draft before registering it, over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `changed`, `notice`, `restrict`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`dry_run(policy, *, question, answer="", tool_calls=None, user=None) -> DryRunResult` runs a policy, by its registered name or as a `ResolvedPolicy` from `build_policy(name, policy_class=Draft)` to try a draft before registering it, over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `changed`, `notice`, `restrict`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
