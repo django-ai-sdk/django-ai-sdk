@@ -80,19 +80,28 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Actions a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.actions.ConsoleLogAction"}`. Every action is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host’s own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 
 ## Oversight
 
 One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings).
 
-`AI_SDK_OVERSIGHT` is checked on start: an unknown key or a value of the wrong kind is `ai_sdk.oversight.E012`, which names the key and what it accepts. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
+Every settings dict of the SDK (`AI_SDK_OVERSIGHT` and `AI_SDK_WORKFLOWS`) is checked on start: an unknown key or a value of the wrong kind is `<app>.E012`, which names the key and what it accepts. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | unset | Key for oversight's optional `TypeSafe` judge (a hosted commercial service; `django-ai-sdk[typesafe]`). Without it that judge abstains. |
 | `TYPESAFE_MODEL` | unset | A TypeSafe model to pin; unset leaves the choice to `typesafe-sdk`. |
+
+## Webhooks
+
+For an integration a platform pushes events into. Per-platform keys (`AGENT`, `RUN_AS`, `ALLOW_FROM`, ...) live in `AI_SDK_INTEGRATIONS[<name>]`; see [Webhooks](/manual/webhooks/).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_WEBHOOK_TIMEOUT` | `120` | Seconds a webhook-triggered agent run may take before the channel gets a timeout reply instead. |
+| `AI_SDK_WEBHOOK_MAX_TEXT` | `4000` | Characters of the inbound question kept, so the prompt is bounded by the SDK rather than by whatever the platform accepts. |
 
 ## Streaming and Titles
 

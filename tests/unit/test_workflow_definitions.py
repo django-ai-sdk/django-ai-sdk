@@ -22,18 +22,22 @@ from django_ai_sdk.workflows.definitions import (
     inputs_json_schema,
     model_from_fields,
 )
+from django_ai_sdk.workflows.registry import validate_definition
 from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.schemas import (
     MAX_DEPTH,
-    ActionDefinition,
+    ListenerDefinition,
     FieldDefinition,
     StepDefinition,
     WorkflowDefinition,
 )
 from django_ai_sdk.workflows.steps import AgentStep, OnError, Step, StepOutcome, WorkflowContext
 
-REGISTERED = {"shout": "tests.unit.test_workflow_definitions.ShoutStep"}
-ACTIONS = {"quiet": "tests.unit.test_workflow_definitions.QuietAction"}
+REGISTERED = {
+    "shout": "tests.unit.test_workflow_definitions.ShoutStep",
+    "repeat": "tests.unit.test_workflow_definitions.RepeatStep",
+}
+LISTENERS = {"quiet": "tests.unit.test_workflow_definitions.QuietListener"}
 
 
 class ShoutStep(Step):
@@ -44,8 +48,65 @@ class ShoutStep(Step):
         return StepOutcome(output=str(source).upper(), detail="shouted")
 
 
-class QuietAction:
+class QuietListener:
     pass
+
+
+class RepeatConfig(BaseModel):
+    times: int
+
+
+class RepeatStep(Step):
+    """A registered step that takes settings, checked by its own model."""
+
+    @classmethod
+    def validate_config(cls, config):
+        RepeatConfig.model_validate(config)
+
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
+        return StepOutcome(output=ctx.input("text", "") * self.config["times"])
+
+
+class TestAStepsConfig:
+    """A registered step's settings live on the definition and are checked when it is stored."""
+
+    @pytest.fixture(autouse=True)
+    def registered(self):
+        with override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED}):
+            yield
+
+    def test_the_config_reaches_the_step(self):
+        spec = WorkflowDefinition(
+            steps=[StepDefinition(type="repeat", name="echo", config={"times": 3})]
+        )
+        validate_definition(spec)
+
+        (step,) = compile_steps(spec)
+
+        assert dict(step.config) == {"times": 3}
+
+    def test_a_config_its_class_refuses_is_refused_before_it_is_stored(self):
+        spec = WorkflowDefinition(
+            steps=[StepDefinition(type="repeat", name="echo", config={"times": "often"})]
+        )
+
+        with pytest.raises(ImproperlyConfigured, match="config its step type refuses"):
+            validate_definition(spec)
+
+    def test_a_step_takes_no_config_unless_it_says_so(self):
+        spec = WorkflowDefinition(
+            steps=[StepDefinition(type="shout", name="loud", config={"volume": 11})]
+        )
+
+        with pytest.raises(ImproperlyConfigured, match="takes no config"):
+            validate_definition(spec)
+
+    def test_an_agent_step_takes_no_config(self):
+        with pytest.raises(ValidationError, match="takes no config"):
+            StepDefinition(name="verdict", agent_id="a1", config={"temperature": 2})
+
+    def test_a_step_written_in_code_has_an_empty_config(self):
+        assert dict(ShoutStep().config) == {}
 
 
 class TestTheSchemaHoldsTheAuthorToACoherentStep:
@@ -384,7 +445,7 @@ class TestAuthoringWithAPydanticModel:
 
 
 class TestCompiling:
-    @override_settings(AI_SDK_WORKFLOW_STEPS=REGISTERED)
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED})
     def test_a_registered_type_becomes_its_class(self):
         spec = WorkflowDefinition(steps=[StepDefinition(type="shout", name="loud")])
 
@@ -395,7 +456,7 @@ class TestCompiling:
         assert type(step).__name__ == "ShoutStep"
         assert step.name == "loud"
 
-    @override_settings(AI_SDK_WORKFLOW_STEPS=REGISTERED)
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED})
     def test_the_definition_wires_the_step_the_class_supplies_behaviour(self):
         spec = WorkflowDefinition(
             steps=[StepDefinition(type="shout", name="loudly", on_error="continue")]
@@ -414,7 +475,6 @@ class TestCompiling:
                     name="verdict",
                     agent_id="a1",
                     history=["prompt"],
-                    system_prompt_override="Be brief.",
                     output_fields={"sailing": FieldDefinition()},
                 )
             ]
@@ -426,7 +486,7 @@ class TestCompiling:
         assert step.agent_id == "a1"
         assert step.agent is None
         assert step.history == ("prompt",)
-        assert step.instructions == "Be brief."
+        assert step.instructions == ""
         assert step.schema is not None
 
     def test_an_agent_step_without_history_sends_no_transcript(self):
@@ -437,22 +497,22 @@ class TestCompiling:
 
         assert step.history == ()
 
-    @override_settings(AI_SDK_WORKFLOW_STEPS={})
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": {}})
     def test_an_unregistered_type_is_refused_naming_what_is_registered(self):
         spec = WorkflowDefinition(steps=[StepDefinition(type="shout", name="loud")])
 
         with pytest.raises(ImproperlyConfigured, match="not registered"):
             compile_steps(spec)
 
-    @override_settings(AI_SDK_WORKFLOW_STEPS={"broken": "nowhere.NoSuchStep"})
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": {"broken": "nowhere.NoSuchStep"}})
     def test_a_type_that_will_not_import_is_left_out_rather_than_raising(self):
         """One bad path in settings must not stop the site booting."""
         assert get_step_registry() == {}
 
-    @override_settings(AI_SDK_WORKFLOW_ACTIONS={})
-    def test_an_unregistered_step_action_is_refused(self):
+    @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {}})
+    def test_an_unregistered_step_listener_is_refused(self):
         spec = WorkflowDefinition(
-            steps=[StepDefinition(name="a", agent_id="a1", actions=[ActionDefinition(type="quiet")])]
+            steps=[StepDefinition(name="a", agent_id="a1", listeners=[ListenerDefinition(type="quiet")])]
         )
 
         with pytest.raises(ImproperlyConfigured, match="not registered"):
@@ -512,7 +572,7 @@ class TestAJsonAgentStepIsGatedToo:
 
 
 class TestRunning:
-    @override_settings(AI_SDK_WORKFLOW_STEPS=REGISTERED)
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED})
     async def test_a_compiled_definition_runs_on_the_step_runner(self):
         spec = WorkflowDefinition(steps=[StepDefinition(type="shout", name="loud")])
 
@@ -520,7 +580,7 @@ class TestRunning:
 
         assert outcomes["loud"].output == "HELLO"
 
-    @override_settings(AI_SDK_WORKFLOW_STEPS=REGISTERED)
+    @override_settings(AI_SDK_WORKFLOWS={"STEPS": REGISTERED})
     async def test_the_run_state_carries_between_a_registered_step_and_the_next(self):
         spec = WorkflowDefinition(
             steps=[

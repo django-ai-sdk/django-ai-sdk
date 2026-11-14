@@ -234,17 +234,18 @@ class WorkflowRunResponse(Schema):
     status: str
 
 
-class WorkflowActionItem(Schema):
+class WorkflowListenerItem(Schema):
     key: str
     description: str
 
 
-class WorkflowRunStepOut(Schema):
+class StepRunOut(Schema):
     id: str
     sequence: int
     # The step's name is its key: its output is filed under it.
     step_name: str
-    output: dict | None = None
+    # Any JSON value the step returned.
+    output: Any = None
     status: str
     error: str
     # Why the step was skipped, or the start of its failure text.
@@ -256,7 +257,11 @@ class WorkflowRunStepOut(Schema):
 class WorkflowRunOut(Schema):
     id: str
     workflow_id: str | None = None
+    # The stored workflow's slug, the registered workflow's name, or "adhoc".
+    workflow_key: str
     status: str
+    # Number of times a worker has claimed the run.
+    attempt: int
     outputs: dict | None = None
     error: str
     created_at: str
@@ -265,12 +270,14 @@ class WorkflowRunOut(Schema):
 
 
 class WorkflowRunDetailOut(WorkflowRunOut):
-    steps: list[WorkflowRunStepOut] = []
+    steps: list[StepRunOut] = []
 
 
 class WorkflowItem(Schema):
     id: str
     name: str
+    # Run key, as in POST /workflows/{slug}/run/.
+    slug: str
     definition: dict
     active: bool
 

@@ -14,6 +14,7 @@ from django_ai_sdk.oversight.conf import (
     DEFAULTS,
     FAIL_MODES,
     STREAM_MODES,
+    UNGUARDED_MODES,
     configured,
     deadline_ms,
     is_enabled,
@@ -141,6 +142,10 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
     "RUNTIME_CACHE_SECONDS": (
         lambda value: _is_number(value) and value >= 0,
         "a number of seconds of at least 0",
+    ),
+    "UNGUARDED_MODEL_CALLS": (
+        lambda value: value in UNGUARDED_MODES,
+        f"one of {_listed(UNGUARDED_MODES)}",
     ),
 }
 

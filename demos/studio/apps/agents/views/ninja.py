@@ -65,8 +65,8 @@ def health_check(request: HttpRequest) -> HealthResponse:
 @router.post("/threads/{thread_id}/digest/", response=DigestResponse, operation_id="digest_thread")
 async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
     """Run the declared thread-digest workflow (see apps.agents.workflows)."""
-    from django_ai_sdk.workflows.executor import WorkflowExecutor
     from django_ai_sdk.workflows.registry import aget_workflow
+    from django_ai_sdk.workflows.runs import execute_run, open_run
 
     user = await request.auser()
     if await ThreadService.get_thread(thread_id, user=user) is None:
@@ -75,10 +75,9 @@ async def digest_thread(request: HttpRequest, thread_id: str) -> Any:
     if definition is None:
         raise NotFound("thread-digest workflow is not registered")
 
-    # Inline, so the caller gets the outcome. WorkflowService.run() queues it.
-    _outputs, run = await WorkflowExecutor().run(
-        definition, inputs={"thread": thread_id}, user=user
-    )
+    # Inline, so the caller gets the outcome. WorkflowService.start() queues it.
+    run = await open_run(definition, inputs={"thread": thread_id}, user=user)
+    await execute_run(str(run.pk))
     return DigestResponse(
         thread_id=thread_id,
         steps=[

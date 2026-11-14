@@ -181,6 +181,8 @@ class TurnGuard:
     # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     blocked: bool = False
+    # The gate ran, so a model call now counts as seen (`oversight.calls`).
+    gated: bool = False
     original_input: str = ""
     original_output: str = ""
     # A turn is finished once, inside its run or after it.
@@ -448,6 +450,7 @@ class TurnGuard:
     async def gate(self) -> StageResult:
         """Judge the question before the model sees it, then write the turn ahead."""
         result = await stages.judge_question(self)
+        self.gated = True
         await self.write_ahead()
         return result
 

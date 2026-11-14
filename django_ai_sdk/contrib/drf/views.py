@@ -36,7 +36,6 @@ from django_ai_sdk.views.files import (
 )
 from django_ai_sdk.views.schemas import Message
 from django_ai_sdk.workflows import services as workflow_services
-from django_ai_sdk.workflows.services import WorkflowService
 
 if TYPE_CHECKING:
     from django.http import FileResponse, HttpResponse
@@ -739,15 +738,20 @@ class MemoryViewSet(ApiViewSet):
 
 
 class WorkflowViewSet(ApiViewSet):
-    """Stored workflow definitions, their runs, and ad-hoc runs."""
+    """Stored workflow definitions and their runs.
+
+    Only registered or stored workflows run, by key (`workflows/<key>/run/`). A
+    definition sent in a request is never run. Read a run at
+    `workflows/runs/<run_id>/` and resume a failed one at
+    `workflows/runs/<run_id>/resume/`.
+    """
 
     lookup_field = "workflow_id"
     lookup_value_regex = ID
     serializer_classes = {
         "create": s.WorkflowCreateSerializer,
         "partial_update": s.WorkflowUpdateSerializer,
-        "run_definition": s.WorkflowRunRequestSerializer,
-        "run": s.WorkflowRunByIdSerializer,
+        "start": s.WorkflowStartSerializer,
     }
 
     def list(self, request: Request) -> Response:
@@ -786,32 +790,27 @@ class WorkflowViewSet(ApiViewSet):
         workflow_services.delete_workflow(workflow_id, user=request.user)
         return Response(status=NO_CONTENT)
 
-    @action(detail=False, methods=["post"], url_path="run")
-    def run_definition(self, request: Request) -> Response:
-        """Run a definition sent in the request, without storing it."""
+    @action(detail=False, methods=["get"], url_path="listeners")
+    def list_listeners(self, request: Request) -> Response:
+        return Response(workflow_services.list_workflow_listeners(user=request.user))
+
+    @action(detail=False, methods=["post"], url_path=rf"(?P<key>{ID})/run")
+    def start(self, request: Request, key: str) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        run = workflow_services.run_workflow(
-            serializer.validated_data["workflow"],
-            inputs=serializer.validated_data["inputs"],
-            user=request.user,
+        run = workflow_services.start_workflow(
+            key, inputs=serializer.validated_data["inputs"], user=request.user
         )
         return Response({"run_id": str(run.id), "status": run.status}, status=202)
 
-    @action(detail=False, methods=["get"], url_path="actions")
-    def list_actions(self, request: Request) -> Response:
-        return Response(WorkflowService.list_actions())
+    @action(detail=False, methods=["get"], url_path=rf"runs/(?P<run_id>{ID})")
+    def workflow_run_by_id(self, request: Request, run_id: str) -> Response:
+        """Get a run by id, e.g. to follow a run started by key."""
+        return self._run_detail(request, run_id, None)
 
-    @action(detail=True, methods=["post"])
-    def run(self, request: Request, workflow_id: str) -> Response:
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        run = workflow_services.run_workflow_by_id(
-            workflow_id,
-            inputs=serializer.validated_data["inputs"],
-            user=request.user,
-            run_id=serializer.validated_data["run_id"],
-        )
+    @action(detail=False, methods=["post"], url_path=rf"runs/(?P<run_id>{ID})/resume")
+    def resume(self, request: Request, run_id: str) -> Response:
+        run = workflow_services.resume_workflow_run(run_id, user=request.user)
         return Response({"run_id": str(run.id), "status": run.status}, status=202)
 
     @action(detail=True, methods=["get"])
@@ -824,7 +823,10 @@ class WorkflowViewSet(ApiViewSet):
 
     @action(detail=True, methods=["get"], url_path=rf"runs/(?P<run_id>{ID})")
     def run_detail(self, request: Request, workflow_id: str, run_id: str) -> Response:
-        run = workflow_services.get_workflow_run(run_id, user=request.user)
+        return self._run_detail(request, run_id, workflow_id)
+
+    def _run_detail(self, request: Request, run_id: str, workflow_id: str | None) -> Response:
+        run = workflow_services.get_workflow_run(run_id, user=request.user, workflow_id=workflow_id)
         if run is None:
             # Absent covers both "no such run" and "not yours", by design.
             raise NotFound("Run not found")

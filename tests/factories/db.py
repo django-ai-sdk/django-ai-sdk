@@ -49,6 +49,9 @@ def grant(user, *perms):
 
 agrant = sync_to_async(grant)
 
+MANAGE_WORKFLOWS = "django_ai_sdk_workflows.change_workflow"
+VIEW_WORKFLOW_RUNS = "django_ai_sdk_workflows.view_workflowrun"
+
 
 class MemoryFactory(AsyncFactoryMixin, DjangoModelFactory):
     class Meta:

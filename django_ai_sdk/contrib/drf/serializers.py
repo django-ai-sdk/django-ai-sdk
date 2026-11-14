@@ -16,7 +16,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rest_framework import serializers
 
 from django_ai_sdk.agents.models import AgentSettings
-from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
+from django_ai_sdk.workflows.models import StepRun, Workflow, WorkflowRun
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
@@ -196,14 +196,8 @@ class WorkflowUpdateSerializer(serializers.Serializer):
     active = serializers.BooleanField(required=False)
 
 
-class WorkflowRunRequestSerializer(serializers.Serializer):
-    workflow = WorkflowDefinitionField()
+class WorkflowStartSerializer(serializers.Serializer):
     inputs = serializers.DictField(required=False, default=dict)
-
-
-class WorkflowRunByIdSerializer(serializers.Serializer):
-    inputs = serializers.DictField(required=False, default=dict)
-    run_id = serializers.CharField(required=False, allow_null=True, default=None)
 
 
 class TraceQuerySerializer(serializers.Serializer):
@@ -468,13 +462,13 @@ class IntegrationSerializer(serializers.Serializer):
 
 class WorkflowSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WorkflowSettings
-        fields = ["id", "name", "definition", "active"]
+        model = Workflow
+        fields = ["id", "name", "slug", "definition", "active"]
 
 
-class WorkflowRunStepSerializer(serializers.ModelSerializer):
+class StepRunSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WorkflowRunStep
+        model = StepRun
         fields = [
             "id",
             "sequence",
@@ -494,7 +488,9 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "workflow_id",
+            "workflow_key",
             "status",
+            "attempt",
             "outputs",
             "error",
             "created_at",
@@ -504,7 +500,7 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
 
 
 class WorkflowRunDetailSerializer(WorkflowRunSerializer):
-    steps = WorkflowRunStepSerializer(many=True, read_only=True)
+    steps = StepRunSerializer(many=True, read_only=True)
 
     class Meta(WorkflowRunSerializer.Meta):  # ty: ignore[invalid-attribute-override]
         fields = [*WorkflowRunSerializer.Meta.fields, "steps"]

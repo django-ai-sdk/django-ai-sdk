@@ -42,7 +42,11 @@ DEFAULTS: dict[str, Any] = {
     "NOTIFIERS": [],
     # How long each process caches authored policies. 0 reads them every turn.
     "RUNTIME_CACHE_SECONDS": 10,
+    # A model call outside a required turn (see `oversight.calls`).
+    "UNGUARDED_MODEL_CALLS": "refuse",
 }
+
+UNGUARDED_MODES = ("refuse", "warn", "allow")
 
 
 def configured(name: str = "AI_SDK_OVERSIGHT") -> Any:

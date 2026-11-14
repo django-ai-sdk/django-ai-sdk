@@ -1,4 +1,4 @@
-"""The non-streaming `Run` adapter, used by WorkflowExecutor and title generation."""
+"""The non-streaming `Run` adapter, used by workflow agent steps and title generation."""
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
