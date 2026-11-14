@@ -4,7 +4,7 @@
 
     result = await dry_run("support", input="Where is my refund?", output="It is on its way.")
     assert result.outcome == "allowed"
-    assert result.ended_at == ""
+    assert result.blocked_stage == ""
     result.stage("gate").answers["prompt_injection"].value  # what the gate's lens said
 
 A dry run opens a real TurnGuard and runs the gate, each tool call and finish.
@@ -38,14 +38,14 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class TurnResult:
+class DryRunResult:
     """The result of a dry run."""
 
     policy: str
     stages: list[StageResult] = field(default_factory=list)
-    # "gate" or "finish" when that stage refused, else "". A refused tool call does
+    # "gate" or "finish" when that stage blocked, else "". A refused tool call does
     # not end the turn. Only its own stage result is blocked.
-    ended_at: str = ""
+    blocked_stage: str = ""
     outcome: Outcome = Outcome.ALLOWED
     # What the turn would have become with every report-mode rule enforced.
     report_outcome: Outcome = Outcome.ALLOWED
@@ -69,7 +69,7 @@ async def dry_run(
     output: str = "",
     tool_calls: Sequence[ToolCall | dict[str, Any]] | None = None,
     user: AbstractBaseUser | AnonymousUser | None = None,
-) -> TurnResult:
+) -> DryRunResult:
     """Run `policy` over one exchange as a turn would, without recording it.
 
     `policy` is a registered policy name or a `ResolvedPolicy` from `policy.build`,
@@ -103,8 +103,8 @@ async def _run(
     *,
     output: str,
     tool_calls: Sequence[ToolCall | dict[str, Any]],
-) -> TurnResult:
-    result = TurnResult(policy=resolved.name)
+) -> DryRunResult:
+    result = DryRunResult(policy=resolved.name)
 
     def stage_out(stage: Stage, before: int, matched_before: int, **extra: Any) -> None:
         result.stages.append(
@@ -119,9 +119,9 @@ async def _run(
     gate = await guard.gate()
     stage_out(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.text)
     if gate.blocked:
-        result.ended_at = "gate"
+        result.blocked_stage = "gate"
 
-    if not result.ended_at:
+    if not result.blocked_stage:
         for raw in tool_calls:
             call = raw if isinstance(raw, ToolCall) else ToolCall.model_validate(raw)
             answered, matched = len(guard.answered), len(guard.matched)
@@ -136,7 +136,7 @@ async def _run(
                 tool=call.name,
             )
 
-    if not result.ended_at and output:
+    if not result.blocked_stage and output:
         answered, matched = len(guard.answered), len(guard.matched)
         finished = await guard.finish(output)
         stage_out(
@@ -148,7 +148,7 @@ async def _run(
             text=finished.text,
         )
         if finished.blocked:
-            result.ended_at = "finish"
+            result.blocked_stage = "finish"
 
     # Reflect runs on every closed turn, a blocked one too.
     answered, matched = len(guard.answered), len(guard.matched)
@@ -175,4 +175,4 @@ async def _reflect(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
     guard.matched.extend(matched)
 
 
-__all__ = ["StageResult", "TurnResult", "dry_run"]
+__all__ = ["DryRunResult", "StageResult", "dry_run"]

@@ -87,7 +87,7 @@ class TestRecordingFailures:
     async def test_a_caller_that_refuses_a_passed_result_records_it_blocked(self):
         guard = await start("test-guard", "mail a@b.nl")
         assert (await guard.gate()).changed
-        guard.refuse("masked result does not fit its schema")
+        guard.block("masked result does not fit its schema")
         turn = await closed_turn(guard)
         assert turn.outcome == "blocked"
         assert turn.error == "masked result does not fit its schema"
@@ -213,12 +213,12 @@ class TestRecordingFailures:
         class Count(BaseModel):
             n: int
 
-        refused: list[str] = []
-        guard = type("Guard", (), {"refuse": lambda self, error="": refused.append(error)})()
-        finished = StageResult(text='{"n": "[NUMBER]"}', changed=True)
-        withhold_unfit(guard, finished, Count)
-        assert finished.blocked and finished.message == str(Block.DEFAULT_MESSAGE)
-        assert refused == ["masked result does not fit its schema"]
+        blocked: list[str] = []
+        guard = type("Guard", (), {"block": lambda self, error="": blocked.append(error)})()
+        finish = StageResult(text='{"n": "[NUMBER]"}', changed=True)
+        withhold_unfit(guard, finish, Count)
+        assert finish.blocked and finish.message == str(Block.DEFAULT_MESSAGE)
+        assert blocked == ["masked result does not fit its schema"]
 
 
 def test_a_user_id_fits_wherever_a_person_is_recorded():

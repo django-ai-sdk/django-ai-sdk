@@ -242,7 +242,7 @@ def keep_masked(messages: list[ChatMessage], request: TurnRequest) -> None:
     the content and the attachments' context, the content is withheld rather
     than stored with what may be unmasked.
     """
-    gated = request.gated
-    if gated is not None and gated.changed and (question := last_user_message(messages)):
-        content = user_content(question, gated.text)
+    gate = request.gate_result
+    if gate is not None and gate.changed and (question := last_user_message(messages)):
+        content = user_content(question, gate.text)
         question.content = content if content is not None else str(UNCHECKED_TEXT)

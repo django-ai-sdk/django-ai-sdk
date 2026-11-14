@@ -412,7 +412,7 @@ class TestBrokenHandlers:
                 make_agent([], None, policy="no-such-policy"), channel="api", input="hi"
             )
             gate_result = await guard.gate()
-        assert guard.active and guard.refused
+        assert guard.active and guard.blocked
         assert gate_result.blocked
         assert await guard.close() is None
         assert await Turn.objects.acount() == 0

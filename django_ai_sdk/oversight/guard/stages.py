@@ -79,7 +79,7 @@ class StageResult:
         """Rules that matched at this stage, whether they acted or not."""
         return [m.rule.name for m in self.matched]
 
-    def refuse(self, message: str) -> StageResult:
+    def block(self, message: str) -> StageResult:
         """Mark the result as refused with `message`, and return it."""
         self.blocked = True
         self.message = message
@@ -95,12 +95,12 @@ async def judge_question(guard: TurnGuard) -> StageResult:
     if not guard.active:
         return result
     if guard.policy_unloaded:
-        return _refuse_question(guard, result, str(Block.DEFAULT_MESSAGE))
+        return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
     limit = setting("MAX_INPUT_CHARS")
     if limit and len(guard.context.input) > limit:
         # Refuse now, because later stages like reflect would only read part of it.
         guard.too_long = True
-        return _refuse_question(guard, result, str(TOO_LONG_MESSAGE))
+        return _block_question(guard, result, str(TOO_LONG_MESSAGE))
     try:
         matched = await judge_stage(
             guard, Stage.GATE, subjects={Subject.INPUT}, deadline=deadline_ms(Stage.GATE)
@@ -111,7 +111,7 @@ async def judge_question(guard: TurnGuard) -> StageResult:
         # Tools taken away by judge_history stay taken away.
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
-            result.refuse(block)
+            result.block(block)
         if masks:
             masked = mask_all(guard.context.input, masks)
             result.changed = masked != guard.context.input
@@ -123,13 +123,13 @@ async def judge_question(guard: TurnGuard) -> StageResult:
         return result
     except Exception:
         # A broken lens or rule follows the fail mode, as in the other stages.
-        if guard.record_stage_error("gate failed", refuse_turn=True):
-            return _refuse_question(guard, result, str(Block.DEFAULT_MESSAGE))
+        if guard.record_stage_error("gate failed", block_turn=True):
+            return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
         return result
 
 
-def _refuse_question(guard: TurnGuard, result: StageResult, message: str) -> StageResult:
-    result.refuse(message)
+def _block_question(guard: TurnGuard, result: StageResult, message: str) -> StageResult:
+    result.block(message)
     result.notice = {**notice_base(guard.id, Stage.GATE, Outcome.BLOCKED), "message": message}
     return result
 
@@ -165,7 +165,7 @@ async def judge_history(
     # Set again below once judging has masked it.
     guard.set_history(messages)
     if guard.policy_unloaded:
-        return _refuse_question(guard, result, str(Block.DEFAULT_MESSAGE))
+        return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
     lenses = guard.resolved.active_lenses(Stage.GATE, Subject.INPUT)
     items = _history_items(messages, history=history) if lenses else []
     if not items:
@@ -174,7 +174,7 @@ async def judge_history(
     limit = setting("MAX_INPUT_CHARS")
     if limit and len(guard.context.input) + sum(len(get()) for get, _ in items) > limit:
         guard.too_long = True
-        return _refuse_question(guard, result, str(TOO_LONG_MESSAGE))
+        return _block_question(guard, result, str(TOO_LONG_MESSAGE))
     if unread and guard.fails_closed:
         for _get, put in unread:
             put(str(UNCHECKED_TEXT))
@@ -189,15 +189,15 @@ async def judge_history(
     try:
         judged = await asyncio.gather(*(judge(get()) for get, _ in items))
     except Exception:
-        if guard.record_stage_error("history check failed", refuse_turn=True):
-            return _refuse_question(guard, result, str(Block.DEFAULT_MESSAGE))
+        if guard.record_stage_error("history check failed", block_turn=True):
+            return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
         return result
     found: list[Matched] = []
     for (_read, put), one in zip(items, judged, strict=True):
         put(one.text)
         found.extend(one.matched)
         if one.blocked and not result.blocked:
-            result.refuse(one.message)
+            result.block(one.message)
         if one.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, one.restrict)
     recorded = guard.record_aside(Stage.GATE, [o for one in judged for o in one.answered], found)
@@ -292,7 +292,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
             return tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE)
         return None
     except Exception:
-        refuse = guard.record_stage_error("tool check failed", refuse_turn=False)
+        refuse = guard.record_stage_error("tool check failed", block_turn=False)
         return str(Block.DEFAULT_MESSAGE) if refuse else None
 
 
@@ -320,7 +320,7 @@ async def judge_answer(guard: TurnGuard, output: str | None) -> StageResult:
         masks = guard.masks.mask_groups(matched, Subject.OUTPUT)
         block = first_refusal(matched)
         if block is not None:
-            result.refuse(block)
+            result.block(block)
             result.changed = True
             result.text = block
         elif masks:
@@ -335,13 +335,13 @@ async def judge_answer(guard: TurnGuard, output: str | None) -> StageResult:
         return result
     except Exception:
         # Keep the answer, unless the policy fails closed.
-        if guard.record_stage_error("finish failed", refuse_turn=True):
+        if guard.record_stage_error("finish failed", block_turn=True):
             return _withhold_answer(guard, result)
         return result
 
 
 def _withhold_answer(guard: TurnGuard, result: StageResult) -> StageResult:
-    result.refuse(str(Block.DEFAULT_MESSAGE))
+    result.block(str(Block.DEFAULT_MESSAGE))
     result.changed = True
     result.text = guard.context.output = result.message
     return result

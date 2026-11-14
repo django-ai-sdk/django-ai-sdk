@@ -335,7 +335,7 @@ python manage.py check --deploy --database default
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> TurnResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `TurnResult` has `outcome`, `report_outcome`, `ended_at` (the stage that refused, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 

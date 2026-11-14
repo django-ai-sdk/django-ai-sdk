@@ -111,10 +111,10 @@ class TurnMasks:
             for action in acting:
                 if isinstance(action, Block):
                     if not judged.blocked:
-                        judged.refuse(refusal_message(match, action))
+                        judged.block(refusal_message(match, action))
                 elif isinstance(action, RestrictTools):
                     if not action.names and not judged.blocked:
-                        judged.refuse(tool_refusal_message(match))
+                        judged.block(tool_refusal_message(match))
                     judged.restrict = merge_restrict(judged.restrict, action.names)
             if acting:
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
@@ -147,7 +147,7 @@ class TurnMasks:
                 guard.record_aside(Stage.TOOL, judged.answered, judged.matched)
             return judged.text
         except Exception:
-            withhold = guard.record_stage_error("tool result masking failed", refuse_turn=False)
+            withhold = guard.record_stage_error("tool result masking failed", block_turn=False)
             return str(UNCHECKED_TEXT) if withhold else text
 
     async def mask_result(self, call_id: str, text: str) -> str:

@@ -100,27 +100,29 @@ class TurnRequest:
     # Called with the stubs of refused tool calls, which never reach the ToolInvoker.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     guard: TurnGuard | None = None
-    gated: StageResult | None = None
+    gate_result: StageResult | None = None
     # Index of the first message the run produced, after the gate.
     first: int = 0
 
     @property
-    def refused(self) -> bool:
-        return self.gated is not None and self.gated.blocked
+    def blocked(self) -> bool:
+        """Whether the gate blocked the question."""
+        return self.gate_result is not None and self.gate_result.blocked
 
     @property
-    def finished(self) -> StageResult | None:
-        return self.guard.finished if self.guard is not None else None
+    def finish_result(self) -> StageResult | None:
+        """What finish decided about the answer, once the run finished it."""
+        return self.guard.finish_result if self.guard is not None else None
 
     def raise_if_blocked(self) -> None:
-        """Raise `Blocked` when the gate refused the question or finish withheld the answer."""
+        """Raise `Blocked` when the gate blocked the question or finish withheld the answer."""
         if self.guard is None:
             return
-        if self.refused:
-            assert self.gated is not None
-            raise Blocked(self.gated.message, stage=str(Stage.GATE), turn_id=self.guard.id)
-        if (finished := self.finished) is not None and finished.blocked:
-            raise Blocked(finished.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
+        if self.blocked:
+            assert self.gate_result is not None
+            raise Blocked(self.gate_result.message, stage=str(Stage.GATE), turn_id=self.guard.id)
+        if (finish := self.finish_result) is not None and finish.blocked:
+            raise Blocked(finish.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
 
     def context(self, **extra: Any) -> dict[str, Any]:
         """A hook_context holding this request, beside `extra` for other hooks."""
@@ -192,7 +194,7 @@ class GateQuestionHook(OversightHook):
     async def run_async(self, state: State) -> None:
         request = turn_request(state)
         if (guard := request.guard) is not None:
-            gate = request.gated = await judge_run_input(
+            gate = request.gate_result = await judge_run_input(
                 state, guard, vouched=request.history_vouched
             )
             if gate.blocked:
@@ -499,7 +501,7 @@ class JudgeAnswerHook(OversightHook):
         if (registry := current_registry.get()) is not None:
             await mask_sources(guard, registry)
             guard.set_sources(registry.all, seeded=registry.seeded)
-        if request.refused:
+        if request.blocked:
             return
         messages = list(state.data.get("messages") or [])
         produced = messages[request.first :]
@@ -528,7 +530,7 @@ def withhold_unfit(guard: TurnGuard, finished: StageResult, schema: type[BaseMod
     try:
         schema.model_validate_json(finished.text)
     except ValidationError:
-        guard.refuse("masked result does not fit its schema")
+        guard.block("masked result does not fit its schema")
         finished.blocked = True
         finished.message = finished.text = str(Block.DEFAULT_MESSAGE)
 

@@ -113,7 +113,7 @@ async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
         guard.note_error(error)
         await guard.close()
         return None
-    guard.refuse(error)
+    guard.block(error)
     await guard.close()
     notice = notice_base(guard.id, Stage.FINISH, Outcome.BLOCKED)
     return RefusalStream(str(Block.DEFAULT_MESSAGE), notice)
@@ -173,14 +173,14 @@ class StreamTurn:
         # Tool events of a held answer, sent after the check.
         self.held: list[StreamEvent] = []
         # Ids of refused tool calls, whose arguments are neither stored nor released.
-        self.refused: set[str] = set()
+        self.refused_call_ids: set[str] = set()
 
         async def refused_results(stubs: list[Any]) -> None:
             # Refused calls never reach the ToolInvoker, so stream their stubs here.
             for index, stub in enumerate(stubs):
                 result = stub.tool_call_result
                 if stub.meta.get(REFUSED_META_KEY):
-                    self.refused.add(result.origin.id or "")
+                    self.refused_call_ids.add(result.origin.id or "")
                     origin = dataclasses.replace(result.origin, arguments={})
                     result = ToolCallResult(result=result.result, origin=origin, error=result.error)
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
@@ -222,13 +222,13 @@ class StreamTurn:
         return events
 
     @property
-    def refusal(self) -> StageResult | None:
-        """The gate's refusal, when the run's gate hook refused the question."""
-        return self.request.gated if self.request.refused else None
+    def gate_refusal(self) -> StageResult | None:
+        """The gate's result, when the run's gate hook blocked the question."""
+        return self.request.gate_result if self.request.blocked else None
 
     def refusal_events(self) -> list[StreamEvent]:
         """The rest of the reply when the gate refused: the policy's message, stored nowhere."""
-        refusal = self.refusal
+        refusal = self.gate_refusal
         assert refusal is not None
         self.finished = True
         notice = {**(refusal.notice or {}), "message": refusal.message}
@@ -294,14 +294,14 @@ class StreamTurn:
 
     def _drop_refused_inputs(self) -> None:
         """Clear the arguments of refused calls: a refusal may be about what they hold."""
-        if not self.refused:
+        if not self.refused_call_ids:
             return
         for call in self.writer.message.tool_calls if self.writer else []:
-            if call.get("id") in self.refused:
+            if call.get("id") in self.refused_call_ids:
                 call["arguments"] = {}
         self.held = [
             e.model_copy(update={"tool_input": {}})
-            if isinstance(e, ToolInputCompleteEvent) and e.tool_call_id in self.refused
+            if isinstance(e, ToolInputCompleteEvent) and e.tool_call_id in self.refused_call_ids
             else e
             for e in self.held
         ]

@@ -209,12 +209,12 @@ class TurnGuard:
     # Refused unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     # Set when a stage failed closed, the policy did not load, or the caller called
-    # `refuse`. The turn is recorded as blocked.
-    refused: bool = False
+    # `block`. The turn is recorded as blocked.
+    blocked: bool = False
     original_input: str = ""
     original_output: str = ""
     # What finish decided. A turn is finished once, inside its run or after it.
-    finished: StageResult | None = None
+    finish_result: StageResult | None = None
     # The enclosing turn when this one has its own policy, like a subagent or nested run().
     parent_turn_id: str = ""
     # Set by a streaming adapter to send stub results for refused tool calls, so the
@@ -246,15 +246,15 @@ class TurnGuard:
         """Add `error` to the turn's errors. Never put content in it."""
         self.error = join_error(self.error, error)
 
-    def refuse(self, error: str = "") -> None:
-        """Mark the turn as refused by the caller, recorded as blocked with `error`.
+    def block(self, error: str = "") -> None:
+        """Mark the turn as blocked by the caller, recorded with `error`.
 
         For results oversight allowed that the caller still cannot use, like a
         masked result that no longer fits its schema.
         """
         if not self.active:
             return
-        self.refused = True
+        self.blocked = True
         self.note_error(error)
 
     def set_history(self, messages: list[ChatMessage]) -> None:
@@ -323,17 +323,17 @@ class TurnGuard:
         """True when a failed lens should trigger the policy's protective rules."""
         return self.policy is None or self.policy.fails_closed
 
-    def record_stage_error(self, error: str, *, refuse_turn: bool) -> bool:
+    def record_stage_error(self, error: str, *, block_turn: bool) -> bool:
         """Log the exception being handled and note `error` on the turn.
 
         Returns True when the policy fails closed, so the caller refuses. With
-        `refuse_turn` the whole turn is then refused. Without it (a tool call or a
+        `block_turn` the whole turn is then blocked. Without it (a tool call or a
         tool result) only that one call is.
         """
         logger.exception("Oversight: {} in turn {}", error, self.id)
         self.note_error(error)
-        if self.fails_closed and refuse_turn:
-            self.refused = True
+        if self.fails_closed and block_turn:
+            self.blocked = True
         return self.fails_closed
 
     def errored_lenses(self) -> set[str]:
@@ -371,14 +371,14 @@ class TurnGuard:
 
     @property
     def outcome(self) -> Outcome:
-        refused = [Outcome.BLOCKED] if self.too_long or self.refused else []
-        return worst_outcome(*refused, *(m.outcome() for m in self.matched))
+        blocked = [Outcome.BLOCKED] if self.too_long or self.blocked else []
+        return worst_outcome(*blocked, *(m.outcome() for m in self.matched))
 
     @property
     def report_outcome(self) -> Outcome:
         """The outcome had every matched rule been enforced."""
-        refused = [Outcome.BLOCKED] if self.too_long or self.refused else []
-        return worst_outcome(*refused, *(m.outcome(report=True) for m in self.matched))
+        blocked = [Outcome.BLOCKED] if self.too_long or self.blocked else []
+        return worst_outcome(*blocked, *(m.outcome(report=True) for m in self.matched))
 
     async def write_ahead(self) -> None:
         """Insert the turn's row now, still open, with the answers and matches so far.
@@ -439,7 +439,7 @@ class TurnGuard:
                 name = (await declared_policy(agent, channel=channel, user=user))[0]
         except Exception:
             logger.exception("Oversight could not choose a policy for {!r}", agent_key(agent))
-            return cls.refusing_all(name="", error="policy could not be chosen", **opening)
+            return cls.blocking_all(name="", error="policy could not be chosen", **opening)
         if not name:
             return inert
         try:
@@ -448,7 +448,7 @@ class TurnGuard:
             logger.exception("Oversight policy {!r} could not be loaded", name)
             resolved = None
         if resolved is None:
-            return cls.refusing_all(name=name, error="policy could not be loaded", **opening)
+            return cls.blocking_all(name=name, error="policy could not be loaded", **opening)
         return cls.under_policy(resolved, **opening)
 
     @classmethod
@@ -486,10 +486,10 @@ class TurnGuard:
         return guard
 
     @classmethod
-    def refusing_all(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
+    def blocking_all(cls, *, name: str, error: str, **opening: Any) -> TurnGuard:
         """Build the guard for a turn whose policy could not be chosen or loaded.
 
-        It refuses everything under an empty stand-in policy, so the refusal and
+        It blocks everything under an empty stand-in policy, so the block and
         the error are still recorded. With FAIL_MODE "open" it is inert instead.
         """
 
@@ -501,13 +501,13 @@ class TurnGuard:
             )
             return cls(context=TurnContext(input=opening["input"]))
         try:
-            guard = cls.under_policy(_refusing_policy(name), **opening)
+            guard = cls.under_policy(_blocking_policy(name), **opening)
         except Exception:
             # The refusal cannot be recorded, so refuse without a record.
             logger.exception("Oversight could not open a refusing turn")
-            guard = cls(active=True, policy=_refusing_policy(name), _closed=True)
+            guard = cls(active=True, policy=_blocking_policy(name), _closed=True)
         guard.policy_unloaded = True
-        guard.refused = True
+        guard.blocked = True
         guard.note_error(error)
         logger.error(
             "Oversight refuses a turn of {!r}: its {}",
@@ -521,7 +521,7 @@ class TurnGuard:
     async def gate(self) -> StageResult:
         """Judge the question before the model sees it (`stages.judge_question`).
 
-        Always writes the turn ahead (`write_ahead`) afterwards, refused or not.
+        Always writes the turn ahead (`write_ahead`) afterwards, blocked or not.
         """
         result = await stages.judge_question(self)
         await self.write_ahead()
@@ -547,11 +547,11 @@ class TurnGuard:
         The run's after_run hook usually finishes the turn. The code around the run
         then reads that decision instead of judging again.
         """
-        if self.finished is not None:
-            return self.finished
+        if self.finish_result is not None:
+            return self.finish_result
         result = await stages.judge_answer(self, output)
         if self.active:
-            self.finished = result
+            self.finish_result = result
         return result
 
     async def mask_text(self, text: str) -> str:
@@ -597,7 +597,7 @@ class TurnGuard:
         return turn_id
 
 
-def _refusing_policy(name: str) -> ResolvedPolicy:
+def _blocking_policy(name: str) -> ResolvedPolicy:
     """Return an empty policy named `name`, used to refuse a turn whose policy failed to load."""
     return ResolvedPolicy(
         name=name,

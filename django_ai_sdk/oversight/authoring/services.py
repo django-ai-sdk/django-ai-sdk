@@ -176,7 +176,7 @@ class AuthoringService(OversightAccess):
         return TryOut(
             outcome=str(result.outcome),
             report_outcome=str(result.report_outcome),
-            ended_at=result.ended_at,
+            ended_at=result.blocked_stage,
             stages=[
                 StageOut(
                     stage=str(stage.stage),

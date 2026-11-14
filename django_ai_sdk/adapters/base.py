@@ -832,7 +832,7 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
-            if turn.refusal is not None:
+            if turn.gate_refusal is not None:
                 # Oversight: the gate refused the question. Nothing is stored.
                 _finalize_called = True
                 for event in turn.refusal_events():
