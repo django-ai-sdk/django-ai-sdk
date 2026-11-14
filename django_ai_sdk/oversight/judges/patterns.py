@@ -2,7 +2,7 @@
 
 A pattern lens is answered by one. In a judge lens it is the cheap first judge:
 
-    judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]
+    judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
 
 A hit is sure (confidence 1). A miss has `miss_confidence`, by default below a
 lens's `min_confidence`, so the next judge is asked.

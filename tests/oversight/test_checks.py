@@ -14,7 +14,7 @@ from django_ai_sdk.oversight import (
     L,
     LLMJudge,
     Mode,
-    Optional,
+    Maybe,
     PatternJudge,
     Policy,
     Rule,
@@ -237,7 +237,7 @@ class TestChecks:
 
         from django_ai_sdk.oversight.checks import policy_checks
 
-        def level(judge: str | Optional) -> list[int]:
+        def level(judge: str | Maybe) -> list[int]:
             name = policy(
                 f"fc-blind-{type(judge).__name__}",
                 [JudgeLens(name="j", judges=[judge])],
@@ -247,7 +247,7 @@ class TestChecks:
             return [m.level for m in found if m.id.endswith(".E007") and repr(name) in m.msg]
 
         # Optional aliases left undefined are a choice: a warning. A required one is not.
-        assert level(Optional("fc-nobody")) == [WARNING]
+        assert level(Maybe("fc-nobody")) == [WARNING]
         assert level("fc-nobody") == [ERROR]
 
     def test_a_notify_that_reaches_no_one_is_flagged(self):

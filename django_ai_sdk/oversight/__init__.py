@@ -33,7 +33,7 @@ from __future__ import annotations
 import importlib
 import typing
 
-from django_ai_sdk.oversight.judges.base import Optional
+from django_ai_sdk.oversight.judges.base import Maybe
 from django_ai_sdk.oversight.judges.llm import LLMJudge
 from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.lenses import (

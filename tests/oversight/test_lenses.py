@@ -8,7 +8,7 @@ import time
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.oversight import (
-    Optional,
+    Maybe,
     CheckLens,
     Choice,
     Entities,
@@ -435,7 +435,7 @@ class TestFromDict:
         lens = lens_from_dict(
             {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": True}]}
         )
-        assert lens.judges == [Optional("judge")]
+        assert lens.judges == [Maybe("judge")]
         with pytest.raises(ImproperlyConfigured, match="optional alias"):
             lens_from_dict(
                 {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": False}]}

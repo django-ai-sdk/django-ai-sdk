@@ -2,7 +2,7 @@
 
 `ask_judge` asks one judge with a timeout, so a slow or broken one becomes an error
 answer instead of an exception. Lenses name judges by alias, and
-AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. `Optional("classifier")` makes
+AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. `Maybe("classifier")` makes
 an alias optional: a lens skips it when the deployment did not define it.
 """
 
@@ -180,10 +180,10 @@ async def ask_judge(
 
 
 @dataclass(frozen=True)
-class Optional:
+class Maybe:
     """A judge alias a lens asks only when AI_SDK_OVERSIGHT["JUDGES"] defines it.
 
-        judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]
+        judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
 
     The JSON form of a lens writes one as {"alias": "classifier", "optional": true}.
     """
@@ -192,7 +192,7 @@ class Optional:
 
 
 def judge_from_json(spec: Any) -> Any:
-    """A judge spec from a lens's JSON form: {"alias": ..., "optional": true} is Optional."""
+    """A judge spec from a lens's JSON form: {"alias": ..., "optional": true} is Maybe."""
     if not (isinstance(spec, dict) and "alias" in spec):
         return spec
     alias = spec["alias"]
@@ -200,7 +200,7 @@ def judge_from_json(spec: Any) -> Any:
         raise ImproperlyConfigured(
             f'Judge {spec!r}: an optional alias is {{"alias": "name", "optional": true}}'
         )
-    return Optional(str(alias))
+    return Maybe(str(alias))
 
 
 def judge_label(spec: Any) -> str:

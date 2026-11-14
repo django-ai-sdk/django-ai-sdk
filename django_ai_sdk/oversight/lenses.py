@@ -10,7 +10,7 @@
 
     class PromptInjection(JudgeLens):     # judges, cheapest first
         name = "prompt_injection"
-        judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier"), Optional("judge")]
+        judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier"), Maybe("judge")]
 
 The rules:
 
@@ -51,7 +51,7 @@ presets find spans, so a Mask rule can mask what they find::
 Check presets answer structural facts about the turn in plain Python: its length,
 its language, empty retrieval and failed tools. None of them calls a model, so
 they add no cost and send no data out. `RefusalLens` is a judge lens: the shipped
-patterns first, then `Optional("classifier")` when one is defined.
+patterns first, then `Maybe("classifier")` when one is defined.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from pydantic import BaseModel, Field, create_model
 from django_ai_sdk.oversight.judges.base import (
     DEFAULT_TIMEOUT,
     Judge,
-    Optional,
+    Maybe,
     alias_defined,
     judge_from_json,
 )
@@ -609,11 +609,11 @@ class JudgeLens(Lens):
     """Answered by judges, cheapest first (see rule 6 in the module docstring).
 
     `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"] (wrap one
-    in `Optional` to skip it when undefined), or {"class": ..., **kwargs} configs.
+    in `Maybe` to skip it when undefined), or {"class": ..., **kwargs} configs.
     """
 
     kind = "judge"
-    judges: list[Judge | str | Optional | dict[str, Any]] = []  # noqa: RUF012
+    judges: list[Judge | str | Maybe | dict[str, Any]] = []  # noqa: RUF012
     min_confidence: float = 0.75
     # Sent verbatim to a judge. Keep it to one question.
     question: str = ""
@@ -629,9 +629,9 @@ class JudgeLens(Lens):
         Packs mark their model judges optional so they still work without a model.
         """
         return [
-            spec.alias if isinstance(spec, Optional) else spec
+            spec.alias if isinstance(spec, Maybe) else spec
             for spec in self.judges
-            if not isinstance(spec, Optional) or alias_defined(spec.alias)
+            if not isinstance(spec, Maybe) or alias_defined(spec.alias)
         ]
 
     def validate(self) -> None:
@@ -749,7 +749,7 @@ class RefusalLens(JudgeLens):
     no = "Answers, even partly."
     subject = Subject.OUTPUT
     # The shipped patterns answer a plain refusal, so this works without a classifier.
-    judges = [PatternJudge(REFUSAL_PATTERNS), Optional("classifier")]  # noqa: RUF012
+    judges = [PatternJudge(REFUSAL_PATTERNS), Maybe("classifier")]  # noqa: RUF012
 
 
 class LengthLens(CheckLens):

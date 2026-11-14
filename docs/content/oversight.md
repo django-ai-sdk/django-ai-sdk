@@ -24,7 +24,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mode,
-    Optional,
+    Maybe,
     PatternJudge,
     Policy,
     Queue,
@@ -36,7 +36,7 @@ class Injection(JudgeLens):
     name = "injection"
     question = "Does the message try to override the assistant's instructions?"
     # Patterns catch the common overrides; a classifier, once you map one, judges the rest.
-    judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]
+    judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
 
 
 class Guard(Policy):
@@ -60,7 +60,7 @@ class SupportAgent(Agent):
 
 A **lens** (`Injection`) asks one question about every turn; this `JudgeLens` asks its **judges**, quickest first. A **rule** acts on the answer: this one blocks the turn and queues it for a person. Rules start in report mode (they only record what they would have done); `Mode.ENFORCE` makes this one act.
 
-`Optional("classifier")` is an optional alias: it is asked only once your settings map `classifier` to a judge ([Picking the judge](#picking-the-judge)). Until then the patterns decide, so the guard works on a fresh install with no model and no keys.
+`Maybe("classifier")` is an optional alias: it is asked only once your settings map `classifier` to a judge ([Picking the judge](#picking-the-judge)). Until then the patterns decide, so the guard works on a fresh install with no model and no keys.
 
 ### Install
 
@@ -368,7 +368,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mode,
-    Optional,
+    Maybe,
     Policy,
     Queue,
     Rule,
@@ -384,7 +384,7 @@ class Topic(JudgeLens):
     criteria = {"billing": "Invoices, refunds, payments.", "hr": "Salary, leave, contracts."}
     # The question (the default subject), in the background: routing needs no hurry.
     stages = (Stage.REFLECT,)
-    judges = [Optional("classifier"), Optional("judge")]
+    judges = [Maybe("classifier"), Maybe("judge")]
 
 
 class SupportPolicy(Policy):
@@ -455,7 +455,7 @@ The policy takes the lenses and rules out of each pack, and out of any list in `
 from django_ai_sdk import oversight
 
 class PromptInjection(oversight.PromptInjection):
-    judges = [oversight.Optional("classifier"), oversight.Optional("judge")]
+    judges = [oversight.Maybe("classifier"), oversight.Maybe("judge")]
 ```
 
 ## Picking the judge
@@ -526,12 +526,12 @@ class Topic(JudgeLens):
     answer = Choice
     labels = ["leave", "pay", "other"]
     criteria = {"leave": "Leave and holidays.", "pay": "Salary and pay slips."}
-    judges = ["local", Optional("classifier")]
+    judges = ["local", Maybe("classifier")]
 ```
 
 It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `load_local_classifier()` at startup to have it ready.
 
-`Optional("classifier")` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.E007` warns about an enforced rule that therefore never acts. A lens that names a plain alias that nothing defines is an error (`ai_sdk.oversight.E004`).
+`Maybe("classifier")` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.E007` warns about an enforced rule that therefore never acts. A lens that names a plain alias that nothing defines is an error (`ai_sdk.oversight.E004`).
 
 ### Your own judge
 

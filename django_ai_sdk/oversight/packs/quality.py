@@ -8,7 +8,7 @@ the judge lenses are skipped and the checks still run.
 
 from __future__ import annotations
 
-from django_ai_sdk.oversight.judges.base import Optional
+from django_ai_sdk.oversight.judges.base import Maybe
 from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
     Entities,
@@ -36,7 +36,7 @@ class ContextRelevance(JudgeLens):
     low, high = "unrelated", "exactly what is needed"
     subject = Subject.SOURCES
     stages = (Stage.REFLECT,)
-    judges = [Optional("classifier")]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class Groundedness(JudgeLens):
@@ -53,7 +53,7 @@ class Groundedness(JudgeLens):
     subject = Subject.OUTPUT
     stages = (Stage.REFLECT,)
     needs_grounding = True
-    judges = [Optional("classifier")]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class TakenFrom(JudgeLens):
@@ -67,7 +67,7 @@ class TakenFrom(JudgeLens):
     # The labels are the turn's sources. A classifier rates each one.
     per_source = True
     # Asked for every answer, since one without sources can be taken from none.
-    judges = [Optional("classifier")]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class AnswerRelevance(JudgeLens):
@@ -78,7 +78,7 @@ class AnswerRelevance(JudgeLens):
     low, high = "beside the point", "fully addresses it"
     subject = Subject.EXCHANGE
     stages = (Stage.REFLECT,)
-    judges = [Optional("classifier")]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class Helpfulness(JudgeLens):
@@ -90,7 +90,7 @@ class Helpfulness(JudgeLens):
     low, high = "useless", "excellent"
     subject = Subject.EXCHANGE
     stages = (Stage.REFLECT,)
-    judges = [Optional("classifier"), Optional("judge")]  # noqa: RUF012
+    judges = [Maybe("classifier"), Maybe("judge")]  # noqa: RUF012
     sample = 0.25
 
 
