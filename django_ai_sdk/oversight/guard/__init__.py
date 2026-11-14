@@ -102,7 +102,7 @@ async def closing_turn(
     """Close `guard` when the block ends, recording an exception as the run's error.
 
     A client that left is recorded as "disconnected". `Blocked` is not an error,
-    since the refusal is already on the turn. `error` gives the error to record
+    since the block is already on the turn. `error` gives the error to record
     otherwise, read at close. With `keep_open` the guard is closed only when the
     block raises, because something else (the Stream) takes the turn over.
     """
@@ -133,7 +133,7 @@ def current_guard() -> TurnGuard | None:
 def outlived_turn() -> bool:
     """True when this code runs under a guard that already closed.
 
-    A task started inside a turn can outlive it. Its tool calls are refused,
+    A task started inside a turn can outlive it. Its tool calls are blocked,
     since nothing would check or record them.
     """
     guard = _current.get()
@@ -203,7 +203,7 @@ class TurnGuard:
     run_error: str = ""
     # False for a dry run, which writes nothing.
     recording: bool = True
-    # Refused unread at the gate for exceeding MAX_INPUT_CHARS.
+    # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     # Set when a stage failed closed, the policy did not load, or the caller called
     # `block`. The turn is recorded as blocked.
@@ -214,15 +214,15 @@ class TurnGuard:
     finish_result: StageResult | None = None
     # The enclosing turn when this one has its own policy, like a subagent or nested run().
     parent_turn_id: str = ""
-    # Set by a streaming adapter to send stub results for refused tool calls, so the
-    # chat shows them as refused instead of still running.
+    # Set by a streaming adapter to send stub results for blocked tool calls, so the
+    # chat shows them as blocked instead of still running.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     started_at: float = field(default_factory=time.perf_counter)
     _closed: bool = False
     # Whether each lens's latest answer errored. An error carries over to later
     # stages until the lens answers again.
     _lens_errored: dict[str, bool] = field(default_factory=dict)
-    # The policy could not be chosen or loaded under FAIL_MODE "closed". Every stage refuses.
+    # The policy could not be chosen or loaded under FAIL_MODE "closed". Every stage blocks.
     policy_unloaded: bool = False
     # What the record has of this turn so far. Only `recording` writes it.
     record: TurnRecordState = field(default_factory=TurnRecordState)
@@ -323,7 +323,7 @@ class TurnGuard:
     def record_stage_error(self, error: str, *, block_turn: bool) -> bool:
         """Log the exception being handled and note `error` on the turn.
 
-        Returns True when the policy fails closed, so the caller refuses. With
+        Returns True when the policy fails closed, so the caller blocks. With
         `block_turn` the whole turn is then blocked. Without it (a tool call or a
         tool result) only that one call is.
         """
@@ -410,7 +410,7 @@ class TurnGuard:
         agent's code (`declared_policy`).
 
         If the policy cannot be chosen (`get_oversight` raised) or loaded (unknown
-        or broken), every stage refuses with Block.DEFAULT_MESSAGE and the turn is
+        or broken), every stage blocks with Block.DEFAULT_MESSAGE and the turn is
         recorded as blocked with the error. With FAIL_MODE "open" the turn runs
         unguarded instead, and the failure is logged.
         """
@@ -500,14 +500,14 @@ class TurnGuard:
         try:
             guard = cls.under_policy(_blocking_policy(name), **opening)
         except Exception:
-            # The refusal cannot be recorded, so refuse without a record.
-            logger.exception("Oversight could not open a refusing turn")
+            # The block cannot be recorded, so block without a record.
+            logger.exception("Oversight could not open a blocking turn")
             guard = cls(active=True, policy=_blocking_policy(name), _closed=True)
         guard.policy_unloaded = True
         guard.blocked = True
         guard.note_error(error)
         logger.error(
-            "Oversight refuses a turn of {!r}: its {}",
+            "Oversight blocks a turn of {!r}: its {}",
             agent_key(opening["agent"]),
             error,
         )
@@ -535,7 +535,7 @@ class TurnGuard:
         return await stages.judge_history(self, messages, history=history)
 
     async def tool_call(self, call: ToolCall) -> str | None:
-        """Judge one tool call (`stages.judge_tool_call`). Returns the refusal, or None."""
+        """Judge one tool call (`stages.judge_tool_call`). Returns the block message, or None."""
         return await stages.judge_tool_call(self, call)
 
     async def finish(self, output: str | None = None) -> StageResult:
@@ -595,7 +595,7 @@ class TurnGuard:
 
 
 def _blocking_policy(name: str) -> ResolvedPolicy:
-    """Return an empty policy named `name`, used to refuse a turn whose policy failed to load."""
+    """Return an empty policy named `name`, used to block a turn whose policy failed to load."""
     return ResolvedPolicy(
         name=name,
         capture=Capture(setting("CAPTURE")),

@@ -23,11 +23,11 @@ from django_ai_sdk.oversight.guard.notices import (
     TOO_LONG_MESSAGE,
     TOOL_UNAVAILABLE_MESSAGE,
     UNCHECKED_TEXT,
-    first_refusal,
+    first_block_message,
     merge_restrict,
     notice_base,
+    removed_tool_message,
     restricted_tools,
-    tool_refusal_message,
 )
 from django_ai_sdk.oversight.patterns import mask_all
 from django_ai_sdk.oversight.rules import Block
@@ -54,7 +54,7 @@ class StageResult:
     """What one stage decided about its text: the question, the answer or other text."""
 
     stage: Stage = Stage.GATE
-    # The text as it may go on: masked, withheld or replaced by the refusal.
+    # The text as it may go on: masked, withheld or replaced by the block message.
     text: str = ""
     # True when the text differs from what was judged.
     changed: bool = False
@@ -80,7 +80,7 @@ class StageResult:
         return [m.rule.name for m in self.matched]
 
     def block(self, message: str) -> StageResult:
-        """Mark the result as refused with `message`, and return it."""
+        """Mark the result as blocked with `message`, and return it."""
         self.blocked = True
         self.message = message
         return self
@@ -90,7 +90,7 @@ class StageResult:
 
 
 async def judge_question(guard: TurnGuard) -> StageResult:
-    """Judge the question before the model sees it, masking or refusing it."""
+    """Judge the question before the model sees it, masking or blocking it."""
     result = StageResult(Stage.GATE, text=guard.context.input)
     if not guard.active:
         return result
@@ -98,7 +98,7 @@ async def judge_question(guard: TurnGuard) -> StageResult:
         return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
     limit = setting("MAX_INPUT_CHARS")
     if limit and len(guard.context.input) > limit:
-        # Refuse now, because later stages like reflect would only read part of it.
+        # Block now, because later stages like reflect would only read part of it.
         guard.too_long = True
         return _block_question(guard, result, str(TOO_LONG_MESSAGE))
     try:
@@ -107,7 +107,7 @@ async def judge_question(guard: TurnGuard) -> StageResult:
         )
         guard.matched.extend(matched)
         masks = guard.masks.mask_groups(matched, Subject.INPUT)
-        block = first_refusal(matched)
+        block = first_block_message(matched)
         # Tools taken away by judge_history stay taken away.
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
@@ -204,7 +204,7 @@ async def judge_history(
     guard.set_history(messages)
     if result.blocked:
         result.notice = guard.notices.stage_notice(Stage.GATE, recorded, True, result.message)
-        # The gate will not run after a refusal, so write the turn ahead here.
+        # The gate will not run after a block, so write the turn ahead here.
         await guard.write_ahead()
     return result
 
@@ -243,7 +243,7 @@ def _history_items(
 
 
 async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
-    """Judge one tool call before it runs. Returns the refusal message, or None to allow it."""
+    """Judge one tool call before it runs. Returns the block message, or None to allow it."""
     if not guard.active:
         return None
     if guard.policy_unloaded:
@@ -264,7 +264,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         tool_lenses = {lens.name for lens in lenses}
         # Failures of other lenses still count. A tool lens failure counts only for this call.
         errored = {name for name in guard.errored_lenses() if name not in tool_lenses}
-        # Judge every call, not just the first, so a retried call is refused again.
+        # Judge every call, not just the first, so a retried call is blocked again.
         matched = [
             m
             for m in match_rules(
@@ -277,11 +277,11 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
             )
             if m.rule.lenses() & tool_lenses
         ]
-        # One recorded match per rule, however many calls it refused.
+        # One recorded match per rule, however many calls it blocked.
         recorded = {m.rule.name for m in guard.matched if not m.aside}
         guard.matched.extend(m for m in matched if m.rule.name not in recorded)
-        # Removed tools stay removed. Later calls are refused and get_tools() leaves them out.
-        block = first_refusal(matched)
+        # Removed tools stay removed. Later calls are blocked and get_tools() leaves them out.
+        block = first_block_message(matched)
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
             return block
@@ -290,12 +290,12 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
                 (m for m in matched if any(a.kind == "restrict_tools" for a in m.acted)), None
             )
             return (
-                tool_refusal_message(restricting) if restricting else str(TOOL_UNAVAILABLE_MESSAGE)
+                removed_tool_message(restricting) if restricting else str(TOOL_UNAVAILABLE_MESSAGE)
             )
         return None
     except Exception:
-        refuse = guard.record_stage_error("tool check failed", block_turn=False)
-        return str(Block.DEFAULT_MESSAGE) if refuse else None
+        fails_closed = guard.record_stage_error("tool check failed", block_turn=False)
+        return str(Block.DEFAULT_MESSAGE) if fails_closed else None
 
 
 # Finish.
@@ -320,7 +320,7 @@ async def judge_answer(guard: TurnGuard, output: str | None) -> StageResult:
         )
         guard.matched.extend(matched)
         masks = guard.masks.mask_groups(matched, Subject.OUTPUT)
-        block = first_refusal(matched)
+        block = first_block_message(matched)
         if block is not None:
             result.block(block)
             result.changed = True

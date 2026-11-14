@@ -5,7 +5,7 @@ RUNTIME_CACHE_SECONDS. It reads every authored policy and registers or unregiste
 A policy that is off registers with its parents and options only.
 
 A definition that no longer validates (for example, a parent was removed in a deploy)
-is unregistered, so turns that name it are refused instead of running without it. If
+is unregistered, so turns that name it are blocked instead of running without it. If
 the database cannot be read, the registered policies stay, for as long as it cannot be
 read. Authored policies extend only code policies, so they load in any order.
 """

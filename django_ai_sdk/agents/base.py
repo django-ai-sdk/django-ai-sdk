@@ -519,7 +519,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         "api", "run", "workflow:<workflow>:<step>"). It may query the database.
         Keep `**kwargs`, since more turn details may be passed later.
 
-        If this raises, or names a policy that cannot load, the turn is refused unless
+        If this raises, or names a policy that cannot load, the turn is blocked unless
         AI_SDK_OVERSIGHT["FAIL_MODE"] is "open".
         """
         return self.oversight
@@ -882,7 +882,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             Response string, or parsed Pydantic model if response_format is set
 
         Raises:
-            Blocked: The policy refused the question or withheld the answer.
+            Blocked: The policy blocked the question or withheld the answer.
                 `Blocked.message` holds the text to show the user.
         """
 
@@ -1173,7 +1173,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
-        # Before anything is stored: a refused chat must leave no trace in the thread.
+        # Before anything is stored: a blocked chat must leave no trace in the thread.
         thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
         if thread:
             await check_object_permissions(

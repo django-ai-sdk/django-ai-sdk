@@ -124,7 +124,7 @@ class SecurityPack(Policy):
                 Block(_("I can't follow instructions that try to change how I work.")),
                 Alert("high"),
             ],
-            description="A confident injection verdict refuses the question.",
+            description="A confident injection verdict blocks the question.",
         ),
         Rule(
             "mask_secrets_in_question",
@@ -139,7 +139,7 @@ class SecurityPack(Policy):
             description="Personal data is masked before the model sees it.",
         ),
         Rule(
-            "refuse_secrets_in_tools",
+            "block_secrets_in_tools",
             when=L("secrets_tool").is_true,
             then=[
                 Block(_("That tool call would send a credential out, so it was not run.")),

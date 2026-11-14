@@ -95,7 +95,7 @@ def register_policy[T: type[Policy]](cls: T) -> T:
 def unregister_policy(name: str) -> None:
     """Remove a policy registered at runtime.
 
-    Later turns naming it find no policy and are refused, unless FAIL_MODE is "open".
+    Later turns naming it find no policy and are blocked, unless FAIL_MODE is "open".
     """
     _registry.pop(name, None)
     _invalid.pop(name, None)
@@ -289,7 +289,7 @@ async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
 
     Returns None for an unknown or broken policy. The reason is logged once and
     kept for `broken_reason()`. The caller decides what happens next.
-    `TurnGuard.start` refuses the turn unless FAIL_MODE is "open".
+    `TurnGuard.start` blocks the turn unless FAIL_MODE is "open".
     """
     await run_policy_loaders()
     cached = _cache.get(name)

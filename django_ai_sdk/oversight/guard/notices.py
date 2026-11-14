@@ -1,4 +1,4 @@
-"""What a turn tells the person: refusal messages, `data-oversight` notices and Notify events."""
+"""What a turn tells the person: block messages, `data-oversight` notices and Notify events."""
 
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ if TYPE_CHECKING:
 TOO_LONG_MESSAGE = _("This message is too long to check. Shorten it and try again.")
 # Shown to the model instead of a tool result or earlier message that could not be checked.
 UNCHECKED_TEXT = _("[withheld: could not be checked]")
-# Shown to the model instead of a tool result an enforced gate rule refuses.
-REFUSED_TEXT = _("[withheld: refused by oversight]")
-# The refusal for a call to a tool removed this turn.
+# Shown to the model instead of a tool result an enforced gate rule blocks.
+# Its words stay as clients and stored threads already show them.
+BLOCKED_TEXT = _("[withheld: refused by oversight]")
+# The block message for a call to a tool removed this turn.
 TOOL_UNAVAILABLE_MESSAGE = _("This tool is not available for this request.")
 
 
@@ -103,7 +104,7 @@ class TurnNotices:
             notice["message"] = message
         if finished is not None and finished.changed:
             notice["replace"] = finished.text
-        # Never echo a refused question, even masked, since parts may be unsafe.
+        # Never echo a blocked question, even masked, since parts may be unsafe.
         masked = any(a.kind == "mask" for m in acted for a in m.acted)
         if stage is Stage.GATE and masked and not blocked:
             notice["input"] = self.guard.context.input
@@ -171,12 +172,12 @@ class TurnNotices:
         )
 
 
-def first_refusal(matched: Iterable[Matched]) -> str | None:
-    """Return the refusal message of the first Block that acted in `matched`, or None."""
+def first_block_message(matched: Iterable[Matched]) -> str | None:
+    """Return the block message of the first Block that acted in `matched`, or None."""
     for match in matched:
         for action in match.acted:
             if isinstance(action, Block):
-                return refusal_message(match, action)
+                return block_message(match, action)
     return None
 
 
@@ -196,15 +197,15 @@ def merge_restrict(restrict: list[str] | None, names: list[str]) -> list[str]:
     return sorted({*(restrict or []), *names})
 
 
-def refusal_message(match: Matched, block: Block) -> str:
-    """Return the refusal message. A match caused only by a failure gets the generic one."""
+def block_message(match: Matched, block: Block) -> str:
+    """Return the block message. A match caused only by a failure gets the generic one."""
     if match.failed:
         return str(Block.DEFAULT_MESSAGE)
     return str(match.rule.message or block.message)
 
 
-def tool_refusal_message(match: Matched) -> str:
-    """Return the refusal for a tool `match` removed. Like `refusal_message`, a failure gets the generic one."""
+def removed_tool_message(match: Matched) -> str:
+    """Return the block message for a tool `match` removed. Like `block_message`, a failure gets the generic one."""
     if match.failed:
         return str(TOOL_UNAVAILABLE_MESSAGE)
     return str(match.rule.message or TOOL_UNAVAILABLE_MESSAGE)

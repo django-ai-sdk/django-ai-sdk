@@ -43,7 +43,7 @@ class DryRunResult:
 
     policy: str
     stages: list[StageResult] = field(default_factory=list)
-    # "gate" or "finish" when that stage blocked, else "". A refused tool call does
+    # "gate" or "finish" when that stage blocked, else "". A blocked tool call does
     # not end the turn. Only its own stage result is blocked.
     blocked_stage: str = ""
     outcome: Outcome = Outcome.ALLOWED
@@ -125,11 +125,11 @@ async def _run_stages(
         for raw in tool_calls:
             call = raw if isinstance(raw, ToolCall) else ToolCall.model_validate(raw)
             answered, matched = len(guard.answered), len(guard.matched)
-            refused = await guard.tool_call(call)
+            message = await guard.tool_call(call)
             guard.context.tool_calls.append(call)
             tool_result = StageResult(stage=Stage.TOOL, tool=call.name)
-            if refused:
-                tool_result.block(refused)
+            if message:
+                tool_result.block(message)
             add_stage(tool_result, answered, matched)
 
     if not result.blocked_stage and output:

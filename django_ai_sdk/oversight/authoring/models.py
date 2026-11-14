@@ -11,7 +11,7 @@ class AuthoredPolicy(models.Model):
     """A policy an operator defined at runtime.
 
     `active` False turns its own lenses and rules off: the policies it extends still run.
-    Deleting the row unregisters the policy, so turns that name it are refused.
+    Deleting the row unregisters the policy, so turns that name it are blocked.
     """
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)

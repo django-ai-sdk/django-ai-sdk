@@ -2,7 +2,7 @@
 
 Other text, like an earlier message or a tool result, is judged by the gate's
 lenses the same way as the question. It is masked or withheld whole, and the
-findings are recorded aside. A tool result a gate rule refuses is withheld whole.
+findings are recorded aside. A tool result a gate rule blocks is withheld whole.
 """
 
 from __future__ import annotations
@@ -22,11 +22,11 @@ from django_ai_sdk.oversight.guard.judging import (
     match_rules,
 )
 from django_ai_sdk.oversight.guard.notices import (
-    REFUSED_TEXT,
+    BLOCKED_TEXT,
     UNCHECKED_TEXT,
+    block_message,
     merge_restrict,
-    refusal_message,
-    tool_refusal_message,
+    removed_tool_message,
 )
 from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.patterns import mask_all
@@ -111,10 +111,10 @@ class TurnMasks:
             for action in acting:
                 if isinstance(action, Block):
                     if not judged.blocked:
-                        judged.block(refusal_message(match, action))
+                        judged.block(block_message(match, action))
                 elif isinstance(action, RestrictTools):
                     if not action.names and not judged.blocked:
-                        judged.block(tool_refusal_message(match))
+                        judged.block(removed_tool_message(match))
                     judged.restrict = merge_restrict(judged.restrict, action.names)
             if acting:
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
@@ -129,7 +129,7 @@ class TurnMasks:
         """Mask a tool result the way the gate masks the question. Never raises.
 
         Findings are recorded aside at the tool stage. A result an enforced gate
-        rule would refuse is withheld whole, and tools it takes away stay away.
+        rule would block is withheld whole, and tools it takes away stay away.
         If the result cannot be checked, a closed policy withholds it and an open
         one passes it unchanged and records the error.
         """
@@ -142,7 +142,7 @@ class TurnMasks:
             if judged.restrict is not None:
                 guard.restrict = merge_restrict(guard.restrict, judged.restrict)
             if judged.blocked:
-                judged.text = str(REFUSED_TEXT)
+                judged.text = str(BLOCKED_TEXT)
             if judged.text != text or any(o.errored for o in judged.answered):
                 guard.record_aside(Stage.TOOL, judged.answered, judged.matched)
             return judged.text

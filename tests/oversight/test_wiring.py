@@ -158,10 +158,10 @@ class TestToolCallsInTheTurn:
 
 class TestProtocols:
     async def test_openai_clients_get_content_filter(self):
-        from django_ai_sdk.oversight.stream import RefusalStream
+        from django_ai_sdk.oversight.stream import BlockedStream
         from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
 
-        chunks = [c async for c in OpenAIProtocolHandler().sse(RefusalStream("No."), [])]
+        chunks = [c async for c in OpenAIProtocolHandler().sse(BlockedStream("No."), [])]
         body = b"".join(chunks).decode()
         assert "content_filter" in body
         assert "content-filter" not in body
@@ -305,7 +305,7 @@ class TestSyncHooks:
         from haystack.dataclasses import ChatMessage as HaystackMessage
         from haystack.dataclasses import ToolCall as HaystackCall
 
-        from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
+        from django_ai_sdk.agents.tool_agent import BLOCKED_META_KEY
         from django_ai_sdk.oversight.guard import guarding
         from django_ai_sdk.oversight.plugin.hooks import JudgeToolCallsHook, MaskToolResultsHook
 
@@ -316,7 +316,7 @@ class TestSyncHooks:
         with guarding(guard):
             await asyncio.to_thread(JudgeToolCallsHook().run, state)
         stub = state.data["messages"][-1]
-        assert stub.meta[REFUSED_META_KEY] is True
+        assert stub.meta[BLOCKED_META_KEY] is True
         assert "sync run" in stub.tool_call_result.result
         ran = self._state([asked, HaystackMessage.from_tool("secret", origin=call)])
         with guarding(guard):

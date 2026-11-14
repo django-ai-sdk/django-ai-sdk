@@ -232,7 +232,7 @@ def agent_checks() -> list[Any]:
             messages.append(
                 Error(
                     f"Agent {cls.__qualname__} names oversight policy {own!r}, which no app "
-                    "registers: every turn it runs is refused.",
+                    "registers: every turn it runs is blocked.",
                     hint="Check the name, and that the app declaring the policy is in "
                     "INSTALLED_APPS with the policy in its oversight.py.",
                     id=f"{PREFIX}.E009",
@@ -389,7 +389,7 @@ def deadline_checks() -> list[Any]:
     """Find enforced gate and tool rules whose lenses may wait on a judge slower than the deadline.
 
     At the deadline the stage abandons the judge and the lens fails. With FAIL_MODE
-    "closed" the rule then refuses the turn or the tool call. With "open" it lets it
+    "closed" the rule then blocks the turn or the tool call. With "open" it lets it
     through unjudged.
     """
     messages: list[Any] = []
@@ -435,7 +435,7 @@ def deadline_warnings(name: str, resolved: Any) -> list[Any]:
                     f"{stage.value}, where it may ask a model judge "
                     f"with a timeout of {seconds:g} s against a "
                     f"{stage.value} deadline of {deadline:g} ms: on a slow answer the "
-                    "lens fails, and the rule refuses (or, with FAIL_MODE 'open', lets "
+                    "lens fails, and the rule blocks (or, with FAIL_MODE 'open', lets "
                     "it through unjudged).",
                     hint="Answer the lens with a LocalClassifier "
                     f"instead, raise AI_SDK_OVERSIGHT['DEADLINE_MS']['{stage.value}'] to "

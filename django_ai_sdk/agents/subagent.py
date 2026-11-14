@@ -283,7 +283,7 @@ class SubagentStreamFilter:
     When `subagent` is given, each delegation runs under that agent's policy. It
     joins the coordinator's turn when the policy is the same (or there is none).
     Otherwise it opens a child turn that checks the task, the tool calls and the
-    response before the coordinator reads it. On a refusal the coordinator reads
+    response before the coordinator reads it. On a block the coordinator reads
     the policy's message.
     """
 
@@ -341,7 +341,7 @@ class SubagentStreamFilter:
             return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
-            # Oversight: the sync tool hooks refuse every call inside a turn.
+            # Oversight: the sync tool hooks block every call inside a turn.
             result = run_with_oversight_sync(
                 self._agent,
                 _handoff_context(messages),

@@ -19,8 +19,9 @@ logger = get_logger(__name__)
 SKIPPED_META_KEY = "django_ai_sdk.skipped"
 # On a cut tool result: {"original_chars", "kept_chars"}.
 TRUNCATED_META_KEY = "django_ai_sdk.truncated"
-# On a stub result for a call oversight refused (True) or skipped with it (False).
-REFUSED_META_KEY = "django_ai_sdk.refused"
+# On a stub result for a call oversight blocked (True) or skipped with it (False).
+# The value stays as messages already stored carry it.
+BLOCKED_META_KEY = "django_ai_sdk.refused"
 # On a tool result oversight has checked for masking.
 MASKED_META_KEY = "django_ai_sdk.masked"
 

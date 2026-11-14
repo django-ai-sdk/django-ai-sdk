@@ -42,7 +42,7 @@ class TestOpeningATurn:
     """What start does when a read fails."""
 
 
-    async def test_an_unknown_policy_refuses_by_default_and_is_recorded(self):
+    async def test_an_unknown_policy_blocks_by_default_and_is_recorded(self):
         agent = make_agent([], None, policy="fx-no-such-policy")
         with log_lines() as lines:
             guard = await TurnGuard.start(agent, channel="api", input="hello")
@@ -55,7 +55,7 @@ class TestOpeningATurn:
         assert turn.policy == "fx-no-such-policy"
         assert turn.error == "policy could not be loaded"
         # Refused with the generic message: the log, not the person, says why.
-        assert any("refuses" in line and "fx-no-such-policy" not in str(gate.message) for line in lines)
+        assert any("blocks" in line and "fx-no-such-policy" not in str(gate.message) for line in lines)
 
     async def test_an_unknown_policy_runs_unguarded_when_open_and_logs(self):
         agent = make_agent([], None, policy="fx-no-such-policy")

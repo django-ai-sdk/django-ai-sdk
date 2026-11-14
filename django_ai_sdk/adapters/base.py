@@ -763,7 +763,7 @@ class Stream:
             await asyncio.to_thread(self.generator.warm_up)
 
         pipeline_task: asyncio.Task[Any] | None = None
-        # Oversight: the run's turn learns the message id and streams the calls it refuses.
+        # Oversight: the run's turn learns the message id and streams the calls it blocks.
         turn = self._turn = StreamTurn(
             self.turn_request,
             message_id,
@@ -832,10 +832,10 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
-            if turn.gate_refusal is not None:
-                # Oversight: the gate refused the question. Nothing is stored.
+            if turn.blocked_gate_result is not None:
+                # Oversight: the gate blocked the question. Nothing is stored.
                 _finalize_called = True
-                for event in turn.refusal_events():
+                for event in turn.blocked_reply_events():
                     yield event
                 return
 

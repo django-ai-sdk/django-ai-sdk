@@ -324,7 +324,7 @@ class RestrictTools(Action):
 
 
 class Block(Action):
-    """Refuse the turn. The question never reaches the model, or the answer never reaches the user."""
+    """Block the turn. The question never reaches the model, or the answer never reaches the user."""
 
     kind = "block"
     outcome = Outcome.BLOCKED
@@ -415,7 +415,7 @@ class Rule:
         self.when = when if isinstance(when, Condition) else Condition(when)
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
-        # Shown to the user when the rule refuses (a block, or a tool it took away).
+        # Shown to the user when the rule blocks (a block, or a tool it took away).
         # Overrides Block's message.
         self.message = message
         # Shown to the user whenever the rule acts, e.g. "The fraud team is alerted."

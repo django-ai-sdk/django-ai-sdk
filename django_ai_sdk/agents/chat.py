@@ -64,7 +64,7 @@ async def chat_turn(
         """Store the question as the gate left it, then title the thread.
 
         Oversight: the run's gate hook calls this once the question passed, so a
-        refused question is never stored.
+        blocked question is never stored.
         """
         mask_stored_question(messages, request)
         question_id = await _store_question(messages, storage_adapter, thread_id)
@@ -140,7 +140,7 @@ async def _unguardable(
     user: AbstractBaseUser | AnonymousUser | None,
     thread_id: str | None,
 ) -> Any:
-    """An adapter that is no Haystack Agent: refused under a policy, unless it fails open.
+    """An adapter that is no Haystack Agent: blocked under a policy, unless it fails open.
 
     Oversight: nothing can check its tool calls or its answer.
     """
@@ -151,8 +151,8 @@ async def _unguardable(
     guard = await TurnGuard.start(
         agent, channel="chat", user=user, thread_id=thread_id, messages=messages
     )
-    if guard.active and (refusal := await close_unguardable(guard)) is not None:
-        return refusal
+    if guard.active and (blocked_stream := await close_unguardable(guard)) is not None:
+        return blocked_stream
     await admit(TurnRequest())
     return adapter
 

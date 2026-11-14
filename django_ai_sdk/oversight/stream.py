@@ -1,7 +1,7 @@
 """Oversight in a streamed chat turn, and the stream events for its interventions.
 
 Every intervention reaches the client as a `data-oversight` part. A UI can then
-show that a question was masked, a tool refused, or an answer withheld or replaced.
+show that a question was masked, a tool blocked, or an answer withheld or replaced.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils.translation import gettext_lazy
 from haystack.dataclasses import StreamingChunk, ToolCallResult
 
-from django_ai_sdk.agents.tool_agent import REFUSED_META_KEY
+from django_ai_sdk.agents.tool_agent import BLOCKED_META_KEY
 from django_ai_sdk.artifacts.schemas import CitationsData
 from django_ai_sdk.events import (
     DataEvent,
@@ -61,7 +61,7 @@ def notice_event(notice: dict[str, Any]) -> DataEvent:
     return DataEvent(data_type="oversight", data=notice)
 
 
-def refusal_reply(message: str) -> list[StreamEvent]:
+def blocked_reply(message: str) -> list[StreamEvent]:
     """The policy's message as the whole answer, then the end of the stream."""
     return [
         TextChunkEvent(content=message),
@@ -85,8 +85,8 @@ def stored_notices(notices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-class RefusalStream:
-    """The full reply when the gate refuses a question. Streams the policy's message and stores nothing."""
+class BlockedStream:
+    """The full reply when the gate blocks a question. Streams the policy's message and stores nothing."""
 
     model: str | None = None
     instructions: str | None = None
@@ -99,14 +99,14 @@ class RefusalStream:
     async def stream(self, messages: list[ChatMessage]) -> AsyncGenerator[StreamEvent, None]:
         yield MessageStartEvent(message_id=str(uuid.uuid4()))
         yield notice_event({**self.notice, "message": self.message})
-        for event in refusal_reply(self.message):
+        for event in blocked_reply(self.message):
             yield event
 
 
-async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
+async def close_unguardable(guard: TurnGuard) -> BlockedStream | None:
     """Close a chat turn whose adapter is not a Stream, so it cannot be guarded past the gate.
 
-    Returns the refusal to stream instead, unless the policy fails open.
+    Returns the blocked reply to stream instead, unless the policy fails open.
     """
     error = "adapter cannot be guarded"
     if not guard.resolved.fails_closed:
@@ -116,7 +116,7 @@ async def close_unguardable(guard: TurnGuard) -> RefusalStream | None:
     guard.block(error)
     await guard.close()
     notice = notice_base(guard.id, Stage.FINISH, Outcome.BLOCKED)
-    return RefusalStream(str(Block.DEFAULT_MESSAGE), notice)
+    return BlockedStream(str(Block.DEFAULT_MESSAGE), notice)
 
 
 async def run_side_task(runner: Any, messages: list[ChatMessage], **kwargs: Any) -> Any:
@@ -147,8 +147,8 @@ class StreamTurn:
     The run opens and decides the turn (see `oversight.plugin`); this shows
     what it decided. The Stream runs the agent with `request`, the run's
     TurnRequest, sends the `start()` events, passes every event through
-    `pass_event`, then calls `finish`, or `refusal_events()` when the gate
-    refused, or `end_early` when the turn ends before that, and always `aclose`,
+    `pass_event`, then calls `finish`, or `blocked_reply_events()` when the gate
+    blocked, or `end_early` when the turn ends before that, and always `aclose`,
     which closes the turn once the answer is stored. Until the run opened a turn,
     and without a policy, every call passes the stream through unchanged.
     """
@@ -172,15 +172,15 @@ class StreamTurn:
         self.sent: list[dict[str, Any]] = []
         # Tool events of a held answer, sent after the check.
         self.held: list[StreamEvent] = []
-        # Ids of refused tool calls, whose arguments are neither stored nor released.
-        self.refused_call_ids: set[str] = set()
+        # Ids of blocked tool calls, whose arguments are neither stored nor released.
+        self.blocked_call_ids: set[str] = set()
 
-        async def refused_results(stubs: list[Any]) -> None:
-            # Refused calls never reach the ToolInvoker, so stream their stubs here.
+        async def stream_blocked_results(stubs: list[Any]) -> None:
+            # Blocked calls never reach the ToolInvoker, so stream their stubs here.
             for index, stub in enumerate(stubs):
                 result = stub.tool_call_result
-                if stub.meta.get(REFUSED_META_KEY):
-                    self.refused_call_ids.add(result.origin.id or "")
+                if stub.meta.get(BLOCKED_META_KEY):
+                    self.blocked_call_ids.add(result.origin.id or "")
                     origin = dataclasses.replace(result.origin, arguments={})
                     result = ToolCallResult(result=result.result, origin=origin, error=result.error)
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
@@ -191,7 +191,7 @@ class StreamTurn:
         self.request = dataclasses.replace(request or TurnRequest())
         self.request.message_id = message_id
         self.request.keep_open = True
-        self.request.on_tool_results = refused_results
+        self.request.on_tool_results = stream_blocked_results
 
     @property
     def guard(self) -> TurnGuard:
@@ -224,20 +224,20 @@ class StreamTurn:
         return events
 
     @property
-    def gate_refusal(self) -> StageResult | None:
+    def blocked_gate_result(self) -> StageResult | None:
         """The gate's result, when the run's gate hook blocked the question."""
         return self.request.gate_result if self.request.blocked else None
 
-    def refusal_events(self) -> list[StreamEvent]:
-        """The rest of the reply when the gate refused: the policy's message, stored nowhere."""
-        refusal = self.gate_refusal
-        assert refusal is not None
+    def blocked_reply_events(self) -> list[StreamEvent]:
+        """The rest of the reply when the gate blocked: the policy's message, stored nowhere."""
+        gate_result = self.blocked_gate_result
+        assert gate_result is not None
         self.finished = True
-        notice = {**(refusal.notice or {}), "message": refusal.message}
+        notice = {**(gate_result.notice or {}), "message": gate_result.message}
         return [
             *self._emit_pending_notices(),
             self._emit_notice(notice),
-            *refusal_reply(refusal.message),
+            *blocked_reply(gate_result.message),
         ]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
@@ -287,7 +287,7 @@ class StreamTurn:
             if writer:
                 writer.drop_tool_details()
             await self.drop_artifacts()
-        self._drop_refused_inputs()
+        self._drop_blocked_inputs()
         events: list[StreamEvent] = self._emit_pending_notices()
         if finished.notice:
             events.append(self._emit_notice(finished.notice))
@@ -298,16 +298,16 @@ class StreamTurn:
             events.append(TextChunkEvent(content=finished.text))
         return events, finished
 
-    def _drop_refused_inputs(self) -> None:
-        """Clear the arguments of refused calls: a refusal may be about what they hold."""
-        if not self.refused_call_ids:
+    def _drop_blocked_inputs(self) -> None:
+        """Clear the arguments of blocked calls: the block may be about what they hold."""
+        if not self.blocked_call_ids:
             return
         for call in self.writer.message.tool_calls if self.writer else []:
-            if call.get("id") in self.refused_call_ids:
+            if call.get("id") in self.blocked_call_ids:
                 call["arguments"] = {}
         self.held = [
             e.model_copy(update={"tool_input": {}})
-            if isinstance(e, ToolInputCompleteEvent) and e.tool_call_id in self.refused_call_ids
+            if isinstance(e, ToolInputCompleteEvent) and e.tool_call_id in self.blocked_call_ids
             else e
             for e in self.held
         ]

@@ -3,7 +3,7 @@
 A save replaces the policy's definition. Toggles change only what the policy itself
 declares: its rules' modes, its lenses, or the whole policy. What it extends always runs.
 A policy cannot be deleted while an agent names it in code, or while it is
-DEFAULT_POLICY: turns that use it would be refused.
+DEFAULT_POLICY: turns that use it would be blocked.
 
 Every write locks the row, so a save and a toggle never overwrite each other.
 """
@@ -145,7 +145,7 @@ class AuthoringService(OversightAccess):
 
     @classmethod
     async def delete_policy(cls, name: str, *, user: UserType) -> bool:
-        """Delete `name`, so turns that use it are refused. False if it does not exist."""
+        """Delete `name`, so turns that use it are blocked. False if it does not exist."""
         await cls.has_perms(user, AUTHOR)
         return await sync_to_async(_delete_unused_policy)(name)
 

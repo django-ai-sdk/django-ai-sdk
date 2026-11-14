@@ -1,8 +1,8 @@
 """The oversight hooks a Haystack Agent runs, and the TurnRequest they read and fill in.
 
-    before_run   GateQuestionHook       judge the history and question; mask them, or refuse the run
+    before_run   GateQuestionHook       judge the history and question; mask them, or block the run
     before_llm   EnforceTurnLimitsHook  stop a run whose turn has closed; offer only the tools it allows
-    before_tool  JudgeToolCallsHook     refuse a tool call the policy says no to
+    before_tool  JudgeToolCallsHook     block a tool call the policy says no to
     after_tool   MaskToolResultsHook    mask a tool result before the model reads it
     after_run    RecordUsageHook        add the run's model and token usage to its turn
     after_run    JudgeAnswerHook        give the sources to the turn; judge the answer, pass, mask or withhold it
@@ -11,9 +11,9 @@ The run's `hook_context` carries the `TurnRequest`, so the hooks read and fill i
 the same object the caller holds. Each hook does nothing when the turn's policy
 has nothing for its stage, or when there is no turn.
 
-If any tool call in a step is refused, the whole step is answered with stubs,
+If any tool call in a step is blocked, the whole step is answered with stubs,
 because Haystack runs a step's calls all together or not at all. The model is
-told which call was refused and that it may retry the others.
+told which call was blocked and that it may retry the others.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ from pydantic import ValidationError
 
 from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.agents.tool_agent import (
+    BLOCKED_META_KEY,
     MASKED_META_KEY,
-    REFUSED_META_KEY,
     answer_calls_with,
     pending_tool_calls,
     replace_messages,
@@ -97,7 +97,7 @@ class TurnRequest:
     message_id: str = ""
     # The caller closes the turn itself, such as a stream that still stores the answer.
     keep_open: bool = False
-    # Called with the stubs of refused tool calls, which never reach the ToolInvoker.
+    # Called with the stubs of blocked tool calls, which never reach the ToolInvoker.
     on_tool_results: Callable[[list[Any]], Awaitable[None]] | None = None
     guard: TurnGuard | None = None
     gate_result: StageResult | None = None
@@ -166,7 +166,7 @@ class EnforceTurnLimitsHook(OversightHook):
         elif (guard := current_guard()) is not None:
             # Haystack hands this same list to the model and the ToolInvoker for
             # the step, so filtering it in place takes the tools away. The tool
-            # hook refuses a call to a removed tool anyway.
+            # hook blocks a call to a removed tool anyway.
             tools = state.data["tools"]
             tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
 
@@ -174,16 +174,16 @@ class EnforceTurnLimitsHook(OversightHook):
         self.run(state)
 
 
-# The meta key on the assistant message that stands in for a refused or replaced answer.
+# The meta key on the assistant message that stands in for a blocked or replaced answer.
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
 class GateQuestionHook(OversightHook):
-    """Judge the run's history and question, then mask them in place or refuse the run.
+    """Judge the run's history and question, then mask them in place or block the run.
 
     The history is every earlier user and assistant message, judged unless the
     TurnRequest says the stored thread vouches for it (`history_vouched`). A
-    refusal ends the run before the first model call, with the policy's message
+    block ends the run before the first model call, with the policy's message
     as the answer. Otherwise the gate's notice waits on the guard for the stream,
     and the request's `on_gated(request)` runs, so a caller can store the question
     only once it passed.
@@ -267,28 +267,28 @@ def end_run_with_answer(state: State, text: str, *, stop: str) -> None:
     state.set("stop_run", stop)
 
 
-# Told to the model for a call skipped because another call in the step was refused.
+# Told to the model for a call skipped because another call in the step was blocked.
 SKIPPED_CALL_MESSAGE = gettext_lazy(
     "Not run: another call in this step was refused. Call it again on its own if you still need it."
 )
 
-# Sync hooks cannot await the guard, so every tool call in a sync run is refused.
+# Sync hooks cannot await the guard, so every tool call in a sync run is blocked.
 UNGUARDABLE_CALL_MESSAGE = gettext_lazy(
     "This tool cannot be checked in a sync run, so it is not run."
 )
 
 
 class JudgeToolCallsHook(OversightHook):
-    """Refuse tool calls the turn's policy says no to, before they run."""
+    """Block tool calls the turn's policy says no to, before they run."""
 
     allowed_hook_points = ["before_tool"]  # noqa: RUF012
 
     def run(self, state: State) -> None:
-        """Refuse every call when inside a turn.
+        """Block every call when inside a turn.
 
         The guard only works from async code, so a sync call cannot be checked.
         """
-        if _refused_after_turn(state):
+        if _blocked_after_turn(state):
             return
         step = _tool_step(state)
         if step is None:
@@ -298,27 +298,27 @@ class JudgeToolCallsHook(OversightHook):
         for call in calls:
             guard.add_tool_call(_as_tool_call(call, state))
         guard.note_error("tool called in a sync run")
-        _refuse_tool_step(
+        _block_tool_step(
             state, messages, {i: str(UNGUARDABLE_CALL_MESSAGE) for i in range(len(calls))}
         )
 
     async def run_async(self, state: State) -> None:
-        if _refused_after_turn(state):
+        if _blocked_after_turn(state):
             return
         step = _tool_step(state)
         if step is None:
             return
         guard, messages = step
-        refusals: dict[int, str] = {}
+        block_messages: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
             seen = _as_tool_call(call, state)
             guard.add_tool_call(seen)
             reason = await guard.tool_call(seen)
             if reason:
-                refusals[index] = reason
-        if not refusals:
+                block_messages[index] = reason
+        if not block_messages:
             return
-        stubs = _refuse_tool_step(state, messages, refusals)
+        stubs = _block_tool_step(state, messages, block_messages)
         if guard.on_tool_results is not None:
             await guard.on_tool_results(stubs)
 
@@ -332,13 +332,13 @@ def _tool_step(state: State) -> tuple[TurnGuard, list[HaystackChatMessage]] | No
     return guard, messages
 
 
-def _refused_after_turn(state: State) -> bool:
-    """Refuse every pending call of a run that outlived its turn. True when it did."""
+def _blocked_after_turn(state: State) -> bool:
+    """Block every pending call of a run that outlived its turn. True when it did."""
     if not outlived_turn():
         return False
     if (messages := pending_tool_calls(state)) is not None:
         calls = messages[-1].tool_calls
-        _refuse_tool_step(
+        _block_tool_step(
             state, messages, {i: str(TOOL_UNAVAILABLE_MESSAGE) for i in range(len(calls))}
         )
     return True
@@ -358,19 +358,19 @@ def _agent_name(state: State) -> str:
     return str(getattr(request.agent, "name", "") or type(request.agent).__name__)
 
 
-def _refuse_tool_step(
-    state: State, messages: list[HaystackChatMessage], refusals: dict[int, str]
+def _block_tool_step(
+    state: State, messages: list[HaystackChatMessage], block_messages: dict[int, str]
 ) -> list[HaystackChatMessage]:
-    """Answer the step's calls with stubs. Refused calls say why, the rest say skipped."""
+    """Answer the step's calls with stubs. Blocked calls say why, the rest say skipped."""
     return answer_calls_with(
         state,
         messages,
         [
             (
-                {"refused": refusals[index]}
-                if index in refusals
+                {"refused": block_messages[index]}
+                if index in block_messages
                 else {"skipped": str(SKIPPED_CALL_MESSAGE)},
-                {REFUSED_META_KEY: index in refusals},
+                {BLOCKED_META_KEY: index in block_messages},
             )
             for index in range(len(messages[-1].tool_calls))
         ],
@@ -389,7 +389,7 @@ class MaskToolResultsHook(OversightHook):
     def run(self, state: State) -> None:
         """Withhold every result that is not a stub when inside a turn.
 
-        The sync before-tool hook refuses every call, so any other result ran unchecked.
+        The sync before-tool hook blocks every call, so any other result ran unchecked.
         """
         if current_guard() is not None or outlived_turn():
             _withhold_results(state)
@@ -426,7 +426,7 @@ def _withhold_results(state: State) -> None:
     withheld = {
         index: _with_result(message, result, str(UNCHECKED_TEXT))
         for index, message, result in tool_results(messages, MASKED_META_KEY)
-        if REFUSED_META_KEY not in message.meta
+        if BLOCKED_META_KEY not in message.meta
     }
     replace_messages(state, messages, withheld)
 

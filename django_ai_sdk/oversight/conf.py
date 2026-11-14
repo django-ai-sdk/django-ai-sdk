@@ -32,7 +32,7 @@ DEFAULTS: dict[str, Any] = {
     "JUDGES": {},
     # Milliseconds per inline stage; a lens still running at the deadline fails.
     "DEADLINE_MS": {"gate": 1000, "tool": 1000, "finish": 2_000},
-    # Longer questions are refused at the gate: lenses would only read part of them.
+    # Longer questions are blocked at the gate: lenses would only read part of them.
     "MAX_INPUT_CHARS": 100_000,
     "CLIENT_DETAIL": "actions",
     "FAIL_MODE": "closed",

@@ -152,7 +152,7 @@ def build_oversight_hooks() -> dict[str, list[Any]]:
 def merge_oversight_hooks(hooks: dict[str, list[Any]] | None) -> dict[str, list[Any]]:
     """Merge the oversight hooks into `hooks`, once, where each must run.
 
-    They come first, so a refused call is neither budgeted nor logged and a
+    They come first, so a blocked call is neither budgeted nor logged and a
     result is masked before any other hook reads or cuts it. Only finish comes
     last, after any hook that completes the answer. Oversight hooks already in
     `hooks` are moved to these places.
@@ -201,7 +201,7 @@ def run_with_oversight_sync(
 ) -> dict[str, Any]:
     """Run a Haystack Agent with oversight from sync code, which cannot open a turn.
 
-    Inside a turn the run joins it, and its tool calls are refused, since the
+    Inside a turn the run joins it, and its tool calls are blocked, since the
     guard only works from async code. Ask `needs_own_turn_sync(request)` first: a run
     that needs a turn of its own must not run here.
     """

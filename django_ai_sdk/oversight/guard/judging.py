@@ -94,7 +94,7 @@ class Matched:
     # toward the outcome but does not stop the rule from judging the turn itself.
     aside: bool = False
     # Matched only because a lens failed under FAIL_MODE "closed". The person sees
-    # the generic refusal, not the rule's message or notice.
+    # the generic block message, not the rule's message or notice.
     failed: bool = False
 
     def outcome(self, *, report: bool = False) -> Outcome:
@@ -307,7 +307,7 @@ def match_rules(
             for name in reads
         )
         if rule.mode is Mode.ENFORCE and stage is Stage.TOOL and reads_tool_call:
-            # A tool call cannot be partly masked, so a mask rule refuses the call.
+            # A tool call cannot be partly masked, so a mask rule blocks the call.
             if any(a.kind == "mask" for a in rule.then) and not any(
                 a.kind == "block" for a in acted
             ):
