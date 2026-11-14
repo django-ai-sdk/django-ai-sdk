@@ -105,8 +105,17 @@ Python class. Add `"django_ai_sdk.oversight"` to `INSTALLED_APPS` and run `migra
 ```python
 from django_ai_sdk import Agent
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight import Block, JudgeLens, L, Mode, Patterns, Policy, Queue, Rule
-from django_ai_sdk.oversight.packs.security import INJECTION_PATTERNS
+from django_ai_sdk.oversight import (
+    INJECTION_PATTERNS,
+    Block,
+    JudgeLens,
+    L,
+    Mode,
+    Patterns,
+    Policy,
+    Queue,
+    Rule,
+)
 
 
 class Injection(JudgeLens):

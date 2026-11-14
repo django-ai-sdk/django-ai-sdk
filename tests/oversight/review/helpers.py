@@ -46,8 +46,8 @@ async def a_turn(
         await guard.gate()
         await guard.finish(output)
         with (
-            patch("django_ai_sdk.oversight.persist.enqueue_reflect"),
-            patch("django_ai_sdk.oversight.persist.enqueue_notifications"),
+            patch("django_ai_sdk.oversight.tasks.enqueue_reflect"),
+            patch("django_ai_sdk.oversight.tasks.enqueue_notifications"),
         ):
             turn_id = await guard.close()
     invalidate_policy()

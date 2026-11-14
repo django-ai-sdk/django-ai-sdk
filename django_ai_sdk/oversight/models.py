@@ -60,7 +60,7 @@ class Turn(models.Model):
         # Claimed by a worker until `reflect_lease_until`. After that another may claim it.
         RUNNING = "running", "Running"
         DONE = "done", "Done"
-        # Gave up after `reflect.REFLECT_ATTEMPTS` tries.
+        # Gave up after `reflection.REFLECT_ATTEMPTS` tries.
         FAILED = "failed", "Failed"
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)

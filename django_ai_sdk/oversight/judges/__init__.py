@@ -1,9 +1,12 @@
 """Judges answer a judge lens: patterns, classifiers and model judges.
 
+Apps import them from `django_ai_sdk.oversight`. This package keeps their paths
+for settings: a judge's "class" in AI_SDK_OVERSIGHT["JUDGES"] names one as
+`django_ai_sdk.oversight.judges.LLMJudge`, or by its bare name.
+
 Each is imported on first use to break an import cycle: lenses imports
 judges.base, which loads this package, and an eager import of classifier or llm
-here would import lenses again while it is half initialised. Helpers like
-`base.build_judge` stay in their modules.
+here would import lenses again while it is half initialised.
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy, unregister_policy
 from django_ai_sdk.oversight.registry import _loaders, add_policy_loader, get_resolved_policy, invalidate_policy
-from django_ai_sdk.oversight.testing import dry_run
+from django_ai_sdk.oversight.trial import dry_run
 from django_ai_sdk.oversight.types import Outcome, Stage
 
 

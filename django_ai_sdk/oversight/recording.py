@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from django.db import transaction
 from django.utils import timezone
 
-from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.content import (
     Masker,
     add_to_content,
@@ -49,8 +48,6 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.models import LensAnswer, Turn
     from django_ai_sdk.oversight.policy import ResolvedPolicy
 
-logger = get_logger(__name__)
-
 
 def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
     """Write the turn row and any answers and matches not written yet.
@@ -63,6 +60,8 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
 
     A turn forgotten while open (`content.forget_turns`) stores no content and no judge text.
     """
+    # Imported here: tasks imports reflection, which imports this module.
+    from django_ai_sdk.oversight import tasks
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
     policy = guard.resolved
@@ -116,9 +115,9 @@ def record_turn(guard: TurnGuard, *, closing: bool = True) -> str:
             floor=Severity.HIGH if guard.outcome is Outcome.BLOCKED else "",
         )
         if closing and columns.get("reflect_state") == Turn.ReflectState.PENDING:
-            transaction.on_commit(lambda: enqueue_reflect(turn.id))
+            transaction.on_commit(lambda: tasks.enqueue_reflect(turn.id))
         if events := guard.notices.notifications(matched):
-            transaction.on_commit(lambda: enqueue_notifications(events))
+            transaction.on_commit(lambda: tasks.enqueue_notifications(events))
     guard.record.row_written = True
     guard.record.answer_ids = [str(row.id) for row in answer_rows]
     guard.record.matches_saved = len(guard.matched)
@@ -261,36 +260,6 @@ def _trail(lens: Lens, answer: Answer) -> dict[str, Any]:
         "cost": answer.cost,
         "latency_ms": answer.latency_ms,
     }
-
-
-def enqueue_notifications(events: list[tuple[dict[str, Any], list[str]]]) -> None:
-    """Queue notifications for the worker, so a slow notifier cannot hold the stream open."""
-    _safe_enqueue(
-        "send_notifications",
-        [[event, names] for event, names in events],
-        what="oversight notifications",
-    )
-
-
-def enqueue_reflect(turn_id: Any) -> bool:
-    """Queue reflection of `turn_id`. False when it could not be queued."""
-    return _safe_enqueue("reflect_turn", str(turn_id), what=f"reflection for turn {turn_id}")
-
-
-def _safe_enqueue(task_name: str, *args: Any, what: str) -> bool:
-    """Queue the `oversight.tasks` task `task_name`. False, and logged, when that fails.
-
-    A missing task backend must not fail the turn, so the error is only logged.
-    The task is looked up by name because `oversight.tasks` imports this module.
-    """
-    try:
-        from django_ai_sdk.oversight import tasks
-
-        getattr(tasks, task_name).enqueue(*args)
-    except Exception:
-        logger.exception("Could not queue {}; is a task backend configured?", what)
-        return False
-    return True
 
 
 def record_answers(

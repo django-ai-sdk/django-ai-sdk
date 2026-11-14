@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from django_ai_sdk.oversight.persist import enqueue_reflect
-from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS, claimable_q, mark_reflect_failed
+from django_ai_sdk.oversight.reflection import REFLECT_ATTEMPTS, claimable_q, mark_reflect_failed
+from django_ai_sdk.oversight.tasks import enqueue_reflect
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser

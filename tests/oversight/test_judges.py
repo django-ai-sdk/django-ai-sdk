@@ -14,7 +14,7 @@ import pytest
 from django.test import override_settings
 from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, Patterns, Rule, Score
 from django_ai_sdk.oversight.guard.judging import answer_lens, answer_lenses, should_retry
-from django_ai_sdk.oversight.judges import TypeSafe
+from django_ai_sdk.oversight import TypeSafe
 from django_ai_sdk.oversight.judges.base import (
     NO_VERDICT,
     TOO_LONG,
@@ -151,7 +151,7 @@ class TestEvidence:
         assert [s.title for s in turn.grounding()] == ["Leave · §1", "get_weather result"]
 
     def test_typesafe_reads_every_source_whole_and_labelled(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         chunks = [f"{n} " + "word " * 600 for n in range(10)]
         state = TypeSafe().state(self.grounded(), view("q", "a", sources=chunks))
@@ -340,7 +340,7 @@ class TestAsk:
         assert await ask_judge(Unset(lambda lens, v: pytest.fail("asked")), self.lens, view("x")) is None
 
     def test_every_judge_takes_a_name_and_a_timeout(self):
-        from django_ai_sdk.oversight.judges import LLMJudge, LocalClassifier
+        from django_ai_sdk.oversight import LLMJudge, LocalClassifier
 
         for cls in (Patterns, TypeSafe, LocalClassifier, LLMJudge):
             judge = cls(name="n", timeout=1.5)
@@ -546,7 +546,7 @@ class TestTypeSafe:
         assert len(state["history"][0]["content"]) <= 500
 
     def test_a_huge_turn_stays_within_the_request_limit(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
         from django_ai_sdk.oversight.judges.typesafe import REQUEST_CHARS
         from django_ai_sdk.oversight.types import HistoryItem
 
@@ -582,7 +582,7 @@ class TestTypeSafe:
 
     async def test_without_a_key_typesafe_abstains_and_the_lens_fails(self):
         from django_ai_sdk.oversight.guard.judging import NO_JUDGE
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
         flag = JudgeLens(name="f", question="?", judges=[TypeSafe()])
@@ -596,7 +596,7 @@ class TestTypeSafe:
     async def test_a_failed_request_is_unavailable_and_logs_its_type_never_its_body(self):
         from unittest.mock import MagicMock
 
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
         class APIError(Exception):
@@ -618,7 +618,7 @@ class TestTypeSafe:
         assert body not in repr(log.mock_calls)
 
     async def test_a_question_it_did_not_answer_is_a_failure(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         flag = JudgeLens(name="f", question="?")
         with typesafe(typesafe_response()):
@@ -627,7 +627,7 @@ class TestTypeSafe:
         assert answer.error == "no verdict"
 
     async def test_an_entities_lens_not_about_sources_is_left_to_others(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         lens = JudgeLens(
             answer=Entities, name="products", question="Which products?", subject=Subject.OUTPUT
@@ -635,7 +635,7 @@ class TestTypeSafe:
         assert await TypeSafe().answer(lens, view("q", "a", ["x"])) is None
 
     async def test_one_stage_sends_one_request(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         lenses = [JudgeLens(name=f"f{n}", question="?", judges=[TypeSafe()]) for n in range(3)]
         with typesafe() as mock:
@@ -649,7 +649,7 @@ class TestTypeSafe:
         assert 0 < options["timeout"] <= 1.0
 
     async def test_a_cancelled_lens_does_not_cancel_the_request(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
         from django_ai_sdk.oversight.judges.classifier import batched
 
         lenses = [JudgeLens(name=f"f{n}", question="?", judges=[TypeSafe()]) for n in range(3)]
@@ -667,7 +667,7 @@ class TestTypeSafe:
         assert sorted(mock.await_args.args[1]) == ["f0", "f1", "f2"]
 
     async def test_a_cancelled_stage_cancels_its_request(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         state = {"sent": 0, "done": 0}
 
@@ -815,7 +815,7 @@ class TestTakenFrom:
         assert answer.error == NO_VERDICT
 
     async def test_a_per_source_request_stays_within_the_request_limit(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
         from django_ai_sdk.oversight.judges.typesafe import REQUEST_CHARS
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
@@ -1018,7 +1018,7 @@ class TestTooLongToJudge:
         assert answer is not None and answer.error == TOO_LONG
 
     async def test_typesafe_does_not_judge_part_of_the_answer(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         lens = JudgeLens(name="t", question="?", subject=Subject.OUTPUT)
         with typesafe() as request:
@@ -1049,7 +1049,7 @@ class TestQualityRefusal:
     """The quality pack's refusal lens is the preset: the shipped refusal patterns first."""
 
     async def test_a_plain_refusal_is_flagged_without_a_classifier(self):
-        from django_ai_sdk.oversight.packs import QualityPack
+        from django_ai_sdk.oversight import QualityPack
         from django_ai_sdk.oversight.lenses import RefusalLens
 
         assert RefusalLens in QualityPack.lenses and RefusalLens.name == "refusal"

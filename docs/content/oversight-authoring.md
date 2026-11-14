@@ -33,7 +33,7 @@ AI_SDK_OVERSIGHT_AUTHORING = {
 }
 ```
 
-Run `manage.py migrate`. On start the app adds a policy loader (`django_ai_sdk.oversight.registry.add_policy_loader`), so every process, task workers included, registers the authored policies. Remove the app and policies are code's alone: core never imports it. To remove it, run `manage.py migrate django_ai_sdk_oversight_authoring zero` first, then take it out of `INSTALLED_APPS`; turns of agents still naming an authored policy are refused from then on.
+Run `manage.py migrate`. On start the app adds a policy loader (`django_ai_sdk.oversight.add_policy_loader`), so every process, task workers included, registers the authored policies. Remove the app and policies are code's alone: core never imports it. To remove it, run `manage.py migrate django_ai_sdk_oversight_authoring zero` first, then take it out of `INSTALLED_APPS`; turns of agents still naming an authored policy are refused from then on.
 
 With the app installed, `get_oversight_router()` also serves its routes, next to the review routes. Leave them out with its `exclude=`. The [manual's permission table](/manual/oversight/#review-api) names the model permission behind each operation.
 
@@ -115,7 +115,7 @@ Deleting the policy is different from turning it off: its name is gone, so turns
 
 ## Try before saving
 
-`POST .../try/` runs a draft (or, without `definition`, the saved one) over one exchange through gate, the tool calls, finish and reflect, and records no turn: the same `testing.dry_run` code uses. Its judges are real, so a judge it names is called and costs what a turn costs; that is why trying needs `AUTHOR_OVERSIGHT`.
+`POST .../try/` runs a draft (or, without `definition`, the saved one) over one exchange through gate, the tool calls, finish and reflect, and records no turn: the same `dry_run` code uses. Its judges are real, so a judge it names is called and costs what a turn costs; that is why trying needs `AUTHOR_OVERSIGHT`.
 
 ## The record
 

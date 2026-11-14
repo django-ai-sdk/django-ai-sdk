@@ -1,4 +1,4 @@
-"""testing.dry_run: what a policy would do with one exchange, recording nothing."""
+"""dry_run: what a policy would do with one exchange, recording nothing."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 from django.test import override_settings
 from django_ai_sdk.oversight import Alert, L, Mode, Rule
 from django_ai_sdk.oversight.models import Turn
-from django_ai_sdk.oversight.testing import dry_run
+from django_ai_sdk.oversight.trial import dry_run
 from django_ai_sdk.oversight.types import Outcome, Stage, Subject, ToolCall
 
 from tests.oversight.helpers import FnLens, broken, policy

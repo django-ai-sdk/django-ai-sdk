@@ -40,7 +40,7 @@ from django_ai_sdk.oversight.lenses import ANSWER_TYPES, LENS_KINDS, get_validat
 from django_ai_sdk.oversight.permissions import OversightAccess, reader_id
 from django_ai_sdk.oversight.registry import get_policies, get_policy_class, run_policy_loaders
 from django_ai_sdk.oversight.rules import ACTION_KINDS, META_OPS, OPS
-from django_ai_sdk.oversight.testing import dry_run
+from django_ai_sdk.oversight.trial import dry_run
 from django_ai_sdk.oversight.types import Mode, Stage, Subject
 from django_ai_sdk.permissions import ConflictError, Operation
 

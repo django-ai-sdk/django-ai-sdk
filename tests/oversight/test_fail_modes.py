@@ -22,7 +22,7 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
-from django_ai_sdk.oversight.judges import Judge, LLMJudge
+from django_ai_sdk.oversight import Judge, LLMJudge
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall

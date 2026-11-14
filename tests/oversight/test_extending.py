@@ -19,7 +19,8 @@ from django_ai_sdk.oversight import (
     Rule,
     Score,
 )
-from django_ai_sdk.oversight.judges import LocalClassifier, local
+from django_ai_sdk.oversight import LocalClassifier
+from django_ai_sdk.oversight.judges import local
 from django_ai_sdk.oversight.judges.base import ask_judge
 from django_ai_sdk.oversight.judges.classifier import Classifier, batched, certainty
 from django_ai_sdk.oversight.policy import ResolvedPolicy

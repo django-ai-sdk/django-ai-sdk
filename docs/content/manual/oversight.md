@@ -8,13 +8,34 @@ The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas
 
 Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are the opt-in [authoring app](/oversight-authoring/). A lens or rule declared in code changes only with a deploy.
 
+## Imports
+
+Everything an app uses imports from `django_ai_sdk.oversight`; its submodules are internal. The declaration API loads with the package; the rest loads on first use, so a policy file imports no model client. The review API (`services`, `schemas`, `permissions`) and the [authoring app](/oversight-authoring/) are opt-in layers with modules of their own.
+
+| For | Names |
+| --- | --- |
+| Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
+| Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TurnContext` |
+| Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
+| Judges | `Judge`, `Classifier`, `certainty`, `Patterns`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec), `judge_label` (a spec's name) |
+| Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
+| Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
+| Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
+| Hooks | `OversightHook`, `GateQuestionHook`, `EnforceTurnLimitsHook`, `JudgeToolCallsHook`, `MaskToolResultsHook`, `RecordUsageHook`, `JudgeAnswerHook` |
+| The guard | `TurnGuard`, `StageResult`, `current_guard`, `guarding`, `unguarded`, `closing_turn` (closes a guard when its block ends), `outlived_turn` (code that runs after its turn closed) |
+| Streams | `StreamTurn`, `CONTENT_FILTER` |
+| History | `history_for` |
+| Testing | `dry_run`, `DryRunResult` |
+| Notifiers | `Notifier`, `LogNotifier`, `WebhookNotifier`, `send_to_notifiers` (sends an event to every notifier, or the named ones) |
+| Forgetting and retention | `forget_turns`, `forget_thread`, `forget_actor`, `prune` |
+
 ## Installing
 
 Add `"django_ai_sdk.oversight"` to `INSTALLED_APPS` and run `migrate`. The app needs no extra to run. Content is kept in the clear, masked as `CAPTURE` says.
 
 Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error when an agent class still asks for a policy (it sets `oversight` to one, or overrides `get_oversight()`) or `AI_SDK_OVERSIGHT["DEFAULT_POLICY"]` is set, so a missing app does not leave those agents unguarded in silence.
 
-- `pip install "django-ai-sdk[typesafe]"` adds the client for the optional `TypeSafe` judge (`django_ai_sdk.oversight.judges.TypeSafe`), a hosted commercial service.
+- `pip install "django-ai-sdk[typesafe]"` adds the client for the optional `TypeSafe` judge (`TypeSafe`), a hosted commercial service.
 
 ## Settings
 
@@ -64,7 +85,7 @@ The checks are Haystack hooks on the run (`django_ai_sdk.oversight.plugin`), so 
 
 ## Lenses
 
-`django_ai_sdk.oversight.lenses`. Subclass one of the three kinds, or construct one with keyword arguments (an unknown keyword raises `ImproperlyConfigured`). The module's docstring states the rules they follow.
+Subclass one of the three kinds, or construct one with keyword arguments (an unknown keyword raises `ImproperlyConfigured`). The docstring of `oversight/lenses.py` states the rules they follow.
 
 Every lens:
 
@@ -100,7 +121,7 @@ An option the lens leaves out takes the default in `<Answer>.options`. A `Choice
 
 ### Built-in lenses
 
-`django_ai_sdk.oversight.lenses`. Each has a default `name`; subclass it to name your own.
+Each has a default `name`; subclass it to name your own.
 
 | Class | Kind | Answers |
 | --- | --- | --- |
@@ -111,11 +132,11 @@ An option the lens leaves out takes the default in `<Answer>.options`. A `Choice
 | `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `lenses.guess_language`. |
 | `EmptyRetrievalLens`, `ToolErrorsLens` | check | A tool call that found no sources (a `Flag`); the share of tool calls that failed (a `Score`: `L("tool_errors") > 0` when any did). |
 
-The regex tables, checksums and the masking helpers (`mask`, `mask_all`, `mask_secrets`) are in `django_ai_sdk.oversight.patterns`.
+The regex tables, checksums and the masking helpers (`mask`, `mask_all`, `mask_secrets`) live in `oversight/patterns.py`; the tables and helpers import from `django_ai_sdk.oversight`.
 
 ## Judges
 
-`django_ai_sdk.oversight.judges`. `answer(lens, view) -> Answer | None`, where `view` is the `TurnContext` the lens reads (`input`, `output`, `history`, `sources`, `tool_call`, the `answers` so far, and `text(subject)`); `None` abstains, and so does a judge whose `missing()` says why it can't run; a lens none of whose judges can run fails with `no judge can run here`, so `FAIL_MODE` decides. An answer with neither a value nor an `error` counts as `no verdict`, so `FAIL_MODE` applies. An `Answer` has `value`, `confidence`, `rationale`, `spans`, `items`, `trail`, `error`, `cost`, `tokens`, `latency_ms`, `answerer` (who answered: a judge's name, `patterns` or `check`) and `model`. Every judge also takes `name=`, the name its answers are recorded under, and `timeout=`, the seconds before its answer is abandoned. The package exports the judges; helpers such as `base.resolve` stay in their modules.
+`answer(lens, view) -> Answer | None`, where `view` is the `TurnContext` the lens reads (`input`, `output`, `history`, `sources`, `tool_call`, the `answers` so far, and `text(subject)`); `None` abstains, and so does a judge whose `missing()` says why it can't run; a lens none of whose judges can run fails with `no judge can run here`, so `FAIL_MODE` decides. An answer with neither a value nor an `error` counts as `no verdict`, so `FAIL_MODE` applies. An `Answer` has `value`, `confidence`, `rationale`, `spans`, `items`, `trail`, `error`, `cost`, `tokens`, `latency_ms`, `answerer` (who answered: a judge's name, `patterns` or `check`) and `model`. Every judge also takes `name=`, the name its answers are recorded under, and `timeout=`, the seconds before its answer is abandoned. The package exports the judges; helpers such as `base.resolve` stay in their modules.
 
 Local (`external = ""`: nothing leaves the process):
 
@@ -129,7 +150,7 @@ Remote (`external` names who receives the turn's content; secrets are masked fir
 | Class | Answers with |
 | --- | --- |
 | `LLMJudge(model=None, *, llm=None, base_url="", api_key_env="", generation_kwargs=None, timeout=None)` | Any chat model. Subclass it and set `instructions` for another system prompt. `base_url` and `api_key_env` name a server of your own: the judge then speaks Chat Completions (Ollama, vLLM, LM Studio, llama.cpp), and abstains while the key's variable is unset. Without them, the default gateway (OpenAI Responses, `OPENAI_API_URL`). `llm`: an SDK generator factory or its dotted path, for another provider. `external = "model gateway"`, 45 s timeout. Structured output where the generator supports it, parsed JSON where not. |
-| `TypeSafe(model=None, *, timeout=None)` | TypeSafe, a hosted commercial classification service. `external = "TypeSafe"`, 20 s timeout. Needs the `typesafe` extra and `TYPESAFE_API_KEY`, else abstains (`ai_sdk.oversight.W005`). Import it from `django_ai_sdk.oversight.judges`. Answers `Flag`, `Choice` and `Score` lenses, and an `Entities` lens with `per_source = True` by asking one yes/no per source: the value is the titles of the sources that answer yes, `items` each source's probability. One stage's questions about the same turn go out as one request. A failed request is an `unavailable` error, so `FAIL_MODE` applies and reflect asks again. |
+| `TypeSafe(model=None, *, timeout=None)` | TypeSafe, a hosted commercial classification service. `external = "TypeSafe"`, 20 s timeout. Needs the `typesafe` extra and `TYPESAFE_API_KEY`, else abstains (`ai_sdk.oversight.W005`). Answers `Flag`, `Choice` and `Score` lenses, and an `Entities` lens with `per_source = True` by asking one yes/no per source: the value is the titles of the sources that answer yes, `items` each source's probability. One stage's questions about the same turn go out as one request. A failed request is an `unavailable` error, so `FAIL_MODE` applies and reflect asks again. |
 
 `TypeSafe` is a `Classifier` (`judges.classifier`), the base for any model that answers typed questions: see the guide's [Your own judge](/oversight/#your-own-judge).
 
@@ -183,15 +204,15 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 
 `pick(items, *names, mode=None, notice=None)` takes single lenses or rules out of a pack instead of extending it whole: `pick(SecurityPack.lenses, "prompt_injection")`, `pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. They come back in the order named, as copies, so `mode` and `notice` leave the pack's own alone. An unknown name raises `ImproperlyConfigured`, and `mode` or `notice` on lenses raises `TypeError`.
 
-`ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached (`django_ai_sdk.oversight.registry`) until settings change or a policy registers; `registry.invalidate_policy(name)` clears it and every policy that extends it.
+`ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached until settings change or a policy registers; `invalidate_policy(name)` clears it and every policy that extends it.
 
-An app can register whole policies at runtime. It adds a loader with `registry.add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `registry.invalidate_policy()`), that registers policies (`registry.register_policy`) and removes them (`registry.unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
+An app can register whole policies at runtime. It adds a loader with `add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `invalidate_policy()`), that registers policies (`register_policy`) and removes them (`unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
 
 A policy that fails to load (a missing parent, a cycle) refuses its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`registry.broken_reason(name)`).
 
 ## Packs
 
-`django_ai_sdk.oversight.packs`. Every pack rule is in report mode. A lens answered only by an optional alias is skipped where that alias is undefined.
+Every pack rule is in report mode. A lens answered only by an optional alias is skipped where that alias is undefined.
 
 | Pack | Lens | Kind, answer, subject | Stage | Answered by |
 | --- | --- | --- | --- | --- |
@@ -219,11 +240,11 @@ Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_i
 
 ## The guard
 
-`TurnGuard` (`django_ai_sdk.oversight.guard`) is the seam every turn passes through. `Agent.run()`, chat and the SDK's entry points open it for you; open one yourself only for a turn the SDK does not run.
+`TurnGuard` is the seam every turn passes through. `Agent.run()`, chat and the SDK's entry points open it for you; open one yourself only for a turn the SDK does not run.
 
 `await TurnGuard.start(agent, *, channel, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies (every call then returns at once and allows everything); `oversight` replaces the agent's own as in `run()`, and `False` opens none. Then `gate_history(messages)` (history the server did not store; returns a `StageResult`), `gate()`, `add_text(chunk)` (streamed answer text), `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`, `finish(output)` and `close(error="")`, which writes the turn and never raises. `gate()` (and `gate_history()` when it refuses) writes the turn ahead, open, when it ends (`write_ahead()`); `close` updates it.
 
-`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `JudgeToolCallsHook` (before each tool call) and `MaskToolResultsHook` (after) are part of the oversight plugin (`django_ai_sdk.oversight.plugin`), with the gate, stop and finish hooks. `run_with_oversight` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
+`unguarded()` suppresses guards inside a block (the SDK's judges and dry runs run under it); `guarding(guard)` makes one visible to `get_tools()`, the tool hooks and nested runs; `current_guard()` returns it, and `None` once it is closed. `JudgeToolCallsHook` (before each tool call) and `MaskToolResultsHook` (after) are part of the oversight plugin, with `GateQuestionHook`, `EnforceTurnLimitsHook`, `RecordUsageHook` and `JudgeAnswerHook`, all subclasses of `OversightHook`. `run_with_oversight` adds them to every Haystack Agent the SDK runs, so every run, subagents included, reports to its turn. Tool results that are not text (images, files) pass as they are.
 
 A headless `agent.run(...)` reports its tool calls, their results and its usage to the guard, so finish judges what the loop did, with or without tools.
 
@@ -240,7 +261,7 @@ A headless `agent.run(...)` reports its tool calls, their results and its usage 
 | `notes` | Enforced rules with a `notice` that acted, once a turn each: `kind` (the first of their actions by `rules.ACTION_ORDER` in `rules.USER_FACING`: `block`, `restrict_tools` or `mask`; else `"notice"`, when it only queued, alerted or notified), `also` (the other user-facing ones), `text`, `stage`. |
 | `rules`, `detail` | Only with `CLIENT_DETAIL` `full`: rule names and every stage's answers. Each answer's `value` is the record's ([`LensAnswer`](#models)), so the client never reads what a mask took out. |
 
-A refused question or withheld answer ends with finish reason `content-filter` (`django_ai_sdk.oversight.stream.CONTENT_FILTER`); `OpenAIProtocolHandler` sends `content_filter` and no `data-*` parts. The notices are stored on the message under `metadata["oversight"]`, with `replace` reduced to `"replaced": true`.
+A refused question or withheld answer ends with finish reason `content-filter` (`CONTENT_FILTER`); `OpenAIProtocolHandler` sends `content_filter` and no `data-*` parts. The notices are stored on the message under `metadata["oversight"]`, with `replace` reduced to `"replaced": true`.
 
 ## Models
 
@@ -310,13 +331,13 @@ What was forgotten reads back as gone. A turn whose thread or user was deleted, 
 
 ## Forgetting
 
-`django_ai_sdk.oversight.content.forget_turns(turns)` takes a queryset of turns, locks them, deletes their `TurnContent` rows (the turns stay, `content` cleared), blanks reviewers' notes on them and sets `content_forgotten` on those still open, so they store no content when they close. `forget_thread(thread_id)` forgets every turn in a thread. Both run in the caller's transaction.
+`forget_turns(turns)` takes a queryset of turns, locks them, deletes their `TurnContent` rows (the turns stay, `content` cleared), blanks reviewers' notes on them and sets `content_forgotten` on those still open, so they store no content when they close. `forget_thread(thread_id)` forgets every turn in a thread. Both run in the caller's transaction.
 
 Deleting a thread calls `forget_thread`. Deleting a user forgets each turn they asked without a thread, 500 turns at a time, then clears `actor_id` on all their turns (`content.forget_actor`). A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
 
 ## Retention
 
-`django_ai_sdk.oversight.retention.prune()`, run by `manage.py oversight_prune`, deletes what expired. Core stamps every row with `expires_at`; nothing is deleted until the command runs. Schedule it daily (cron, or your scheduler):
+`prune()`, run by `manage.py oversight_prune`, deletes what expired. Core stamps every row with `expires_at`; nothing is deleted until the command runs. Schedule it daily (cron, or your scheduler):
 
 ```bash
 python manage.py oversight_prune --batch-size 500
@@ -335,13 +356,13 @@ python manage.py check --deploy --database default
 
 ## Testing
 
-`django_ai_sdk.oversight.testing.dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
+`dry_run(policy, *, input, output="", tool_calls=None, user=None) -> DryRunResult` runs a registered policy over one exchange through gate, the tool calls (each checked as the model's), finish and reflect (every reflect lens, whatever its sample), and records nothing. `DryRunResult` has `outcome`, `report_outcome`, `blocked_stage` (the stage that blocked, or `""`), `stages` (`StageResult`: `stage`, `answered`, `matched`, `blocked`, `message`, `text`, `tool`, and `answers` and `rules` by name) and `stage(name)`. An unknown or broken policy raises `LookupError`. Judges are real: a model judge is called.
 
 ## Tasks
 
-`django_ai_sdk.oversight.tasks`, `django-tasks` on the `default` queue: `reflect_turn`, queued on commit when the policy has reflect lenses or a lens is to be asked again, and `send_notifications`, which sends a turn's notifications from the worker so a slow receiver never holds a stream open. What reflect does is in `django_ai_sdk.oversight.reflect`.
+`django_ai_sdk.oversight.tasks`, `django-tasks` on the `default` queue: `reflect_turn`, queued on commit when the policy has reflect lenses or a lens is to be asked again, and `send_notifications`, which sends a turn's notifications from the worker so a slow receiver never holds a stream open. What reflect does is in `django_ai_sdk.oversight.reflection`.
 
-`Turn.reflect_state` follows reflection: `pending` when queued, `running` while a worker holds its claim, `done`, or `failed`. `run_reflection` claims the turn in one conditional update with a lease of `reflect.REFLECT_LEASE` (ten minutes) and counts `reflect_attempts`, so a doubled task does nothing. It writes its answers, matches, the stored answer's mask and notices, and `done`, in one transaction and only while the lease is still its own. A run that fails gives the claim back (`pending`); after `reflect.REFLECT_ATTEMPTS` (three) the turn is `failed` and its `error` says `reflect failed`. A lease that ran out (its worker died) may be claimed again.
+`Turn.reflect_state` follows reflection: `pending` when queued, `running` while a worker holds its claim, `done`, or `failed`. `run_reflection` claims the turn in one conditional update with a lease of `reflection.REFLECT_LEASE` (ten minutes) and counts `reflect_attempts`, so a doubled task does nothing. It writes its answers, matches, the stored answer's mask and notices, and `done`, in one transaction and only while the lease is still its own. A run that fails gives the claim back (`pending`); after `reflection.REFLECT_ATTEMPTS` (three) the turn is `failed` and its `error` says `reflect failed`. A lease that ran out (its worker died) may be claimed again.
 
 ## Commands
 

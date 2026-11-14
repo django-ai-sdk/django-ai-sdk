@@ -76,6 +76,3 @@ def _delete_rows(model: Any, ids: list[Any]) -> int:
     """Delete `model` rows by pk. Returns how many of `model` went, not counting cascades."""
     _, by_model = model.objects.filter(pk__in=ids).delete()
     return by_model.get(model._meta.label, 0)
-
-
-__all__ = ["BATCH_SIZE", "prune"]

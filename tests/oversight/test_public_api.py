@@ -11,14 +11,16 @@ import django_ai_sdk.oversight as oversight
 MANUAL = Path(__file__).resolve().parents[2] / "docs/content/manual/oversight.md"
 
 
-def test_judges_are_exported_from_their_own_module():
-    import django_ai_sdk.oversight.judges as judges
-
-    assert "TypeSafe" not in oversight.__all__ and not hasattr(oversight, "TypeSafe")
-    assert "TypeSafe" in judges.__all__
-    assert not {"ask_judge", "mask", "build_judge"} & set(judges.__all__)
+def test_judges_are_exported_from_the_package_and_load_on_first_use():
+    assert {"TypeSafe", "LocalClassifier", "Judge", "Classifier", "certainty"} <= set(
+        oversight.__all__
+    )
+    assert {"ask_judge", "build_judge", "judge_label", "load_local_classifier"} <= set(
+        oversight.__all__
+    )
     # Each judge loads on first use, so declaring a lens never imports a model client.
-    assert judges.TypeSafe.__name__ == "TypeSafe"
+    assert "TypeSafe" not in vars(oversight)
+    assert oversight.TypeSafe.__name__ == "TypeSafe"
 
 
 def shown(value) -> str:

@@ -140,7 +140,7 @@ class TestPolicyAndDeployChecks:
         assert "ai_sdk.oversight.E013" in self._deploy_ids(name)
 
     def test_a_local_classifier_is_not_a_slow_judge(self):
-        from django_ai_sdk.oversight.judges import LocalClassifier
+        from django_ai_sdk.oversight import LocalClassifier
 
         name = policy(
             "fc-local",
@@ -150,7 +150,7 @@ class TestPolicyAndDeployChecks:
         assert "ai_sdk.oversight.E013" not in self._deploy_ids(name)
 
     def test_a_slow_custom_external_judge_is_a_deploy_warning(self):
-        from django_ai_sdk.oversight.judges import Judge
+        from django_ai_sdk.oversight import Judge
 
         class Remote(Judge):
             external = "my service"

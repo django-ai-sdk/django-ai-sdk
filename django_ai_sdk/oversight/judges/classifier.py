@@ -403,16 +403,3 @@ def _unsourced(lens: Lens, judged: Answer | None) -> Answer | None:
         model=judged.model,
         rationale=f"No source found; states facts: {float(judged.value):.2f}",
     )
-
-
-__all__ = [
-    "STATES_FACTS",
-    "TAKEN_FROM_NO",
-    "TAKEN_FROM_YES",
-    "Batch",
-    "Classifier",
-    "batched",
-    "certainty",
-    "ranked_rationale",
-    "yes_answer",
-]

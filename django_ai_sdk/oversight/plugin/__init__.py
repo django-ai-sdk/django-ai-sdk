@@ -1,10 +1,10 @@
 """Oversight as a Haystack plugin: the turn around a run, and the hooks inside it.
 
-    from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
+    from django_ai_sdk.oversight import TurnRequest, run_with_oversight
 
-    request = TurnRequest(agent=my_sdk_agent, user=user, channel="api")
-    result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, request=request)
-    request.raise_if_blocked()
+    turn = TurnRequest(agent=my_sdk_agent, user=user, channel="api")
+    result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, request=turn)
+    turn.raise_if_blocked()
 
 `run_with_oversight` opens the turn under the agent's policy, or joins the outer one,
 runs a copy of the Agent with the oversight hooks (`hooks.py`) in their places,

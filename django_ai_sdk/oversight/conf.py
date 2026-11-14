@@ -94,16 +94,3 @@ def is_installed() -> bool:
 def is_enabled() -> bool:
     """Whether the app is installed and ENABLED is true."""
     return is_installed() and bool(setting("ENABLED"))
-
-
-__all__ = [
-    "APP_LABEL",
-    "DEFAULTS",
-    "configured",
-    "deadline_ms",
-    "is_enabled",
-    "is_installed",
-    "is_retention",
-    "setting",
-    "validate_retention",
-]

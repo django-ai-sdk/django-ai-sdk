@@ -20,7 +20,7 @@ from django_ai_sdk.oversight import (
 )
 from django_ai_sdk.oversight.guard import TurnGuard, unguarded
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch, Turn
-from django_ai_sdk.oversight.reflect import run_reflection
+from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall
 from django_ai_sdk.permissions import AllowAll
 
@@ -108,7 +108,7 @@ class TestHeadless:
 
     async def test_notifications_leave_from_the_worker(self):
         from django_ai_sdk.oversight import Notify
-        from django_ai_sdk.oversight import persist as records
+        from django_ai_sdk.oversight import tasks
         from django_ai_sdk.oversight.notifiers import Notifier
 
         sent: list[dict] = []
@@ -128,7 +128,7 @@ class TestHeadless:
         with override_settings(AI_SDK_OVERSIGHT={"NOTIFIERS": [Collect()]}):
             guard = await start("test-noisy", "x")
             with patch.object(
-                records, "enqueue_notifications", wraps=records.enqueue_notifications
+                tasks, "enqueue_notifications", wraps=tasks.enqueue_notifications
             ) as queued:
                 # The gate's notification leaves when the gate ends, and only then.
                 await guard.gate()
@@ -172,7 +172,7 @@ class TestHeadless:
         with override_settings(AI_SDK_OVERSIGHT={"DEADLINE_MS": {"gate": 20}}):
             guard = await start("test-slow", "x")
             await guard.gate()
-            with patch("django_ai_sdk.oversight.persist.enqueue_reflect") as enqueue:
+            with patch("django_ai_sdk.oversight.tasks.enqueue_reflect") as enqueue:
                 turn_id = await guard.close()
         enqueue.assert_called_once()
         assert await run_reflection(turn_id) == 1
@@ -205,7 +205,7 @@ class TestHeadless:
         assert errors == ["deadline"]
 
     async def test_a_typesafe_outage_is_an_error_that_reflect_asks_again(self):
-        from django_ai_sdk.oversight.judges import TypeSafe
+        from django_ai_sdk.oversight import TypeSafe
 
         @register_policy
         class TypeSafeOnly(Policy):
@@ -222,7 +222,7 @@ class TestHeadless:
         ):
             guard = await start("test-typesafe-only", "x")
             await guard.gate()
-            with patch("django_ai_sdk.oversight.persist.enqueue_reflect") as enqueue:
+            with patch("django_ai_sdk.oversight.tasks.enqueue_reflect") as enqueue:
                 turn_id = await guard.close()
         enqueue.assert_called_once()
         row = await LensAnswer.objects.aget(turn_id=turn_id, lens="typesafe_flag")

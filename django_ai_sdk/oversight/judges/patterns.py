@@ -99,6 +99,3 @@ class Patterns(Judge):
             spans=spans,
             rationale="; ".join(notes),
         )
-
-
-__all__ = ["MISS_CONFIDENCE", "Patterns"]

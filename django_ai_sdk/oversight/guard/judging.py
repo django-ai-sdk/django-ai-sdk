@@ -1,6 +1,6 @@
 """Judging: ask_judge a stage's lenses within a deadline, then find the rules that match.
 
-Used by every guard stage, by reflect and by `testing.dry_run`.
+Used by every guard stage, by reflect and by `dry_run`.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ async def answer_lens(
     A lens whose judges all cannot run here (`Judge.missing()`, such as an unset
     API key) answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped.
     Only reflect samples. Inline stages always ask_judge. `sample=False` ignores the
-    sample rate, for `testing.dry_run`. `progress` collects each answer as it
+    sample rate, for `dry_run`. `progress` collects each answer as it
     arrives, so a caller that cancels still has them.
     """
     if not lens.applies(view):

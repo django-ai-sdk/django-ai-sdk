@@ -412,8 +412,8 @@ async def gate(policy: str, text: str = "hello") -> Any:
 async def closed_turn(guard: TurnGuard) -> Turn:
     """Close `guard` without queueing reflect or notifications, and read its turn back."""
     with (
-        patch("django_ai_sdk.oversight.persist.enqueue_reflect"),
-        patch("django_ai_sdk.oversight.persist.enqueue_notifications"),
+        patch("django_ai_sdk.oversight.tasks.enqueue_reflect"),
+        patch("django_ai_sdk.oversight.tasks.enqueue_notifications"),
     ):
         turn_id = await guard.close()
     return await Turn.objects.select_related("content").aget(id=turn_id)

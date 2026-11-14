@@ -1,6 +1,6 @@
-"""Test helpers. Run a policy over one exchange as a turn would, without recording it.
+"""Dry runs: run a policy over one exchange as a turn would, without recording it.
 
-    from django_ai_sdk.oversight.testing import dry_run
+    from django_ai_sdk.oversight import dry_run
 
     result = await dry_run("support", input="Where is my refund?", output="It is on its way.")
     assert result.outcome == "allowed"
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.policy import ResolvedPolicy
-from django_ai_sdk.oversight.reflect import judge_reflect_stage
+from django_ai_sdk.oversight.reflection import judge_reflect_stage
 from django_ai_sdk.oversight.registry import broken_reason, get_resolved_policy
 from django_ai_sdk.oversight.types import Outcome, Stage, ToolCall
 
@@ -173,6 +173,3 @@ async def _run_reflect_stage(guard: TurnGuard, resolved: ResolvedPolicy) -> None
     )
     guard.answered.extend(answered)
     guard.matched.extend(matched)
-
-
-__all__ = ["DryRunResult", "StageResult", "dry_run"]

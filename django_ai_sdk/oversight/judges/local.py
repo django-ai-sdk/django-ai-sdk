@@ -27,7 +27,7 @@ blank texts, on lenses about sources or tool calls, on lenses that need groundin
 and on "taken from". Until the model is loaded it answers unavailable and loads it
 in the background, so the next judge is asked, FAIL_MODE applies, and reflect asks
 again later. A failed load is logged and tried again after LOAD_RETRY_SECONDS.
-Call `load()` at startup to have it ready.
+Call `load_local_classifier()` at startup to have it ready.
 """
 
 from __future__ import annotations
@@ -291,7 +291,7 @@ def loaded_runner(model: str, file: str) -> ModelRunner | None:
     return _runners.get((model, file))
 
 
-def load(model: str = ENGLISH, file: str = QUANTIZED) -> None:
+def load_local_classifier(model: str = ENGLISH, file: str = QUANTIZED) -> None:
     """Load a model now, e.g. at startup, so no turn waits for it."""
     key = (model, file)
     with _load_lock:
@@ -321,7 +321,7 @@ def load_in_background(model: str, file: str) -> str:
 
     def run() -> None:
         try:
-            load(model, file)
+            load_local_classifier(model, file)
         except Exception as exc:
             logger.opt(exception=exc).warning("Local model {} does not load", model)
         finally:
@@ -330,6 +330,3 @@ def load_in_background(model: str, file: str) -> str:
 
     threading.Thread(target=run, name=f"oversight-load-{model}", daemon=True).start()
     return "loading"
-
-
-__all__ = ["ENGLISH", "MULTILINGUAL", "LocalClassifier", "load"]

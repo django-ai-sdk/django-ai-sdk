@@ -62,7 +62,9 @@ def test_all_is_what_the_package_binds_and_the_docs_describe(package):
         if not name.startswith("_") and name != "annotations" and not inspect.ismodule(value)
     }
     assert len(module.__all__) == len(set(module.__all__))
-    assert set(module.__all__) == bound
+    # A package may load some of its exports on first use (a module __getattr__).
+    assert set(module.__all__) == bound | set(getattr(module, "_LAZY", {}))
+    assert all(hasattr(module, name) for name in module.__all__)
     text = "\n".join(pages(package))
     undocumented = [
         name

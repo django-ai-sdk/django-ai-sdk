@@ -29,7 +29,7 @@ def _fresh_resolutions():
 @pytest.fixture
 def no_reflect_queue():
     """Close turns without queueing reflection."""
-    with patch("django_ai_sdk.oversight.persist.enqueue_reflect"):
+    with patch("django_ai_sdk.oversight.tasks.enqueue_reflect"):
         yield
 
 

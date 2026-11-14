@@ -238,24 +238,3 @@ def mask_all(text: str, groups: Iterable[tuple[Iterable[TextSpan], str]]) -> str
         cursor = end
     out.append(text[cursor:])
     return "".join(out)
-
-
-__all__ = [
-    "COUNTRY_PII_KINDS",
-    "DEFAULT_PII_KINDS",
-    "PII_PATTERNS",
-    "PII_VERIFY",
-    "REFUSAL_PATTERNS",
-    "SECRET_PATTERNS",
-    "WORD",
-    "bsn_ok",
-    "compile_patterns",
-    "iban_ok",
-    "luhn_ok",
-    "mask",
-    "mask_all",
-    "mask_json",
-    "mask_secrets",
-    "regex_spans",
-    "valid_spans",
-]

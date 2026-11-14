@@ -18,8 +18,17 @@ Oversight checks and records every turn of an agent that has a policy, on the SD
 
 ```python
 from django_ai_sdk import Agent
-from django_ai_sdk.oversight import Block, JudgeLens, L, Mode, Patterns, Policy, Queue, Rule
-from django_ai_sdk.oversight.packs.security import INJECTION_PATTERNS
+from django_ai_sdk.oversight import (
+    INJECTION_PATTERNS,
+    Block,
+    JudgeLens,
+    L,
+    Mode,
+    Patterns,
+    Policy,
+    Queue,
+    Rule,
+)
 
 
 class Injection(JudgeLens):
@@ -96,7 +105,7 @@ from unittest.mock import patch
 import pytest
 
 from django_ai_sdk.common import ChatMessage
-from django_ai_sdk.oversight.testing import dry_run
+from django_ai_sdk.oversight import dry_run
 from django_ai_sdk.testing import FakeLLM
 from myapp.agents import SupportAgent
 
@@ -171,8 +180,19 @@ A policy is a class. Name it on the agent:
 
 ```python
 from django_ai_sdk import Agent
-from django_ai_sdk.oversight import L, Mask, Mode, PIILens, Policy, Queue, Rule, Stage, Subject, pick
-from django_ai_sdk.oversight.packs import SecurityPack
+from django_ai_sdk.oversight import (
+    L,
+    Mask,
+    Mode,
+    PIILens,
+    Policy,
+    Queue,
+    Rule,
+    SecurityPack,
+    Stage,
+    Subject,
+    pick,
+)
 
 
 class SupportPolicy(Policy):
@@ -245,7 +265,7 @@ A policy is a promise about an agent, not about one endpoint. If chat checked th
 | `Agent.run()` | `run`, or what you pass as `channel` | Raises `Blocked`. |
 | HTTP run endpoints (`POST /agents/{id}/run/`, `POST /threads/{id}/run/`, Ninja and DRF) | `api` | `{"result": <the policy's message>, "thread_id": ..., "blocked": true}`. Raised elsewhere, `Blocked` is an HTTP 400. |
 | Workflow `AgentStep` | `workflow:<workflow>:<step>`; `workflow:adhoc:<step>` for a definition a client submitted | The step fails: `refused by oversight: ...` or `withheld by oversight: ...`. |
-| `run_with_oversight()` | What you pass | `request.raise_if_blocked()` raises `Blocked`. |
+| `run_with_oversight()` | What you pass | `turn.raise_if_blocked()` on its `TurnRequest` raises `Blocked`. |
 
 ### `Agent.run()` and `Blocked`
 
@@ -288,15 +308,15 @@ The policy's checks are hooks on the Haystack run that `Agent.run()` starts. A s
 
 ### Model calls of your own: `run_with_oversight()`
 
-A model you call yourself, not through an agent's `run()`, is seen by no policy unless it runs in a turn. Run it as a Haystack Agent through `run_with_oversight()` (`django_ai_sdk.oversight.plugin`), with a `TurnRequest` that names the agent whose policy applies:
+A model you call yourself, not through an agent's `run()`, is seen by no policy unless it runs in a turn. Run it as a Haystack Agent through `run_with_oversight()`, with a `TurnRequest` that names the agent whose policy applies:
 
 ```python
 from haystack.components.agents import Agent as HaystackAgent
-from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
+from django_ai_sdk.oversight import TurnRequest, run_with_oversight
 
-request = TurnRequest(agent=agent, channel="api", user=request.user)
-result = await run_with_oversight(HaystackAgent(chat_generator=generator), messages, request=request)
-request.raise_if_blocked()
+turn = TurnRequest(agent=agent, channel="api", user=request.user)
+result = await run_with_oversight(HaystackAgent(chat_generator=generator), messages, request=turn)
+turn.raise_if_blocked()
 ```
 
 `run_with_oversight()` opens the turn, runs the Agent with the oversight hooks (below), and closes the turn after the run, also when it raises. `oversight` on the request takes what `run(oversight=...)` takes.
@@ -318,7 +338,7 @@ For whoever works on the SDK itself. Oversight is a Haystack plugin, `django_ai_
 | `after_run` | `RecordUsageHook` | Adds the run's model and token usage to its turn, in a sync run too. |
 | `after_run` | `JudgeAnswerHook` | Gives the sources to the turn, and judges the answer (pass, mask or withhold). |
 
-`run_with_oversight(agent, messages, request=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel, person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`request.guard`, `request.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and a caller asks `needs_own_turn_sync(request)` first and runs nothing when it would need one of its own.
+`run_with_oversight(agent, messages, request=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel, person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`turn.guard`, `turn.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and a caller asks `needs_own_turn_sync(turn)` first and runs nothing when it would need one of its own.
 
 The SDK joins the plugin in one place: `run_with_oversight()` runs a copy of every Haystack Agent with the hooks in their places, whether `ToolAgent` built it or someone did by hand. A run that names no SDK agent in its `TurnRequest` joins the turn it runs in; outside one it runs under `DEFAULT_POLICY` and is recorded as "Haystack agent", and without `DEFAULT_POLICY` it opens no turn. That includes a plain `Run(generator).run()`. A side call opts out on purpose with `TurnRequest(oversight=False)`, as `run_side_task` does for titles, suggestions, citations and artifact extraction; like `run(oversight=False)`, it does not join the outer turn either. The call sites carry an `# Oversight:` comment, so `grep -rn "Oversight:" django_ai_sdk` finds them. The modules of `django_ai_sdk.oversight` the SDK may import are listed, each with the reason, in `SEAMS` in `tests/oversight/test_layers.py`, which fails on any other import.
 
@@ -390,8 +410,8 @@ class EvenAmount(CheckLens):             # plain Python
     validators = [even_amount]           # each raises Violation to say yes
 ```
 
-- A `PatternLens` answers `Entities`: which labels it found, with where (`spans`), so a `Mask` can mask them. `patterns` maps a label to regexes, `keywords` a label to whole words, `verify` a label to a check its matches must pass (a checksum). `L(name).is_true` means it found something. Built in: `PIILens` and `SecretsLens` in `oversight.lenses`.
-- A `CheckLens` answers with `check(text, view)`. By default that runs its `validators`, `fn(text)` or `fn(text, view)`, and answers a `Flag`: yes when one raises `Violation`, with its message as the reason. Override `check` to answer anything else, as `LengthLens`, `LanguageLens`, `EmptyRetrievalLens` and `ToolErrorsLens` in `oversight.lenses` do. `register_validator` names a validator, so a lens in JSON can use it.
+- A `PatternLens` answers `Entities`: which labels it found, with where (`spans`), so a `Mask` can mask them. `patterns` maps a label to regexes, `keywords` a label to whole words, `verify` a label to a check its matches must pass (a checksum). `L(name).is_true` means it found something. Built in: `PIILens` and `SecretsLens`.
+- A `CheckLens` answers with `check(text, view)`. By default that runs its `validators`, `fn(text)` or `fn(text, view)`, and answers a `Flag`: yes when one raises `Violation`, with its message as the reason. Override `check` to answer anything else, as `LengthLens`, `LanguageLens`, `EmptyRetrievalLens` and `ToolErrorsLens` do. `register_validator` names a validator, so a lens in JSON can use it.
 - A `JudgeLens` asks its `judges` ([below](#picking-the-judge)) and answers a `Flag` by default: set `answer` to `Choice`, `Score` or `Entities`. Only a judge lens has a `question`, `guidance` and `min_confidence`; each answer option belongs to the type that reads it: `yes` and `no` to `Flag`, `labels`, `default` and `criteria` to `Choice`, `low`, `middle` and `high` to `Score`, `labels` and `per_source` to `Entities`. A lens's `subject` (what it reads) defaults to the question and its `stages` to where that subject is first there to judge: the question at `gate`, a tool call at `tool`, the answer and the sources at `finish`. Reflect reads all but tool calls. A lens at a stage that never reads its subject is refused (`ai_sdk.oversight.E001`).
 
 ### Start small
@@ -399,8 +419,7 @@ class EvenAmount(CheckLens):             # plain Python
 `extends` brings in every lens and rule of a pack. To take only what you need, use `pick`:
 
 ```python
-from django_ai_sdk.oversight import Mode, Policy, pick
-from django_ai_sdk.oversight.packs import QualityPack, SecurityPack
+from django_ai_sdk.oversight import Mode, Policy, QualityPack, SecurityPack, pick
 
 
 class SupportPolicy(Policy):
@@ -419,9 +438,9 @@ class SupportPolicy(Policy):
 A picked rule is a copy, so `mode` changes it only here. A rule may only read lenses its policy has, or the policy does not resolve (`ai_sdk.oversight.E002`) and its turns are refused. To change a pack lens, subclass it and list the subclass:
 
 ```python
-from django_ai_sdk.oversight.packs import security
+from django_ai_sdk import oversight
 
-class PromptInjection(security.PromptInjection):
+class PromptInjection(oversight.PromptInjection):
     judges = ["classifier?", "judge?"]
 ```
 
@@ -496,7 +515,7 @@ class Topic(JudgeLens):
     judges = ["local", "classifier?"]
 ```
 
-It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `django_ai_sdk.oversight.judges.local.load()` at startup to have it ready.
+It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `load_local_classifier()` at startup to have it ready.
 
 `"classifier?"` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.E007` warns about an enforced rule that therefore never acts. A lens that names an alias without `?` that nothing defines is an error (`ai_sdk.oversight.E004`).
 
@@ -511,11 +530,10 @@ A judge is a class with one method, `async answer(lens, view) -> Answer | None`.
 
 `missing()` returns why it cannot run on this deployment (a package or key absent), so it abstains (return `None` from `answer` to abstain otherwise; an answer with neither a value nor an `error` is `no verdict`, and `FAIL_MODE` applies) and `ai_sdk.oversight.W005` says why. A lens none of whose judges can run answers the error `no judge can run here`, so `FAIL_MODE` decides for it rather than skipping it. For the shape of an answer, use what the lens reads: a yes/no is a bool (or a probability of yes, 0.5 and up is yes), a label one of the lens's labels, a score 0 to 1, found things a list of labels with their `spans`. `confidence` is how sure, from 0 to 1, on your judge's own scale.
 
-Subclass `Judge` (`oversight.judges.base`), or `Classifier` for a model that answers typed questions, hosted or local. Implement `question(lens)` (your API's form of a yes/no, label or score question; `None` for a lens you cannot answer) and `async classify(state, questions, *, timeout=None) -> {name: Answer}`. The base decides what the model reads per lens subject, masks secrets first, refuses a text it would have to cut, sends one stage's questions about the same turn as one call, and rates each source for a "taken from" lens. `TypeSafe` is the worked example.
+Subclass `Judge`, or `Classifier` for a model that answers typed questions, hosted or local. Implement `question(lens)` (your API's form of a yes/no, label or score question; `None` for a lens you cannot answer) and `async classify(state, questions, *, timeout=None) -> {name: Answer}`. The base decides what the model reads per lens subject, masks secrets first, refuses a text it would have to cut, sends one stage's questions about the same turn as one call, and rates each source for a "taken from" lens. `TypeSafe` is the worked example.
 
 ```python
-from django_ai_sdk.oversight import Answer
-from django_ai_sdk.oversight.judges.classifier import Classifier, certainty
+from django_ai_sdk.oversight import Answer, Classifier, certainty
 
 class MyClassifier(Classifier):
     external = "My classifier"
@@ -532,7 +550,7 @@ Name it in `JUDGES` by its dotted path (`{"class": "myapp.oversight.MyClassifier
 
 ### A classifier service: TypeSafe
 
-The SDK ships one service-backed `Classifier`, for TypeSafe, a hosted, commercial classification service; it is also the worked example of the base. It is optional: it needs the `typesafe` extra (`pip install "django-ai-sdk[typesafe]"`) and the `TYPESAFE_API_KEY` Django setting, and without either it abstains (`ai_sdk.oversight.W005`). It is exported from `django_ai_sdk.oversight.judges`, not from `django_ai_sdk.oversight`. Nothing in the SDK uses it unless a deployment maps an alias to it:
+The SDK ships one service-backed `Classifier`, for TypeSafe, a hosted, commercial classification service; it is also the worked example of the base. It is optional: it needs the `typesafe` extra (`pip install "django-ai-sdk[typesafe]"`) and the `TYPESAFE_API_KEY` Django setting, and without either it abstains (`ai_sdk.oversight.W005`). Like every judge it imports from `django_ai_sdk.oversight`, and loads on first use. Nothing in the SDK uses it unless a deployment maps an alias to it:
 
 ```python
 "JUDGES": {"classifier": {"class": "TypeSafe"}}
@@ -552,8 +570,7 @@ A `PIILens` finds personal data by kind, with checksums where a kind has one: a 
 - **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`).
 
 ```python
-from django_ai_sdk.oversight import PIILens
-from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
+from django_ai_sdk.oversight import DEFAULT_PII_KINDS, PIILens
 
 class CustomerData(PIILens):
     name = "customer_data"
@@ -561,7 +578,7 @@ class CustomerData(PIILens):
     patterns = {"customer_id": [r"\bCUST-\d{6}\b"]}  # your own, after the kinds, unchecked
 ```
 
-A `SecretsLens` finds `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key` and `password_assignment`. The tables are in `oversight.patterns` (`PII_PATTERNS`, `SECRET_PATTERNS`), to use in a lens of your own. The security pack's lenses use the default kinds; give your policy its own lens to add country kinds.
+A `SecretsLens` finds `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key` and `password_assignment`. The tables are `PII_PATTERNS` and `SECRET_PATTERNS`, to use in a lens of your own. The security pack's lenses use the default kinds; give your policy its own lens to add country kinds.
 
 A `Mask` replaces each span with its label in capitals: `Mail me at [EMAIL]`.
 

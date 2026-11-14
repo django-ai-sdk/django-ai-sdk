@@ -56,7 +56,7 @@ class TestFakeLLM:
 
     async def test_a_model_judge_runs_on_it(self):
         from django_ai_sdk.oversight import JudgeLens
-        from django_ai_sdk.oversight.judges import LLMJudge
+        from django_ai_sdk.oversight import LLMJudge
         from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.types import TurnContext
 

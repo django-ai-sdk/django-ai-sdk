@@ -30,7 +30,7 @@ from django_ai_sdk.oversight.guard.masking import collect_masks
 from django_ai_sdk.oversight.guard.notices import notice_base, rule_notes
 from django_ai_sdk.oversight.notifiers import notify_events
 from django_ai_sdk.oversight.patterns import mask_all
-from django_ai_sdk.oversight.persist import fit_column, record_answers
+from django_ai_sdk.oversight.recording import fit_column, record_answers
 from django_ai_sdk.oversight.registry import get_resolved_policy
 from django_ai_sdk.oversight.types import (
     Answer,
@@ -208,10 +208,11 @@ def commit_reflection(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
         if events:
-            # Looked up at call time: tests silence notifications by patching persist.
-            from django_ai_sdk.oversight.persist import enqueue_notifications
+            # Imported here: tasks imports this module. Looked up at call time, so tests
+            # silence notifications by patching tasks.
+            from django_ai_sdk.oversight import tasks
 
-            transaction.on_commit(lambda: enqueue_notifications(events))
+            transaction.on_commit(lambda: tasks.enqueue_notifications(events))
     return True
 
 
@@ -472,14 +473,3 @@ def _update_stored_message(
         return
     message.result = {**result, "metadata": {**metadata, "oversight": notices}}
     message.save(update_fields=["result"])
-
-
-__all__ = [
-    "REFLECT_ATTEMPTS",
-    "REFLECT_LEASE",
-    "claim_for_reflect",
-    "claimable_q",
-    "mark_reflect_failed",
-    "release_reflect_claim",
-    "run_reflection",
-]

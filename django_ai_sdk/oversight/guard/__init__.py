@@ -3,7 +3,7 @@
 Chat, workflow steps and your own code open a guard and report what happens
 (sources found, tools called, text produced). The guard is asked whether to go on
 three times: at the gate, before each tool call, and at finish. Closing it writes
-the turn to the record (see `persist`) and queues the background stages.
+the turn to the record (see `recording`) and queues the background stages.
 
     guard = await TurnGuard.start(agent, channel="api", user=user, input=text)
     gate = await guard.gate()
@@ -46,8 +46,8 @@ from django_ai_sdk.oversight.guard import stages
 from django_ai_sdk.oversight.guard.judging import Answered, Matched
 from django_ai_sdk.oversight.guard.masking import TurnMasks
 from django_ai_sdk.oversight.guard.notices import TurnNotices
-from django_ai_sdk.oversight.persist import record_turn
 from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, default_fail_mode
+from django_ai_sdk.oversight.recording import record_turn
 from django_ai_sdk.oversight.registry import get_resolved_policy, policy_name
 from django_ai_sdk.oversight.types import (
     Capture,
@@ -162,7 +162,7 @@ class Usage:
 
 @dataclass
 class TurnRecordState:
-    """What the record has of a turn so far. Only `persist` writes it."""
+    """What the record has of a turn so far. Only `recording` writes it."""
 
     # The row was written ahead after the gate, so close updates it.
     row_written: bool = False
@@ -224,7 +224,7 @@ class TurnGuard:
     _lens_errored: dict[str, bool] = field(default_factory=dict)
     # The policy could not be chosen or loaded under FAIL_MODE "closed". Every stage refuses.
     policy_unloaded: bool = False
-    # What the record has of this turn so far. Only `persist` writes it.
+    # What the record has of this turn so far. Only `recording` writes it.
     record: TurnRecordState = field(default_factory=TurnRecordState)
     masks: TurnMasks = field(init=False, repr=False)
     notices: TurnNotices = field(init=False, repr=False)
@@ -602,13 +602,3 @@ def _blocking_policy(name: str) -> ResolvedPolicy:
         retention=validate_retention(setting("RETENTION")),
         origin="unloaded",
     )
-
-
-__all__ = [
-    "TurnGuard",
-    "closing_turn",
-    "current_guard",
-    "guarding",
-    "outlived_turn",
-    "unguarded",
-]

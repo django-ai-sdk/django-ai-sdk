@@ -15,7 +15,7 @@ from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight import Entities, L, Mask, Rule
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import RuleMatch
-from django_ai_sdk.oversight.reflect import run_reflection
+from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.types import (
     Answer,
     Stage,
@@ -74,7 +74,7 @@ class TestReflect:
 
     async def test_a_judge_that_is_down_is_asked_again_and_fails_closed_at_the_last(self):
         from django_ai_sdk.oversight.models import Turn
-        from django_ai_sdk.oversight.reflect import REFLECT_ATTEMPTS
+        from django_ai_sdk.oversight.reflection import REFLECT_ATTEMPTS
 
         from django_ai_sdk.conversation.models import Message, Thread
 

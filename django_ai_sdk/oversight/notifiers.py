@@ -174,14 +174,3 @@ async def send_to_notifiers(event: dict[str, Any], *, names: list[str] | None = 
             await notifier.send(event)
         except Exception:
             logger.exception("Oversight notifier {} failed", notifier.name)
-
-
-__all__ = [
-    "LogNotifier",
-    "Notifier",
-    "WebhookNotifier",
-    "configured_notifiers",
-    "event_id",
-    "notify_events",
-    "send_to_notifiers",
-]

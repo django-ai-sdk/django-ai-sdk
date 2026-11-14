@@ -89,7 +89,7 @@ class TestInjectionWithoutAModel:
     """On a fresh install, with no judge aliases, the quickstart blocks."""
 
     def readme_policy(self) -> str:
-        from django_ai_sdk.oversight.packs import SecurityPack
+        from django_ai_sdk.oversight import SecurityPack
         from django_ai_sdk.oversight.policy import pick
 
         return policy(
@@ -133,7 +133,7 @@ class TestInjectionWithoutAModel:
             assert (await gate(name, "an innocent looking question")).blocked
 
     def test_the_security_pack_needs_no_deadline_error_with_a_judge(self):
-        from django_ai_sdk.oversight.packs import SecurityPack  # noqa: F401
+        from django_ai_sdk.oversight import SecurityPack  # noqa: F401
 
         configured = {
             "DEFAULT_POLICY": "security",
@@ -172,7 +172,7 @@ def builtin_patterns():
     from django_ai_sdk.oversight import lenses, patterns
     from django_ai_sdk.oversight.judges import llm, local
     from django_ai_sdk.oversight.judges.patterns import Patterns
-    from django_ai_sdk.oversight.packs import QualityPack, SafetyPack, SecurityPack
+    from django_ai_sdk.oversight import QualityPack, SafetyPack, SecurityPack
     from django_ai_sdk.oversight.lenses import PIILens, RefusalLens, SecretsLens
 
     found: set[re.Pattern] = set()

@@ -35,8 +35,8 @@ from django_ai_sdk.oversight.content import (
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
-from django_ai_sdk.oversight.persist import split_answer
-from django_ai_sdk.oversight.reflect import run_reflection
+from django_ai_sdk.oversight.recording import split_answer
+from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, TextSpan, ToolCall
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 

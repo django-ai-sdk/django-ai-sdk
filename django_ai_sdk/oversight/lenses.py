@@ -850,31 +850,3 @@ PRESETS: dict[str, type[Lens]] = {
         ToolErrorsLens,
     )
 }
-
-
-__all__ = [
-    "ANSWER_TYPES",
-    "DEFAULT_STAGES",
-    "LENS_KINDS",
-    "PRESETS",
-    "AnswerType",
-    "CheckLens",
-    "Choice",
-    "EmptyRetrievalLens",
-    "Entities",
-    "Flag",
-    "JudgeLens",
-    "LanguageLens",
-    "LengthLens",
-    "Lens",
-    "PIILens",
-    "PatternLens",
-    "RefusalLens",
-    "Score",
-    "SecretsLens",
-    "ToolErrorsLens",
-    "Violation",
-    "guess_language",
-    "lens_from_dict",
-    "register_validator",
-]
