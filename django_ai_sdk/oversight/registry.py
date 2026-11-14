@@ -33,6 +33,7 @@ from django_ai_sdk.oversight.policy import (
     default_fail_mode,
     default_stream_mode,
     policy_lenses,
+    policy_rules,
     validate_choice,
     validate_policy,
     validate_rule,
@@ -201,7 +202,7 @@ def _from_code(
     for lens in policy_lenses(cls):
         resolved.lenses[lens.name] = copy.copy(lens)
         resolved.sources[f"lens:{lens.name}"] = name
-    for rule in cls.rules:
+    for rule in policy_rules(cls):
         resolved.rules[rule.name] = copy.copy(rule)
         resolved.sources[f"rule:{rule.name}"] = name
     for rule in resolved.rules.values():

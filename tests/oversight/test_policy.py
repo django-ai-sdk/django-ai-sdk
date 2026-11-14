@@ -24,7 +24,8 @@ from django_ai_sdk.oversight import (
     RestrictTools,
     Rule,
     Score,
-    pick,
+    LensPack,
+    RulePack,
     register_policy,
 )
 from django_ai_sdk.oversight import registry as resolution
@@ -79,10 +80,10 @@ class ChildPolicy(Policy):
 @register_policy
 class PickedPolicy(Policy):
     name = "test-picked"
-    lenses = pick(SecurityPack.lenses, "prompt_injection", "secrets_input")
+    lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "secrets_input")]
     rules = [
-        *pick(SecurityPack.rules, "block_injection"),
-        *pick(SecurityPack.rules, "mask_secrets_in_question", mode=Mode.ENFORCE),
+        RulePack(SecurityPack.rules, "block_injection"),
+        RulePack(SecurityPack.rules, "mask_secrets_in_question", mode=Mode.ENFORCE),
     ]
 
 
@@ -204,15 +205,42 @@ class TestPolicies:
     def test_picking_leaves_the_pack_alone(self):
         pack = {rule.name: rule for rule in SecurityPack.rules}
         assert pack["mask_secrets_in_question"].mode is Mode.REPORT
-        assert pick(SecurityPack.rules, "block_injection")[0] is not pack["block_injection"]
+        assert RulePack(SecurityPack.rules, "block_injection")[0] is not pack["block_injection"]
 
     def test_picking_an_unknown_name_says_what_there_is(self):
         with pytest.raises(ImproperlyConfigured, match="prompt_injection"):
-            pick(SecurityPack.lenses, "prompt_injektion")
+            LensPack(SecurityPack.lenses, "prompt_injektion")
 
     def test_mode_only_applies_to_rules(self):
-        with pytest.raises(TypeError):
-            pick(SecurityPack.lenses, "prompt_injection", mode=Mode.ENFORCE)
+        with pytest.raises(ImproperlyConfigured, match="mode"):
+            LensPack(SecurityPack.lenses, "prompt_injection", mode=Mode.ENFORCE)
+
+    def test_a_pack_without_names_takes_everything(self):
+        assert [rule.name for rule in RulePack(SecurityPack.rules)] == [
+            rule.name for rule in SecurityPack.rules
+        ]
+
+    def test_a_lens_pack_sets_overrides_on_copies(self):
+        [taken] = LensPack(SecurityPack.lenses, "secrets_input", stages=(Stage.REFLECT,))
+        [own] = [lens for lens in SecurityPack.lenses if getattr(lens, "name", "") == "secrets_input"]
+        assert taken.stages == (Stage.REFLECT,) and own.stages != (Stage.REFLECT,)
+
+    def test_packs_and_lists_in_a_policy_are_flattened(self):
+        class Nested(Policy):
+            name = "test-nested"
+            lenses = [LensPack(SecurityPack.lenses, "pii_output"), PickedPolicy.lenses]
+            rules = [PickedPolicy.rules, RulePack(SecurityPack.rules, "mask_pii_in_answer")]
+
+        assert [rule.name for rule in Nested.rules] == [
+            "block_injection",
+            "mask_secrets_in_question",
+            "mask_pii_in_answer",
+        ]
+        assert [getattr(lens, "name", "") for lens in Nested.lenses] == [
+            "pii_output",
+            "prompt_injection",
+            "secrets_input",
+        ]
 
     def test_the_packs_are_registered_and_resolve(self):
         resolved = build_policy("default")
@@ -516,7 +544,7 @@ class TestDeclarations:
         from django_ai_sdk.oversight.packs.security import Exfiltration, SecurityPack
 
         assert Exfiltration().stages == (Stage.FINISH,)
-        pii_tool, secrets_tool = pick(SecurityPack.lenses, "pii_tool", "secrets_tool")
+        pii_tool, secrets_tool = LensPack(SecurityPack.lenses, "pii_tool", "secrets_tool")
         assert pii_tool.stages == secrets_tool.stages == (Stage.TOOL,)
 
     def test_only_entities_spans_are_masked_in_what_capture_keeps(self):

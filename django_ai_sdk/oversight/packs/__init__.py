@@ -1,6 +1,6 @@
 """Built-in policies: security, quality, safety, and a default that combines them.
 
-Extend a whole pack, or take single lenses and rules with `pick`.
+Extend a whole pack, or take single lenses and rules with `LensPack` and `RulePack`.
 OversightConfig.ready() imports this module, which registers the packs.
 """
 

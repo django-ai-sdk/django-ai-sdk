@@ -31,7 +31,13 @@ from django_ai_sdk.oversight.authoring.apps import setting
 from django_ai_sdk.oversight.checks import policy_errors
 from django_ai_sdk.oversight.judges.base import alias_defined
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
-from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, policy_lenses, validate_policy
+from django_ai_sdk.oversight.policy import (
+    Policy,
+    ResolvedPolicy,
+    policy_lenses,
+    policy_rules,
+    validate_policy,
+)
 from django_ai_sdk.oversight.registry import (
     ancestors,
     build_policy,
@@ -242,7 +248,7 @@ def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
 def _inherited_names(parents: dict[str, ResolvedPolicy], cls: type[Policy]) -> list[str]:
     """Own lenses and rules may not take a name a parent has, a preset's default included."""
     own_lenses = {lens.name for lens in policy_lenses(cls)}
-    own_rules = {rule.name for rule in cls.rules}
+    own_rules = {rule.name for rule in policy_rules(cls)}
     return [
         f"{what} {item!r} of {parent!r} is replaced: name yours differently"
         for parent, built in parents.items()

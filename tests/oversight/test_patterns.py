@@ -90,12 +90,12 @@ class TestInjectionWithoutAModel:
 
     def readme_policy(self) -> str:
         from django_ai_sdk.oversight import SecurityPack
-        from django_ai_sdk.oversight.policy import pick
+        from django_ai_sdk.oversight.policy import LensPack, RulePack
 
         return policy(
             "fc-readme",
-            pick(SecurityPack.lenses, "prompt_injection"),
-            pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
+            LensPack(SecurityPack.lenses, "prompt_injection"),
+            RulePack(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
         )
 
     @pytest.mark.parametrize(

@@ -15,7 +15,9 @@ rule declared in code at runtime.
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
@@ -44,8 +46,10 @@ class Policy:
     # Packs or policies to inherit lenses and rules from. A lens or rule declared
     # here replaces an inherited one with the same name.
     extends: list[str] = []  # noqa: RUF012
-    lenses: list[Lens | type[Lens]] = []  # noqa: RUF012
-    rules: list[Rule] = []  # noqa: RUF012
+    # A LensPack, a RulePack or another policy's list in these gives its items in its
+    # place: the class flattens them one level when it is built.
+    lenses: Sequence[Lens | type[Lens] | Sequence[Any]] = []  # noqa: RUF012
+    rules: Sequence[Rule | Sequence[Any]] = []  # noqa: RUF012
     # None inherits. The CAPTURE setting is always the ceiling.
     capture: Capture | None = None
     # "auto" or "live". None inherits.
@@ -59,41 +63,103 @@ class Policy:
     # Where this policy's values come from: "code", "pack:<name>" or "authored".
     origin: str = "code"
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Take the lenses and rules out of the packs and lists in `lenses` and `rules`."""
+        super().__init_subclass__(**kwargs)
+        cls.lenses = flatten(cls.lenses)
+        cls.rules = flatten(cls.rules)
+
 
 def policy_lenses(cls: type[Policy]) -> list[Lens]:
     """The lenses `cls` declares, a lens class instantiated."""
-    return [lens() if isinstance(lens, type) else lens for lens in cls.lenses]
+    return [lens() if isinstance(lens, type) else lens for lens in flatten(cls.lenses)]
 
 
-def pick[T: (Lens | type[Lens], Rule)](
-    items: Iterable[T],
-    *names: str,
-    mode: Mode | str | None = None,
-    notice: str | None = None,
-) -> list[T]:
-    """Pick lenses or rules by name from a pack's `lenses` or `rules`, in that order.
+def policy_rules(cls: type[Policy]) -> list[Rule]:
+    """The rules `cls` declares."""
+    return flatten(cls.rules)
 
-    Use this to take only what you need instead of extending a whole pack::
 
-        lenses = pick(SecurityPack.lenses, "prompt_injection", "pii_input")
-        rules = pick(SecurityPack.rules, "block_injection", "mask_pii_in_question")
+class LensPack(list[Lens | type[Lens]]):
+    """Lenses taken by name from a pack's `lenses`, in the order named; all without names.
 
-    Items are copies, so setting `mode` or `notice` does not change the pack.
+    List it in a policy's `lenses`, which takes its lenses in its place::
+
+        lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "pii_input"), Topic]
+
+    `overrides` set attributes on each lens taken, such as `stages`. The lenses are
+    copies, so the pack keeps its own.
     """
+
+    def __init__(
+        self, lenses: Iterable[Lens | type[Lens] | Sequence[Any]], *names: str, **overrides: Any
+    ) -> None:
+        taken = _take(flatten(lenses), names)
+        super().__init__(_with_overrides(lens, overrides) for lens in taken)
+
+
+class RulePack(list[Rule]):
+    """Rules taken by name from a pack's `rules`, in the order named; all without names.
+
+    List it in a policy's `rules`, which takes its rules in its place::
+
+        rules = [
+            SupportPolicy.rules,
+            RulePack(SecurityPack.rules, "mask_pii_in_answer", mode=Mode.ENFORCE),
+        ]
+
+    The rules are copies, so setting `mode` or `notice` does not change the pack.
+    """
+
+    def __init__(
+        self,
+        rules: Iterable[Rule | Sequence[Any]],
+        *names: str,
+        mode: Mode | str | None = None,
+        notice: str | None = None,
+    ) -> None:
+        taken = [copy.copy(rule) for rule in _take(flatten(rules), names)]
+        for rule in taken:
+            if mode is not None:
+                rule.mode = Mode(mode)
+            if notice is not None:
+                rule.notice = notice
+        super().__init__(taken)
+
+
+def _take[T: (Lens | type[Lens], Rule)](items: Iterable[T], names: tuple[str, ...]) -> list[T]:
+    """The items named `names`, in that order, or every item when no name is given."""
     by_name = {item.name: item for item in items}
     missing = [name for name in names if name not in by_name]
     if missing:
-        raise ImproperlyConfigured(f"Cannot pick {missing}: the choices are {sorted(by_name)}")
-    picked = [copy.copy(by_name[name]) for name in names]
-    if mode is not None or notice is not None:
-        for item in picked:
-            if not isinstance(item, Rule):
-                raise TypeError("pick(mode=..., notice=...) applies to rules only")
-            if mode is not None:
-                item.mode = Mode(mode)
-            if notice is not None:
-                item.notice = notice
-    return picked
+        raise ImproperlyConfigured(f"Cannot take {missing}: the choices are {sorted(by_name)}")
+    return [by_name[name] for name in names] if names else list(by_name.values())
+
+
+def _with_overrides(lens: Lens | type[Lens], overrides: Mapping[str, Any]) -> Lens | type[Lens]:
+    """A copy of `lens` with `overrides` set. A lens class stays a class without them."""
+    if isinstance(lens, type):
+        return lens(**overrides) if overrides else lens
+    if not overrides:
+        return copy.copy(lens)
+    # Rebuilt from what was set on it, so nothing worked out from the old values stays.
+    declared = {
+        key: value
+        for key, value in vars(lens).items()
+        if not isinstance(getattr(type(lens), key, None), cached_property)
+    }
+    return type(lens)(**{**declared, **overrides})
+
+
+def flatten[T: (Lens | type[Lens], Rule)](items: Iterable[T | Sequence[Any]]) -> list[T]:
+    """`items` with every list, tuple or pack in it replaced by its own items, one level deep."""
+    flat: list[T] = []
+    for item in items:
+        if isinstance(item, Sequence):
+            flat.extend(item)
+        else:
+            flat.append(item)
+    return flat
 
 
 # Subjects a Mask can rewrite: the question, the answer, or both.
@@ -115,7 +181,7 @@ def validate_policy(cls: type[Policy]) -> None:
             raise ImproperlyConfigured(f"Policy {cls.name!r} declares lens {lens.name!r} twice.")
         lenses[lens.name] = lens
     rules: set[str] = set()
-    for rule in cls.rules:
+    for rule in policy_rules(cls):
         if rule.name in rules:
             raise ImproperlyConfigured(f"Policy {cls.name!r} declares rule {rule.name!r} twice.")
         validate_rule(rule, lenses)

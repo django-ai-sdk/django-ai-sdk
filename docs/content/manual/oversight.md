@@ -14,7 +14,7 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 
 | For | Names |
 | --- | --- |
-| Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
+| Policies | `Policy`, `LensPack`, `RulePack`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
 | Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
 | Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `Optional` (an alias a lens skips while `JUDGES` does not define it), `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
@@ -202,7 +202,7 @@ class Policy:
 
 A policy is registered by `@register_policy` (in any module; an installed app's `oversight.py` is imported on startup), or by naming the class on an agent (`oversight = SupportPolicy`) or in `run(oversight=...)`. A policy that fails validation is not registered (`ai_sdk.oversight.E001`); its agents' turns are blocked. Two classes that declare one name are an error (`ai_sdk.oversight.E010`): the first one registered keeps the name.
 
-`pick(items, *names, mode=None, notice=None)` takes single lenses or rules out of a pack instead of extending it whole: `pick(SecurityPack.lenses, "prompt_injection")`, `pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. They come back in the order named, as copies, so `mode` and `notice` leave the pack's own alone. An unknown name raises `ImproperlyConfigured`, and `mode` or `notice` on lenses raises `TypeError`.
+`LensPack(lenses, *names, **overrides)` and `RulePack(rules, *names, mode=None, notice=None)` take single lenses or rules out of a pack instead of extending it whole: `LensPack(SecurityPack.lenses, "prompt_injection")`, `RulePack(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. With no names they take every one. They come back in the order named, as copies, so `overrides` (lens attributes such as `stages`), `mode` and `notice` leave the pack's own alone. An unknown name, or an override a lens does not have, raises `ImproperlyConfigured`. When a policy class is built it flattens its `lenses` and `rules` one level: a pack, or a list such as another policy's `rules`, gives its items in its place.
 
 `ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached until settings change or a policy registers; `invalidate_policy(name)` clears it and every policy that extends it.
 

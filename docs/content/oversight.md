@@ -147,7 +147,7 @@ api.add_router("/", get_oversight_router())
 
 ### Grow it
 
-- **Packs**: `extends = ["security"]`, or take single lenses and rules with `pick` ([Start small](#start-small)).
+- **Packs**: `extends = ["security"]`, or take single lenses and rules with `LensPack` and `RulePack` ([Start small](#start-small)).
 - **A classifier**: map the `classifier` alias to a local classifier, a model judge or a classifier service ([Picking the judge](#picking-the-judge)).
 - **Report, then enforce**: leave a rule in report mode, read what it would have done in the record, then set `mode=Mode.ENFORCE`.
 - **Personal data**: a `PIILens` and a `Mask` rule ([Personal data and secrets](#personal-data-and-secrets)).
@@ -183,27 +183,28 @@ A policy is a class. Name it on the agent:
 from django_ai_sdk import Agent
 from django_ai_sdk.oversight import (
     L,
+    LensPack,
     Mask,
     Mode,
     PIILens,
     Policy,
     Queue,
     Rule,
+    RulePack,
     SecurityPack,
     Stage,
     Subject,
-    pick,
 )
 
 
 class SupportPolicy(Policy):
     name = "support"
     lenses = [
-        *pick(SecurityPack.lenses, "prompt_injection"),
+        LensPack(SecurityPack.lenses, "prompt_injection"),
         PIILens(name="pii", subject=Subject.OUTPUT, stages=(Stage.FINISH,)),
     ]
     rules = [
-        *pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
+        RulePack(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
         Rule("mask_pii", when=L("pii").is_true, then=Mask(), mode=Mode.ENFORCE),
         Rule("iban_to_people", when=L("pii").contains("iban"), then=Queue("privacy"), mode=Mode.REPORT),
     ]
@@ -429,26 +430,26 @@ class EvenAmount(CheckLens):             # plain Python
 
 ### Start small
 
-`extends` brings in every lens and rule of a pack. To take only what you need, use `pick`:
+`extends` brings in every lens and rule of a pack. To take only what you need, use `LensPack` and `RulePack`:
 
 ```python
-from django_ai_sdk.oversight import Mode, Policy, QualityPack, SecurityPack, pick
+from django_ai_sdk.oversight import LensPack, Mode, Policy, QualityPack, RulePack, SecurityPack
 
 
 class SupportPolicy(Policy):
     name = "support"
     lenses = [
-        *pick(SecurityPack.lenses, "prompt_injection", "pii_input", "secrets_input", "pii_output"),
-        *pick(QualityPack.lenses, "groundedness"),
+        LensPack(SecurityPack.lenses, "prompt_injection", "pii_input", "secrets_input", "pii_output"),
+        LensPack(QualityPack.lenses, "groundedness"),
         Topic,
     ]
     rules = [
-        *pick(SecurityPack.rules, "block_injection", "mask_pii_in_answer"),
-        *pick(SecurityPack.rules, "mask_pii_in_question", "mask_secrets_in_question", mode=Mode.ENFORCE),
+        RulePack(SecurityPack.rules, "block_injection", "mask_pii_in_answer"),
+        RulePack(SecurityPack.rules, "mask_pii_in_question", "mask_secrets_in_question", mode=Mode.ENFORCE),
     ]
 ```
 
-A picked rule is a copy, so `mode` changes it only here. A rule may only read lenses its policy has, or the policy does not resolve (`ai_sdk.oversight.E002`) and its turns are blocked. To change a pack lens, subclass it and list the subclass:
+The policy takes the lenses and rules out of each pack, and out of any list in `lenses` or `rules`, so `rules = [OtherPolicy.rules, RulePack(...)]` needs no `*`. A pack with no names takes everything. A taken rule is a copy, so `mode` changes it only here. A rule may only read lenses its policy has, or the policy does not resolve (`ai_sdk.oversight.E002`) and its turns are blocked. To change a pack lens, subclass it and list the subclass:
 
 ```python
 from django_ai_sdk import oversight

@@ -3,11 +3,11 @@
 Add "django_ai_sdk.oversight" to INSTALLED_APPS and give an agent a policy::
 
     from django_ai_sdk import Agent
-    from django_ai_sdk.oversight import L, Mask, Mode, Policy, Rule, SecurityPack, pick
+    from django_ai_sdk.oversight import L, LensPack, Mask, Mode, Policy, Rule, SecurityPack
 
     class SupportPolicy(Policy):
         name = "support"
-        lenses = pick(SecurityPack.lenses, "pii_input")
+        lenses = [LensPack(SecurityPack.lenses, "pii_input")]
         rules = [Rule("mask_pii", when=L("pii_input").is_true, then=Mask(), mode=Mode.ENFORCE)]
 
     class SupportAgent(Agent):
@@ -55,7 +55,7 @@ from django_ai_sdk.oversight.lenses import (
     Violation,
     register_validator,
 )
-from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, pick
+from django_ai_sdk.oversight.policy import LensPack, Policy, ResolvedPolicy, RulePack
 from django_ai_sdk.oversight.registry import (
     add_policy_loader,
     build_policy,
