@@ -257,7 +257,7 @@ class TestWorkflowSteps:
 
         outcome = await Ask().run(WorkflowContext(workflow="intake"))
         assert outcome.status == "failed"
-        assert outcome.detail == "refused by oversight: Not like that."
+        assert outcome.detail == "blocked by oversight: Not like that."
         assert model.asked == []
         assert await Turn.objects.filter(channel="workflow:intake:ask").acount() == 1
 

@@ -475,8 +475,8 @@ class SupportAgent(Agent):
 
 try:
     answer = await agent.run(messages, user=request.user, channel="api")
-except Blocked as refused:
-    answer = refused.message           # the policy's text for the person asking
+except Blocked as blocked:
+    answer = blocked.message           # the policy's text for the person asking
 ```
 
 `oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](/manual/oversight/#agents-and-runs); what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked, in [the guide](/oversight/#every-sdk-entry-point-is-a-turn).

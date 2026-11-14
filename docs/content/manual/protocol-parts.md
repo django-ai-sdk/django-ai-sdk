@@ -86,7 +86,7 @@ When an [oversight](/oversight/) rule acts on a turn, the stream says so, and th
 {"type":"finish","finishReason":"content-filter"}
 ```
 
-`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A refused question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](../oversight/#client-notices).
+`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A blocked question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](../oversight/#client-notices).
 
 ## Warmup parts
 

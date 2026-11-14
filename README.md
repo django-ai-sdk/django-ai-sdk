@@ -144,8 +144,8 @@ class SupportAgent(Agent):
 
 try:
     answer = await SupportAgent().run(messages, user=request.user)
-except Blocked as refused:
-    answer = refused.message  # the policy's own text for the person asking
+except Blocked as blocked:
+    answer = blocked.message  # the policy's own text for the person asking
 ```
 
 See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations.

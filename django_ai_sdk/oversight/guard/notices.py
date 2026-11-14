@@ -24,7 +24,7 @@ TOO_LONG_MESSAGE = _("This message is too long to check. Shorten it and try agai
 UNCHECKED_TEXT = _("[withheld: could not be checked]")
 # Shown to the model instead of a tool result an enforced gate rule blocks.
 # Its words stay as clients and stored threads already show them.
-BLOCKED_TEXT = _("[withheld: refused by oversight]")
+BLOCKED_TEXT = _("[withheld: blocked by oversight]")
 # The block message for a call to a tool removed this turn.
 TOOL_UNAVAILABLE_MESSAGE = _("This tool is not available for this request.")
 

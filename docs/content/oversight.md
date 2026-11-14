@@ -266,7 +266,7 @@ A policy is a promise about an agent, not about one endpoint. If chat checked th
 | Chat, `Agent.as_view()` | `chat` | The policy's message streams as the reply, ending with finish reason `content-filter`. A blocked question is not stored. |
 | `Agent.run()` | What you pass as `channel`; `default` when you pass none | Raises `Blocked`. |
 | HTTP run endpoints (`POST /agents/{id}/run/`, `POST /threads/{id}/run/`, Ninja and DRF) | `api` | `{"result": <the policy's message>, "thread_id": ..., "blocked": true}`. Raised elsewhere, `Blocked` is an HTTP 400. |
-| Workflow `AgentStep` | `workflow:<workflow>:<step>`; `workflow:adhoc:<step>` for a definition a client submitted | The step fails: `refused by oversight: ...` or `withheld by oversight: ...`. |
+| Workflow `AgentStep` | `workflow:<workflow>:<step>`; `workflow:adhoc:<step>` for a definition a client submitted | The step fails: `blocked by oversight: ...` or `withheld by oversight: ...`. |
 | `run_with_oversight()` | What you pass; `default` when you pass none | `turn.raise_if_blocked()` on its `TurnRequest` raises `Blocked`. |
 
 ### `Agent.run()` and `Blocked`

@@ -214,7 +214,7 @@ def end_run_with_answer(state: State, text: str, *, stop: str) -> None:
 
 # Told to the model for a call skipped because another call in the step was blocked.
 SKIPPED_CALL_MESSAGE = gettext_lazy(
-    "Not run: another call in this step was refused. Call it again on its own if you still need it."
+    "Not run: another call in this step was blocked. Call it again on its own if you still need it."
 )
 
 # Sync hooks cannot await the guard, so every tool call in a sync run is blocked.
