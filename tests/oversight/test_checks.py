@@ -244,11 +244,15 @@ class TestChecks:
                 [Rule("r", when=L("j").is_true, then=Block(), mode=ENFORCE)],
             )
             found = policy_checks(set())
-            return [m.level for m in found if m.id.endswith(".E007") and repr(name) in m.msg]
+            return [
+                (m.id.rsplit(".", 1)[1], m.level)
+                for m in found
+                if m.id.endswith((".E007", ".W008")) and repr(name) in m.msg
+            ]
 
         # Optional aliases left undefined are a choice: a warning. A required one is not.
-        assert level(Maybe("fc-nobody")) == [WARNING]
-        assert level("fc-nobody") == [ERROR]
+        assert level(Maybe("fc-nobody")) == [("W008", WARNING)]
+        assert level("fc-nobody") == [("E007", ERROR)]
 
     def test_a_notify_that_reaches_no_one_is_flagged(self):
         from django_ai_sdk.oversight.rules import Notify

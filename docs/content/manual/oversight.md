@@ -404,12 +404,13 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.E004` | A judge lens names an alias `JUDGES` does not define (`Maybe` aliases excepted). |
 | `ai_sdk.oversight.E005` | An alias cannot be built. |
 | `ai_sdk.oversight.E006` | `DEFAULT_POLICY` names an unknown policy. |
-| `ai_sdk.oversight.E007` | An enforced rule reads a lens no judge here can answer. A warning, not an error, when the lens's judges are all optional aliases and none is defined: the rule never acts. |
+| `ai_sdk.oversight.E007` | An enforced rule reads a lens no judge here can answer. |
+| `ai_sdk.oversight.W008` | An enforced rule reads lenses whose judges are all optional aliases, and none is defined here: the rule never acts. |
 | `ai_sdk.oversight.E009` | An agent class names a policy no app registers: every turn it runs is blocked. |
 | `ai_sdk.oversight.E010` | Two policy classes declare the same name; the first one registered keeps it. |
 | `ai_sdk.oversight.E011` | An agent class's `oversight` names no policy (set after the class was defined). |
 | `ai_sdk.oversight.E012` | `AI_SDK_OVERSIGHT` has an unknown key, or a value of the wrong kind; the message says what it accepts. |
-| `ai_sdk.oversight.E013` | Deploy warning: an enforced gate or tool rule that blocks, masks or takes tools away reads a lens with an external judge (any judge with `external` set) whose timeout is longer than that stage's deadline. A slow answer fails the lens, and the rule blocks the turn or the tool call. |
+| `ai_sdk.oversight.E013` | Deploy error: an enforced gate or tool rule that blocks, masks or takes tools away reads a lens with an external judge (any judge with `external` set) whose timeout is longer than that stage's deadline. A slow answer fails the lens, and the rule blocks the turn or the tool call. |
 | `ai_sdk.oversight.E014` | A `Notify(to=[...])` names a notifier `NOTIFIERS` does not have (checked when `NOTIFIERS` is set). |
 | `ai_sdk.oversight.W001` | Deploy check: `CAPTURE` is `"full"`, so content is kept unmasked. |
 | `ai_sdk.oversight.W005` | An alias's judge cannot run here, such as `TypeSafe` without `TYPESAFE_API_KEY` or `typesafe-sdk`. |

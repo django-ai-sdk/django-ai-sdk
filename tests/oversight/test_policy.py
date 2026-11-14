@@ -258,6 +258,30 @@ class TestRuleEvaluation:
         later = match_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
         assert "ungrounded_answer" in {m.rule.name for m in later}
 
+    def test_a_block_that_is_already_decided_does_not_wait(self):
+        resolved = build_policy("default")
+        rule = resolved.rules["ungrounded_answer"]
+        rule.mode = Mode.ENFORCE
+        found = {"pii_question": ans(["email"])}
+
+        def at_gate(when, *then):
+            rule.when, rule.then = when, list(then)
+            return [
+                m for m in match_rules(resolved, found, Stage.GATE, done=set()) if m.rule is rule
+            ]
+
+        either = L("pii_question").is_true | (L("groundedness") < 0.5)
+        [match] = at_gate(either, Block())
+        assert [a.kind for a in match.acted] == ["block"]
+        # Not decided yet: an `all`, or a `missing` on the later lens. A mask waits anyway.
+        assert not at_gate(L("pii_question").is_true & (L("groundedness") < 0.5), Block())
+        assert not at_gate(L("pii_question").is_false | L("groundedness").missing, Block())
+        assert not at_gate(either, Mask())
+        assert at_gate(either, RestrictTools(["search"]))
+        # Restricting tools early would lose the mask at finish; blocking ends the turn.
+        assert not at_gate(either, RestrictTools(["search"]), Mask())
+        assert at_gate(either, Block(), Mask())
+
     def test_report_matches_record_but_do_not_act(self):
         resolved = build_policy("test-parent")
         [match] = match_rules(resolved, {"mentions_x": ans(True)}, Stage.GATE, done=set())

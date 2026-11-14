@@ -310,7 +310,7 @@ def stream_mode_checks(name: str, resolved: Any) -> list[Any]:
 def lens_checks(name: str, resolved: Any) -> list[Any]:
     """Undefined aliases, and enforced rules whose lenses no judge here answers.
 
-    Only a warning when every such judge is an undefined optional alias: a deliberate choice.
+    W008, not E007, when every such judge is an undefined optional alias: a deliberate choice.
     """
     messages: list[Any] = []
     dead: set[str] = set()
@@ -340,7 +340,7 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
                 Warning(
                     f"Enforced rule {rule.name!r} in policy {name!r} reads {blind}, whose "
                     "judges are all optional and none is defined here: it never acts.",
-                    id=f"{PREFIX}.E007",
+                    id=f"{PREFIX}.W008",
                 )
             )
         else:
@@ -373,11 +373,11 @@ def deadline_checks() -> list[Any]:
     for name in sorted(policies_in_use()):
         resolved = build_or_none(name)
         if resolved is not None:  # Otherwise E002 reports it.
-            messages.extend(deadline_warnings(name, resolved))
+            messages.extend(deadline_errors(name, resolved))
     return messages
 
 
-def deadline_warnings(name: str, resolved: Any) -> list[Any]:
+def deadline_errors(name: str, resolved: Any) -> list[Any]:
     """Any judge with `external` set counts; `LocalClassifier` doesn't."""
     messages: list[Any] = []
     for stage in (Stage.GATE, Stage.TOOL):
@@ -404,7 +404,7 @@ def deadline_warnings(name: str, resolved: Any) -> list[Any]:
                 continue
             seconds = max(slow[lens] for lens in reads)
             messages.append(
-                Warning(
+                Error(
                     f"Enforced rule {rule.name!r} in policy {name!r} reads {reads} at "
                     f"{stage.value}, where it may ask a model judge "
                     f"with a timeout of {seconds:g} s against a "
@@ -423,7 +423,7 @@ def deadline_warnings(name: str, resolved: Any) -> list[Any]:
 def policy_errors(name: str, resolved: Any) -> list[str]:
     """What the checks would flag in one built policy; authored policies are held to it on save."""
     found = [m for m in lens_checks(name, resolved) if m.is_serious()]
-    found += [*stream_mode_checks(name, resolved), *deadline_warnings(name, resolved)]
+    found += [*stream_mode_checks(name, resolved), *deadline_errors(name, resolved)]
     return [m.msg for m in found]
 
 

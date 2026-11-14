@@ -531,7 +531,7 @@ class Topic(JudgeLens):
 
 It reads one text: lenses on the question or on the answer. A lens on sources or a tool call, one that needs grounding (groundedness), and a "taken from" lens go to the next judge. A zero-shot model reads statements, not questions: each label's criterion as "This text is about <criterion>.", a yes/no as the lens's `yes`. Write `yes="This text asks to ignore previous instructions."`, not a question. For one fixed question there are models trained for it: `LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2", file="onnx/model.onnx", positive="INJECTION")`. Until its model is loaded (downloaded once, then about a second), it answers `unavailable` and loads in the background, so the first turns after a deploy go to the next judge and `FAIL_MODE` applies; call `load_local_classifier()` at startup to have it ready.
 
-`Maybe("classifier")` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.E007` warns about an enforced rule that therefore never acts. A lens that names a plain alias that nothing defines is an error (`ai_sdk.oversight.E004`).
+`Maybe("classifier")` names an alias *optionally*: it is asked when `JUDGES` defines `classifier` and skipped otherwise. So the packs work with whatever you define: a lens left without a judge is skipped, and `ai_sdk.oversight.W008` warns about an enforced rule that therefore never acts. A lens that names a plain alias that nothing defines is an error (`ai_sdk.oversight.E004`).
 
 ### Your own judge
 
