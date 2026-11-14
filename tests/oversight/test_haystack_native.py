@@ -19,6 +19,7 @@ from django_ai_sdk.oversight.guard import TurnGuard, current_guard, guarding
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.plugin import (
     TurnRequest,
+    needs_own_turn,
     needs_own_turn_sync,
     build_oversight_hooks,
     run_with_oversight,
@@ -357,6 +358,14 @@ def test_a_sync_run_whose_policy_needs_a_turn_must_not_run():
     with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
         assert needs_own_turn_sync(TurnRequest())
     assert not needs_own_turn_sync(TurnRequest())
+
+
+@pytest.mark.django_db
+async def test_the_async_twin_agrees_for_an_unnamed_agent():
+    # Without an agent, DEFAULT_POLICY applies, so run_with_oversight opens a turn.
+    with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
+        assert await needs_own_turn(TurnRequest())
+    assert not await needs_own_turn(TurnRequest())
 
 
 def test_a_sync_run_without_a_policy_runs():

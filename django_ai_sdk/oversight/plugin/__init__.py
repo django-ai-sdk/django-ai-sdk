@@ -121,7 +121,7 @@ def needs_own_turn_sync(turn: TurnRequest) -> bool:
 
 async def needs_own_turn(turn: TurnRequest) -> bool:
     """True also when the policy cannot be determined."""
-    agent, oversight = turn.agent, turn.oversight
+    agent, oversight = policy_agent(turn), turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
         return False
     try:
