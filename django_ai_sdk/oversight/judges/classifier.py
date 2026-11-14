@@ -1,10 +1,7 @@
-"""Classifiers: fast models that answer typed questions (yes/no, a label, a score).
+"""Classifiers: fast models that answer typed questions, batched per stage and state.
 
-This base decides what the model reads of a turn, skips texts too long to judge,
-batches a stage's questions about one state into one request, and runs the
-per-source yes/no behind "taken from". A subclass implements `question(lens)` and
-`classify(state, questions, timeout=)` and sets `external`; see `judges.typesafe`.
-What is sent, per lens subject: the docs, "Where turn content goes".
+A subclass implements `question(lens)` and `classify(state, questions, timeout=)`
+and sets `external`; see `judges.typesafe`.
 """
 
 from __future__ import annotations
@@ -39,29 +36,26 @@ if TYPE_CHECKING:
 
 # Seconds the first question of a stage waits for others before sending.
 BATCH_DELAY = 0.005
-# How many of the likeliest answers a rationale lists.
 RATIONALE_ANSWERS = 3
 
 
 def certainty(probability: float) -> float:
-    """Confidence from 0 to 1, based on the distance from 0.5."""
+    """Distance from 0.5, scaled to 0..1."""
     return min(1.0, abs(float(probability) - 0.5) * 2)
 
 
 def yes_answer(probability: float, model: str, rationale: str) -> Answer:
-    """A yes/no judgment as an Answer: the probability of yes, sure as far as it is from 0.5."""
     return Answer(
         value=probability, confidence=certainty(probability), model=model, rationale=rationale
     )
 
 
 def ranked_rationale(pairs: Iterable[tuple[str, float]], n: int = RATIONALE_ANSWERS) -> str:
-    """The `n` likeliest (label, probability) pairs, as "label 0.80, other 0.15"."""
+    """The `n` likeliest pairs, as "label 0.80, other 0.15"."""
     top = sorted(pairs, key=lambda pair: -pair[1])[:n]
     return ", ".join(f"{label} {probability:.2f}" for label, probability in top)
 
 
-# What "taken from" means, for every classifier's yes/no question per source.
 TAKEN_FROM_YES = "The reply states at least one fact that is in the source and relies on it."
 TAKEN_FROM_NO = (
     "The reply's facts are not in the source: it only shares the topic, or it says something else."
@@ -82,8 +76,7 @@ class Batch:
     """Groups a stage's classifier questions so those about the same state share one call.
 
     The flush runs in its own task, so a lens cancelled at the deadline does not
-    cancel the call other lenses wait on. `deadline` is the loop time the stage ends,
-    or None in the background.
+    cancel the call other lenses wait on.
     """
 
     def __init__(self, deadline: float | None = None) -> None:
@@ -92,7 +85,6 @@ class Batch:
         self._flushes: set[asyncio.Task] = set()
 
     def left(self) -> float | None:
-        """Seconds until the deadline (at least 0.05), or None in the background."""
         if self.deadline is None:
             return None
         return max(0.05, self.deadline - asyncio.get_running_loop().time())
@@ -125,10 +117,7 @@ class Batch:
         )
 
     async def _send(self, classify: Any, state: Any, waiting: dict[str, Any]) -> None:
-        """Send one call for `waiting`, and cancel it once nobody waits for it.
-
-        This keeps the call from outliving the stage that asked.
-        """
+        """Send one call; cancel it once nobody waits, so it never outlives its stage."""
         questions = {name: question for name, (question, _) in waiting.items()}
         futures = [future for _, future in waiting.values()]
         call = asyncio.ensure_future(classify(state, questions, timeout=self.left()))
@@ -164,7 +153,7 @@ _batch: contextvars.ContextVar[Batch | None] = contextvars.ContextVar(
 
 @contextlib.contextmanager
 def batched(deadline_ms: float | None = None) -> Generator[Batch]:
-    """Batch the classifier questions of lens tasks started inside this block."""
+    """Batch the classifier questions of lens tasks created inside this block."""
     deadline = asyncio.get_running_loop().time() + deadline_ms / 1000 if deadline_ms else None
     batch = Batch(deadline)
     token = _batch.set(batch)
@@ -175,17 +164,11 @@ def batched(deadline_ms: float | None = None) -> Generator[Batch]:
 
 
 class Classifier(Judge):
-    """Base for judges that classify yes/no, label, score and per-source lenses.
-
-    Subclasses implement `question` and `classify`, and set `external`. When an
-    external one raises, `ask_judge` marks it unavailable, so FAIL_MODE applies and reflect
-    retries. See the module docstring for what is read.
-    """
+    """Base for judges that classify yes/no, label, score and per-source lenses."""
 
     external: ClassVar[str] = "classifier"
     timeout = 20.0
 
-    # Character limits. See the module docstring.
     TEXT_CHARS: ClassVar[int] = 30_000
     SOURCE_CHARS: ClassVar[int] = 8_000
     SOURCES_CHARS: ClassVar[int] = 32_000
@@ -200,18 +183,10 @@ class Classifier(Judge):
     async def classify(
         self, state: dict[str, Any], questions: dict[str, Any], *, timeout: float | None = None
     ) -> dict[str, Answer]:
-        """Answer each of `questions`, keyed by name, about `state` in one call.
-
-        `timeout` is the seconds left before the stage's deadline, or None in the
-        background. Inline, a retry would come too late.
-        """
+        """Answer `questions` about `state` in one call. `timeout`: seconds left, or None."""
 
     def batch_key(self) -> str:
-        """Key for batching. Only judges with the same configuration share a call.
-
-        Built from `describe()`, so two aliases of one class with different settings
-        never answer each other's questions.
-        """
+        """Only judges with the same configuration share a call."""
         described = {k: v for k, v in self.describe().items() if k != "name"}
         return f"{type(self).__qualname__}:{json.dumps(described, sort_keys=True, default=str)}"
 
@@ -231,7 +206,6 @@ class Classifier(Judge):
     async def _classify_batched(
         self, state: dict[str, Any], questions: dict[str, Any], *, alone: bool = False
     ) -> dict[str, Answer]:
-        """Call `classify`, through the stage's batch when there is one."""
         batch = _batch.get()
         if batch is None:
             return await self.classify(state, questions)
@@ -248,17 +222,12 @@ class Classifier(Judge):
         return {name: merged[name] for name in questions if name in merged}
 
     def text(self, text: str, limit: int) -> str:
-        """Mask secrets, then clip to `limit`."""
         return masked_clip(text, limit)
 
     def labelled_sources(
         self, context: TurnContext, *, earlier: bool = False
     ) -> list[tuple[str, Source]]:
-        """The turn's sources labelled S1, S2, ..., masked and clipped.
-
-        Each source is clipped to SOURCE_CHARS. Once the total passes SOURCES_CHARS
-        the rest are dropped. Earlier turns' sources come last, so they go first.
-        """
+        """The turn's sources labelled S1, S2, ..., masked, clipped, up to SOURCES_CHARS."""
         labelled: list[tuple[str, Source]] = []
         total = 0
         for source in context.grounding(earlier=earlier):
@@ -272,7 +241,7 @@ class Classifier(Judge):
         return labelled
 
     def state(self, lens: JudgeLens, context: TurnContext) -> dict[str, Any]:
-        """Build the state for `lens` from only the parts its subject covers."""
+        """Only the parts the lens's subject covers."""
         subject = lens.subject
         state: dict[str, Any] = {}
         if context.history and subject in {Subject.QUESTION, Subject.EXCHANGE}:
@@ -280,14 +249,12 @@ class Classifier(Judge):
                 {"role": h.role, "content": self.text(h.content, HISTORY_ITEM_CHARS)}
                 for h in context.history[-self.HISTORY :]
             ]
-        # Judge an answer against the question, as the model judge does.
         if subject is not Subject.TOOL_CALL or lens.reads_question:
             state["user_message"] = self.text(context.input, self.TEXT_CHARS)
         if subject in {Subject.ANSWER, Subject.EXCHANGE}:
             state["assistant_reply"] = self.text(context.output, self.TEXT_CHARS)
-        # An answer also sees earlier turns' sources. A search sees only its own.
-        # Unlike the model judge, an exchange gets none: a classifier scores what it is
-        # sent, so sources would turn an exchange score into a groundedness one.
+        # Unlike the model judge, an exchange gets no sources: a classifier scores
+        # what it is sent, so sources would turn it into a groundedness score.
         if subject in {Subject.SOURCES, Subject.ANSWER} and (
             labelled := self.labelled_sources(context, earlier=subject is Subject.ANSWER)
         ):
@@ -307,7 +274,6 @@ class Classifier(Judge):
         return state
 
     def too_long(self, lens: Lens, context: TurnContext) -> bool:
-        """Whether the text `lens` judges would have to be clipped. If so, don't ask."""
         return too_long(
             lens,
             context,
@@ -317,7 +283,6 @@ class Classifier(Judge):
         )
 
     def source_question(self, source: Source) -> Any | None:
-        """Ask whether the answer is taken from `source`."""
         return self.question(
             JudgeLens(
                 name="taken_from",
@@ -329,13 +294,10 @@ class Classifier(Judge):
         )
 
     async def per_source(self, lens: JudgeLens, context: TurnContext) -> Answer | None:
-        """Find which sources the answer is taken from, with one yes/no per source.
+        """Which sources the answer is taken from, one yes/no per source.
 
-        The value lists the titles that answered yes. Sources from earlier turns are
-        marked "(found earlier)". `items` maps each source key to its probability, and
-        the confidence is the lowest one. Without sources, the classifier is asked
-        whether the reply states facts. If it does, it is taken from none. An empty
-        reply is also taken from none.
+        Confidence is the lowest per-source one. Without sources, a reply that
+        states facts is taken from none.
         """
         if not context.output.strip():
             return Answer(value=lens.answer.parse(lens, []), confidence=1.0, rationale="No answer.")
@@ -389,10 +351,7 @@ class Classifier(Judge):
 
 
 def _unsourced(lens: Lens, judged: Answer | None) -> Answer | None:
-    """With no sources, a reply that states facts is taken from none.
-
-    A missing or failed answer is a failure, so fail-closed holds.
-    """
+    """A missing or failed answer is a failure, so fail-closed holds."""
     if judged is None or judged.error or not isinstance(judged.value, int | float):
         return Answer(error=(judged.error if judged else "") or NO_VERDICT)
     if float(judged.value) < 0.5:

@@ -1,10 +1,4 @@
-"""Judges: models that answer a judge lens, and the shared machinery to ask_judge them.
-
-`ask_judge` asks one judge with a timeout, so a slow or broken one becomes an error
-answer instead of an exception. Lenses name judges by alias, and
-AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. `Maybe("classifier")` makes
-an alias optional: a lens skips it when the deployment did not define it.
-"""
+"""The Judge base and the shared machinery to ask one, build one from an alias or config."""
 
 from __future__ import annotations
 
@@ -36,42 +30,32 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Seconds before an answer is abandoned, unless the judge sets its own.
 DEFAULT_TIMEOUT = 30.0
 
-# Error prefix for an answer whose external service failed.
-# Reflect asks such a lens again later.
+# Error prefix for a failed external service; reflect asks such a lens again later.
 UNAVAILABLE = "unavailable"
 
-# Error for text too long to judge whole. Nothing was judged, so FAIL_MODE decides.
+# Errors where nothing was judged, so FAIL_MODE decides.
 TOO_LONG = "too long"
-
-# Error for a judge that was asked and returned nothing usable. FAIL_MODE decides.
 NO_VERDICT = "no verdict"
 
-# Confidence for a judgment that states none. Below the default min_confidence,
-# so a made-up confidence never ends the chain.
+# Below the default min_confidence, so a made-up confidence never ends the chain.
 UNSTATED_CONFIDENCE = 0.5
 
-# Limits every judge family shares: earlier messages shown, characters per earlier
-# message, and characters of a source title or tool name.
 HISTORY_MESSAGES = 6
 HISTORY_ITEM_CHARS = 500
 TITLE_CHARS = 200
 
 
 def modules_installed(*modules: str) -> bool:
-    """Whether every one of `modules` can be imported, without importing it."""
     return all(find_spec(module) is not None for module in modules)
 
 
 def unavailable(exc: BaseException) -> str:
-    """Error text for an external judge that raised `exc`."""
     return f"{UNAVAILABLE}: {type(exc).__name__}"
 
 
 def is_unavailable(error: str) -> bool:
-    """Whether `error` means the service failed and a later retry may work."""
     return error.startswith(f"{UNAVAILABLE}: ")
 
 
@@ -94,11 +78,10 @@ class Judge(ABC):
 
     @property
     def display_name(self) -> str:
-        """The name its answers are recorded under: `name`, or the class name."""
         return self.name or type(self).__name__.lower()
 
     def missing(self) -> str:
-        """Why this judge can't run here, or "" when it can. `ask_judge` abstains when set."""
+        """Why this judge can't run here (e.g. an unset key), or "" when it can."""
         return ""
 
     def describe(self) -> dict[str, Any]:
@@ -113,11 +96,8 @@ async def ask_judge(
 ) -> Answer | None:
     """Ask one judge with a timeout. Any failure comes back as an Answer with `error`.
 
-    `judge` may be a spec for `build_judge`. A spec that fails to build is an error answer,
-    so the lens keeps its other answers. A judge whose `missing()` is set abstains.
-    An external judge that raises is marked unavailable. An answer without a value
-    or an error is NO_VERDICT, so FAIL_MODE applies; return None to abstain. A task
-    cancelled from outside re-raises; one that cancels itself is an error answer.
+    An answer without a value or an error is NO_VERDICT, so FAIL_MODE applies
+    (return None to abstain). Cancellation from outside re-raises.
     """
     started = time.perf_counter()
     label = judge_label(judge)
@@ -185,18 +165,12 @@ async def ask_judge(
 
 @dataclass(frozen=True)
 class Maybe:
-    """A judge alias a lens asks only when AI_SDK_OVERSIGHT["JUDGES"] defines it.
-
-        judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
-
-    The JSON form of a lens writes one as {"alias": "classifier", "optional": true}.
-    """
+    """A judge alias asked only when JUDGES defines it. JSON: {"alias": ..., "optional": true}."""
 
     alias: str
 
 
 def judge_from_json(spec: Any) -> Any:
-    """A judge spec from a lens's JSON form: {"alias": ..., "optional": true} is Maybe."""
     if not (isinstance(spec, dict) and "alias" in spec):
         return spec
     alias = spec["alias"]
@@ -208,7 +182,6 @@ def judge_from_json(spec: Any) -> Any:
 
 
 def judge_label(spec: Any) -> str:
-    """A name for a judge spec, for logs and checks, without building it."""
     if isinstance(spec, Judge):
         return spec.display_name
     if isinstance(spec, dict):
@@ -217,10 +190,7 @@ def judge_label(spec: Any) -> str:
 
 
 def clip(text: str, limit: int) -> str:
-    """Shorten `text` to `limit` characters by cutting out the middle.
-
-    Keep both ends because an injected instruction can hide after a page of padding.
-    """
+    """Cut out the middle: an injected instruction can hide after a page of padding."""
     if len(text) <= limit:
         return text
     marker = "\n[... {} characters left out ...]\n"
@@ -230,16 +200,15 @@ def clip(text: str, limit: int) -> str:
 
 
 def masked_clip(text: str, limit: int) -> str:
-    """Mask secrets, then clip to `limit`. Every judge reads turn text this way."""
+    """Every judge reads turn text this way: secrets masked, then clipped."""
     return clip(mask_secrets(text or ""), limit)
 
 
 def too_long(
     lens: Lens, context: TurnContext, *, input_chars: int, output_chars: int, tool_chars: int
 ) -> bool:
-    """Whether the text `lens` judges would have to be clipped. If so, nothing is judged.
+    """Whether the judged text would need clipping; then nothing is judged.
 
-    Only the judged text counts (the question, the answer, or tool arguments).
     Context like history and sources is clipped to fit instead.
     """
     judged: list[tuple[str, int]] = []
@@ -255,7 +224,6 @@ def too_long(
 
 
 def unit(value: Any, default: float) -> float:
-    """`value` as a number from 0 to 1, or `default` when it is not a number."""
     try:
         return min(1.0, max(0.0, float(value)))
     except (TypeError, ValueError):
@@ -263,12 +231,12 @@ def unit(value: Any, default: float) -> float:
 
 
 def secret_setting(name: str) -> str:
-    """A key named `name`, from the environment or else Django settings. "" when unset."""
+    """From the environment, else Django settings."""
     return str(os.environ.get(name) or resolve_setting(name, "") or "").strip()
 
 
 def sampled(key: str, rate: float) -> bool:
-    """Deterministic sampling: the same `key` always gets the same result for a `rate`."""
+    """Deterministic: the same `key` always gets the same result for a `rate`."""
     if rate >= 1:
         return True
     if rate <= 0:
@@ -278,11 +246,7 @@ def sampled(key: str, rate: float) -> bool:
 
 
 def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
-    """Build a Judge from an instance, an alias, or a config dict.
-
-    A config dict is {"class": dotted path, **kwargs}. An alias may point to another
-    alias, in `alias_table()`.
-    """
+    """Build a Judge from an instance, an alias, or {"class": dotted path, **kwargs}."""
     if isinstance(spec, Judge):
         return spec
     if isinstance(spec, str):
@@ -293,7 +257,6 @@ def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
 
 
 def alias_table() -> dict[str, Any]:
-    """All aliases from AI_SDK_OVERSIGHT["JUDGES"]."""
     return dict(setting("JUDGES"))
 
 

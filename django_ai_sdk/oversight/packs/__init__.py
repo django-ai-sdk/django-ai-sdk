@@ -1,12 +1,11 @@
 """Built-in policies: security, quality, safety, and a default that combines them.
 
 Extend a whole pack, or take single lenses and rules with `LensPack` and `RulePack`.
-OversightConfig.ready() imports this module, which registers the packs.
 """
 
 from __future__ import annotations
 
-# Imported to register the packs, which DefaultPolicy extends.
+# Imported to register the packs.
 from django_ai_sdk.oversight.packs import quality, safety, security  # noqa: F401
 from django_ai_sdk.oversight.policy import Policy
 from django_ai_sdk.oversight.registry import register_policy

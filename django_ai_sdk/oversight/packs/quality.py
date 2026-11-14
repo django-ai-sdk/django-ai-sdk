@@ -1,9 +1,7 @@
 """The quality pack: was the answer good, and did retrieval find the right things?
 
-The RAG triad, "taken from" and helpfulness run in the background (reflect), so
-they add no latency. Refusals, wrong-language replies, empty retrieval and failed
-tools are checked at finish. Every judge is an optional alias: with none defined,
-the judge lenses are skipped and the checks still run.
+Judge lenses run in reflect, adding no latency, and are skipped when no judge
+alias is defined; the plain checks run at finish.
 """
 
 from __future__ import annotations

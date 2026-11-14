@@ -1,12 +1,4 @@
-"""Regexes and keywords as a judge. Deterministic, free, and fast enough for the gate.
-
-A pattern lens is answered by one. In a judge lens it is the cheap first judge:
-
-    judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
-
-A hit is sure (confidence 1). A miss has `miss_confidence`, by default below a
-lens's `min_confidence`, so the next judge is asked.
-"""
+"""Regexes and keywords as a judge: deterministic, free, and fast enough for the gate."""
 
 from __future__ import annotations
 
@@ -33,11 +25,9 @@ MISS_CONFIDENCE = 0.5
 class PatternJudge(Judge):
     """Finds labelled spans with regexes and whole-word keywords.
 
-    `patterns` maps a label to its regexes; a plain list labels every hit with the
-    lens's name. `keywords` maps a label to whole words. `verify` maps a label to a
-    check its matches must pass. Every stretch of text gets one label: the first
-    pattern that matches it keeps it, since a card number can also look like a
-    phone number.
+    A hit is sure; a miss has `miss_confidence`, below `min_confidence` by default,
+    so the next judge is asked. The first pattern to match a stretch of text keeps
+    it, since a card number can also look like a phone number.
     """
 
     timeout = PATTERNS_TIMEOUT
@@ -56,7 +46,6 @@ class PatternJudge(Judge):
     ) -> None:
         super().__init__(name=name, timeout=timeout)
         groups = keywords.items() if isinstance(keywords, Mapping) else [("", keywords)]
-        # Keywords after patterns, as one whole-word regex per label.
         self.patterns = compile_patterns(patterns, flags) + [
             (label, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + r")\b", flags))
             for label, group in groups
@@ -66,13 +55,11 @@ class PatternJudge(Judge):
         self.miss_confidence = miss_confidence
 
     def labels(self) -> list[str]:
-        """The labels this judge looks for, so a miss can name them."""
         return list(dict.fromkeys(label for label, _ in self.patterns if label))
 
     def find(self, text: str, default_label: str = "") -> list[TextSpan]:
-        """Every valid_spans span in `text`, in order. Unlabelled ones get `default_label`."""
         spans: list[TextSpan] = []
-        # Spans kept so far, sorted and never overlapping, so only the neighbours can overlap.
+        # Sorted and never overlapping, so only the neighbours can overlap.
         taken: list[tuple[int, int]] = []
         for label, pattern in self.patterns:
             for start, end in valid_spans(pattern, self.verify.get(label), text):
@@ -87,7 +74,6 @@ class PatternJudge(Judge):
         text = context.text(lens.subject)
         if not text:
             return None
-        # In a thread, so a long text can't block the event loop.
         spans = await asyncio.to_thread(self.find, text, lens.name)
         labels = list(dict.fromkeys(span.label for span in spans))
         notes = [f"found {', '.join(k.replace('_', ' ') for k in labels)}"] if labels else []

@@ -1,8 +1,7 @@
 """The safety pack: harmful questions, harmful answers, and people at risk.
 
-The classifier answers all three lenses. When it is unsure about the answer, the
-`judge` model is asked, since finish has time for it. A message suggesting someone
-is at risk is never blocked. It goes to the front of a person's queue.
+A message suggesting someone is at risk is never blocked; it goes to the front of
+a person's queue.
 """
 
 from __future__ import annotations

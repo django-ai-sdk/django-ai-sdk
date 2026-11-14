@@ -1,9 +1,7 @@
 """The security pack: what is asked, what tools receive, and what leaves.
 
 Patterns catch plain injection attempts without a model; what they miss goes to
-the optional `classifier` alias. Pattern lenses find personal data and secrets to
-mask, and exfiltration links in the answer. Add country PII kinds in your own lens,
-e.g. `kinds = [*DEFAULT_PII_KINDS, "bsn"]`. Every pattern here runs in linear time.
+the optional `classifier` alias. Every pattern here runs in linear time.
 """
 
 from __future__ import annotations

@@ -7,29 +7,10 @@
         mode=Mode.ENFORCE,
     )
 
-A rule starts in report mode: it reports what it would have done, on every turn,
-so its false-positive rate is known before it can block anyone.
-
-Conditions are written in Python, stored and edited as JSON:
-
-    L("injection_question").is_true & (L("toxicity") > 0.8)
-    L("pii").contains("bsn") | L("topic").in_({"hr", "legal"})
-    ~L("grounded").is_true & L("sources").confident(0.7)
-
-A condition wraps the JSON node it is stored as, so a rule from code and a rule
-from a dict behave the same. Every comparison on a lens without a usable answer
-is false. Use `L(name).missing` to test for that. `is_true` is a yes, or for an
-Entities lens, that it found something; `is_false` the opposite.
-
-A lens in `unknown` (its check or judge failed this turn) is unknown, not
-false: a comparison on it is neither true nor false, so `~L("grounded").is_true`
-does not match just because "grounded" failed. Only `missing` and `present` read
-a failed lens like any other, through its error answer.
-
-Actions are what a matched rule does. Lenses only answer questions. Rules act.
-An action's `outcome` is what the turn becomes when it is enforced. `effective`
-lists the stages where it can still change the turn. At other stages it is only
-recorded.
+A rule starts in report mode, so its false-positive rate is known before it can
+block anyone. Conditions are Python over JSON nodes; a comparison on a lens without
+a usable answer is false (test with `L(name).missing`), and on a lens that failed
+this turn it is unknown, so `~L("grounded").is_true` does not match on a failure.
 """
 
 from __future__ import annotations
@@ -46,8 +27,6 @@ if TYPE_CHECKING:
     from django.utils.functional import Promise
 
     from django_ai_sdk.oversight.types import Answer
-
-# Conditions.
 
 # op -> test(answer value, operand)
 OPS: dict[str, Any] = {
@@ -157,7 +136,7 @@ def _node_matches(
 
 
 def _validated(node: Any) -> dict[str, Any]:
-    """Return `node` as a clean JSON node. Rejects a bad op or operand now, not on every turn."""
+    """Reject a bad op or operand now, not on every turn."""
     if not isinstance(node, Mapping):
         raise ValueError(f"{node!r} is not a condition")
     for key in ("all", "any"):
@@ -243,15 +222,11 @@ class L:
         return self._test("unsure", below)
 
 
-# Actions.
-
-
 class Action:
-    """Base class for what a matched rule does."""
-
     kind: ClassVar[str] = ""
+    # What the turn becomes when the action is enforced.
     outcome: ClassVar[Outcome] = Outcome.FLAGGED
-    # Stages where the action can still change the turn. Elsewhere it is recorded.
+    # Stages where the action can still change the turn. Elsewhere it is only recorded.
     effective: ClassVar[tuple[Stage, ...]] = tuple(Stage)
 
     def params(self) -> dict[str, Any]:
@@ -286,11 +261,10 @@ class Alert(Action):
 
 
 class Mask(Action):
-    """Mask the spans that `lenses` found. By default, every lens the rule reads.
+    """Mask the spans `lenses` found (default: every lens the rule reads).
 
-    At the gate, the question is masked before the model or the thread sees it.
-    At finish, the stored answer is masked and the client replaces its copy when
-    the stream ends. In reflect, the stored message is masked afterwards.
+    Gate: before the model or thread sees the question. Finish: the stored answer,
+    and the client replaces its copy. Reflect: the stored message, afterwards.
     """
 
     kind = "mask"
@@ -324,7 +298,7 @@ class RestrictTools(Action):
 
 
 class Block(Action):
-    """Block the turn. The question never reaches the model, or the answer never reaches the user."""
+    """Block the turn: the question never reaches the model, or the answer the user."""
 
     kind = "block"
     outcome = Outcome.BLOCKED
@@ -353,10 +327,7 @@ class Queue(Action):
 
 
 class Notify(Action):
-    """Send the match to the notifiers named in `to`, or to all of `NOTIFIERS`.
-
-    Like `Alert`, it also marks the turn at `severity`, so it needs no Alert beside it.
-    """
+    """Send the match to notifiers `to` (default all of NOTIFIERS); also alerts at `severity`."""
 
     kind = "notify"
 
@@ -372,18 +343,17 @@ ACTION_KINDS: dict[str, type[Action]] = {
     cls.kind: cls for cls in (Alert, Mask, RestrictTools, Block, Queue, Notify)
 }
 
-# Actions are enforced in this order. After a block the rest do not matter.
-# A rule's notice describes its first action in this order that the user can see.
+# Enforcement order; a rule's notice describes its first user-facing action in it.
 ACTION_ORDER = ("block", "restrict_tools", "mask", "queue", "notify", "alert")
-# Actions the user can see. The client is never told about a queue, alert or
-# notification (SEC-20) unless the rule's notice says so.
+# The client is never told about a queue, alert or notification (SEC-20) unless
+# the rule's notice says so.
 USER_FACING = frozenset({"block", "restrict_tools", "mask"})
 
 
 def build_from_kind[T](
     registry: Mapping[str, T], node: Mapping[str, Any], what: str
 ) -> tuple[T, dict[str, Any]]:
-    """Look up `node["kind"]` in `registry`. Returns the entry and the rest of `node`."""
+    """Return `registry[node["kind"]]` and the rest of `node`."""
     rest = dict(node)
     kind = rest.pop("kind", "")
     if kind not in registry:
@@ -392,7 +362,6 @@ def build_from_kind[T](
 
 
 def action_from_dict(node: Mapping[str, Any]) -> Action:
-    """Build an action from its JSON form, {"kind": "block", ...params}."""
     cls, params = build_from_kind(ACTION_KINDS, node, "action")
     return cls(**params)
 
@@ -415,11 +384,9 @@ class Rule:
         self.when = when if isinstance(when, Condition) else Condition(when)
         self.then = [then] if isinstance(then, Action) else list(then)
         self.mode = Mode(mode)
-        # Shown to the user when the rule blocks (a block, or a tool it took away).
-        # Overrides Block's message.
+        # Shown when the rule blocks (or takes a tool away); overrides Block's message.
         self.message = message
-        # Shown to the user whenever the rule acts, e.g. "The fraud team is alerted."
-        # Leave empty to queue or alert without telling the user.
+        # Shown whenever the rule acts. Empty: queue or alert without telling the user.
         self.notice = notice
         self.description = description
 

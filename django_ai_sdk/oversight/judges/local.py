@@ -1,33 +1,6 @@
-"""A classifier that runs an ONNX model from the Hugging Face Hub in this process.
+"""An ONNX classifier from the Hugging Face Hub, run in this process (`django-ai-sdk[local]`).
 
-No torch is needed and nothing leaves the machine. onnxruntime and tokenizers run
-the model, and huggingface-hub downloads it once. Install `django-ai-sdk[local]`.
-
-It supports two kinds of model:
-
-- **Zero-shot (NLI)**, the default. It answers yes/no, label and score lenses by
-  checking whether the text entails a statement. A yes/no checks the lens's `yes`
-  (or its question, if `yes` is left at the default). A label picks the criterion
-  the text entails most, phrased as "This text is about <criterion>." unless
-  the criterion is a full statement starting "This text". A score is how much the text entails `high`. Write `yes` as a
-  statement about the text, like "This text asks to ignore previous instructions.",
-  not as a question.
-- **A fixed classifier**, set with `positive=` (the label that means yes). A model
-  trained for one question, like a prompt-injection detector. It answers yes/no
-  lenses with that label's probability, whatever the lens asks.
-
-    LocalClassifier()                                        # English, 87 MB
-    LocalClassifier(model=MULTILINGUAL)                      # 100 languages, 340 MB
-    LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2",
-                    file="onnx/model.onnx", positive="INJECTION")
-
-It reads only the judged text (the question or the answer), with secrets masked,
-up to TEXT_CHARS and MAX_TOKENS. A longer text fails as too long. It abstains on
-blank texts, on lenses about sources or tool calls, on lenses that need grounding,
-and on "taken from". Until the model is loaded it answers unavailable and loads it
-in the background, so the next judge is asked, FAIL_MODE applies, and reflect asks
-again later. A failed load is logged and tried again after LOAD_RETRY_SECONDS.
-Call `load_local_classifier()` at startup to have it ready.
+No torch is needed and nothing leaves the machine.
 """
 
 from __future__ import annotations
@@ -50,26 +23,36 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Secret masks like "[SLACK_TOKEN]" become "(slack token)". A small model reads
-# bracketed capitals as injected markup.
+# "[SLACK_TOKEN]" becomes "(slack token)": a small model reads bracketed capitals as markup.
 _MASK = re.compile(r"\[([A-Z][A-Z0-9_]*)\]")
 
-# Small English zero-shot DeBERTa, quantized to int8. MIT license.
+# Zero-shot DeBERTa, English (int8, 87 MB) and multilingual (100 languages, 340 MB). MIT.
 ENGLISH = "MoritzLaurer/deberta-v3-xsmall-zeroshot-v1.1-all-33"
-# Multilingual (XNLI, 100 languages). MIT license.
 MULTILINGUAL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
 QUANTIZED = "onnx/model_quantized.onnx"
-# DeBERTa's token limit. TEXT_CHARS keeps Latin-script text well inside it. Denser
-# scripts like Chinese may still overflow. Then nothing is judged (TOO_LONG).
+# Denser scripts may overflow despite TEXT_CHARS; then nothing is judged (TOO_LONG).
 MAX_TOKENS = 512
-# Confidence of a score. Entailment of `high` is a rough scale, so it is never sure.
+# Entailment of `high` is a rough scale, so a score is never sure.
 SCORE_CONFIDENCE = 0.6
-# Seconds before a model that failed to load is tried again.
 LOAD_RETRY_SECONDS = 60.0
 
 
 class LocalClassifier(Classifier):
-    """Answer yes/no, label and score lenses with an ONNX model in this process."""
+    """Answer yes/no, label and score lenses with an ONNX model in this process.
+
+    Zero-shot (NLI) by default: a yes/no checks entailment of the lens's `yes` (write
+    it as a statement, "This text asks to ignore previous instructions."), a label
+    picks the criterion entailed most, a score is entailment of `high`. With
+    `positive=` it is a fixed classifier (e.g. an injection detector) answering
+    yes/no lenses with that label's probability, whatever the lens asks::
+
+        LocalClassifier(model="protectai/deberta-v3-base-prompt-injection-v2",
+                        file="onnx/model.onnx", positive="INJECTION")
+
+    Reads only the question or answer. Until the model is loaded it answers
+    unavailable and loads in the background, so FAIL_MODE applies and reflect asks
+    again; call `load_local_classifier()` at startup to have it ready.
+    """
 
     external: ClassVar[str] = ""
     timeout = 10.0
@@ -110,12 +93,10 @@ class LocalClassifier(Classifier):
         return ""
 
     async def answer(self, lens: Lens, context: Any) -> Answer | None:
-        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
-        # A lens it can't read, or nothing to read: nothing to say.
+        assert isinstance(lens, JudgeLens)
         if self.question(lens) is None or not context.text(lens.subject).strip():
             return None
-        # Unavailable while the model loads in the background, so the first turn after
-        # a deploy goes to the next judge instead of hitting the deadline.
+        # So the first turn after a deploy goes to the next judge, not the deadline.
         if loaded_runner(self.model, self.file) is None:
             return Answer(error=f"{UNAVAILABLE}: {load_in_background(self.model, self.file)}")
         return await super().answer(lens, context)
@@ -125,13 +106,11 @@ class LocalClassifier(Classifier):
         return None
 
     def question(self, lens: JudgeLens) -> dict[str, Any] | None:
-        # Only one text at a time. Lenses that need sources or a tool call go elsewhere.
         if lens.subject not in {Subject.QUESTION, Subject.ANSWER} or lens.needs_grounding:
             return None
         reads = "output" if lens.subject is Subject.ANSWER else "input"
         kind = lens.answer.kind
         if self.positive:
-            # A fixed classifier only answers yes/no lenses.
             return {"kind": "fixed", "reads": reads} if kind == "flag" else None
         if kind == "flag":
             # The default yes says nothing about the lens, so the question says more.
@@ -155,7 +134,7 @@ class LocalClassifier(Classifier):
         )
 
     def about(self, criterion: str) -> str:
-        """Phrase a label's criterion as a statement, like "This text is about leave."."""
+        """A criterion as a statement, "This text is about leave.", unless already one."""
         text = criterion.strip().rstrip(".")
         if text.lower().startswith("this text"):
             return f"{text}."
@@ -209,7 +188,7 @@ class LocalClassifier(Classifier):
 
 
 class TooLongError(Exception):
-    """A text runs past MAX_TOKENS, so the model would only read its start."""
+    """Past MAX_TOKENS: the model would read only the start."""
 
 
 class ModelRunner:
@@ -241,7 +220,6 @@ class ModelRunner:
         return self.labels.index(label.lower())
 
     def run(self, pairs: list[tuple[str, str | None]]) -> list[list[float]]:
-        """Label probabilities for each (text, statement) pair."""
         import numpy as np
 
         if all(statement is None for _, statement in pairs):
@@ -263,10 +241,7 @@ class ModelRunner:
         return (exp / exp.sum(axis=-1, keepdims=True)).tolist()
 
     def entailment(self, pairs: list[tuple[str, str]]) -> list[float]:
-        """Entailment versus contradiction for each pair, ignoring "neutral".
-
-        Matches how Hugging Face's zero-shot pipeline scores it.
-        """
+        """Entailment versus contradiction, ignoring "neutral", as HF's zero-shot pipeline."""
         index = self.label_index("entailment")
         against = next((i for i, label in enumerate(self.labels) if "contradiction" in label), None)
         if against is None:
@@ -278,11 +253,12 @@ class ModelRunner:
         return scores
 
 
-# Loaded models, keyed by (model, file), and for each failed load its error and time.
 _runners: dict[tuple[str, str], ModelRunner] = {}
+# (error, monotonic time) of each failed load.
 _load_errors: dict[tuple[str, str], tuple[str, float]] = {}
 _loading: set[tuple[str, str]] = set()
-# Held while a model loads. The short one guards the two above, so a turn never waits.
+# _load_lock is held while a model loads; the short _state_lock guards the state
+# above, so a turn never waits on a load.
 _load_lock = threading.Lock()
 _state_lock = threading.Lock()
 
@@ -309,7 +285,7 @@ def load_local_classifier(model: str = ENGLISH, file: str = QUANTIZED) -> None:
 
 
 def load_in_background(model: str, file: str) -> str:
-    """Load the model in a thread, unless it is loading or failed lately. Says which."""
+    """Load the model in a thread, unless loading or failed lately. Returns the status."""
     key = (model, file)
     with _state_lock:
         failed = _load_errors.get(key)

@@ -1,4 +1,4 @@
-"""Lenses. A lens is one typed question about a turn, declared by how it is answered.
+"""Lenses: one typed question about a turn each, answered by patterns, a check or judges.
 
     class Competitors(PatternLens):       # code finds spans, which a Mask rule can mask
         name = "competitors"
@@ -12,46 +12,9 @@
         name = "injection_question"
         judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier"), Maybe("judge")]
 
-The rules:
-
-1. A lens is a PatternLens, a CheckLens or a JudgeLens, and only answers. What to
-   do about the answer is a `Rule`, declared on the policy.
-2. An attribute lives on the class whose behaviour it changes: `patterns`,
-   `keywords` and `verify` on PatternLens; `validators` on CheckLens; `judges`,
-   `min_confidence` and what a judge reads (`question`, `guidance`,
-   `reads_question`) on JudgeLens. An answer option (`yes`, `labels`, `low`, ...)
-   belongs to the answer types that read it.
-3. `answer` picks the answer type: `Flag` (yes or no), `Choice` (one of
-   `labels`), `Score` (0 to 1) or `Entities` (which `labels` occur, and where).
-4. A PatternLens answers Entities: what it found, with spans. `L(name).is_true`
-   means it found something. What patterns find is a fact: hit and miss are sure (1).
-5. A CheckLens answers with `check(text, context)`. By default that runs its
-   `validators`, each of which raises `Violation` when the text breaks it, and
-   answers a Flag. Override `check` for another answer: it returns the value (or
-   an Answer to add a reason or confidence, or None to abstain).
-6. A JudgeLens asks its judges in order. An answer at or above `min_confidence`
-   ends the chain; otherwise the next judge is asked, and the last usable answer
-   counts. A pattern pre-filter is just the first judge: it answers the lens's
-   question, so a `PatternJudge` hit is sure (1) and a miss is not (0.5).
-7. A judge alias ending in "?" is optional: the lens skips it when the deployment
-   does not define it, and system check E007 warns about an enforced rule
-   left without a judge.
-
-Inline, pass the same attributes as keyword arguments::
-
-    JudgeLens(name="topic", answer=Choice, labels=["billing", "hr", "other"], judges=["judge"])
-
-The built-in lenses at the end of this module are ready to subclass. Pattern
-presets find spans, so a Mask rule can mask what they find::
-
-    class InputPII(PIILens):
-        name = "pii_question"
-        kinds = [*DEFAULT_PII_KINDS, "bsn"]
-
-Check presets answer structural facts about the turn in plain Python: its length,
-its language, empty retrieval and failed tools. None of them calls a model, so
-they add no cost and send no data out. `RefusalLens` is a judge lens: the shipped
-patterns first, then `Maybe("classifier")` when one is defined.
+A lens only answers; what to do about it is a `Rule` on the policy. `answer`
+picks Flag, Choice, Score or Entities; an answer option (`yes`, `labels`, `low`)
+belongs to the type that reads it. Inline, pass attributes as keyword arguments.
 """
 
 from __future__ import annotations
@@ -94,26 +57,20 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.patterns import PatternTable, Verifier
     from django_ai_sdk.oversight.types import TurnContext
 
-# The subjects each stage reads. A lens never runs at a stage that skips its subject.
 STAGE_SUBJECTS: dict[Stage, frozenset[Subject]] = {
     Stage.GATE: frozenset({Subject.QUESTION}),
     Stage.TOOL: frozenset({Subject.TOOL_CALL}),
     Stage.FINISH: frozenset({Subject.ANSWER, Subject.EXCHANGE, Subject.SOURCES}),
     Stage.REFLECT: frozenset({Subject.QUESTION, Subject.ANSWER, Subject.EXCHANGE, Subject.SOURCES}),
 }
-# Default stages per subject: the first stage that reads it.
 DEFAULT_STAGES: dict[Subject, tuple[Stage, ...]] = {
     subject: (next(stage for stage in Stage if subject in STAGE_SUBJECTS[stage]),)
     for subject in Subject
 }
 
 
-# Answer types. A lens picks one with `answer =`. The type reads its options from
-# the lens, which falls back to the type's defaults. They are never instantiated.
-
-
 class AnswerType:
-    """How a lens's answer is shaped, parsed and described to a judge."""
+    """How a lens's answer is shaped, parsed and described to a judge. Never instantiated."""
 
     kind: ClassVar[str] = ""
     # The lens attributes this type reads, with their defaults.
@@ -130,7 +87,6 @@ class AnswerType:
 
     @classmethod
     def from_detections(cls, lens: Lens, labels: list[str]) -> Any:
-        """Turn the labels patterns found into a value."""
         raise NotImplementedError
 
     @classmethod
@@ -148,7 +104,7 @@ class AnswerType:
 
 
 def _yes_no(value: Any) -> bool:
-    """Read a yes or a no: a bool, a probability of yes (0.5 and up), or a word."""
+    """A bool, a probability of yes (0.5 and up), or a word."""
     if isinstance(value, bool):
         return value
     if isinstance(value, int | float):
@@ -182,7 +138,7 @@ class Flag(AnswerType):
 class Choice(AnswerType):
     """Exactly one of `labels`. Patterns that find none give `default`, or the last label.
 
-    `criteria` optionally says what a label means; a label without one means itself.
+    `criteria` optionally says what a label means.
     """
 
     kind = "choice"
@@ -226,11 +182,7 @@ class Choice(AnswerType):
 
 
 class Score(AnswerType):
-    """A number from 0 to 1, where 1 is the most of what the question asks about.
-
-    `low` and `high` say what 0 and 1 mean; `middle` is the middle level, for a
-    classifier that scores in levels.
-    """
+    """0 to 1. `low` and `high` say what 0 and 1 mean; `middle` serves level classifiers."""
 
     kind = "score"
     options: ClassVar[dict[str, Any]] = {
@@ -241,7 +193,6 @@ class Score(AnswerType):
 
     @classmethod
     def parse(cls, lens: Lens, value: Any) -> float:
-        # Judges are told 0 to 1 (see `value_description`), so reject anything else.
         number = float(value)
         if not 0 <= number <= 1:
             raise ValueError(f"{value!r} is not a score from 0 to 1")
@@ -265,10 +216,9 @@ class Score(AnswerType):
 
 
 class Entities(AnswerType):
-    """Which of `labels` occur, and where. Empty means none; no `labels` means any.
+    """Which of `labels` occur, and where. No `labels` means any.
 
-    With `per_source`, judges that support it rate each source separately, as the
-    quality pack's "taken from" lens does.
+    With `per_source`, judges that support it rate each source separately.
     """
 
     kind = "entities"
@@ -306,15 +256,11 @@ class Entities(AnswerType):
 ANSWER_TYPES: dict[str, type[AnswerType]] = {
     cls.kind: cls for cls in (Flag, Choice, Score, Entities)
 }
-# Every answer option, whichever type reads it.
 OPTIONS = frozenset(name for cls in ANSWER_TYPES.values() for name in cls.options)
 
 
 class Violation(Exception):  # noqa: N818 - read like Django's ValidationError
-    """Raised by a check lens's validator: the text breaks the rule, so the answer is yes.
-
-    `message` becomes the answer's rationale.
-    """
+    """Raised by a check lens's validator: the answer is yes, `message` its rationale."""
 
     def __init__(self, message: str | Promise) -> None:
         super().__init__(message)
@@ -324,26 +270,22 @@ class Violation(Exception):  # noqa: N818 - read like Django's ValidationError
 class Lens:
     """Base lens. Subclass PatternLens, CheckLens or JudgeLens."""
 
-    # How the lens is answered: "pattern", "check" or "judge".
     kind: ClassVar[str] = ""
     answer: type[AnswerType] = Flag
 
-    # Unique within a policy. Answers are stored under it, so renaming starts a new series.
+    # Answers are stored under it, so renaming starts a new series.
     name: str = ""
-    # Shown for the lens. Empty means its name.
     label: str = ""
     subject: Subject = Subject.QUESTION
-    # Empty means the default for the subject (see DEFAULT_STAGES).
+    # Empty means the first stage that reads the subject.
     stages: tuple[Stage, ...] = ()
-    # Fraction of turns the reflect stage judges, 0 to 1. Inline stages always run.
+    # Fraction of turns the reflect stage judges. Inline stages always run.
     sample: float = 1.0
     enabled: bool = True
-    # Only ask when there are sources or tool results to judge against, from this
-    # turn or an earlier one. Groundedness means nothing without them.
+    # Only ask when there are sources or tool results (this turn or earlier) to judge against.
     needs_grounding: bool = False
 
-    # Answer options. Each is set only when the answer type reads it (see
-    # `AnswerType.options`), from the lens or else the type's default.
+    # Answer options, set only when the answer type reads them.
     yes: str
     no: str
     labels: list[str]
@@ -373,7 +315,6 @@ class Lens:
             )
         self.subject = Subject(self.subject)
         self.stages = tuple(Stage(s) for s in self.stages) or DEFAULT_STAGES[self.subject]
-        # An answer option the lens leaves out takes its answer type's default.
         for option, default in self.answer.options.items():
             if not hasattr(self, option):
                 setattr(self, option, copy.copy(default))
@@ -386,7 +327,6 @@ class Lens:
         return self.label or self.name.replace("_", " ")
 
     def applies(self, context: TurnContext) -> bool:
-        """Whether this turn has what the lens judges."""
         if self.subject is Subject.SOURCES:
             return bool(context.grounding())
         if self.needs_grounding:
@@ -394,7 +334,6 @@ class Lens:
         return True
 
     def validate(self) -> None:
-        """Raise ImproperlyConfigured when the lens cannot be asked as declared."""
         if not self.name:
             raise ImproperlyConfigured(f"{type(self).__name__} lens without a `name`.")
         if not (isinstance(self.answer, type) and issubclass(self.answer, AnswerType)):
@@ -409,18 +348,16 @@ class Lens:
         self.answer.validate(self)
 
     def steps(self) -> list[Any]:
-        """What answers the lens, in order: judges, or specs for `judges.base.ask_judge`."""
+        """What answers the lens, in order: judges, or specs for `ask_judge`."""
         raise NotImplementedError
 
     def is_final(self, answer: Answer) -> bool:
-        """Whether `answer` ends the lens's chain of steps."""
         return answer.ok
 
     def reports_kinds(self, answer: Answer) -> bool:
-        """Whether `answer` names kinds patterns found, which the record may keep as they are.
+        """Whether `answer` names pattern kinds the record may keep as is.
 
-        Other names may quote the turn, so the record keeps only declared labels. A
-        person's answer on the lens names what they typed, not a kind.
+        Other names may quote the turn, so the record keeps only declared labels.
         """
         return any(
             isinstance(step, PatternJudge) and step.display_name == answer.answerer
@@ -428,7 +365,6 @@ class Lens:
         )
 
     def describe(self) -> dict[str, Any]:
-        """JSON-safe summary of the lens, for checks and logs."""
         return {
             "name": self.name,
             "kind": self.kind,
@@ -443,12 +379,11 @@ class Lens:
 
 
 class PatternLens(Lens):
-    """Answered by regexes and keywords. It answers Entities, with spans a Mask can mask.
+    """Answers Entities by regexes and keywords, with spans a Mask can mask. Always sure.
 
-    `patterns` maps a label to its regexes; a plain list labels every hit with the
-    lens's name. `keywords` maps a label to whole words. `verify` maps a label to a
-    check its matches must pass, like a checksum. `flags` applies to patterns and
-    keywords alike. Hit or miss, the answer is sure.
+    `patterns` maps a label to regexes (a plain list labels hits with the lens's
+    name), `keywords` a label to whole words, `verify` a label to a check such as
+    a checksum.
     """
 
     kind = "pattern"
@@ -469,7 +404,6 @@ class PatternLens(Lens):
         )
 
     def pattern_table(self) -> PatternTable:
-        """The patterns to compile. A preset adds its own here."""
         return self.patterns
 
     def validate(self) -> None:
@@ -489,7 +423,6 @@ class PatternLens(Lens):
         return [self.finder]
 
 
-# Validators a check lens may name, by name.
 _validators: dict[str, Callable[..., Any]] = {}
 
 
@@ -509,11 +442,7 @@ def register_validator(name: str) -> Callable[[Callable[..., Any]], Callable[...
 
 
 def get_validator(validator: Callable[..., Any] | str) -> Callable[..., Any]:
-    """The validator itself, or the one registered under a name.
-
-    Raises ImproperlyConfigured for an unknown name. A name is never imported as a
-    path, so JSON cannot run code a developer did not register.
-    """
+    """Never imports a name as a path, so JSON cannot run code a developer did not register."""
     if callable(validator):
         return validator
     if validator not in _validators:
@@ -524,19 +453,15 @@ def get_validator(validator: Callable[..., Any] | str) -> Callable[..., Any]:
 
 
 def get_validators() -> dict[str, Callable[..., Any]]:
-    """Every validator registered in code."""
     return dict(_validators)
 
 
 class CheckLens(Lens):
     """Answered by plain Python, in `check(text, context)`.
 
-    By default `check` runs `validators` and answers a Flag: yes when any raises
-    `Violation`, with their messages as the reason. A validator is `fn(text)` or
-    `fn(text, context)`, or the name of one registered with `register_validator`.
-    Override `check` for another answer, as `ToolErrorsLens` does. It returns the
-    value, an Answer to give a reason or confidence too, or None to abstain. A
-    sync `check` runs in a thread, so a slow one cannot block the event loop.
+    By default `check` runs `validators` (`fn(text)`, `fn(text, context)` or a
+    registered name) and answers yes when any raises `Violation`. Override `check`
+    to return a value, an Answer, or None to abstain. A sync `check` runs in a thread.
     """
 
     kind = "check"
@@ -573,7 +498,7 @@ class CheckLens(Lens):
 
 
 class _Checker(Judge):
-    """Asks a check lens's `check`, so it gets the same timeout and error handling as a judge."""
+    """Runs `check` as a judge, for the same timeout and error handling."""
 
     name = "check"
 
@@ -596,7 +521,6 @@ class _Checker(Judge):
 
 @cache
 def _takes_view(validator: Callable[..., Any]) -> bool:
-    """Whether a validator takes the turn as well as the text."""
     try:
         params = inspect.signature(validator).parameters.values()
     except (TypeError, ValueError):
@@ -606,10 +530,12 @@ def _takes_view(validator: Callable[..., Any]) -> bool:
 
 
 class JudgeLens(Lens):
-    """Answered by judges, cheapest first (see rule 6 in the module docstring).
+    """Answered by judges, cheapest first.
 
-    `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"] (wrap one
-    in `Maybe` to skip it when undefined), or {"class": ..., **kwargs} configs.
+    An answer at or above `min_confidence` ends the chain, else the last usable
+    answer counts. `judges` are Judge instances, aliases from
+    AI_SDK_OVERSIGHT["JUDGES"] (`Maybe` skips one when undefined), or
+    {"class": ..., **kwargs} configs.
     """
 
     kind = "judge"
@@ -619,15 +545,10 @@ class JudgeLens(Lens):
     question: str = ""
     # Extra instructions for a judge, such as scale anchors and edge cases.
     guidance: str = ""
-    # Judge a tool call together with the question that led to it. Turn off for a
-    # lens that should judge only the call's own content.
+    # Judge a tool call together with the question that led to it.
     reads_question: bool = True
 
     def usable_judges(self) -> list[Any]:
-        """The judges to ask, minus optional aliases that are not defined.
-
-        Packs mark their model judges optional so they still work without a model.
-        """
         return [
             spec.alias if isinstance(spec, Maybe) else spec
             for spec in self.judges
@@ -650,7 +571,6 @@ class JudgeLens(Lens):
         return answer.ok and answer.confidence >= self.min_confidence
 
     def answer_model(self) -> type[BaseModel]:
-        """The structured output a judge fills in."""
         return create_model(
             f"{type(self).__name__}Answer",
             rationale=(str, Field(description="One or two sentences: why.")),
@@ -673,12 +593,9 @@ LENS_KINDS: dict[str, type[Lens]] = {cls.kind: cls for cls in (PatternLens, Chec
 
 
 def lens_from_dict(node: Mapping[str, Any]) -> Lens:
-    """Build a lens from its JSON form, as settings and authored policies use.
+    """Build a lens from JSON: {"kind" | "preset", "answer", ...attributes}.
 
-    {"kind": "pattern" | "check" | "judge", "answer": "flag" | "score" | "choice" |
-    "entities", ...attributes}. "preset" names a built-in lens instead (see
-    `PRESETS`). A check lens names its validators, which must be
-    registered: JSON never names code to run.
+    Check lens validators must be registered: JSON never names code to run.
     """
     node = dict(node)
     preset = node.pop("preset", "")
@@ -697,21 +614,18 @@ def lens_from_dict(node: Mapping[str, Any]) -> Lens:
     return lens
 
 
-# Built-in lenses: subclass one, name it, and it is ready to use. `PRESETS` names
-# each one for the JSON form ({"kind": "pattern", "preset": "pii"}).
+# Built-in lenses, named in `PRESETS` for the JSON form. None of the check presets
+# calls a model, so they cost nothing and send no data out.
 
-# Don't guess the language of texts shorter than this many words.
 MIN_LANGUAGE_WORDS = 3
 
 
 class PIILens(PatternLens):
-    """Personal data by kind (`patterns.PII_PATTERNS`), checked by checksum where it can be.
+    """Personal data by kind, checksum-verified where possible.
 
-    `kinds` defaults to the kinds that mean the same in every country
-    (DEFAULT_PII_KINDS): email, iban (mod-97 checked), credit_card (Luhn checked),
-    phone (international format) and ip_address. Name country kinds to add them
-    (COUNTRY_PII_KINDS): bsn (11-check), phone_nl and postcode_nl. Your own
-    `patterns` come after the kinds, without a checksum.
+    `kinds` defaults to the country-neutral email, iban (mod-97), credit_card (Luhn),
+    phone (international) and ip_address; name country kinds to add them: bsn
+    (11-check), phone_nl, postcode_nl. Own `patterns` come after, unverified.
     """
 
     name = "pii"
@@ -720,7 +634,6 @@ class PIILens(PatternLens):
     flags = 0
 
     def pattern_table(self) -> PatternTable:
-        # No kinds means the default kinds.
         kinds = self.kinds or DEFAULT_PII_KINDS
         unknown = sorted(set(kinds) - set(PII_PATTERNS))
         if unknown:
@@ -732,7 +645,7 @@ class PIILens(PatternLens):
 
 
 class SecretsLens(PatternLens):
-    """API keys, tokens and private keys (`patterns.SECRET_PATTERNS`), as in a pasted message."""
+    """API keys, tokens and private keys."""
 
     name = "secrets"
     patterns = SECRET_PATTERNS
@@ -753,8 +666,6 @@ class RefusalLens(JudgeLens):
 
 
 class LengthLens(CheckLens):
-    """Whether the subject is longer than `max_chars`."""
-
     name = "length"
     max_chars: int = 0
 
@@ -767,7 +678,6 @@ class LengthLens(CheckLens):
             raise ImproperlyConfigured(f"Length lens {self.name!r} needs `max_chars` of 1 or more.")
 
 
-# The most frequent words per language, enough to tell them apart.
 _STOPWORDS: dict[str, frozenset[str]] = {
     "en": frozenset("the and is are was to of in that it for you with on this have be not".split()),
     "nl": frozenset("de het een en is van dat niet je ik op te zijn met voor maar wat".split()),
@@ -790,10 +700,7 @@ def guess_language(text: str) -> tuple[str, float]:
 
 
 class LanguageLens(CheckLens):
-    """Whether the answer is in another language than the question. Abstains when unsure.
-
-    For the subject's language as a Choice, write a CheckLens over `guess_language`.
-    """
+    """Whether the answer is in another language than the question. Abstains when unsure."""
 
     name = "language"
     subject = Subject.EXCHANGE
@@ -811,8 +718,6 @@ class LanguageLens(CheckLens):
 
 
 class EmptyRetrievalLens(CheckLens):
-    """Whether the turn called a tool but found no sources."""
-
     name = "empty_retrieval"
     label = "Nothing retrieved"
     subject = Subject.SOURCES
@@ -827,7 +732,7 @@ class EmptyRetrievalLens(CheckLens):
 
 
 class ToolErrorsLens(CheckLens):
-    """The share of the turn's tool calls that failed. `L("tool_errors") > 0`: any did."""
+    """The share of the turn's tool calls that failed."""
 
     name = "tool_errors"
     label = "Tool failures"
