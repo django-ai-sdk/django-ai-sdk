@@ -17,7 +17,7 @@ Everything an app uses imports from `django_ai_sdk.oversight`; its submodules ar
 | Policies | `Policy`, `pick`, `register_policy`, `unregister_policy`, `add_policy_loader`, `invalidate_policy`, `build_policy` (a policy resolved with its parents and settings, or a draft class with `policy_class=`), `ResolvedPolicy`, `Capture`, `Mode`, `Severity`, `Stage`, `Subject`, `Outcome` |
 | Lenses | `Lens`, `JudgeLens`, `PatternLens`, `CheckLens`, `PIILens`, `SecretsLens`, `RefusalLens`, `LengthLens`, `LanguageLens`, `EmptyRetrievalLens`, `ToolErrorsLens`, `Flag`, `Choice`, `Score`, `Entities`, `Violation`, `register_validator`, `Answer`, `TextSpan` (a span of an `Entities` answer), `TurnContext` |
 | Rules | `Rule`, `L`, `Block`, `Mask`, `RestrictTools`, `Queue`, `Alert`, `Notify` |
-| Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
+| Judges | `Judge`, `Classifier`, `certainty`, `PatternJudge`, `LLMJudge`, `LocalClassifier`, `load_local_classifier`, `TypeSafe`, `Optional` (an alias a lens skips while `JUDGES` does not define it), `ask_judge` (asks one judge with its timeout), `build_judge` (builds a judge from an alias or a spec) |
 | Packs | `SecurityPack` (`PromptInjection`, `Exfiltration`), `SafetyPack` (`SelfHarm`, `HarmInput`, `HarmOutput`), `QualityPack` (`ContextRelevance`, `Groundedness`, `TakenFrom`, `AnswerRelevance`, `Helpfulness`), `DefaultPolicy`, `INJECTION_PATTERNS`, `EXFILTRATION_PATTERNS` |
 | Patterns | `PII_PATTERNS`, `SECRET_PATTERNS`, `DEFAULT_PII_KINDS`, `mask`, `mask_all`, `mask_secrets` |
 | Runs | `run_with_oversight`, `run_with_oversight_sync`, `TurnRequest`, `needs_own_turn`, `needs_own_turn_sync`, `apply_oversight` (a copy of an Agent with the hooks), `build_oversight_hooks`, `merge_oversight_hooks` |
@@ -106,7 +106,7 @@ Each kind adds its own:
 | --- | --- | --- |
 | `PatternLens` | `Entities` only, with spans | `patterns` (label to regexes; a plain list labels hits with the lens's name), `keywords` (label to whole words), `verify` (label to a check a match must pass, such as a checksum), `flags` (`re.IGNORECASE`, for patterns and keywords). Each stretch of text gets one label, the first pattern's. What patterns find is a fact: hit and miss both have confidence `1`. |
 | `CheckLens` | `Flag` by default | `validators`: functions `fn(text)` or `fn(text, view)`, or names registered with `register_validator`; each raises `Violation(message)` to say yes, and the messages are the answer's reason. `check(text, view)` runs them; override it to answer another type, returning the value, an `Answer` (with a reason or confidence) or `None` to abstain. A sync `check` runs in a thread. `timeout` (`30` s). |
-| `JudgeLens` | `Flag` by default | `judges`: tried in order (instances, aliases, optional aliases such as `"judge?"`, or `{"class": ..., **kwargs}`); `min_confidence` (`0.75`: an answer below it asks the next judge); `question` (asked verbatim); `guidance` (scale anchors, edge cases); `reads_question` (`True`: a tool-call lens also reads the question that led to the call). |
+| `JudgeLens` | `Flag` by default | `judges`: tried in order (instances, aliases, optional aliases such as `Optional("judge")`, or `{"class": ..., **kwargs}`); `min_confidence` (`0.75`: an answer below it asks the next judge); `question` (asked verbatim); `guidance` (scale anchors, edge cases); `reads_question` (`True`: a tool-call lens also reads the question that led to the call). |
 
 | Answer | Value | Options, on the lens |
 | --- | --- | --- |
@@ -127,7 +127,7 @@ Each has a default `name`; subclass it to name your own.
 | --- | --- | --- |
 | `PIILens` | pattern | Personal data. `kinds` defaults to `patterns.DEFAULT_PII_KINDS`: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format), `ip_address`. Country kinds (`COUNTRY_PII_KINDS`), only when named: `bsn` (11-check), `phone_nl`, `postcode_nl`. `patterns` adds your own, unchecked. |
 | `SecretsLens` | pattern | `api_key`, `stripe_key`, `google_api_key`, `github_token`, `aws_key`, `slack_token`, `jwt`, `private_key`, `password_assignment` (`patterns.SECRET_PATTERNS`). |
-| `RefusalLens` | judge | Answers that decline: `PatternJudge(REFUSAL_PATTERNS)` (English and Dutch), then `classifier?`. |
+| `RefusalLens` | judge | Answers that decline: `PatternJudge(REFUSAL_PATTERNS)` (English and Dutch), then `Optional("classifier")`. |
 | `LengthLens` | check | A `Flag`: the subject is longer than `max_chars`. |
 | `LanguageLens` | check | A `Flag`: answered in another language than asked. Abstains when unsure. For the subject's language as a `Choice`, write a check lens over `lenses.guess_language`. |
 | `EmptyRetrievalLens`, `ToolErrorsLens` | check | A tool call that found no sources (a `Flag`); the share of tool calls that failed (a `Score`: `L("tool_errors") > 0` when any did). |
@@ -216,22 +216,22 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 
 | Pack | Lens | Kind, answer, subject | Stage | Answered by |
 | --- | --- | --- | --- | --- |
-| `security` | `prompt_injection` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `classifier?` |
+| `security` | `prompt_injection` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `Optional("classifier")` |
 | | `pii_input` | pattern, Entities, input | gate | `PIILens` |
 | | `secrets_input` | pattern, Entities, input | gate | `SecretsLens` |
 | | `secrets_tool` | pattern, Entities, tool call | tool | `SecretsLens` |
 | | `pii_tool` | pattern, Entities, tool call | tool | `PIILens` |
 | | `pii_output` | pattern, Entities, output | finish | `PIILens` |
 | | `exfiltration` | pattern, Entities, output | finish | `EXFILTRATION_PATTERNS`: Markdown images, links and reference links, and HTML images, that carry data in their URL's query |
-| `safety` | `self_harm` | judge, Flag, input | gate | `classifier?` |
-| | `harm_input` | judge, Score, input | gate | `classifier?` |
-| | `harm_output` | judge, Score, output | finish | `classifier?`, `judge?` |
-| `quality` | `context_relevance` | judge, Score, sources | reflect | `classifier?` |
-| | `groundedness` | judge, Score, output, needs grounding | reflect | `classifier?` |
-| | `taken_from` | judge, Entities, output, `per_source` | reflect | `classifier?` |
-| | `answer_relevance` | judge, Score, exchange | reflect | `classifier?` |
-| | `helpfulness` | judge, Score, exchange | reflect | `classifier?`, `judge?` |
-| | `refusal` | judge, Flag, output | finish | `PatternJudge(REFUSAL_PATTERNS)` (a hit is sure, a miss asks on), `classifier?` |
+| `safety` | `self_harm` | judge, Flag, input | gate | `Optional("classifier")` |
+| | `harm_input` | judge, Score, input | gate | `Optional("classifier")` |
+| | `harm_output` | judge, Score, output | finish | `Optional("classifier")`, `Optional("judge")` |
+| `quality` | `context_relevance` | judge, Score, sources | reflect | `Optional("classifier")` |
+| | `groundedness` | judge, Score, output, needs grounding | reflect | `Optional("classifier")` |
+| | `taken_from` | judge, Entities, output, `per_source` | reflect | `Optional("classifier")` |
+| | `answer_relevance` | judge, Score, exchange | reflect | `Optional("classifier")` |
+| | `helpfulness` | judge, Score, exchange | reflect | `Optional("classifier")`, `Optional("judge")` |
+| | `refusal` | judge, Flag, output | finish | `PatternJudge(REFUSAL_PATTERNS)` (a hit is sure, a miss asks on), `Optional("classifier")` |
 | | `language` | check, Flag, exchange | finish | `LanguageLens` |
 | | `empty_retrieval` | check, Flag, sources | finish | `EmptyRetrievalLens` |
 | | `tool_errors` | check, Score, exchange | finish | `ToolErrorsLens` |
@@ -402,7 +402,7 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | --- | --- |
 | `ai_sdk.oversight.E001` | A policy was not registered; the message says why (a lens without a name, a pattern lens without patterns, a check lens without validators, a judge lens without judges, an attribute its kind or answer type does not read, a duplicate lens or rule, a rule without `then`, a `Mask` over a lens that is not `Entities` or does not read the question or the answer, a `Choice` whose `default` is not a label, a lens at a stage that never reads its subject (the question at `tool` or `finish`, the answer at `gate` or `tool`, a tool call anywhere but `tool`), a `sample` or `min_confidence` outside 0 to 1). |
 | `ai_sdk.oversight.E002` | A policy does not resolve (an unknown parent, a cycle, a rule or `Mask` naming a lens the policy does not have, an inherited lens a rule cannot use). |
-| `ai_sdk.oversight.E004` | A judge lens names an alias `JUDGES` does not define (optional `?` aliases excepted). |
+| `ai_sdk.oversight.E004` | A judge lens names an alias `JUDGES` does not define (`Optional` aliases excepted). |
 | `ai_sdk.oversight.E005` | An alias cannot be built. |
 | `ai_sdk.oversight.E006` | `DEFAULT_POLICY` names an unknown policy. |
 | `ai_sdk.oversight.E007` | An enforced rule reads a lens no judge here can answer. A warning, not an error, when the lens's judges are all optional aliases and none is defined: the rule never acts. |

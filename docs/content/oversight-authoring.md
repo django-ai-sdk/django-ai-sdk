@@ -13,7 +13,7 @@ The line between the two is fixed: **a lens or rule declared in code changes onl
 What a definition holds:
 
 - **What it extends**: code's policies and the packs (`security`, `safety`, `quality`). Never another authored policy: copy its rules, or have a developer move the base into code.
-- **Lenses of its own**: a judge lens answered by aliases the deployment set up (`"judge"`, `"classifier?"`), a pattern lens of keywords, a check lens of validators the developers registered, or a built-in lens (`pii`, `secrets`, `refusal`, `length`, `language`).
+- **Lenses of its own**: a judge lens answered by aliases the deployment set up (`"judge"`, or `{"alias": "classifier", "optional": true}` for one the lens skips while it is undefined), a pattern lens of keywords, a check lens of validators the developers registered, or a built-in lens (`pii`, `secrets`, `refusal`, `length`, `language`).
 - **Rules of its own**: a condition over its lenses (inherited ones included) and actions: `block`, `mask`, `restrict_tools`, `queue`, `notify`, `alert`.
 - **Options**: `capture`, `stream_mode`, `fail_mode`, `retention`.
 
@@ -63,7 +63,7 @@ The catalog lists what a definition may use: lens kinds, answer types, actions, 
       "name": "refund",
       "question": "Does the person ask for a refund?",
       "stages": ["gate"],
-      "judges": [{"class": "PatternJudge", "keywords": ["refund", "money back"]}, "judge?"]
+      "judges": [{"class": "PatternJudge", "keywords": ["refund", "money back"]}, {"alias": "judge", "optional": true}]
     }
   ],
   "rules": [

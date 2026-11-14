@@ -2,8 +2,8 @@
 
 `ask_judge` asks one judge with a timeout, so a slow or broken one becomes an error
 answer instead of an exception. Lenses name judges by alias, and
-AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. A trailing "?" makes the
-alias optional: a lens skips it when the deployment did not define it.
+AI_SDK_OVERSIGHT["JUDGES"] says what each alias is. `Optional("classifier")` makes
+an alias optional: a lens skips it when the deployment did not define it.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -178,14 +179,28 @@ async def ask_judge(
     return answer
 
 
-def is_optional(spec: Any) -> bool:
-    """Whether `spec` is an optional alias like "judge?"."""
-    return isinstance(spec, str) and spec.endswith("?")
+@dataclass(frozen=True)
+class Optional:
+    """A judge alias a lens asks only when AI_SDK_OVERSIGHT["JUDGES"] defines it.
+
+        judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]
+
+    The JSON form of a lens writes one as {"alias": "classifier", "optional": true}.
+    """
+
+    alias: str
 
 
-def alias_of(spec: Any) -> str:
-    """The alias a judge spec names, without the optional "?"."""
-    return str(spec).removesuffix("?")
+def judge_from_json(spec: Any) -> Any:
+    """A judge spec from a lens's JSON form: {"alias": ..., "optional": true} is Optional."""
+    if not (isinstance(spec, dict) and "alias" in spec):
+        return spec
+    alias = spec["alias"]
+    if set(spec) != {"alias", "optional"} or spec["optional"] is not True or not alias:
+        raise ImproperlyConfigured(
+            f'Judge {spec!r}: an optional alias is {{"alias": "name", "optional": true}}'
+        )
+    return Optional(str(alias))
 
 
 def judge_label(spec: Any) -> str:
@@ -267,7 +282,7 @@ def build_judge(spec: Judge | str | dict[str, Any]) -> Judge:
     if isinstance(spec, Judge):
         return spec
     if isinstance(spec, str):
-        return _build_alias(alias_of(spec), alias_table())
+        return _build_alias(spec, alias_table())
     if isinstance(spec, dict):
         return _from_config(spec)
     raise ImproperlyConfigured(f"{spec!r} is not a judge, an alias or a config")

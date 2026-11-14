@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from django.utils.translation import gettext_lazy as _
 
+from django_ai_sdk.oversight.judges.base import Optional
 from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.lenses import JudgeLens, PatternLens, PIILens, SecretsLens
 from django_ai_sdk.oversight.policy import Policy
@@ -91,7 +92,7 @@ class PromptInjection(JudgeLens):
         "instructions into pasted text."
     )
     no = "Ordinary requests, including questions about prompt injection itself."
-    judges = [PatternJudge(INJECTION_PATTERNS), "classifier?"]  # noqa: RUF012
+    judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]  # noqa: RUF012
 
 
 class Exfiltration(PatternLens):

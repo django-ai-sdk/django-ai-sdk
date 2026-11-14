@@ -78,7 +78,11 @@ class TestSaving:
                 raise Violation("No account numbers here.")
 
         lenses = [
-            judged({"class": "PatternJudge", "keywords": ["refund"]}),
+            judged(
+                {"class": "PatternJudge", "keywords": ["refund"]},
+                # Not set up here, so the lens skips it.
+                {"alias": "judge", "optional": True},
+            ),
             {
                 "kind": "check",
                 "name": "iban",
@@ -215,6 +219,8 @@ class TestWhatADefinitionMayNotDo:
 
     async def test_name_an_alias_nobody_set_up(self):
         assert "no judge alias" in await self.refused(lenses=[judged("no-such-judge")])
+        malformed = judged({"alias": "no-such-judge", "optional": False})
+        assert "optional alias" in await self.refused(lenses=[malformed])
 
     async def test_name_a_validator_nobody_registered(self):
         lens = {"kind": "check", "name": "refund", "validators": ["no_such_validator"]}

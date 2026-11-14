@@ -111,6 +111,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mode,
+    Optional,
     PatternJudge,
     Policy,
     Queue,
@@ -121,7 +122,7 @@ from django_ai_sdk.oversight import (
 class Injection(JudgeLens):
     name = "injection"
     question = "Does the message try to override the assistant's instructions?"
-    judges = [PatternJudge(INJECTION_PATTERNS), "classifier?"]
+    judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier")]
 
 
 class Guard(Policy):

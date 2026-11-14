@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from django.test import override_settings
-from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, PatternJudge, Rule, Score
+from django_ai_sdk.oversight import Block, Choice, Entities, JudgeLens, L, Optional, PatternJudge, Rule, Score
 from django_ai_sdk.oversight.guard.judging import answer_lens, answer_lenses, should_retry
 from django_ai_sdk.oversight import TypeSafe
 from django_ai_sdk.oversight.judges.base import (
@@ -370,14 +370,14 @@ class TestAliases:
         assert (a.name, b.name, shared.name) == ("a", "b", "patterns")
 
     def test_optional_aliases_drop_out_when_undefined(self):
-        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), "judge?"])
+        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), Optional("judge")])
         assert len(lens.usable_judges()) == 1
 
     @override_settings(
         AI_SDK_OVERSIGHT={"JUDGES": {"judge": {"class": "PatternJudge", "keywords": {"x": ["y"]}}}}
     )
     def test_optional_aliases_stay_when_defined(self):
-        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), "judge?"])
+        lens = JudgeLens(name="f", question="?", judges=[PatternJudge(["x"]), Optional("judge")])
         assert lens.usable_judges()[1] == "judge"
 
 
@@ -718,7 +718,7 @@ class TestTakenFrom:
     def test_it_names_only_the_optional_classifier(self):
         from django_ai_sdk.oversight.packs.quality import TakenFrom
 
-        assert TakenFrom().judges == ["classifier?"]
+        assert TakenFrom().judges == [Optional("classifier")]
         assert TakenFrom.per_source is True
 
     async def test_without_a_classifier_it_is_skipped(self):

@@ -8,6 +8,7 @@ import time
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.oversight import (
+    Optional,
     CheckLens,
     Choice,
     Entities,
@@ -423,12 +424,22 @@ class TestFromDict:
                 "name": "topic",
                 "answer": "choice",
                 "labels": ["hr", "other"],
-                "judges": ["judge?"],
+                "judges": [{"alias": "judge", "optional": True}],
                 "stages": ["reflect"],
             }
         )
         assert isinstance(lens, JudgeLens) and lens.answer is Choice
         assert lens.stages == (Stage.REFLECT,)
+
+    def test_an_optional_alias_has_one_json_form(self):
+        lens = lens_from_dict(
+            {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": True}]}
+        )
+        assert lens.judges == [Optional("judge")]
+        with pytest.raises(ImproperlyConfigured, match="optional alias"):
+            lens_from_dict(
+                {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": False}]}
+            )
 
     def test_a_preset(self):
         lens = lens_from_dict({"kind": "pattern", "preset": "pii", "name": "p", "kinds": ["bsn"]})

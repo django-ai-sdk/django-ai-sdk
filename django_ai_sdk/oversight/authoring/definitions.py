@@ -29,7 +29,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.oversight.authoring.apps import setting
 from django_ai_sdk.oversight.checks import policy_errors
-from django_ai_sdk.oversight.judges.base import alias_defined, alias_of, is_optional
+from django_ai_sdk.oversight.judges.base import alias_defined
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
 from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, policy_lenses, validate_policy
 from django_ai_sdk.oversight.registry import (
@@ -86,12 +86,17 @@ def is_authored(cls: type[Policy] | None) -> bool:
 
 
 def _judge_spec(spec: Any) -> Any:
-    """Return `spec` if a lens may use it: a known alias, or PatternJudge of keywords."""
+    """Return `spec` if a lens may use it: a known alias, an optional one, or keywords.
+
+    An optional alias, {"alias": ..., "optional": true}, may be undefined: the lens
+    skips it. `lens_from_dict` checks its form.
+    """
     if isinstance(spec, str):
-        # A trailing "?" marks the alias optional. The lens skips it when it is not set up.
-        if not alias_of(spec) or (not is_optional(spec) and not alias_defined(spec)):
-            raise ValueError(f"no judge alias {alias_of(spec)!r} in AI_SDK_OVERSIGHT['JUDGES']")
+        if not alias_defined(spec):
+            raise ValueError(f"no judge alias {spec!r} in AI_SDK_OVERSIGHT['JUDGES']")
         return spec
+    if isinstance(spec, dict) and "alias" in spec:
+        return dict(spec)
     if isinstance(spec, dict) and spec.get("class") == "PatternJudge" and "keywords" in INLINE_ARGS:
         extra = sorted(set(spec) - {"class", "name"} - INLINE_ARGS["keywords"])
         if extra:

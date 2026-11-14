@@ -10,7 +10,7 @@
 
     class PromptInjection(JudgeLens):     # judges, cheapest first
         name = "prompt_injection"
-        judges = [PatternJudge(INJECTION_PATTERNS), "classifier?", "judge?"]
+        judges = [PatternJudge(INJECTION_PATTERNS), Optional("classifier"), Optional("judge")]
 
 The rules:
 
@@ -51,7 +51,7 @@ presets find spans, so a Mask rule can mask what they find::
 Check presets answer structural facts about the turn in plain Python: its length,
 its language, empty retrieval and failed tools. None of them calls a model, so
 they add no cost and send no data out. `RefusalLens` is a judge lens: the shipped
-patterns first, then `classifier?` when one is defined.
+patterns first, then `Optional("classifier")` when one is defined.
 """
 
 from __future__ import annotations
@@ -70,9 +70,9 @@ from pydantic import BaseModel, Field, create_model
 from django_ai_sdk.oversight.judges.base import (
     DEFAULT_TIMEOUT,
     Judge,
+    Optional,
     alias_defined,
-    alias_of,
-    is_optional,
+    judge_from_json,
 )
 from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.patterns import (
@@ -608,12 +608,12 @@ def _takes_view(validator: Callable[..., Any]) -> bool:
 class JudgeLens(Lens):
     """Answered by judges, cheapest first (see rule 6 in the module docstring).
 
-    `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"] (a
-    trailing "?" makes one optional), or {"class": ..., **kwargs} configs.
+    `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"] (wrap one
+    in `Optional` to skip it when undefined), or {"class": ..., **kwargs} configs.
     """
 
     kind = "judge"
-    judges: list[Judge | str | dict[str, Any]] = []  # noqa: RUF012
+    judges: list[Judge | str | Optional | dict[str, Any]] = []  # noqa: RUF012
     min_confidence: float = 0.75
     # Sent verbatim to a judge. Keep it to one question.
     question: str = ""
@@ -629,9 +629,9 @@ class JudgeLens(Lens):
         Packs mark their model judges optional so they still work without a model.
         """
         return [
-            alias_of(spec) if is_optional(spec) else spec
+            spec.alias if isinstance(spec, Optional) else spec
             for spec in self.judges
-            if not is_optional(spec) or alias_defined(alias_of(spec))
+            if not isinstance(spec, Optional) or alias_defined(spec.alias)
         ]
 
     def validate(self) -> None:
@@ -690,6 +690,8 @@ def lens_from_dict(node: Mapping[str, Any]) -> Lens:
             raise ImproperlyConfigured(f"Preset {preset!r} is a {cls.kind} lens, not a {kind} one")
     else:
         cls, node = build_from_kind(LENS_KINDS, node, "lens kind")
+    if isinstance(node.get("judges"), list):
+        node["judges"] = [judge_from_json(spec) for spec in node["judges"]]
     lens = cls(**node)
     lens.validate()
     return lens
@@ -747,7 +749,7 @@ class RefusalLens(JudgeLens):
     no = "Answers, even partly."
     subject = Subject.OUTPUT
     # The shipped patterns answer a plain refusal, so this works without a classifier.
-    judges = [PatternJudge(REFUSAL_PATTERNS), "classifier?"]  # noqa: RUF012
+    judges = [PatternJudge(REFUSAL_PATTERNS), Optional("classifier")]  # noqa: RUF012
 
 
 class LengthLens(CheckLens):
