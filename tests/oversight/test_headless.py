@@ -215,7 +215,7 @@ class TestHeadless:
         down = AsyncMock(side_effect=ConnectionError("down"))
         with (
             patch(
-                "django_ai_sdk.oversight.judges.typesafe._client",
+                "django_ai_sdk.oversight.judges.typesafe.api_client",
                 lambda key: SimpleNamespace(system_one=down),
             ),
             patch.object(TypeSafe, "missing", lambda self: ""),
@@ -237,7 +237,7 @@ class TestHeadless:
         )
         with (
             patch(
-                "django_ai_sdk.oversight.judges.typesafe._client",
+                "django_ai_sdk.oversight.judges.typesafe.api_client",
                 lambda key: SimpleNamespace(system_one=back),
             ),
             patch.object(TypeSafe, "missing", lambda self: ""),

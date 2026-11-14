@@ -94,10 +94,10 @@ async def dry_run(
         input=input,
     )
     guard.recording = False
-    return await _run(guard, resolved, output=output, tool_calls=tool_calls or [])
+    return await _run_stages(guard, resolved, output=output, tool_calls=tool_calls or [])
 
 
-async def _run(
+async def _run_stages(
     guard: TurnGuard,
     resolved: ResolvedPolicy,
     *,
@@ -106,7 +106,7 @@ async def _run(
 ) -> DryRunResult:
     result = DryRunResult(policy=resolved.name)
 
-    def stage_out(stage: Stage, before: int, matched_before: int, **extra: Any) -> None:
+    def add_stage(stage: Stage, before: int, matched_before: int, **extra: Any) -> None:
         result.stages.append(
             StageResult(
                 stage=stage,
@@ -117,7 +117,7 @@ async def _run(
         )
 
     gate = await guard.gate()
-    stage_out(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.text)
+    add_stage(Stage.GATE, 0, 0, blocked=gate.blocked, message=gate.message, text=gate.text)
     if gate.blocked:
         result.blocked_stage = "gate"
 
@@ -127,7 +127,7 @@ async def _run(
             answered, matched = len(guard.answered), len(guard.matched)
             refused = await guard.tool_call(call)
             guard.context.tool_calls.append(call)
-            stage_out(
+            add_stage(
                 Stage.TOOL,
                 answered,
                 matched,
@@ -139,7 +139,7 @@ async def _run(
     if not result.blocked_stage and output:
         answered, matched = len(guard.answered), len(guard.matched)
         finished = await guard.finish(output)
-        stage_out(
+        add_stage(
             Stage.FINISH,
             answered,
             matched,
@@ -152,15 +152,15 @@ async def _run(
 
     # Reflect runs on every closed turn, a blocked one too.
     answered, matched = len(guard.answered), len(guard.matched)
-    await _reflect(guard, resolved)
-    stage_out(Stage.REFLECT, answered, matched)
+    await _run_reflect_stage(guard, resolved)
+    add_stage(Stage.REFLECT, answered, matched)
 
     result.outcome = guard.outcome
     result.report_outcome = guard.report_outcome
     return result
 
 
-async def _reflect(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
+async def _run_reflect_stage(guard: TurnGuard, resolved: ResolvedPolicy) -> None:
     """Run what reflect would on the open guard: its lenses, and inline lenses to ask again."""
     retry = {item.lens.name for item in guard.answered if item.needs_retry}
     answered, matched, _masks = await judge_reflect_stage(

@@ -441,18 +441,18 @@ class TestReflectLease:
         assert (turn.reflect_state, turn.reflect_attempts) == ("done", 2)
 
     async def test_a_run_that_lost_its_lease_writes_nothing(self):
-        from django_ai_sdk.oversight.reflect import _commit_reflection, _judge
+        from django_ai_sdk.oversight.reflect import commit_reflection, judge_stored_turn
 
         turn_id = await self.closed()
         stale_lease = await claim_for_reflect(turn_id)
         turn = await Turn.objects.select_related("content").aget(id=turn_id)
-        judged = await _judge(turn)
+        judged = await judge_stored_turn(turn)
         assert judged is not None
         # Too slow: the lease ran out, and another run reflected the turn.
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.persist.enqueue_notifications"):
             assert await run_reflection(turn_id) == 1
-        kept = await sync_to_async(_commit_reflection)(turn, *judged, lease=stale_lease)
+        kept = await sync_to_async(commit_reflection)(turn, *judged, lease=stale_lease)
         assert kept is False
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
 
@@ -467,7 +467,7 @@ class TestReflectLease:
     async def test_an_after_effect_that_fails_writes_nothing_and_is_retried(self):
         turn_id = await self.closed()
         with (
-            patch("django_ai_sdk.oversight.reflect._after_effects", side_effect=RuntimeError("x")),
+            patch("django_ai_sdk.oversight.reflect.apply_reflect_actions", side_effect=RuntimeError("x")),
             pytest.raises(RuntimeError),
         ):
             await run_reflection(turn_id)
@@ -597,8 +597,8 @@ class TestStableEventIds:
 
         hook = WebhookNotifier("https://example.test/hook", secret="s")
         event = {"id": event_id("t", "r", "gate"), "type": "oversight.match"}
-        _, headers = hook._request(event)
-        _, repeated = hook._request(event)
+        _, headers = hook.build_request(event)
+        _, repeated = hook.build_request(event)
         assert headers["webhook-id"] == repeated["webhook-id"] == event["id"]
 
     def test_notify_sends_to_the_notifiers_it_names(self):

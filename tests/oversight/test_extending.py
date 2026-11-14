@@ -191,7 +191,7 @@ class TestHoldWhenNeeded:
 class TestLocalClassifier:
     @pytest.fixture(autouse=True)
     def runner(self):
-        with patch("django_ai_sdk.oversight.judges.local._loaded", lambda *a: FakeRunner()):
+        with patch("django_ai_sdk.oversight.judges.local.loaded_runner", lambda *a: FakeRunner()):
             yield
 
     async def test_a_zero_shot_model_answers_any_yes_no_and_label(self):
@@ -226,20 +226,20 @@ class TestLocalClassifier:
     async def test_a_text_the_tokenizer_would_cut_is_too_long(self):
         pytest.importorskip("numpy")
         tokenizers = pytest.importorskip("tokenizers")
-        cutting = object.__new__(local._Runner)
+        cutting = object.__new__(local.ModelRunner)
         cutting.tokenizer = tokenizers.Tokenizer(
             tokenizers.models.WordLevel({"[UNK]": 0}, unk_token="[UNK]")
         )
         cutting.tokenizer.pre_tokenizer = tokenizers.pre_tokenizers.Whitespace()
         cutting.tokenizer.enable_truncation(max_length=4)
-        with pytest.raises(local._TooLong):
+        with pytest.raises(local.TooLongError):
             cutting.run([("one two three four five", "a statement")])
 
         class Cut(FakeRunner):
             def entailment(self, pairs):
-                raise local._TooLong
+                raise local.TooLongError
 
-        with patch.object(local, "_loaded", lambda *a: Cut()):
+        with patch.object(local, "loaded_runner", lambda *a: Cut()):
             answer = await ask_judge(
                 LocalClassifier(), JudgeLens(name="f", question="?"), TurnContext(input="x")
             )
@@ -262,7 +262,7 @@ class TestLocalClassifier:
 class TestALocalClassifierSaysWhatItCannotRead:
     @pytest.fixture(autouse=True)
     def runner(self):
-        with patch("django_ai_sdk.oversight.judges.local._loaded", lambda *a: FakeRunner()):
+        with patch("django_ai_sdk.oversight.judges.local.loaded_runner", lambda *a: FakeRunner()):
             yield
 
     async def test_it_leaves_lenses_it_cannot_read_to_the_next_judge(self):
@@ -298,8 +298,8 @@ class TestLocalClassifierLoading:
             return "loading"
 
         with (
-            patch.object(local, "_loaded", lambda *a: None),
-            patch.object(local, "_load_in_background", start),
+            patch.object(local, "loaded_runner", lambda *a: None),
+            patch.object(local, "load_in_background", start),
         ):
             answer = await ask_judge(LocalClassifier(), self.lens, TurnContext(input="x"))
             # A lens it could never read still goes to the next judge.
@@ -313,7 +313,7 @@ class TestLocalClassifierLoading:
         judge = LocalClassifier(model=key[0])
         log = MagicMock()
         with (
-            patch.object(local, "_Runner", side_effect=OSError("no such repo")),
+            patch.object(local, "ModelRunner", side_effect=OSError("no such repo")),
             patch.object(local, "logger", log),
             patch.object(local, "modules_installed", lambda *a: True),
         ):

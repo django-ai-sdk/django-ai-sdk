@@ -80,7 +80,9 @@ class Command(BaseCommand):
         keys = list(stale.order_by("created_at").values_list("pk", flat=True)[:limit])
         # The update repeats the filter, so a turn that closed in the meantime is left alone.
         count = len(keys) if dry_run else stale.filter(pk__in=keys).update(status="interrupted")
-        self.stdout.write(f"{_turns(count)} {'would be swept' if dry_run else 'swept'}")
+        self.stdout.write(
+            f"{count} turn{'' if count == 1 else 's'} {'would be swept' if dry_run else 'swept'}"
+        )
 
         lost = Turn.objects.filter(claimable_q(now, pending_before=now - options["reflect_after"]))
         keys = list(lost.order_by("created_at").values_list("pk", flat=True)[:limit])
@@ -96,8 +98,6 @@ class Command(BaseCommand):
                 )
             )
             count = sum(enqueue_reflect(key) for key in keys)
-        self.stdout.write(f"{_turns(count)} {'would be queued' if dry_run else 'queued'}")
-
-
-def _turns(count: int) -> str:
-    return f"{count} turn{'' if count == 1 else 's'}"
+        self.stdout.write(
+            f"{count} turn{'' if count == 1 else 's'} {'would be queued' if dry_run else 'queued'}"
+        )

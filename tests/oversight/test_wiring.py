@@ -193,7 +193,7 @@ class TestWithheldArtifacts:
         kept = await Artifact.objects.acreate(thread=thread, schema_name="s", data={})
         turn = StreamTurn.__new__(StreamTurn)
         turn.artifact_ids = [str(artifact.id)]
-        await turn._drop_artifacts()
+        await turn.drop_artifacts()
         assert not await Artifact.objects.filter(id=artifact.id).aexists()
         assert await Artifact.objects.filter(id=kept.id).aexists()
 

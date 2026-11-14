@@ -51,7 +51,7 @@ _clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[str, Any]] 
 )
 
 
-def _client(api_key: str) -> Any:
+def api_client(api_key: str) -> Any:
     from typesafe_sdk import AsyncTypeSafeClient
 
     loop = asyncio.get_running_loop()
@@ -128,7 +128,7 @@ class TypeSafe(Classifier):
 
             # Inline, a retry would land after the deadline, so make one attempt.
             options = {"timeout": timeout, "retry": RetryPolicy(max_retries=0)}
-        response = await _client(secret_setting("TYPESAFE_API_KEY")).system_one(
+        response = await api_client(secret_setting("TYPESAFE_API_KEY")).system_one(
             state=state, questions=questions, model=self.model or typesafe_model(), **options
         )
         answers = {}

@@ -138,7 +138,8 @@ class Masker:
             text = self._pattern.sub(
                 lambda m: f"[{(self.found[m.group()] or 'masked').upper()}]", text
             )
-        return _mask_detected(text)
+        spans = [span for lens in _detectors() for span in lens.finder.find(text, lens.name)]
+        return mask_all(text, [(spans, "[{label}]")]) if spans else text
 
     def __call__(self, value: Any) -> Any:
         """Mask every string in a JSON value."""
@@ -221,14 +222,6 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
             if 0 <= span.start < span.end <= len(text):
                 found.setdefault(text[span.start : span.end], span.label or item.lens.name)
     return found
-
-
-def _mask_detected(text: str) -> str:
-    """Mask personal data (every kind, all countries) and secrets in `text`."""
-    if not text:
-        return text
-    spans = [span for lens in _detectors() for span in lens.finder.find(text, lens.name)]
-    return mask_all(text, [(spans, "[{label}]")]) if spans else text
 
 
 @cache

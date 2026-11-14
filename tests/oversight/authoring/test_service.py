@@ -105,7 +105,7 @@ class TestSaving:
 
         from django_ai_sdk.oversight.authoring.loader import loader
 
-        load = loader._load
+        load = loader.load_sync
 
         def other_request_creates_it_first() -> None:
             # A new name has no row to lock, so another request can insert it meanwhile.
@@ -114,7 +114,7 @@ class TestSaving:
             load()
 
         with (
-            patch.object(loader, "_load", other_request_creates_it_first),
+            patch.object(loader, "load_sync", other_request_creates_it_first),
             pytest.raises(ConflictError),
         ):
             await save()

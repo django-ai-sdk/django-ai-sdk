@@ -224,11 +224,11 @@ class Classifier(Judge):
             return None
         if self.too_long(lens, view):
             return Answer(error=TOO_LONG)
-        answers = await self._ask(self.state(lens, view), {lens.name: question})
+        answers = await self._classify_batched(self.state(lens, view), {lens.name: question})
         # Asked and not answered is a failure, as with the model judge, so fail-closed holds.
         return answers.get(lens.name) or Answer(error=NO_VERDICT)
 
-    async def _ask(
+    async def _classify_batched(
         self, state: dict[str, Any], questions: dict[str, Any], *, alone: bool = False
     ) -> dict[str, Answer]:
         """Call `classify`, through the stage's batch when there is one."""
@@ -354,9 +354,9 @@ class Classifier(Judge):
             facts = self.question(STATES_FACTS)
             if facts is None:
                 return None
-            answers = await self._ask(state, {"facts": facts}, alone=True)
+            answers = await self._classify_batched(state, {"facts": facts}, alone=True)
             return _unsourced(lens, answers.get("facts"))
-        answers = await self._ask(state, questions, alone=True)
+        answers = await self._classify_batched(state, questions, alone=True)
 
         found: list[str] = []
         sure: list[float] = []

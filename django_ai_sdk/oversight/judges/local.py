@@ -102,7 +102,7 @@ class LocalClassifier(Classifier):
     def missing(self) -> str:
         if not modules_installed("onnxruntime", "tokenizers", "huggingface_hub"):
             return "needs django-ai-sdk[local] (onnxruntime, tokenizers, huggingface-hub)"
-        runner = _loaded(self.model, self.file)
+        runner = loaded_runner(self.model, self.file)
         wanted = self.positive.lower() or "entailment"
         if runner is not None and wanted not in runner.labels:
             hint = "" if self.positive else ": a fixed classifier needs positive="
@@ -116,8 +116,8 @@ class LocalClassifier(Classifier):
             return None
         # Unavailable while the model loads in the background, so the first turn after
         # a deploy goes to the next judge instead of hitting the deadline.
-        if _loaded(self.model, self.file) is None:
-            return Answer(error=f"{UNAVAILABLE}: {_load_in_background(self.model, self.file)}")
+        if loaded_runner(self.model, self.file) is None:
+            return Answer(error=f"{UNAVAILABLE}: {load_in_background(self.model, self.file)}")
         return await super().answer(lens, view)
 
     async def per_source(self, lens: JudgeLens, view: Any) -> Answer | None:
@@ -168,10 +168,12 @@ class LocalClassifier(Classifier):
             "input": state.get("user_message", ""),
             "output": state.get("assistant_reply", ""),
         }
-        return await asyncio.to_thread(self._classify, texts, questions)
+        return await asyncio.to_thread(self._classify_texts, texts, questions)
 
-    def _classify(self, texts: dict[str, str], questions: dict[str, Any]) -> dict[str, Answer]:
-        runner = _loaded(self.model, self.file)
+    def _classify_texts(
+        self, texts: dict[str, str], questions: dict[str, Any]
+    ) -> dict[str, Answer]:
+        runner = loaded_runner(self.model, self.file)
         if runner is None:
             return {}
         answers: dict[str, Answer] = {}
@@ -184,7 +186,7 @@ class LocalClassifier(Classifier):
                     answers[name] = yes_answer(yes, self.model, f"{self.positive} {yes:.2f}")
                     continue
                 entailed = runner.entailment([(text, s) for s in question["statements"]])
-            except _TooLong:
+            except TooLongError:
                 answers[name] = Answer(error=TOO_LONG)
                 continue
             if question["kind"] == "flag":
@@ -206,11 +208,11 @@ class LocalClassifier(Classifier):
         return answers
 
 
-class _TooLong(Exception):
+class TooLongError(Exception):
     """A text runs past MAX_TOKENS, so the model would only read its start."""
 
 
-class _Runner:
+class ModelRunner:
     """One model's session, tokenizer and labels. `run` is thread-safe."""
 
     def __init__(self, model: str, file: str) -> None:
@@ -248,7 +250,7 @@ class _Runner:
             encoded = self.tokenizer.encode_batch([(text, s or "") for text, s in pairs])
         if any(e.overflowing for e in encoded):
             # The tokenizer cut the end off, and a verdict on the rest would hide it.
-            raise _TooLong
+            raise TooLongError
         feed = {
             "input_ids": np.array([e.ids for e in encoded], dtype=np.int64),
             "attention_mask": np.array([e.attention_mask for e in encoded], dtype=np.int64),
@@ -277,7 +279,7 @@ class _Runner:
 
 
 # Loaded models, keyed by (model, file), and for each failed load its error and time.
-_runners: dict[tuple[str, str], _Runner] = {}
+_runners: dict[tuple[str, str], ModelRunner] = {}
 _load_errors: dict[tuple[str, str], tuple[str, float]] = {}
 _loading: set[tuple[str, str]] = set()
 # Held while a model loads. The short one guards the two above, so a turn never waits.
@@ -285,7 +287,7 @@ _load_lock = threading.Lock()
 _state_lock = threading.Lock()
 
 
-def _loaded(model: str, file: str) -> _Runner | None:
+def loaded_runner(model: str, file: str) -> ModelRunner | None:
     return _runners.get((model, file))
 
 
@@ -296,7 +298,7 @@ def load(model: str = ENGLISH, file: str = QUANTIZED) -> None:
         if key in _runners:
             return
         try:
-            runner = _Runner(model, file)
+            runner = ModelRunner(model, file)
         except Exception as exc:
             with _state_lock:
                 _load_errors[key] = (type(exc).__name__, time.monotonic())
@@ -306,7 +308,7 @@ def load(model: str = ENGLISH, file: str = QUANTIZED) -> None:
             _load_errors.pop(key, None)
 
 
-def _load_in_background(model: str, file: str) -> str:
+def load_in_background(model: str, file: str) -> str:
     """Load the model in a thread, unless it is loading or failed lately. Says which."""
     key = (model, file)
     with _state_lock:

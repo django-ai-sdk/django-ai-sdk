@@ -213,9 +213,9 @@ class StreamTurn:
         if not self.guard.active:
             return []
         await mask_sources(self.guard, self.registry)
-        return self._pending()
+        return self._emit_pending_notices()
 
-    def _pending(self) -> list[StreamEvent]:
+    def _emit_pending_notices(self) -> list[StreamEvent]:
         """Send the notices raised since the last event, such as the gate's."""
         events: list[StreamEvent] = [
             self._emit_notice(notice) for notice in self.guard.notices.pending
@@ -234,13 +234,17 @@ class StreamTurn:
         assert refusal is not None
         self.finished = True
         notice = {**(refusal.notice or {}), "message": refusal.message}
-        return [*self._pending(), self._emit_notice(notice), *refusal_reply(refusal.message)]
+        return [
+            *self._emit_pending_notices(),
+            self._emit_notice(notice),
+            *refusal_reply(refusal.message),
+        ]
 
     def pass_event(self, event: StreamEvent) -> list[StreamEvent]:
         """Report `event` to the guard and return what to send now."""
         if not self.guard.active:
             return [event]
-        pending = self._pending()
+        pending = self._emit_pending_notices()
         if pending:
             return [*pending, *self.pass_event(event)]
         if isinstance(event, TextChunkEvent):
@@ -282,9 +286,9 @@ class StreamTurn:
             # Tool details first: if the artifacts fail to delete, they are still gone.
             if writer:
                 writer.drop_tool_details()
-            await self._drop_artifacts()
+            await self.drop_artifacts()
         self._drop_refused_inputs()
-        events: list[StreamEvent] = self._pending()
+        events: list[StreamEvent] = self._emit_pending_notices()
         if finished.notice:
             events.append(self._emit_notice(finished.notice))
         if self.sent and writer:
@@ -308,7 +312,7 @@ class StreamTurn:
             for e in self.held
         ]
 
-    async def _drop_artifacts(self) -> None:
+    async def drop_artifacts(self) -> None:
         """Delete this answer's artifacts. They may hold what the tools found."""
         if not self.artifact_ids:
             return

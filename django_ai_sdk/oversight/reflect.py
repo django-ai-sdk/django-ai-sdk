@@ -104,7 +104,7 @@ async def run_reflection(turn_id: str) -> int:
         turn = await Turn.objects.select_related("content").filter(id=turn_id).afirst()
         if turn is None:
             return 0
-        judged = await _judge(turn)
+        judged = await judge_stored_turn(turn)
         if judged is None:
             # The policy did not load. Give the claim back so a later run can try.
             await release_reflect_claim(turn_id, lease)
@@ -114,7 +114,7 @@ async def run_reflection(turn_id: str) -> int:
             # A judge was down or out of time: ask again later rather than settle without it.
             await release_reflect_claim(turn_id, lease)
             return 0
-        kept = await sync_to_async(_commit_reflection)(
+        kept = await sync_to_async(commit_reflection)(
             turn, policy, view, answered, matched, found, masks, lease=lease
         )
     except BaseException:
@@ -175,7 +175,7 @@ async def release_reflect_claim(turn_id: str, lease: Any) -> None:
         logger.exception("Reflect could not give back its claim on turn {}", turn_id)
 
 
-def _commit_reflection(
+def commit_reflection(
     turn: Turn,
     policy: ResolvedPolicy,
     view: TurnContext,
@@ -203,7 +203,7 @@ def _commit_reflection(
             logger.warning("Reflect lost its lease on turn {}; another run reflects it", turn.id)
             return False
         record_answers(turn, policy, answered, matched, view=view, found=found)
-        events = _after_effects(turn, view, matched, masks)
+        events = apply_reflect_actions(turn, view, matched, masks)
         Turn.objects.filter(pk=turn.pk).update(
             reflect_state=state.DONE, reflect_lease_until=None, reflected_at=timezone.now()
         )
@@ -234,7 +234,7 @@ def mark_reflect_failed(turns: QuerySet) -> int:
     return len(rows)
 
 
-async def _judge(
+async def judge_stored_turn(
     turn: Turn,
 ) -> (
     tuple[
@@ -417,7 +417,7 @@ def _judgeable(
     return lens.subject is Subject.SOURCES and bool((content or {}).get("sources"))
 
 
-def _after_effects(
+def apply_reflect_actions(
     turn: Turn, view: TurnContext, matched: list[Matched], groups: list[MaskGroup]
 ) -> list[tuple[dict[str, Any], list[str]]]:
     """Apply what reflect's rules can still do: mask the stored answer and notify the user.
@@ -432,11 +432,11 @@ def _after_effects(
     )
     notes = rule_notes(matched, set())
     if (masks or notes) and turn.message_id:
-        _update_stored(turn, view.output, masks, rules, notes)
+        _update_stored_message(turn, view.output, masks, rules, notes)
     return events
 
 
-def _update_stored(
+def _update_stored_message(
     turn: Turn,
     judged: str,
     masks: list[tuple[list[Any], str]],

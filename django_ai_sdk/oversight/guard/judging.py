@@ -302,7 +302,11 @@ def match_rules(
             if rule.mode is Mode.ENFORCE
             else []
         )
-        if rule.mode is Mode.ENFORCE and stage is Stage.TOOL and _reads_tool_call(policy, reads):
+        reads_tool_call = any(
+            (lens := policy.lenses.get(name)) is not None and lens.subject is Subject.TOOL_CALL
+            for name in reads
+        )
+        if rule.mode is Mode.ENFORCE and stage is Stage.TOOL and reads_tool_call:
             # A tool call cannot be partly masked, so a mask rule refuses the call.
             if any(a.kind == "mask" for a in rule.then) and not any(
                 a.kind == "block" for a in acted
@@ -323,13 +327,6 @@ def match_rules(
 def errored_lenses(answered: list[Answered]) -> set[str]:
     """Return the names of lenses whose answer failed."""
     return {o.lens.name for o in answered if o.errored}
-
-
-def _reads_tool_call(policy: ResolvedPolicy, names: AbstractSet[str]) -> bool:
-    return any(
-        (lens := policy.lenses.get(name)) is not None and lens.subject is Subject.TOOL_CALL
-        for name in names
-    )
 
 
 async def judge_stage(

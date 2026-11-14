@@ -87,7 +87,7 @@ class AuthoringService(OversightAccess):
 
         await cls.has_perms(user, VIEW)
         await run_policy_loaders()
-        return [_out(row) async for row in AuthoredPolicy.objects.order_by("name")]
+        return [_policy_out(row) async for row in AuthoredPolicy.objects.order_by("name")]
 
     @classmethod
     async def get_policy(cls, name: str, *, user: UserType) -> PolicyOut | None:
@@ -97,7 +97,7 @@ class AuthoringService(OversightAccess):
         await cls.has_perms(user, VIEW)
         await run_policy_loaders()
         row = await AuthoredPolicy.objects.filter(name=name).afirst()
-        return _out(row) if row else None
+        return _policy_out(row) if row else None
 
     @classmethod
     async def save_policy(cls, name: str, change: PolicyIn, *, user: UserType) -> PolicyOut:
@@ -109,14 +109,14 @@ class AuthoringService(OversightAccess):
             for key, value in definition.items():
                 setattr(row, key, value)
 
-        row = await sync_to_async(_write)(name, replace, user, create=True)
+        row = await sync_to_async(_save_definition)(name, replace, user, create=True)
         assert row is not None
-        return _out(row)
+        return _policy_out(row)
 
     @classmethod
     async def set_active(cls, name: str, active: bool, *, user: UserType) -> PolicyOut | None:
         """Turn the policy's own lenses and rules on or off. None if it does not exist."""
-        return await _toggle(name, user, lambda row: setattr(row, "active", active))
+        return await _change_policy(name, user, lambda row: setattr(row, "active", active))
 
     @classmethod
     async def set_rule_mode(
@@ -128,9 +128,9 @@ class AuthoringService(OversightAccess):
         """
 
         def change(row: AuthoredPolicy) -> None:
-            row.rules = _with(row.rules, rule, "rule", {"mode": str(mode)})
+            row.rules = _set_values(row.rules, rule, "rule", {"mode": str(mode)})
 
-        return await _toggle(name, user, change)
+        return await _change_policy(name, user, change)
 
     @classmethod
     async def set_lens_enabled(
@@ -139,15 +139,15 @@ class AuthoringService(OversightAccess):
         """Turn one of the policy's own lenses on or off. None if the policy does not exist."""
 
         def change(row: AuthoredPolicy) -> None:
-            row.lenses = _with(row.lenses, lens, "lens", {"enabled": enabled})
+            row.lenses = _set_values(row.lenses, lens, "lens", {"enabled": enabled})
 
-        return await _toggle(name, user, change)
+        return await _change_policy(name, user, change)
 
     @classmethod
     async def delete_policy(cls, name: str, *, user: UserType) -> bool:
         """Delete `name`, so turns that use it are refused. False if it does not exist."""
         await cls.has_perms(user, AUTHOR)
-        return await sync_to_async(_delete)(name)
+        return await sync_to_async(_delete_unused_policy)(name)
 
     @classmethod
     async def try_policy(cls, name: str, run: TryIn, *, user: UserType) -> TryOut:
@@ -192,15 +192,15 @@ class AuthoringService(OversightAccess):
         )
 
 
-async def _toggle(
+async def _change_policy(
     name: str, user: UserType, change: Callable[[AuthoredPolicy], None]
 ) -> PolicyOut | None:
     await AuthoringService.has_perms(user, AUTHOR)
-    row = await sync_to_async(_write)(name, change, user)
-    return _out(row) if row else None
+    row = await sync_to_async(_save_definition)(name, change, user)
+    return _policy_out(row) if row else None
 
 
-def _write(
+def _save_definition(
     name: str,
     mutate: Callable[[AuthoredPolicy], None],
     user: UserType,
@@ -223,7 +223,7 @@ def _write(
             row = row or AuthoredPolicy(name=name)
             mutate(row)
             # Read after the lock, so what other processes saved counts.
-            loader._load()
+            loader.load_sync()
             try:
                 check_definition(name, row.definition())
             except DefinitionError as exc:
@@ -232,11 +232,11 @@ def _write(
             row.save()
     except IntegrityError:
         raise ConflictError(f"Policy {name!r} was created at the same time. Try again.") from None
-    loader._load()
+    loader.load_sync()
     return row
 
 
-def _delete(name: str) -> bool:
+def _delete_unused_policy(name: str) -> bool:
     """Delete `name` unless something still uses it. False if it does not exist."""
     from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
@@ -248,11 +248,11 @@ def _delete(name: str) -> bool:
         if users:
             raise UserError(f"{name!r} is still used: {'; '.join(users)}.")
         row.delete()
-    loader._load()
+    loader.load_sync()
     return True
 
 
-def _with(items: list[dict[str, Any]], name: str, what: str, values: dict[str, Any]) -> list:
+def _set_values(items: list[dict[str, Any]], name: str, what: str, values: dict[str, Any]) -> list:
     """`items` with `values` set on the one named `name`. UserError when it is not there."""
     if not any(item.get("name") == name for item in items):
         raise UserError(f"No {what} {name!r} of its own: a {what} it extends changes only in code.")
@@ -276,7 +276,7 @@ def _dependents(name: str) -> list[str]:
     return found
 
 
-def _out(row: AuthoredPolicy) -> PolicyOut:
+def _policy_out(row: AuthoredPolicy) -> PolicyOut:
     return PolicyOut(
         name=row.name,
         **row.definition(),

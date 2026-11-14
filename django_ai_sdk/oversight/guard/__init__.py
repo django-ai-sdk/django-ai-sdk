@@ -109,18 +109,15 @@ async def closing_turn(
     try:
         yield
     except BaseException as exc:
-        await guard.close(error=_run_error(exc) or error())
+        if isinstance(exc, Blocked):
+            await guard.close(error=error())
+        elif isinstance(exc, GeneratorExit | asyncio.CancelledError):
+            await guard.close(error="disconnected")
+        else:
+            await guard.close(error=type(exc).__name__)
         raise
     if not keep_open:
         await guard.close(error=error())
-
-
-def _run_error(exc: BaseException) -> str:
-    if isinstance(exc, Blocked):
-        return ""
-    if isinstance(exc, GeneratorExit | asyncio.CancelledError):
-        return "disconnected"
-    return type(exc).__name__
 
 
 def current_guard() -> TurnGuard | None:

@@ -141,12 +141,12 @@ class TestMasksThatChangeNothing:
 
 def test_a_span_across_question_and_answer_masks_both_sides():
     from django_ai_sdk.oversight.guard.judging import Answered
-    from django_ai_sdk.oversight.guard.masking import _spans_for
+    from django_ai_sdk.oversight.guard.masking import spans_for
 
     lens = JudgeLens(name="who", answer=Entities, subject=Subject.EXCHANGE)
     # "ask Jan" + "\n\n" + "Jansen here": one name across the blank line.
     found = Answered(lens, Stage.FINISH, Answer(value=["Jan Jansen"], spans=[TextSpan(start=4, end=15)]))
-    question = _spans_for([found], {"who"}, Subject.INPUT, "ask Jan")
-    answer = _spans_for([found], {"who"}, Subject.OUTPUT, "ask Jan")
+    question = spans_for([found], {"who"}, Subject.INPUT, "ask Jan")
+    answer = spans_for([found], {"who"}, Subject.OUTPUT, "ask Jan")
     assert [(s.start, s.end) for s in question] == [(4, 7)]
     assert [(s.start, s.end) for s in answer] == [(0, 6)]

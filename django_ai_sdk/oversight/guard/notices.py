@@ -86,7 +86,14 @@ class TurnNotices:
         notes = rule_notes([*acted, *self._tool_matches(stage, matched)], self.told)
         # Hide invisible actions (queue, alert, notify) so the client cannot probe the
         # policy. A rule's own notice may still reveal them.
-        shown = acted if detail else [m for m in acted if _is_seen(m)]
+        # A rule is shown when the person may learn it acted: by its notice, or a visible action.
+        shown = [
+            m
+            for m in acted
+            if detail
+            or (m.rule.notice and not m.failed)
+            or any(a.kind in USER_FACING for a in m.acted)
+        ]
         if not shown and not detail and not notes:
             return None
         notice = notice_base(self.guard.id, stage, worst_outcome(*(m.outcome() for m in shown)))
@@ -162,12 +169,6 @@ class TurnNotices:
             channel=self.guard.channel,
             outcome=str(self.guard.outcome),
         )
-
-
-def _is_seen(match: Matched) -> bool:
-    """True when the person may learn that `match` acted, by a visible action or its notice."""
-    told = bool(match.rule.notice) and not match.failed
-    return told or any(a.kind in USER_FACING for a in match.acted)
 
 
 def first_refusal(matched: Iterable[Matched]) -> str | None:

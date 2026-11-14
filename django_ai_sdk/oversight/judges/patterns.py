@@ -90,19 +90,15 @@ class Patterns(Judge):
         # In a thread, so a long text can't block the event loop.
         spans = await asyncio.to_thread(self.find, text, lens.name)
         labels = list(dict.fromkeys(span.label for span in spans))
-        notes = [f"found {_listed(labels)}"] if labels else []
+        notes = [f"found {', '.join(k.replace('_', ' ') for k in labels)}"] if labels else []
         if not labels and (kinds := self.kinds()):
-            notes.append(f"found none of: {_listed(kinds)}")
+            notes.append(f"found none of: {', '.join(k.replace('_', ' ') for k in kinds)}")
         return Answer(
             value=lens.answer.from_detections(lens, labels),
             confidence=1.0 if spans else self.miss_confidence,
             spans=spans,
             rationale="; ".join(notes),
         )
-
-
-def _listed(kinds: list[str]) -> str:
-    return ", ".join(kind.replace("_", " ") for kind in kinds)
 
 
 __all__ = ["MISS_CONFIDENCE", "Patterns"]

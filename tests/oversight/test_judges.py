@@ -446,7 +446,7 @@ def typesafe_client(request):
         return await request(state, questions, **options)
 
     with (
-        patch(f"{TYPESAFE}._client", lambda key: SimpleNamespace(system_one=system_one)),
+        patch(f"{TYPESAFE}.api_client", lambda key: SimpleNamespace(system_one=system_one)),
         patch.object(TypeSafe, "missing", lambda self: ""),
     ):
         yield

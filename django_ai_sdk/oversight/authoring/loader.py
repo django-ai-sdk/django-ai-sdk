@@ -41,9 +41,10 @@ class AuthoredPolicyLoader:
 
     async def load(self) -> None:
         """Read the authored policies now and register any changes."""
-        await sync_to_async(self._load)()
+        await sync_to_async(self.load_sync)()
 
-    def _load(self) -> None:
+    def load_sync(self) -> None:
+        """Read the authored policies now and register any changes, from sync code."""
         from django_ai_sdk.oversight.authoring.models import AuthoredPolicy
 
         stamp = dict(AuthoredPolicy.objects.values_list("name", "updated_at"))

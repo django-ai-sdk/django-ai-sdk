@@ -120,7 +120,7 @@ class WebhookNotifier(Notifier):
         self.secret = secret
         self.timeout = timeout
 
-    def _request(self, event: dict[str, Any]) -> tuple[bytes, dict[str, str]]:
+    def build_request(self, event: dict[str, Any]) -> tuple[bytes, dict[str, str]]:
         body = json.dumps(event, default=str, sort_keys=True).encode()
         msg_id = str(event["id"])
         headers = {"Content-Type": "application/json", "webhook-id": msg_id}
@@ -140,7 +140,7 @@ class WebhookNotifier(Notifier):
     async def send(self, event: dict[str, Any]) -> None:
         import httpx
 
-        body, headers = self._request(event)
+        body, headers = self.build_request(event)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(self.url, content=body, headers=headers)
             response.raise_for_status()
@@ -151,7 +151,13 @@ def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
     notifiers: list[Notifier] = []
     for spec in setting("NOTIFIERS") or []:
         try:
-            notifier = spec if isinstance(spec, Notifier) else _build_notifier(spec)
+            if isinstance(spec, Notifier):
+                notifier = spec
+            elif isinstance(spec, str):
+                notifier = import_string(spec)()
+            else:
+                config = dict(spec)
+                notifier = import_string(config.pop("class"))(**config)
         except Exception:
             logger.exception("Oversight notifier {!r} could not be built", spec)
             continue
@@ -159,14 +165,6 @@ def configured_notifiers(names: list[str] | None = None) -> list[Notifier]:
             continue
         notifiers.append(notifier)
     return notifiers
-
-
-def _build_notifier(spec: str | dict[str, Any]) -> Notifier:
-    if isinstance(spec, str):
-        return import_string(spec)()
-    config = dict(spec)
-    cls = import_string(config.pop("class"))
-    return cls(**config)
 
 
 async def send_to_notifiers(event: dict[str, Any], *, names: list[str] | None = None) -> None:

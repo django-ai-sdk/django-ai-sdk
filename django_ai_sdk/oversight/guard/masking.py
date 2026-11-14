@@ -228,7 +228,7 @@ def collect_masks(
                 if _unpointed(answered, names, closed=closed, subject=subject, view=view):
                     unpointed.append((match, action))
                 else:
-                    group = (_spans_for(answered, names, subject, view.input), action.template)
+                    group = (spans_for(answered, names, subject, view.input), action.template)
                     if not group[0] or mask_all(text, [group]) == text:
                         continue
                     groups.append((match, group))
@@ -273,7 +273,7 @@ def _unpointed(
     return False
 
 
-def _spans_for(
+def spans_for(
     answered: Iterable[Answered], names: set[str], subject: Subject, input_text: str
 ) -> list[TextSpan]:
     """Return the spans lenses `names` found in `subject`, from each lens's latest answer.

@@ -270,10 +270,10 @@ async def run_policy_loaders() -> None:
     while it runs wait for it, so a burst reads the database once.
     """
     global _loaded_at
-    if not _loaders or _fresh():
+    if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
         return
     async with _locks.setdefault(asyncio.get_running_loop(), asyncio.Lock()):
-        if _fresh():
+        if time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
             return
         started = time.monotonic()
         for loader in list(_loaders):
@@ -282,10 +282,6 @@ async def run_policy_loaders() -> None:
             except Exception:
                 logger.opt(exception=True).warning("An oversight policy loader failed")
         _loaded_at = started
-
-
-def _fresh() -> bool:
-    return time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS"))
 
 
 async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
@@ -299,13 +295,13 @@ async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
     cached = _cache.get(name)
     if cached:
         return cached[0]
-    resolved = _build(name)
+    resolved = _load_policy(name)
     # Cache failures too, so a broken policy logs once, not once per turn.
     _cache[name] = (resolved, frozenset(ancestors(name)))
     return resolved
 
 
-def _build(name: str) -> ResolvedPolicy | None:
+def _load_policy(name: str) -> ResolvedPolicy | None:
     """Call build_policy(). On failure, record why and return None."""
     try:
         resolved = build_policy(name)

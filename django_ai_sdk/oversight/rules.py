@@ -96,7 +96,7 @@ class Condition:
         return self.node
 
     def lenses(self) -> set[str]:
-        return set(_lenses(self.node))
+        return set(_node_lenses(self.node))
 
     def matches(
         self, answers: Mapping[str, Answer], unknown: Set[str] = frozenset()
@@ -115,11 +115,11 @@ def _children(node: Mapping[str, Any]) -> list[dict[str, Any]]:
     return node.get("all") or node.get("any") or []
 
 
-def _lenses(node: Mapping[str, Any]) -> Iterator[str]:
+def _node_lenses(node: Mapping[str, Any]) -> Iterator[str]:
     if "lens" in node:
         yield node["lens"]
     for child in _children(node):
-        yield from _lenses(child)
+        yield from _node_lenses(child)
 
 
 def _node_matches(

@@ -90,7 +90,7 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
         evidence := view.grounding(earlier=subject is not Subject.SOURCES)
     ):
         rendered = "\n".join(
-            f'<source n="{n}" title="{_attr(s.title)}">\n{_evidence(s.content, SOURCE_CHARS)}'
+            f'<source n="{n}" title="{escape_attribute(s.title)}">\n{_evidence(s.content, SOURCE_CHARS)}'
             "\n</source>"
             for n, s in enumerate(evidence[:MAX_SOURCES], start=1)
         )
@@ -103,7 +103,7 @@ def render_turn(lens: JudgeLens, view: TurnContext) -> str:
         if lens.reads_question:
             parts.append(f"<question>\n{_evidence(view.input, INPUT_CHARS)}\n</question>")
         parts.append(
-            f'<tool_call name="{_attr(call.name)}">\n'
+            f'<tool_call name="{escape_attribute(call.name)}">\n'
             f"{_evidence(arguments, TOOL_ARGUMENTS_CHARS)}\n</tool_call>"
         )
     return "<turn>\n" + "\n".join(parts) + "\n</turn>"
@@ -115,7 +115,7 @@ def _evidence(text: str, limit: int) -> str:
     return _TAG.sub(r"&lt;\1", masked_clip(text, limit))
 
 
-def _attr(text: str) -> str:
+def escape_attribute(text: str) -> str:
     """Escape untrusted text onto one line so it can't break out of the attribute."""
     return html.escape(" ".join(mask_secrets(text or "").split())[:TITLE_CHARS], quote=True)
 

@@ -127,7 +127,11 @@ async def ask_judge(
         return Answer(answerer=label, error=type(exc).__name__)
 
     def failed(error: str) -> Answer:
-        return Answer(answerer=judge.label(), error=error, latency_ms=_ms(started))
+        return Answer(
+            answerer=judge.label(),
+            error=error,
+            latency_ms=round((time.perf_counter() - started) * 1000, 2),
+        )
 
     try:
         answer = await asyncio.wait_for(judge.answer(lens, view), timeout=judge.timeout)
@@ -170,12 +174,8 @@ async def ask_judge(
         answer = answer.model_copy(update={"error": NO_VERDICT})
     answer.answerer = answer.answerer or judge.label()
     if answer.latency_ms is None:
-        answer.latency_ms = _ms(started)
+        answer.latency_ms = round((time.perf_counter() - started) * 1000, 2)
     return answer
-
-
-def _ms(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000, 2)
 
 
 def is_optional(spec: Any) -> bool:
