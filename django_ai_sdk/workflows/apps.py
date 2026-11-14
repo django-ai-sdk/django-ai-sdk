@@ -2,7 +2,8 @@
 the workflow system checks.
 
 Opt-in. Without it in INSTALLED_APPS there are no workflow tables or checks, and
-nothing from this package is imported.
+nothing from this package is imported. Runs execute on DBOS, so it needs
+'django_ai_sdk.durable' too.
 """
 
 from __future__ import annotations
@@ -30,6 +31,11 @@ class WorkflowsConfig(AppConfig):
         if "django_ai_sdk" not in names[: names.index(self.name)]:
             raise ImproperlyConfigured(
                 "List 'django_ai_sdk.workflows' after 'django_ai_sdk' in INSTALLED_APPS."
+            )
+        if not apps.is_installed("django_ai_sdk.durable"):
+            raise ImproperlyConfigured(
+                "Workflow runs execute on DBOS: add 'django_ai_sdk.durable' to INSTALLED_APPS "
+                "(needs the `dbos` extra)."
             )
         autodiscover_modules("workflows")
 

@@ -6,7 +6,8 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 from tests.removable import run_without
 
-WORKFLOW_APPS = ["django_ai_sdk.workflows"]
+# The durable app runs workflows on DBOS: it goes with them.
+WORKFLOW_APPS = ["django_ai_sdk.workflows", "django_ai_sdk.durable"]
 
 WITHOUT_WORKFLOWS = """
 import sys
@@ -56,6 +57,23 @@ class TestTheAppConfig:
 
         assert check_workflows in checks.registry.registry.get_checks()
 
+    def test_it_needs_the_durable_app(self):
+        from django.apps import apps
+
+        config = apps.get_app_config("django_ai_sdk_workflows")
+        installed = apps.is_installed
+
+        with (
+            pytest.MonkeyPatch.context() as patch,
+            pytest.raises(ImproperlyConfigured, match="django_ai_sdk.durable"),
+        ):
+            patch.setattr(
+                apps,
+                "is_installed",
+                lambda name: name != "django_ai_sdk.durable" and installed(name),
+            )
+            config.ready()
+
     def test_it_must_come_after_the_core_app(self):
         from django.apps import apps
 
@@ -78,10 +96,12 @@ class TestTheAppConfig:
 
 # What may import the workflows package from outside it: the opt-in HTTP contrib
 # packages, which mount its routes, the default workflow permission, which reads its
-# models lazily (a follow-up moves it into the app).
+# models lazily (a follow-up moves it into the app), and the opt-in durable app,
+# which runs workflows on DBOS.
 MAY_IMPORT_WORKFLOWS = (
     "django_ai_sdk.contrib",
     "django_ai_sdk.permissions",
+    "django_ai_sdk.durable",
 )
 
 

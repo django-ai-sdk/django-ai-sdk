@@ -50,6 +50,7 @@ django_ai_sdk/
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
 ├── workflows/            # definitions, runs, listeners
+├── durable/              # workflow runs, triggers and tasks on DBOS (opt-in app)
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator

@@ -8,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db.models.functions import Now
 from pydantic import ValidationError
 
+from django_ai_sdk.durable import runtime
 from django_ai_sdk.errors import UserError
 from django_ai_sdk.permissions import Operation, PermissionDomain, PermissionsMixin, user_pk
 from django_ai_sdk.workflows.definitions import inputs_json_schema
@@ -20,6 +21,7 @@ from django_ai_sdk.workflows.registry import (
     validate_definition,
 )
 from django_ai_sdk.workflows.runs import aenqueue_run, queue_run
+from django_ai_sdk.workflows.triggers import async_schedules, refuse_run_as
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,15 @@ def _validate_submitted(workflow: WorkflowDefinition) -> None:
         validate_definition(workflow)
     except ImproperlyConfigured as exc:
         raise UserError(str(exc)) from exc
+    refuse_run_as(workflow)
+
+
+async def _resync_schedules(key: str) -> None:
+    """Bring workflow `key`'s cron schedules in line after its row changed. Logs a failure."""
+    try:
+        await async_schedules(key)
+    except Exception:
+        logger.exception("Could not sync workflow schedules; the worker syncs them on start")
 
 
 class WorkflowService(PermissionsMixin):
@@ -59,7 +70,7 @@ class WorkflowService(PermissionsMixin):
         if not is_registered(workflow):
             await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
         _validate_submitted(workflow)
-        return await queue_run(workflow, inputs=inputs, user=user)
+        return await queue_run(workflow, inputs=inputs, user=user, started_by=user)
 
     @classmethod
     async def start(
@@ -88,7 +99,7 @@ class WorkflowService(PermissionsMixin):
                 raise UserError(f"Workflow {key!r} cannot run; see the server log.") from exc
         if workflow is None:
             raise Workflow.DoesNotExist
-        return await queue_run(workflow, inputs=inputs, user=user, record=record)
+        return await queue_run(workflow, inputs=inputs, user=user, record=record, started_by=user)
 
     @classmethod
     async def resume(
@@ -97,7 +108,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Queue a failed or interrupted run again. It skips the steps that completed.
+        """Queue a failed or cancelled run again. It skips the steps that completed.
 
         The run keeps its original definition, inputs and user. A run the caller may
         not resume raises `WorkflowRun.DoesNotExist`. An ad-hoc run also needs
@@ -118,7 +129,11 @@ class WorkflowService(PermissionsMixin):
             # Deactivating or deleting a workflow stops its old runs too.
             raise UserError(f"Workflow {run.workflow_key!r} no longer runs.")
         reopened = await WorkflowRun.objects.filter(
-            pk=run.pk, status__in=(WorkflowRun.Status.FAILED, WorkflowRun.Status.INTERRUPTED)
+            pk=run.pk,
+            status__in=(
+                WorkflowRun.Status.FAILED,
+                WorkflowRun.Status.CANCELLED,
+            ),
         ).aupdate(
             status=WorkflowRun.Status.PENDING,
             error="",
@@ -129,10 +144,229 @@ class WorkflowService(PermissionsMixin):
         )
         if not reopened:
             raise UserError(
-                f"Run {run.pk} is {run.status}; only a failed or interrupted run resumes."
+                f"Run {run.pk} is {run.status}; only a failed or cancelled run resumes."
             )
         await run.arefresh_from_db()
         await aenqueue_run(run)
+        return run
+
+    @classmethod
+    async def cancel(
+        cls,
+        run_id: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> WorkflowRun:
+        """Stop a pending or running run. The step in flight finishes; none after it starts.
+
+        Only the user it runs as cancels it, as for resume. Resume picks it up again.
+        A step waiting for approval stops waiting at once, freeing its worker slot.
+        """
+        from django.utils import timezone
+
+        from django_ai_sdk.workflows.models import StepRun, WorkflowRun
+
+        run = await cls._own_run(run_id, user)
+        waiting = [
+            name
+            async for name in StepRun.objects.filter(
+                run=run, status=StepRun.Status.WAITING
+            ).values_list("step_name", flat=True)
+        ]
+        stopped = await WorkflowRun.objects.filter(
+            pk=run.pk, status__in=(WorkflowRun.Status.PENDING, WorkflowRun.Status.RUNNING)
+        ).aupdate(
+            status=WorkflowRun.Status.CANCELLED,
+            error="Cancelled.",
+            completed_at=timezone.now(),
+            updated_at=Now(),
+        )
+        if not stopped:
+            raise UserError(f"Run {run.pk} is {run.status}; only a pending or running run stops.")
+        await StepRun.objects.filter(
+            run=run, status__in=(StepRun.Status.RUNNING, StepRun.Status.WAITING)
+        ).aupdate(status=StepRun.Status.SKIPPED, detail="cancelled", completed_at=timezone.now())
+        if run.task_id:
+            # DBOS's cancel does not wake a run blocked in recv: an empty decision does,
+            # and the cancelled run then stops at its next step.
+            for name in waiting:
+                await runtime.send(
+                    run.task_id,
+                    None,
+                    topic=f"approval:{name}",
+                    idempotency_key=f"{run.task_id}:{name}:cancel",
+                )
+            await runtime.cancel(run.task_id)
+        await run.arefresh_from_db()
+        return run
+
+    @classmethod
+    async def decide(
+        cls,
+        run_id: str,
+        step: str,
+        *,
+        approved: bool,
+        note: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> WorkflowRun:
+        """Approve or reject the approval step `step` that `run_id` waits on.
+
+        Needs APPROVE_WORKFLOW on the run, which nobody has on a run that acts as them
+        or that they started.
+        Only a waiting step is decided, once: the first decision wins. A run the caller
+        may not see raises `WorkflowRun.DoesNotExist`.
+        """
+        from django_ai_sdk.workflows.models import StepRun, WorkflowRun
+
+        await cls.has_perms(user, Operation.APPROVE_WORKFLOW, raise_on_deny=True)
+        run = await WorkflowRun.objects.filter(id=run_id).afirst()
+        if run is None or not await cls.has_perms(
+            user, Operation.VIEW_WORKFLOW, run, raise_on_deny=False
+        ):
+            raise WorkflowRun.DoesNotExist
+        await cls.has_perms(user, Operation.APPROVE_WORKFLOW, run, raise_on_deny=True)
+        if not run.task_id:
+            raise UserError(f"Run {run.pk} is not queued yet.")
+        by = str(getattr(user, "get_username", lambda: "")() or user_pk(user) or "")
+        claimed = await StepRun.objects.filter(
+            run=run, step_name=step, status=StepRun.Status.WAITING
+        ).aupdate(status=StepRun.Status.RUNNING, detail=f"decided by {by}"[:255])
+        if not claimed:
+            raise UserError(f"Step {step!r} of run {run.pk} is not waiting for a decision.")
+        decision = {"approved": bool(approved), "by": by, "note": note[:1000]}
+        try:
+            await runtime.send(
+                run.task_id,
+                decision,
+                topic=f"approval:{step}",
+                idempotency_key=f"{run.task_id}:{step}",
+            )
+        except Exception:
+            await StepRun.objects.filter(run=run, step_name=step).aupdate(
+                status=StepRun.Status.WAITING, detail=""
+            )
+            raise
+        await run.arefresh_from_db()
+        return run
+
+    @classmethod
+    async def list_triggers(
+        cls,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> list[dict[str, Any]]:
+        """Every declared trigger, with its schedule's state and its latest run."""
+        from asgiref.sync import sync_to_async
+
+        from django_ai_sdk.workflows.models import WorkflowRun
+        from django_ai_sdk.workflows.triggers import declared_workflows, schedule_name
+
+        await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
+        schedules = await _schedules()
+        runs = await sync_to_async(cls.has_queryset_perms)(
+            user, Operation.VIEW_WORKFLOW, queryset=WorkflowRun.objects.all()
+        )
+        found: list[dict[str, Any]] = []
+        for key, definition, record in await sync_to_async(declared_workflows)():
+            for trigger in definition.triggers:
+                tag = f"{trigger.kind}:{trigger.name}"
+                last = (
+                    await runs.filter(workflow_key=key, trigger=tag)
+                    .order_by("-created_at")
+                    .afirst()
+                )
+                schedule = schedules.get(schedule_name(key, trigger.name))
+                found.append(
+                    {
+                        "workflow": key,
+                        "workflow_id": str(record.pk) if record else None,
+                        "name": trigger.name,
+                        "kind": trigger.kind,
+                        "cron": getattr(trigger, "cron", ""),
+                        "timezone": getattr(trigger, "timezone", ""),
+                        "event": getattr(trigger, "event", ""),
+                        "run_as": trigger.run_as
+                        or (str(record.created_by_id or "") if record else ""),
+                        "enabled": trigger.enabled,
+                        "paused": bool(schedule and schedule["status"] != "ACTIVE"),
+                        "next_run_at": _next_run(trigger, schedule),
+                        "last_fired_at": schedule["last_fired_at"] if schedule else None,
+                        "last_run": last,
+                    }
+                )
+        return found
+
+    @classmethod
+    async def set_trigger_paused(
+        cls,
+        key: str,
+        trigger: str,
+        *,
+        paused: bool,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> None:
+        """Pause or resume a cron trigger's schedule. A deploy keeps the choice."""
+        name = await cls._managed_schedule(key, trigger, user)
+        dbos = runtime.client()
+        await sync_to_async(dbos.pause_schedule if paused else dbos.resume_schedule)(name)
+
+    @classmethod
+    async def fire_trigger(
+        cls,
+        key: str,
+        trigger: str,
+        *,
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> None:
+        """Fire a cron trigger now, outside its schedule. The schedule goes on as before.
+
+        The run records the caller as who started it, so they cannot approve it even
+        when it acts as another account.
+        """
+        from django.utils import timezone
+
+        from django_ai_sdk.workflows.triggers import start_cron
+
+        await cls._managed_schedule(key, trigger, user)
+        await start_cron(key, trigger, timezone.now().isoformat(), started_by=user)
+
+    @classmethod
+    async def _managed_schedule(
+        cls, key: str, trigger: str, user: AbstractBaseUser | AnonymousUser | None
+    ) -> str:
+        """The schedule name of a cron trigger this caller may manage, or DoesNotExist."""
+        from django_ai_sdk.workflows.models import Workflow
+        from django_ai_sdk.workflows.schemas import CronTrigger
+        from django_ai_sdk.workflows.triggers import schedule_name
+
+        await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
+        declared, record = await afind(key)
+        if record is not None:
+            if not await cls.has_perms(
+                user, Operation.MANAGE_WORKFLOW, obj=record, raise_on_deny=False
+            ):
+                raise Workflow.DoesNotExist
+            declared = definition_of(record)
+        if declared is None or not any(
+            isinstance(t, CronTrigger) and t.name == trigger and t.enabled
+            for t in declared.triggers
+        ):
+            raise Workflow.DoesNotExist
+        return schedule_name(key, trigger)
+
+    @classmethod
+    async def _own_run(
+        cls, run_id: str, user: AbstractBaseUser | AnonymousUser | None
+    ) -> WorkflowRun:
+        from django_ai_sdk.workflows.models import WorkflowRun
+
+        await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
+        run = await WorkflowRun.objects.filter(id=run_id).afirst()
+        if run is None or not await cls.has_perms(
+            user, Operation.RUN_WORKFLOW, run, raise_on_deny=False
+        ):
+            raise WorkflowRun.DoesNotExist
         return run
 
     @classmethod
@@ -193,6 +427,7 @@ class WorkflowService(PermissionsMixin):
             created_by_id=user_pk(user),
         )
         await record.asave()
+        await _resync_schedules(record.slug)
         return record
 
     @classmethod
@@ -223,6 +458,7 @@ class WorkflowService(PermissionsMixin):
         active: bool | None = None,
     ) -> Any:
         record = await cls.get(workflow_id, user=user)
+        slug = record.slug
         if workflow is not None:
             _validate_submitted(workflow)
             record.definition = workflow.model_dump()
@@ -231,6 +467,9 @@ class WorkflowService(PermissionsMixin):
         if active is not None:
             record.active = active
         await record.asave()
+        # A rename moves the slug, and the schedules with it.
+        for key in {slug, record.slug}:
+            await _resync_schedules(key)
         return record
 
     @classmethod
@@ -244,6 +483,7 @@ class WorkflowService(PermissionsMixin):
 
         record = await cls.get(workflow_id, user=user)
         await Workflow.objects.filter(id=record.id).adelete()
+        await _resync_schedules(record.slug)
 
     @classmethod
     async def list_workflows(
@@ -305,9 +545,47 @@ class WorkflowService(PermissionsMixin):
         return run
 
 
+async def _schedules() -> dict[str, Any]:
+    from django_ai_sdk.workflows.triggers import FIRE_CRON
+
+    return {
+        schedule["schedule_name"]: schedule
+        for schedule in await runtime.client().list_schedules_async()
+        if schedule["workflow_name"] == FIRE_CRON
+    }
+
+
+def _next_run(trigger: Any, schedule: dict[str, Any] | None) -> str | None:
+    """When an active cron trigger fires next, in UTC ISO 8601."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    from django_ai_sdk.workflows.conf import setting
+    from django_ai_sdk.workflows.schemas import CronTrigger
+
+    if (
+        not isinstance(trigger, CronTrigger)
+        or schedule is None
+        or schedule["status"] != "ACTIVE"
+        or not setting("SCHEDULES_ENABLED")
+    ):
+        return None
+    try:
+        from croniter import croniter
+    except ImportError:  # pragma: no cover - croniter comes with the dbos extra
+        return None
+    now = datetime.now(ZoneInfo(trigger.timezone))
+    return croniter(trigger.cron, now).get_next(datetime).astimezone(UTC).isoformat()
+
+
 # Sync wrappers, for sync views (e.g. Django REST framework).
 start_workflow = async_to_sync(WorkflowService.start)
 resume_workflow_run = async_to_sync(WorkflowService.resume)
+cancel_workflow_run = async_to_sync(WorkflowService.cancel)
+decide_workflow_step = async_to_sync(WorkflowService.decide)
+list_workflow_triggers = async_to_sync(WorkflowService.list_triggers)
+set_workflow_trigger_paused = async_to_sync(WorkflowService.set_trigger_paused)
+fire_workflow_trigger = async_to_sync(WorkflowService.fire_trigger)
 list_workflow_listeners = async_to_sync(WorkflowService.list_listeners)
 create_workflow = async_to_sync(WorkflowService.create)
 update_workflow = async_to_sync(WorkflowService.update)

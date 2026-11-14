@@ -200,6 +200,15 @@ class WorkflowStartSerializer(serializers.Serializer):
     inputs = serializers.DictField(required=False, default=dict)
 
 
+class WorkflowDecisionSerializer(serializers.Serializer):
+    approved = serializers.BooleanField()
+    note = serializers.CharField(required=False, default="", allow_blank=True, max_length=1000)
+
+
+class WorkflowTriggerPauseSerializer(serializers.Serializer):
+    paused = serializers.BooleanField()
+
+
 class TraceQuerySerializer(serializers.Serializer):
     message_id = serializers.CharField(required=False, allow_null=True, default=None)
     operation_name = serializers.CharField(required=False, allow_null=True, default=None)
@@ -477,6 +486,7 @@ class StepRunSerializer(serializers.ModelSerializer):
             "status",
             "error",
             "detail",
+            "turn_id",
             "started_at",
             "completed_at",
         ]
@@ -491,6 +501,7 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
             "workflow_key",
             "status",
             "attempt",
+            "trigger",
             "outputs",
             "error",
             "created_at",
@@ -504,3 +515,19 @@ class WorkflowRunDetailSerializer(WorkflowRunSerializer):
 
     class Meta(WorkflowRunSerializer.Meta):  # ty: ignore[invalid-attribute-override]
         fields = [*WorkflowRunSerializer.Meta.fields, "steps"]
+
+
+class WorkflowTriggerSerializer(serializers.Serializer):
+    workflow = serializers.CharField()
+    workflow_id = serializers.CharField(allow_null=True)
+    name = serializers.CharField()
+    kind = serializers.CharField()
+    cron = serializers.CharField(allow_blank=True)
+    timezone = serializers.CharField(allow_blank=True)
+    event = serializers.CharField(allow_blank=True)
+    run_as = serializers.CharField(allow_blank=True)
+    enabled = serializers.BooleanField()
+    paused = serializers.BooleanField()
+    next_run_at = serializers.CharField(allow_null=True)
+    last_fired_at = serializers.CharField(allow_null=True)
+    last_run = WorkflowRunSerializer(allow_null=True)

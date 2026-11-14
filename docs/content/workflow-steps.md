@@ -163,7 +163,7 @@ run = await WorkflowRun.objects.acreate(status=WorkflowRun.Status.RUNNING)
 await run_steps(PIPELINE, inputs={"document": document}, recorder=RunRecorder(run, PIPELINE))
 ```
 
-`RunRecorder` writes one `StepRun` row per step, and takes the declared pipeline because that is what fixes each row's order. It is passed as `recorder=`, not among the listeners, because it is the run's own record: it is told about each step first, and an error it raises (a database that is down, a run that is no longer this worker's) stops the run instead of being logged. A step does not run without its row. It also refreshes the run's `heartbeat_at` at every step, and every minute while a step runs, which is what `workflows_sweep` reads. A host that already keeps a step table — because a review screen queries one — adds a listener of its own instead of writing the same fact twice under two retention policies.
+`RunRecorder` writes one `StepRun` row per step, and takes the declared pipeline because that is what fixes each row's order. It is passed as `recorder=`, not among the listeners, because it is the run's own record: it is told about each step first, and an error it raises (a database that is down, a run that is no longer this worker's) stops the run instead of being logged. A step does not run without its row. It also refreshes the run's `heartbeat_at` at every step. A host that already keeps a step table — because a review screen queries one — adds a listener of its own instead of writing the same fact twice under two retention policies.
 
 ## Resume
 
@@ -173,7 +173,7 @@ A pipeline you run yourself resumes by passing what already finished as `complet
 await run_steps(PIPELINE, completed={"text": stored_text})
 ```
 
-A queued run does this for you. Dispatch is at-least-once, so the same run can reach a worker twice: the worker claims the run first (pending to running, in one conditional update), and a second delivery finds nothing to claim. A run that failed, or that `workflows_sweep` marked interrupted after its worker died, is queued again with `WorkflowService.resume(run_id)`; the worker that claims it reads the run's completed rows and continues from there.
+A queued run does this for you. Dispatch is at-least-once, so the same run can reach a worker twice: the worker claims the run first (pending to running, in one conditional update), and a second delivery finds nothing to claim. A run that failed or was cancelled is queued again with `WorkflowService.resume(run_id)`; the worker that claims it reads the run's completed rows and continues from there. A worker that died mid-run needs nothing: DBOS recovers the run.
 
 ## Interpreting a step's output
 
@@ -273,10 +273,10 @@ as a real failure.
 
 ## Limitations
 
-Workflows are a beta: retries, timeouts, parallel steps, human approval, the sweep, run data and snapshot semantics are listed once, under [Beta limitations](/manual/workflows/#beta-limitations). What concerns writing steps in particular:
+Workflows are a beta: retries, timeouts, parallel steps, one worker, run data and snapshot semantics are listed once, under [Beta limitations](/manual/workflows/#beta-limitations). What concerns writing steps in particular:
 
 - **No re-run of one step.** A failed step runs again only when the whole run is resumed, which continues past whatever already completed.
-- **A blocked event loop does not beat.** A step that blocks the loop (sync work not wrapped in `sync_to_async`) for longer than `workflows_sweep --stale-after` gets its live run marked `interrupted` (its worker then stops at its next step).
+- **A blocked event loop blocks the worker.** A step that blocks the loop (sync work not wrapped in `sync_to_async`) stalls every other run in that worker until it returns.
 - **Order is yours to get right.** A step declared ahead of the one it reads is refused, not reordered.
 - **An `AgentStep` runs the CHAT permission check** on the user, the same way a JSON agent step does. A code pipeline is not a permission bypass.
 - **A pipeline you pass to `run_steps` yourself is not queued**, recorded or swept: only a `WorkflowRun` is.

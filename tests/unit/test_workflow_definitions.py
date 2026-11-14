@@ -507,7 +507,7 @@ class TestCompiling:
     @override_settings(AI_SDK_WORKFLOWS={"STEPS": {"broken": "nowhere.NoSuchStep"}})
     def test_a_type_that_will_not_import_is_left_out_rather_than_raising(self):
         """One bad path in settings must not stop the site booting."""
-        assert get_step_registry() == {}
+        assert set(get_step_registry()) == {"approval"}
 
     @override_settings(AI_SDK_WORKFLOWS={"LISTENERS": {}})
     def test_an_unregistered_step_listener_is_refused(self):

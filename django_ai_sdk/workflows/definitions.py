@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, create_model
 
 from django_ai_sdk.workflows.conf import registered
 from django_ai_sdk.workflows.listeners import RunListener, get_listener_registry
-from django_ai_sdk.workflows.schemas import AGENT_STEP, PY_TYPES
-from django_ai_sdk.workflows.steps import AgentStep, OnError, Step
+from django_ai_sdk.workflows.schemas import AGENT_STEP, APPROVAL_STEP, PY_TYPES
+from django_ai_sdk.workflows.steps import AgentStep, ApprovalStep, OnError, Step
 
 if TYPE_CHECKING:
     from django_ai_sdk.workflows.schemas import (
@@ -24,9 +24,10 @@ def get_step_registry() -> dict[str, type[Step]]:
     """Step classes a definition may name, by key, from `AI_SDK_WORKFLOWS['STEPS']`.
 
     The registry is the gate: a type that is not listed cannot be composed. A path
-    that does not import is left out with a warning (and system check E002).
+    that does not import is left out with a warning (and system check E002). The
+    built-in approval step is always there.
     """
-    return registered("STEPS", Step)
+    return {**registered("STEPS", Step), APPROVAL_STEP: ApprovalStep}
 
 
 def _field_annotation(field: FieldDefinition, label: str) -> Any:

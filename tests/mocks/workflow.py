@@ -15,7 +15,7 @@ from django_ai_sdk.workflows.steps import OnError, Step, StepOutcome, WorkflowCo
 
 # Patch targets: the agent an agent step loads, and the hand-off to the task queue.
 AGENT_GET = "django_ai_sdk.agents.services.AgentService.get"
-ENQUEUE = "django_ai_sdk.workflows.runs._enqueue"
+ENQUEUE = "django_ai_sdk.workflows.runs.requeue"
 
 
 def fake_agent(result: Any = "agent result") -> MagicMock:

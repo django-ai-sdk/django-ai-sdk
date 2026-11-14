@@ -16,6 +16,8 @@ DEFAULTS: dict[str, Any] = {
     "STEPS": {},
     # Listener classes by key: {"log": "myapp.listeners.LogListener"}.
     "LISTENERS": {},
+    # False: a cron occurrence starts nothing, such as on a staging copy of production.
+    "SCHEDULES_ENABLED": True,
 }
 
 

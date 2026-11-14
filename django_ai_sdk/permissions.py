@@ -74,6 +74,8 @@ class Operation(StrEnum):
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
+    # Decide an approval step: let a waiting run go on, or stop it.
+    APPROVE_WORKFLOW = "approve_workflow"
     # Oversight records without content: turn fields, rule matches, counts.
     VIEW_OVERSIGHT_METRICS = "view_oversight_metrics"
     # Turn content: question, answer, sources, reasons, notes and who asked.
@@ -455,7 +457,9 @@ class WorkflowDefaultPermission(BasePermission):
       definition that is neither stored nor registered): the `MANAGE_PERMISSION` model
       permission. A holder manages every stored definition.
     - A run is read by the user it ran as, or by a holder of `VIEW_RUNS_PERMISSION`. Only
-      the user it ran as resumes it. `is_staff` grants nothing here.
+      the user it ran as resumes or cancels it. `is_staff` grants nothing here.
+    - Deciding an approval step: the `APPROVE_PERMISSION` model permission, and never on
+      a run the approver acts as or started, so nobody approves their own run.
 
     Ownership lives here rather than in `WorkflowService`, so a deployment that
     overrides the `workflow` domain replaces the whole rule and not half of it.
@@ -467,12 +471,15 @@ class WorkflowDefaultPermission(BasePermission):
 
     MANAGE_PERMISSION = "django_ai_sdk_workflows.change_workflow"
     VIEW_RUNS_PERMISSION = "django_ai_sdk_workflows.view_workflowrun"
+    APPROVE_PERMISSION = "django_ai_sdk_workflows.approve_steprun"
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
         if operation in self.MANAGE:
             return await _ahas_perm(user, self.MANAGE_PERMISSION)
+        if operation is Operation.APPROVE_WORKFLOW:
+            return await _ahas_perm(user, self.APPROVE_PERMISSION)
         return operation in self.READ | self.WRITE
 
     async def has_object_permission(
@@ -491,6 +498,11 @@ class WorkflowDefaultPermission(BasePermission):
                 return await _ahas_perm(user, self.MANAGE_PERMISSION)
             return operation in self.READ | self.WRITE
         if isinstance(obj, WorkflowRun):
+            if operation is Operation.APPROVE_WORKFLOW:
+                # SECURITY: four eyes. Nobody decides on a run that acts as them, or that
+                # they started as another account (a trigger fired by hand).
+                own = _owned_by(obj.user_id, user) or _owned_by(obj.started_by_id, user)
+                return not own and await _ahas_perm(user, self.APPROVE_PERMISSION)
             if _owned_by(obj.user_id, user):
                 return True
             # Viewers may read a run but not resume it, since resuming acts as its user.

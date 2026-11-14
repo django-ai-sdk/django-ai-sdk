@@ -31,7 +31,13 @@ from django_ai_sdk.oversight.agents import (
     overrides_get_oversight,
 )
 from django_ai_sdk.oversight.conf import is_enabled
-from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
+from django_ai_sdk.oversight.guard import (
+    TurnGuard,
+    closing_turn,
+    current_guard,
+    guarding,
+    note_opened,
+)
 from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT, merge_restrict
 from django_ai_sdk.oversight.plugin.hooks import (
     GateQuestionHook,
@@ -110,6 +116,7 @@ async def open_turn(
         guard.actor_id = guard.actor_id or outer.actor_id
         if outer.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, outer.restrict)
+    note_opened(guard)
     return guard, True
 
 

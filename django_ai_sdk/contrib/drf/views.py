@@ -752,6 +752,8 @@ class WorkflowViewSet(ApiViewSet):
         "create": s.WorkflowCreateSerializer,
         "partial_update": s.WorkflowUpdateSerializer,
         "start": s.WorkflowStartSerializer,
+        "decide": s.WorkflowDecisionSerializer,
+        "pause_trigger": s.WorkflowTriggerPauseSerializer,
     }
 
     def list(self, request: Request) -> Response:
@@ -812,6 +814,48 @@ class WorkflowViewSet(ApiViewSet):
     def resume(self, request: Request, run_id: str) -> Response:
         run = workflow_services.resume_workflow_run(run_id, user=request.user)
         return Response({"run_id": str(run.id), "status": run.status}, status=202)
+
+    @action(detail=False, methods=["post"], url_path=rf"runs/(?P<run_id>{ID})/cancel")
+    def cancel(self, request: Request, run_id: str) -> Response:
+        run = workflow_services.cancel_workflow_run(run_id, user=request.user)
+        return Response({"run_id": str(run.id), "status": run.status})
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path=rf"runs/(?P<run_id>{ID})/steps/(?P<step>{ID})/decision",
+    )
+    def decide(self, request: Request, run_id: str, step: str) -> Response:
+        """Approve or reject an approval step the run waits on. Not on a run that acts as you."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        run = workflow_services.decide_workflow_step(
+            run_id, step, user=request.user, **serializer.validated_data
+        )
+        return Response({"run_id": str(run.id), "status": run.status})
+
+    @action(detail=False, methods=["get"], url_path="triggers")
+    def triggers(self, request: Request) -> Response:
+        triggers = workflow_services.list_workflow_triggers(user=request.user)
+        return Response(s.WorkflowTriggerSerializer(triggers, many=True).data)
+
+    @action(
+        detail=False, methods=["post"], url_path=rf"triggers/(?P<key>{ID})/(?P<trigger>{ID})/pause"
+    )
+    def pause_trigger(self, request: Request, key: str, trigger: str) -> Response:
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        workflow_services.set_workflow_trigger_paused(
+            key, trigger, paused=serializer.validated_data["paused"], user=request.user
+        )
+        return Response(status=NO_CONTENT)
+
+    @action(
+        detail=False, methods=["post"], url_path=rf"triggers/(?P<key>{ID})/(?P<trigger>{ID})/fire"
+    )
+    def fire_trigger(self, request: Request, key: str, trigger: str) -> Response:
+        workflow_services.fire_workflow_trigger(key, trigger, user=request.user)
+        return Response(status=202)
 
     @action(detail=True, methods=["get"])
     def runs(self, request: Request, workflow_id: str) -> Response:

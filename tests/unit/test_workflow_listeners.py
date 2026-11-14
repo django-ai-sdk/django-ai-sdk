@@ -178,10 +178,10 @@ class TestTheRecorderHoldsTheRun:
         with pytest.raises(RunSuperseded):
             await recorder.on_step_start(CTX, ocr)
 
-    async def test_a_swept_run_stops_its_old_worker_before_it_writes(self):
+    async def test_a_cancelled_run_stops_its_worker_before_it_writes(self):
         run, recorder, (ocr,) = await self._recorder("ocr")
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(
-            status=WorkflowRun.Status.INTERRUPTED
+            status=WorkflowRun.Status.CANCELLED
         )
 
         with pytest.raises(RunSuperseded):

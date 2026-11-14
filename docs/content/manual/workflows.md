@@ -8,10 +8,10 @@ The workflow engine orchestrates multi-step agent tasks: steps that pass results
 
 ## Installing
 
-Workflows are an opt-in app. Add it after the core app and run `migrate`:
+Workflows are an opt-in app. Runs execute on DBOS, so it comes with `"django_ai_sdk.durable"` (the `dbos` extra). Add both after the core app, run `migrate`, and run `manage.py ai_sdk_worker`; see [Durable runs on DBOS](#durable-runs-on-dbos):
 
 ```python
-INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.workflows"]
+INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.workflows", "django_ai_sdk.durable"]
 ```
 
 On start it reads every installed app's `workflows.py` (after the core app has set up the agents, so a step can name `MyAgent().agent_id`) and registers the [system checks](#system-checks). Without it the SDK has no workflow tables, checks or endpoints: the DRF router leaves `workflows/` out, and the Ninja `get_workflows_router()` is yours not to mount.
@@ -173,8 +173,8 @@ AI_SDK_WORKFLOWS = {
 | Model | Purpose |
 | --- | --- |
 | `Workflow` | A persisted, named workflow: `name`, `slug` (registry key, shared with code declarations), `definition` (JSON), `active`, `created_by`. |
-| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed` / `interrupted`, `attempt` (how many times a worker claimed it), `heartbeat_at` (when its worker last showed it was alive), `workflow_key` (set by the server: the stored workflow's slug, the registered workflow's name, or `adhoc`), `workflow_definition` snapshot, `inputs` (the declared inputs the caller supplied; undeclared keys are dropped), `outputs` (`{step name: output}` for every completed step), `error`, `task_id`, `user`. |
-| `StepRun` | Per-step progress: `sequence`, `step_name`, `output`, status `pending` / `running` / `completed` / `failed` / `skipped`, `detail` / `error`, timestamps. |
+| `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed` / `cancelled`, `trigger` (what started it: `manual`, `cron:<trigger>` or `event:<trigger>`), `attempt` (how many times a worker claimed it), `heartbeat_at` (when it last made progress: the claim or a step boundary), `workflow_key` (set by the server: the stored workflow's slug, the registered workflow's name, or `adhoc`), `workflow_definition` snapshot, `inputs` (the declared inputs the caller supplied; undeclared keys are dropped), `outputs` (`{step name: output}` for every completed step), `error`, `task_id` (the DBOS workflow id of the current attempt), `user` (who it acts as), `started_by` (the person who asked for it, when one did: the starter of a manual run, or the operator who fired a trigger by hand). |
+| `StepRun` | Per-step progress: `sequence`, `step_name`, `output`, status `pending` / `running` / `completed` / `failed` / `skipped` / `waiting` (an approval step), `detail` / `error`, `turn_id` (the oversight turn its model call opened), timestamps. |
 
 `registry.definition_of(workflow)` parses and validates the stored JSON. A stored definition is named by its row's slug: `create` and `update` overwrite the `name` it was sent with.
 
@@ -198,9 +198,20 @@ await WorkflowService.list_workflows(user=request.user, active_only=True)
 # active stored workflow's slug.
 run = await WorkflowService.start("process-document", inputs={"file": ref}, user=request.user)
 
-# Queue a failed or interrupted run again. It reuses the run's own definition and
-# inputs, and continues past the steps that completed.
+# Queue a failed or cancelled run again. It reuses the run's own
+# definition and inputs, and continues past the steps that completed.
 run = await WorkflowService.resume(run_id, user=request.user)
+
+# Stop a pending or running run. The step in flight finishes; none after it starts.
+run = await WorkflowService.cancel(run_id, user=request.user)
+
+# Decide an approval step the run waits on. Never on a run that acts as you or that you started.
+run = await WorkflowService.decide(run_id, "approve", approved=True, note="ok", user=request.user)
+
+# Triggers: list them with their schedule's state, pause or resume a cron one, fire it now.
+triggers = await WorkflowService.list_triggers(user=request.user)
+await WorkflowService.set_trigger_paused("nightly-report", "nightly", paused=True, user=request.user)
+await WorkflowService.fire_trigger("nightly-report", "nightly", user=request.user)
 
 # Run history
 runs = await WorkflowService.list_runs(workflow_id, user=request.user)
@@ -223,46 +234,96 @@ A definition is checked when it is written, not only when it runs: `create` and 
 | Create, edit, delete or list stored workflows, list the listeners; run any other definition with `WorkflowService.run` | Holders of `django_ai_sdk_workflows.change_workflow`. A holder manages every stored workflow. |
 | Read a run (`GET /workflows/runs/{id}/`, or under its stored workflow's path) | The user it ran as, or holders of `django_ai_sdk_workflows.view_workflowrun`. |
 | Resume a run (`resume`, `POST /workflows/runs/{id}/resume/`) | The user it ran as. An ad-hoc run (neither stored nor registered) also takes the manage permission, as starting it did. |
+| Cancel a run (`cancel`, `POST /workflows/runs/{id}/cancel/`) | The user it ran as. |
+| Decide an approval step (`decide`, `POST /workflows/runs/{id}/steps/{step}/decision/`) | Holders of `django_ai_sdk_workflows.approve_steprun`, and never on a run that acts as them: nobody approves their own run, a superuser included. |
+| List triggers (`GET /workflows/triggers/`) | Any authenticated user. |
+| Pause, resume or fire a cron trigger (`POST /workflows/triggers/{key}/{trigger}/pause/` and `.../fire/`) | The manage permission. |
 
 `is_staff` grants nothing here; a superuser holds every model permission. Over HTTP only a registered or stored workflow runs, by its key: there is no endpoint that runs a definition sent in the request. `POST /workflows/{key}/run/` answers `{run_id, status}`; follow the run at `GET /workflows/runs/{run_id}/`, which reads any run the caller may read, whether or not a stored workflow started it. Its `steps` carry each step's `status`, `output`, `detail` and `error`. `WorkflowService.run` is for definitions your own code builds. A run, a stored workflow or a resume the caller may not reach reads as absent (404), not forbidden. To change these rules, set `AI_SDK_PERMISSIONS["workflow"]`.
 
 ## Execution Model
 
-`WorkflowService.start()` and `run()` create a `WorkflowRun` in `pending` and queue it with `enqueue_run` (`django_ai_sdk.workflows.runs`). It queues the `execute_workflow` background task (`django_tasks`) once the current transaction commits, so a worker never looks for a row that is not there yet; if queueing fails, the run is marked `failed` with the reason. Whether the task runs in a worker or inline in the calling request depends on the configured `TASKS` backend — see [Background Tasks](/manual/settings/#background-tasks).
+`WorkflowService.start()` and `run()` create a `WorkflowRun` in `pending` and queue it with `enqueue_run` (`django_ai_sdk.workflows.runs`). It hands the run to DBOS once the current transaction commits, so the worker never looks for a row that is not there yet; if queueing fails, the run is marked `failed` with the reason. A process that dies between the commit and the queueing leaves the run `pending`; the worker queues every pending run again when it starts, which runs nothing twice because the DBOS workflow id is fixed per attempt.
 
 The run row keeps a copy of the definition (`workflow_definition`) taken when the run was queued, and the worker runs that copy: editing a stored workflow changes later runs, not a queued or resumed one. The step types and listeners it names are resolved by key in the worker, so they must be registered in the worker's settings as well.
 
-In the worker, `execute_run(run_id)`:
+In the worker, the DBOS workflow calls `execute_run(run_id)`, with each unit checkpointed (below). It:
 
 1. **Claims** the run with one conditional update: `pending` becomes `running`, `attempt` goes up by one and `heartbeat_at` is set. A second delivery of the same run, or a delivery of a run that already finished, claims nothing and stops there.
 2. Validates the run's inputs against the definition's `input_fields`, when it declares any.
 3. Compiles the definition to `Step` objects and listeners, and runs them through `run_steps` with a `RunRecorder` (JSON and code share this path).
 4. **Replays** completed steps from a previous attempt, so a resumed run continues where it left off and does not re-date the rows it is trusting.
-5. Marks the run `completed` with `{step name: output}` for every completed step. A failed step whose `on_error` is `stop` marks the run `failed` either way, but the task ends differently: a step that returned a failed outcome raises `WorkflowStopped`, which the task logs as an outcome; a step that raised lets its own exception fail the task, traceback and all, for your error reporting.
+5. Marks the run `completed` with `{step name: output}` for every completed step. A failed step whose `on_error` is `stop` marks the run `failed`.
 
-At every step, and every minute while a step runs, the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When it is not (the run was swept, resumed and claimed again), it raises `RunSuperseded` before it writes anything, and the worker stops.
+At every step the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When it is not (the run was cancelled, or resumed and claimed again), it raises `RunSuperseded` before it writes anything, and the walk stops.
 
-### A worker that dies
+Called directly, `execute_run(run_id)` does the same walk in the calling process without checkpoints, as an inline demo endpoint does. Such a run cannot wait: an approval step in it fails at once. In a host's tests, `django_ai_sdk.durable.testing.run_inline(monkeypatch)` in an autouse fixture makes every queued run execute that way, with no DBOS tables needed.
 
-A killed worker leaves its run `running` with a heartbeat that stops moving. `workflows_sweep` finds those runs, marks them `interrupted`, and marks the step each one was in `failed`. It also marks `interrupted` a run still `pending` with no `task_id` past `--stale-after`: the process died after the run was committed and before it was queued. A pending run that has a `task_id` is the task backend's to deliver, and the sweep leaves it alone however long it waits:
+## Durable runs on DBOS
 
-```bash
-manage.py workflows_sweep --stale-after 30m --limit 500 [--dry-run]
+[DBOS](https://docs.dbos.dev) runs every workflow run, in the project's own database (Postgres in production, its own schema `dbos`; a file next to a SQLite database in development). There is no other service: `manage.py ai_sdk_worker` is the worker, and creates or upgrades DBOS's tables as it launches. If a web process may queue a run before the first worker has started, run `manage.py dbos_migrate` in your release step. A host's own DBOS schedules hang on the `durable.signals.worker_launched` signal, sent once DBOS is up.
+
+```python
+INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.workflows", "django_ai_sdk.durable"]
+TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
+AI_SDK_DBOS = {"VERSION": "1"}  # every key optional; see Settings
 ```
 
-Schedule it (cron, a periodic task): each run takes the next `--limit` runs, oldest first. Pick a `--stale-after` of several minutes: a worker beats every minute, also inside a long step, and the command refuses less than two minutes. It shares its options and its pattern with `oversight_sweep`. An interrupted run is not retried by itself: `WorkflowService.resume(run_id)` or `POST /workflows/runs/{id}/resume/` queues it again.
+- **The same walk, checkpointed.** A run is the DBOS workflow `ai_sdk.workflow_run`. The runner hands each unit (the claim, the run's start, each step, the run's end) to DBOS as a step, which records its result. A worker that dies mid-run is recovered by the next one: the units that finished are replayed from their records, and only the step in flight runs again. There is no heartbeat and nothing to sweep.
+- **Ids.** The run's id is its first attempt's DBOS workflow id; a resumed run's attempt is `<run id>:<attempt>`. Queueing an id that exists runs nothing.
+- **Pinned version.** `AI_SDK_DBOS["VERSION"]` is fixed rather than a hash of the code, so a deploy recovers the runs the last one left. Each run carries its definition, so only a change to step code that an unfinished run cannot replay calls for a new version.
+- **JSON, not pickle.** DBOS stores inputs, step results and errors as JSON (`portable_json`); loading them runs no code.
+- **Cancel.** `cancel` marks the run `cancelled` and tells DBOS, which stops it before its next step. A run waiting for an approval is woken first, since DBOS's cancel alone leaves it waiting. `resume` takes it up again.
+- **One worker at a time.** Without DBOS Conductor, a worker recovers every unfinished run of its executor (`"local"`) at launch, so two at once would both run them. `ai_sdk_worker` takes a Postgres advisory lock first: a second worker waits as a standby until the first stops, which also makes a deploy that starts the new worker before stopping the old one safe. Concurrency comes from the queues, not from more workers.
+- **No cap on the `workflows` queue.** A run waiting for an approval counts against its queue's `worker_concurrency` for as long as it waits, so a cap there lets a few waiting approvals stop every other run. Bound model spend in the agents, not in the queue.
+- **One queue system.** `DBOSTaskBackend` runs every other `django_tasks` task (oversight's reflection and notifications, document processing) as a DBOS workflow of one step on the queue its `queue_name` names, so `db_worker` is not needed. `AI_SDK_DBOS["QUEUES"]` declares the queues and their concurrency.
+
+Web processes never launch DBOS: they queue, send decisions and manage schedules through a `DBOSClient` on the same tables.
+
+## Approval steps
+
+The built-in step type `approval` waits for a person:
+
+```json
+{"type": "approval", "name": "approve", "requires": ["check"],
+ "config": {"prompt": "Book this invoice?", "timeout_seconds": 86400}}
+```
+
+The step is set `waiting` with the prompt as its `detail`, and the run waits durably (`DBOS.recv`) across restarts and deploys. A decision comes from `WorkflowService.decide` or `POST /workflows/runs/{id}/steps/{step}/decision/` (`{"approved": true, "note": "..."}`). It takes the `approve_steprun` permission and is refused on a run that acts as the approver or that they started (such as a trigger they fired by hand that runs as a bot). The first decision wins. Approved, the step completes with `{approved, by, note}`; rejected, or without a decision within `timeout_seconds` (default a week), it fails and its `on_error` decides what follows.
+
+## Triggers
+
+A workflow declares what starts it besides a person or code asking:
+
+```python
+WorkflowDefinition(
+    name="wiki-gardener",
+    input_fields={"mode": FieldDefinition(enum=["hourly", "morning"])},
+    steps=[...],
+    triggers=[
+        CronTrigger(name="hourly", cron="5 * * * *", timezone="Europe/Amsterdam",
+                    run_as="wiki-bot", inputs={"mode": "hourly"}),
+        EventTrigger(name="inbox", event="telegram.message", inputs={"text": "{text}"}),
+    ],
+)
+```
+
+- **Cron.** The worker keeps one DBOS schedule per enabled cron trigger, named `<workflow>:<trigger>`, and syncs them all on start; saving a stored workflow syncs that workflow's schedules only. DBOS fires each occurrence once; the run's id derives from the occurrence, so a repeat opens nothing new. Five fields only, so nothing fires more than once a minute. An operator pauses a trigger at runtime and a deploy keeps that. `AI_SDK_WORKFLOWS["SCHEDULES_ENABLED"] = False` makes every occurrence start nothing and leaves the schedules as they are, so turning it back on needs no clean-up. Firing a trigger by hand works either way, and records who fired it.
+- **Event.** The host reports an event with `await start_for_event("telegram.message", payload, idempotency_key=update_id)` (`django_ai_sdk.workflows.triggers`). Every enabled trigger on that event starts a run whose id derives from the key, so a redelivered message starts nothing new.
+- **Inputs.** `"{word}"` in a string is filled in: from `name`, `workflow`, `scheduled_at` and `last_run_at` for cron, from the payload for an event. A string that is only `"{word}"` takes the value with its type. Every input a trigger fills must be declared.
+- **Who it acts as.** `run_as` (a USERNAME_FIELD value) on a workflow declared in code. A stored workflow's runs act as the person who created it: a submitted definition that sets `run_as` is refused, or authoring a workflow would be a way to act as anyone.
 
 ### Beta limitations
 
 Workflows ship as a beta. What the engine does not do yet, in one list:
 
 - **No retries.** A failed step fails its run (or, with `on_error: continue`, is recorded and skipped past). Nothing tries it again by itself: `resume` queues the whole run again, which continues past the steps that completed.
-- **No timeouts beyond the model's.** A model call is bounded only by its client; a step doing its own HTTP or subprocess work bounds its own client. `django_tasks` has no task timeout either.
+- **No timeouts beyond the model's.** A model call is bounded only by its client; a step doing its own HTTP or subprocess work bounds its own client.
 - **Sequential steps only.** Steps run one at a time, in declared order: no fan-out and no join, even where two steps read nothing from each other.
 - **Only model calls are overseen.** A step's turn is its model call: an `AgentStep`'s `agent.run()`, or `self.turn()` in a step of your own. A step that calls no model (a count, a fetch, a save) opens no turn and no policy judges it; one that calls a model outside a turn is refused, or with `UNGUARDED_MODEL_CALLS` set to `warn`, logged.
-- **No human approval.** A step never waits for a person. An oversight rule that blocks the step's turn fails the step; a `Queue` rule files a review item, and the step carries on with the answer it got.
-- **The sweep is yours to schedule.** A killed worker, or a run that never reached the queue, is found only by `workflows_sweep`, run by the host's cron or periodic task. Until it runs, the run stays `running` or `pending`.
-- **A message the task backend loses is not found.** A run whose task was queued (it has a `task_id`) but never delivered stays `pending`; the sweep does not guess at a backend's backlog. Mark it `interrupted` yourself to resume it.
+- **Oversight does not wait.** An oversight rule that blocks a step's turn fails the step; a `Queue` rule files a review item, and the step carries on with the answer it got. To have a person decide before the run goes on, put an [approval step](#approval-steps) after it.
+- **One worker.** Workers do not share the load; a second one is a standby (see [Durable runs on DBOS](#durable-runs-on-dbos)).
+- **Step code changes replay.** A run recovered after a deploy replays its finished units by name. Changing which units a run goes through (a new step type's internals are fine; reordering the runner's units is not) calls for a new `AI_SDK_DBOS["VERSION"]`, and the old version's unfinished runs are left to finish or be resumed.
 - **Run data is plaintext and stays.** `inputs`, `outputs` and each `StepRun.output` are stored as plain JSON and kept until you delete the rows. Deleting a user nulls the run's `user` but keeps its inputs and outputs; deleting a thread does not reach them. Pass ids rather than content where you can, and prune old runs yourself.
 - **Payload ids are not checked.** A document id or any other key in `inputs` is passed to the steps as given; a step that loads a row by it must check that `ctx.user` may read that row.
 - **A run executes the definition captured when it was queued.** Editing a stored workflow changes later runs, not one already queued or one that is resumed. Deactivating or deleting it, or removing a registered one from code, stops its runs from being resumed. The step types and listeners it names are looked up in the worker, so they must be registered there too.
@@ -277,10 +338,9 @@ In-turn multi-agent chat without a durable record belongs to **subagents**, not 
 | `ai_sdk.workflows.E001` | A workflow passed to `register_workflow` was refused (no steps, a name that is not a slug, an unknown step type or listener, …). |
 | `ai_sdk.workflows.E002` | An `AI_SDK_WORKFLOWS["STEPS"]` entry does not import, or is not a `Step` subclass. |
 | `ai_sdk.workflows.E003` | An `AI_SDK_WORKFLOWS["LISTENERS"]` entry does not import, or is not a `RunListener` subclass. |
-| `ai_sdk.workflows.E004` | `AI_SDK_WORKFLOWS["STEPS"]` has the key `agent`, which agent steps reserve. |
+| `ai_sdk.workflows.E004` | `AI_SDK_WORKFLOWS["STEPS"]` has the key `agent` or `approval`, which the built-in step types reserve. |
 | `ai_sdk.workflows.E005` | A 0.1 setting is still set: `AI_SDK_WORKFLOW_STEPS` (now `AI_SDK_WORKFLOWS["STEPS"]`) or `AI_SDK_WORKFLOW_ACTIONS` (now `AI_SDK_WORKFLOWS["LISTENERS"]`). |
 | `ai_sdk.workflows.E012` | `AI_SDK_WORKFLOWS` is not a dict, or one of its keys has a value of the wrong type. |
-| `ai_sdk.workflows.W001` | Deploy check (`check --deploy`): the `TASKS` backend runs workflow runs inline in the request that queued them (`ImmediateBackend`), never runs them (`DummyBackend`), or does not load. |
 
 At run time an entry that does not import is left out of its registry with a warning, so a definition naming it is refused; the checks make that visible before the first run.
 

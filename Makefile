@@ -1,6 +1,6 @@
 PHONY: setup setup-all format test test-demos typecheck check-migrations tag build publish release docs-graphs docs-build docs-serve
 
-DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
+DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --extra dbos --group studio
 # Leaves out local: its onnxruntime stack is heavy, and the tests fake the model.
 TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf --extra typesafe
 # example: make test UV_RUN_ARGS='--with "django==5.2.*"' TEST_PATHS=tests/oversight

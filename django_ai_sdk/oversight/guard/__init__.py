@@ -57,7 +57,7 @@ from django_ai_sdk.oversight.types import (
 from django_ai_sdk.utils import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
@@ -73,6 +73,9 @@ _unguarded: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _current: contextvars.ContextVar[TurnGuard | None] = contextvars.ContextVar(
     "django_ai_sdk_oversight_guard", default=None
 )
+_watched: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "django_ai_sdk_oversight_watched", default=None
+)
 
 
 def unguarded() -> contextlib.AbstractContextManager[None]:
@@ -82,6 +85,27 @@ def unguarded() -> contextlib.AbstractContextManager[None]:
 
 def is_unguarded() -> bool:
     return _unguarded.get()
+
+
+@contextlib.contextmanager
+def watching_turns() -> Generator[list[str]]:
+    """Collect the ids of the turns opened inside the block, in order.
+
+    For a caller that records which turn its work ran in, such as a workflow step.
+    A run that joins an outer turn opens none, so it adds nothing.
+    """
+    opened: list[str] = []
+    token = _watched.set(opened)
+    try:
+        yield opened
+    finally:
+        _watched.reset(token)
+
+
+def note_opened(guard: TurnGuard) -> None:
+    """Tell `watching_turns()` that `guard` opened a turn of its own."""
+    if (opened := _watched.get()) is not None:
+        opened.append(guard.id)
 
 
 def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]:

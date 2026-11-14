@@ -1,12 +1,12 @@
 """A queued run: sequencing, declared inputs, listeners, and the task entry point."""
 
+from __future__ import annotations
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from asgiref.sync import sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
-
 from django_ai_sdk.workflows.registry import register_workflow, reset_registry
 from django_ai_sdk.workflows.schemas import (
     FieldDefinition,
@@ -256,7 +256,6 @@ class TestListeners:
 
     async def test_a_workflow_listener_fires_for_every_step(self):
         from django_ai_sdk.workflows.listeners import RunListener
-        from django_ai_sdk.workflows.models import WorkflowRun
 
         events: list[tuple[str, str]] = []
 
@@ -300,7 +299,6 @@ class TestListeners:
     async def test_a_step_listener_fires_for_that_step_alone(self):
         """The difference the two attachment points buy."""
         from django_ai_sdk.workflows.listeners import RunListener
-        from django_ai_sdk.workflows.models import WorkflowRun
 
         events: list[str] = []
 
@@ -347,10 +345,9 @@ class TestListeners:
             await run_now(workflow)
 
     async def test_a_listener_reads_the_run_and_the_step_it_was_configured_with(self):
-        from tests.factories.db import UserFactory
-
         from django_ai_sdk.workflows.listeners import RunListener
         from django_ai_sdk.workflows.models import WorkflowRun
+        from tests.factories.db import UserFactory
 
         seen: list[dict] = []
 
@@ -402,92 +399,6 @@ class TestListeners:
         assert seen[0]["workflow"] == "ships-log"
         assert seen[0]["run_id"] == str(run.id)
         assert seen[0]["status"] == WorkflowRun.Status.COMPLETED
-
-
-@pytest.mark.asyncio
-@pytest.mark.django_db(transaction=True)
-class TestTheQueuedEntryPoint:
-    """A recorded ending stays off the queue; an unrecorded crash reaches it.
-
-    A stopped step and a refused claim are already on the run's own rows, so the
-    task result reports only what nothing else did.
-    """
-
-    async def _run_for(self, *steps):
-        from django_ai_sdk.workflows.models import WorkflowRun
-
-        workflow = make_workflow(*steps)
-        return await WorkflowRun.objects.acreate(
-            workflow_definition=workflow.model_dump(), inputs={}
-        )
-
-    async def test_a_queued_run_reaches_the_workflow(self):
-        from django_ai_sdk.workflows.tasks import execute_workflow
-
-        agent = make_agent("done")
-        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
-
-        with patch(AGENT_GET, AsyncMock(return_value=agent)):
-            await sync_to_async(execute_workflow.call)(str(run.id))
-
-        await run.arefresh_from_db()
-        assert run.outputs == {"result": "done"}
-
-    async def test_a_step_failure_does_not_escape_the_task(self):
-        from django_ai_sdk.workflows.models import WorkflowRun
-        from django_ai_sdk.workflows.tasks import execute_workflow
-
-        # A declared schema the agent does not return fails the step, and the
-        # step's on_error stops the run.
-        agent = make_agent("plain string, not a model")
-        run = await self._run_for(
-            StepDefinition(
-                name="result", agent_id="a1", output_fields={"x": FieldDefinition(type="int")}
-            )
-        )
-
-        with patch(AGENT_GET, AsyncMock(return_value=agent)):
-            await sync_to_async(execute_workflow.call)(str(run.id))
-
-        await run.arefresh_from_db()
-        assert run.status == WorkflowRun.Status.FAILED
-        assert run.error
-
-    async def test_a_superseded_attempt_does_not_escape_the_task(self):
-        from django_ai_sdk.workflows.models import WorkflowRun
-        from django_ai_sdk.workflows.steps import RunSuperseded
-        from django_ai_sdk.workflows.tasks import execute_workflow
-
-        agent = make_agent("done")
-        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
-
-        with (
-            patch(AGENT_GET, AsyncMock(return_value=agent)),
-            patch(
-                "django_ai_sdk.workflows.runs.RunRecorder.on_step_start",
-                AsyncMock(side_effect=RunSuperseded("result")),
-            ),
-        ):
-            await sync_to_async(execute_workflow.call)(str(run.id))
-
-        # The attempt that replaced this one owns the run: this one must not stamp
-        # failure over its progress.
-        await run.arefresh_from_db()
-        assert run.status == WorkflowRun.Status.RUNNING
-        assert run.error == ""
-
-    async def test_a_crash_still_reaches_the_queue(self):
-        from django_ai_sdk.workflows.tasks import execute_workflow
-
-        agent = MagicMock()
-        agent.run = AsyncMock(side_effect=RuntimeError("boom"))
-        run = await self._run_for(StepDefinition(name="result", agent_id="a1"))
-
-        with (
-            patch(AGENT_GET, AsyncMock(return_value=agent)),
-            pytest.raises(RuntimeError),
-        ):
-            await sync_to_async(execute_workflow.call)(str(run.id))
 
 
 @pytest.mark.asyncio
@@ -546,7 +457,7 @@ class TestRunState:
         assert outputs["result"] == "ok"
 
     async def test_a_completed_step_is_not_re_run_on_resume(self):
-        from django_ai_sdk.workflows.models import WorkflowRun, StepRun
+        from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 
         agent = make_agent("ok")
         workflow = make_workflow(
@@ -584,30 +495,3 @@ class TestRunState:
         outputs, _ = await run_now(workflow, run=run)
 
         assert outputs == {"result": "already done"}
-
-    async def test_a_long_step_keeps_beating_so_the_sweep_leaves_it(self):
-        import asyncio
-
-        from django_ai_sdk.workflows.models import WorkflowRun
-
-        beats = []
-
-        async def slow(*args, **kwargs):
-            row = await WorkflowRun.objects.aget(status=WorkflowRun.Status.RUNNING)
-            beats.append(row.heartbeat_at)
-            await asyncio.sleep(0.2)
-            row = await WorkflowRun.objects.aget(pk=row.pk)
-            beats.append(row.heartbeat_at)
-            return "ok"
-
-        agent = make_agent("ok")
-        agent.run = AsyncMock(side_effect=slow)
-        workflow = make_workflow(StepDefinition(name="result", agent_id="a1"))
-        with (
-            patch("django_ai_sdk.workflows.runs.HEARTBEAT_SECONDS", 0.02),
-            patch(AGENT_GET, AsyncMock(return_value=agent)),
-        ):
-            outputs, _ = await run_now(workflow)
-
-        assert outputs == {"result": "ok"}
-        assert beats[1] > beats[0]
