@@ -1,7 +1,7 @@
 """Rules: when a condition over lens answers holds, act.
 
     Rule(
-        "block_injection",
+        "injection_in_question",
         when=L("prompt_injection").is_true & L("prompt_injection").confident(0.9),
         then=Block("I can't help with that request."),
         mode=Mode.ENFORCE,

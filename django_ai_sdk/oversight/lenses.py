@@ -45,7 +45,7 @@ The built-in lenses at the end of this module are ready to subclass. Pattern
 presets find spans, so a Mask rule can mask what they find::
 
     class InputPII(PIILens):
-        name = "pii_input"
+        name = "pii_question"
         kinds = [*DEFAULT_PII_KINDS, "bsn"]
 
 Check presets answer structural facts about the turn in plain Python: its length,

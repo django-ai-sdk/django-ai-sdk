@@ -115,7 +115,7 @@ class GuardPolicy(Policy):
     ]
     rules = [
         Rule(
-            "block_injection",
+            "injection_in_question",
             when=L("injection").is_true,
             then=[Block("Not like that."), Alert("high")],
             mode=ENFORCE,

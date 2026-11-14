@@ -106,7 +106,7 @@ class TestHistoryAtTheGate:
         assert checked.notice and checked.notice["outcome"] == "blocked"
         turn = await closed_turn(guard)
         assert turn.outcome == "blocked"
-        row = await RuleMatch.objects.aget(turn=turn, rule="block_injection")
+        row = await RuleMatch.objects.aget(turn=turn, rule="injection_in_question")
         assert row.acted
 
     async def test_history_never_alerts_queues_or_takes_over_the_gate_rules(self):

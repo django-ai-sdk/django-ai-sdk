@@ -113,31 +113,31 @@ class QualityPack(Policy):
     ]
     rules = [
         Rule(
-            "review_ungrounded",
+            "ungrounded_answer",
             when=(L("groundedness") < 0.5) & L("groundedness").confident(0.7),
             then=Queue("quality"),
             description="Answers the sources do not support go to a person.",
         ),
         Rule(
-            "review_unsourced",
+            "unsourced_answer",
             # No confidence gate. An unsure verdict is worth a look too.
             when=L("taken_from").present & ~L("taken_from").is_true,
             then=Queue("quality"),
             description="Answers taken from none of the sources, or no answer, go to a person.",
         ),
         Rule(
-            "review_irrelevant_context",
+            "irrelevant_context",
             when=(L("context_relevance") < 0.3) & L("context_relevance").confident(0.7),
             then=Queue("retrieval"),
             description="Retrieval that found the wrong things, to tune the knowledge base.",
         ),
         Rule(
-            "note_empty_retrieval",
+            "empty_retrieval",
             when=L("empty_retrieval").is_true,
             then=Alert("info"),
         ),
         Rule(
-            "note_tool_failures",
+            "tool_failures",
             when=L("tool_errors") >= 0.5,
             then=Alert("warning"),
         ),

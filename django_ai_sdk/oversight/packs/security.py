@@ -110,16 +110,20 @@ class SecurityPack(Policy):
     origin = "pack:security"
     lenses = [
         PromptInjection,
-        PIILens(name="pii_input", label="Personal data in question"),
-        SecretsLens(name="secrets_input", label="Secrets in question"),
-        SecretsLens(name="secrets_tool", label="Secrets in tool call", subject=Subject.TOOL_CALL),
-        PIILens(name="pii_tool", label="Personal data in tool call", subject=Subject.TOOL_CALL),
-        PIILens(name="pii_output", label="Personal data in answer", subject=Subject.OUTPUT),
+        PIILens(name="pii_question", label="Personal data in question"),
+        SecretsLens(name="secrets_question", label="Secrets in question"),
+        SecretsLens(
+            name="secrets_tool_call", label="Secrets in tool call", subject=Subject.TOOL_CALL
+        ),
+        PIILens(
+            name="pii_tool_call", label="Personal data in tool call", subject=Subject.TOOL_CALL
+        ),
+        PIILens(name="pii_answer", label="Personal data in answer", subject=Subject.OUTPUT),
         Exfiltration,
     ]
     rules = [
         Rule(
-            "block_injection",
+            "injection_in_question",
             when=L("prompt_injection").is_true & L("prompt_injection").confident(0.9),
             then=[
                 Block(_("I can't follow instructions that try to change how I work.")),
@@ -128,32 +132,32 @@ class SecurityPack(Policy):
             description="A confident injection verdict blocks the question.",
         ),
         Rule(
-            "mask_secrets_in_question",
-            when=L("secrets_input").is_true,
+            "secrets_in_question",
+            when=L("secrets_question").is_true,
             then=[Mask(), Alert("high")],
             description="Keys and tokens never reach the model or the thread.",
         ),
         Rule(
-            "mask_pii_in_question",
-            when=L("pii_input").is_true,
+            "pii_in_question",
+            when=L("pii_question").is_true,
             then=Mask(),
             description="Personal data is masked before the model sees it.",
         ),
         Rule(
-            "block_secrets_in_tools",
-            when=L("secrets_tool").is_true,
+            "secrets_in_tool_call",
+            when=L("secrets_tool_call").is_true,
             then=[
                 Block(_("That tool call would send a credential out, so it was not run.")),
                 Alert("high"),
             ],
         ),
         Rule(
-            "mask_pii_in_answer",
-            when=L("pii_output").is_true,
+            "pii_in_answer",
+            when=L("pii_answer").is_true,
             then=[Mask(), Alert("warning")],
         ),
         Rule(
-            "block_exfiltration",
+            "exfiltration_in_answer",
             when=L("exfiltration").is_true,
             then=[
                 Block(_("The answer contained links that could leak data, so it was withheld.")),

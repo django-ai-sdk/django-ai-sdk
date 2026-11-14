@@ -130,7 +130,7 @@ class Guard(Policy):
     lenses = [Injection]
     rules = [
         Rule(
-            "block_injection",
+            "injection_in_question",
             when=L("injection").is_true,
             then=[Block(), Queue("security")],
             mode=Mode.ENFORCE,

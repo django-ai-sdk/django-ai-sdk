@@ -80,10 +80,10 @@ class ChildPolicy(Policy):
 @register_policy
 class PickedPolicy(Policy):
     name = "test-picked"
-    lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "secrets_input")]
+    lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "secrets_question")]
     rules = [
-        RulePack(SecurityPack.rules, "block_injection"),
-        RulePack(SecurityPack.rules, "mask_secrets_in_question", mode=Mode.ENFORCE),
+        RulePack(SecurityPack.rules, "injection_in_question"),
+        RulePack(SecurityPack.rules, "secrets_in_question", mode=Mode.ENFORCE),
     ]
 
 
@@ -197,15 +197,15 @@ class TestPolicies:
 
     def test_a_policy_picks_single_lenses_and_rules_from_a_pack(self):
         resolved = build_policy("test-picked")
-        assert list(resolved.lenses) == ["prompt_injection", "secrets_input"]
-        assert list(resolved.rules) == ["block_injection", "mask_secrets_in_question"]
-        assert resolved.rules["mask_secrets_in_question"].mode is Mode.ENFORCE
+        assert list(resolved.lenses) == ["prompt_injection", "secrets_question"]
+        assert list(resolved.rules) == ["injection_in_question", "secrets_in_question"]
+        assert resolved.rules["secrets_in_question"].mode is Mode.ENFORCE
         assert not get_invalid_policies().get("test-picked")
 
     def test_picking_leaves_the_pack_alone(self):
         pack = {rule.name: rule for rule in SecurityPack.rules}
-        assert pack["mask_secrets_in_question"].mode is Mode.REPORT
-        assert RulePack(SecurityPack.rules, "block_injection")[0] is not pack["block_injection"]
+        assert pack["secrets_in_question"].mode is Mode.REPORT
+        assert RulePack(SecurityPack.rules, "injection_in_question")[0] is not pack["injection_in_question"]
 
     def test_picking_an_unknown_name_says_what_there_is(self):
         with pytest.raises(ImproperlyConfigured, match="prompt_injection"):
@@ -221,30 +221,30 @@ class TestPolicies:
         ]
 
     def test_a_lens_pack_sets_overrides_on_copies(self):
-        [taken] = LensPack(SecurityPack.lenses, "secrets_input", stages=(Stage.REFLECT,))
-        [own] = [lens for lens in SecurityPack.lenses if getattr(lens, "name", "") == "secrets_input"]
+        [taken] = LensPack(SecurityPack.lenses, "secrets_question", stages=(Stage.REFLECT,))
+        [own] = [lens for lens in SecurityPack.lenses if getattr(lens, "name", "") == "secrets_question"]
         assert taken.stages == (Stage.REFLECT,) and own.stages != (Stage.REFLECT,)
 
     def test_packs_and_lists_in_a_policy_are_flattened(self):
         class Nested(Policy):
             name = "test-nested"
-            lenses = [LensPack(SecurityPack.lenses, "pii_output"), PickedPolicy.lenses]
-            rules = [PickedPolicy.rules, RulePack(SecurityPack.rules, "mask_pii_in_answer")]
+            lenses = [LensPack(SecurityPack.lenses, "pii_answer"), PickedPolicy.lenses]
+            rules = [PickedPolicy.rules, RulePack(SecurityPack.rules, "pii_in_answer")]
 
         assert [rule.name for rule in Nested.rules] == [
-            "block_injection",
-            "mask_secrets_in_question",
-            "mask_pii_in_answer",
+            "injection_in_question",
+            "secrets_in_question",
+            "pii_in_answer",
         ]
         assert [getattr(lens, "name", "") for lens in Nested.lenses] == [
-            "pii_output",
+            "pii_answer",
             "prompt_injection",
-            "secrets_input",
+            "secrets_question",
         ]
 
     def test_the_packs_are_registered_and_resolve(self):
         resolved = build_policy("default")
-        assert {"prompt_injection", "pii_input", "groundedness", "self_harm"} <= set(
+        assert {"prompt_injection", "pii_question", "groundedness", "self_harm"} <= set(
             resolved.lenses
         )
         assert all(rule.mode is Mode.REPORT for rule in resolved.rules.values())
@@ -253,10 +253,10 @@ class TestPolicies:
 class TestRuleEvaluation:
     def test_a_rule_waits_for_lenses_still_to_come(self):
         resolved = build_policy("default")
-        early = match_rules(resolved, {"pii_input": ans([])}, Stage.GATE, done=set())
-        assert "review_ungrounded" not in {m.rule.name for m in early}
+        early = match_rules(resolved, {"pii_question": ans([])}, Stage.GATE, done=set())
+        assert "ungrounded_answer" not in {m.rule.name for m in early}
         later = match_rules(resolved, {"groundedness": ans(0.1, 0.9)}, Stage.REFLECT, done=set())
-        assert "review_ungrounded" in {m.rule.name for m in later}
+        assert "ungrounded_answer" in {m.rule.name for m in later}
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build_policy("test-parent")
@@ -544,8 +544,8 @@ class TestDeclarations:
         from django_ai_sdk.oversight.packs.security import Exfiltration, SecurityPack
 
         assert Exfiltration().stages == (Stage.FINISH,)
-        pii_tool, secrets_tool = LensPack(SecurityPack.lenses, "pii_tool", "secrets_tool")
-        assert pii_tool.stages == secrets_tool.stages == (Stage.TOOL,)
+        pii_tool_call, secrets_tool_call = LensPack(SecurityPack.lenses, "pii_tool_call", "secrets_tool_call")
+        assert pii_tool_call.stages == secrets_tool_call.stages == (Stage.TOOL,)
 
     def test_only_entities_spans_are_masked_in_what_capture_keeps(self):
         text = "What about my salary, Jan?"

@@ -50,7 +50,7 @@ class TestChat:
         assert storage.stored == []
         turn = await Turn.objects.aget()
         assert (turn.outcome, turn.severity, turn.channel) == ("blocked", "high", "chat")
-        assert await RuleMatch.objects.filter(rule="block_injection", acted=True).aexists()
+        assert await RuleMatch.objects.filter(rule="injection_in_question", acted=True).aexists()
 
     async def test_the_gate_masks_personal_data_before_the_model_sees_it(self):
         seen: list[str] = []

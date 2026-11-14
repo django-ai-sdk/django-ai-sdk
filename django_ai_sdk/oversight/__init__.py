@@ -7,8 +7,8 @@ Add "django_ai_sdk.oversight" to INSTALLED_APPS and give an agent a policy::
 
     class SupportPolicy(Policy):
         name = "support"
-        lenses = [LensPack(SecurityPack.lenses, "pii_input")]
-        rules = [Rule("mask_pii", when=L("pii_input").is_true, then=Mask(), mode=Mode.ENFORCE)]
+        lenses = [LensPack(SecurityPack.lenses, "pii_question")]
+        rules = [Rule("mask_pii", when=L("pii_question").is_true, then=Mask(), mode=Mode.ENFORCE)]
 
     class SupportAgent(Agent):
         oversight = SupportPolicy

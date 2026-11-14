@@ -202,7 +202,7 @@ class Policy:
 
 A policy is registered by `@register_policy` (in any module; an installed app's `oversight.py` is imported on startup), or by naming the class on an agent (`oversight = SupportPolicy`) or in `run(oversight=...)`. A policy that fails validation is not registered (`ai_sdk.oversight.E001`); its agents' turns are blocked. Two classes that declare one name are an error (`ai_sdk.oversight.E010`): the first one registered keeps the name.
 
-`LensPack(lenses, *names, **overrides)` and `RulePack(rules, *names, mode=None, notice=None)` take single lenses or rules out of a pack instead of extending it whole: `LensPack(SecurityPack.lenses, "prompt_injection")`, `RulePack(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE)`. With no names they take every one. They come back in the order named, as copies, so `overrides` (lens attributes such as `stages`), `mode` and `notice` leave the pack's own alone. An unknown name, or an override a lens does not have, raises `ImproperlyConfigured`. When a policy class is built it flattens its `lenses` and `rules` one level: a pack, or a list such as another policy's `rules`, gives its items in its place.
+`LensPack(lenses, *names, **overrides)` and `RulePack(rules, *names, mode=None, notice=None)` take single lenses or rules out of a pack instead of extending it whole: `LensPack(SecurityPack.lenses, "prompt_injection")`, `RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE)`. With no names they take every one. They come back in the order named, as copies, so `overrides` (lens attributes such as `stages`), `mode` and `notice` leave the pack's own alone. An unknown name, or an override a lens does not have, raises `ImproperlyConfigured`. When a policy class is built it flattens its `lenses` and `rules` one level: a pack, or a list such as another policy's `rules`, gives its items in its place.
 
 `ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached until settings change or a policy registers; `invalidate_policy(name)` clears it and every policy that extends it.
 
@@ -217,15 +217,15 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 | Pack | Lens | Kind, answer, subject | Stage | Answered by |
 | --- | --- | --- | --- | --- |
 | `security` | `prompt_injection` | judge, Flag, input | gate | `PatternJudge(INJECTION_PATTERNS)` (overrides, requests for the hidden prompt, role takeovers, fake delimiters; a hit is sure, a miss asks on), `Optional("classifier")` |
-| | `pii_input` | pattern, Entities, input | gate | `PIILens` |
-| | `secrets_input` | pattern, Entities, input | gate | `SecretsLens` |
-| | `secrets_tool` | pattern, Entities, tool call | tool | `SecretsLens` |
-| | `pii_tool` | pattern, Entities, tool call | tool | `PIILens` |
-| | `pii_output` | pattern, Entities, output | finish | `PIILens` |
+| | `pii_question` | pattern, Entities, input | gate | `PIILens` |
+| | `secrets_question` | pattern, Entities, input | gate | `SecretsLens` |
+| | `secrets_tool_call` | pattern, Entities, tool call | tool | `SecretsLens` |
+| | `pii_tool_call` | pattern, Entities, tool call | tool | `PIILens` |
+| | `pii_answer` | pattern, Entities, output | finish | `PIILens` |
 | | `exfiltration` | pattern, Entities, output | finish | `EXFILTRATION_PATTERNS`: Markdown images, links and reference links, and HTML images, that carry data in their URL's query |
 | `safety` | `self_harm` | judge, Flag, input | gate | `Optional("classifier")` |
-| | `harm_input` | judge, Score, input | gate | `Optional("classifier")` |
-| | `harm_output` | judge, Score, output | finish | `Optional("classifier")`, `Optional("judge")` |
+| | `harm_question` | judge, Score, input | gate | `Optional("classifier")` |
+| | `harm_answer` | judge, Score, output | finish | `Optional("classifier")`, `Optional("judge")` |
 | `quality` | `context_relevance` | judge, Score, sources | reflect | `Optional("classifier")` |
 | | `groundedness` | judge, Score, output, needs grounding | reflect | `Optional("classifier")` |
 | | `taken_from` | judge, Entities, output, `per_source` | reflect | `Optional("classifier")` |
@@ -236,7 +236,7 @@ Every pack rule is in report mode. A lens answered only by an optional alias is 
 | | `empty_retrieval` | check, Flag, sources | finish | `EmptyRetrievalLens` |
 | | `tool_errors` | check, Score, exchange | finish | `ToolErrorsLens` |
 
-Rules: `security` has `block_injection`, `mask_secrets_in_question`, `mask_pii_in_question`, `block_secrets_in_tools`, `mask_pii_in_answer` and `block_exfiltration`; `safety` has `person_at_risk` (never blocks: queues for review and notifies at `critical`), `harmful_request` and `harmful_answer`; `quality` has `review_ungrounded`, `review_unsourced`, `review_irrelevant_context`, `note_empty_retrieval` and `note_tool_failures`. `default` extends all three.
+Rules: `security` has `injection_in_question`, `secrets_in_question`, `pii_in_question`, `secrets_in_tool_call`, `pii_in_answer` and `exfiltration_in_answer`; `safety` has `person_at_risk_in_question` (never blocks: queues for review and notifies at `critical`), `harm_in_question` and `harm_in_answer`; `quality` has `ungrounded_answer`, `unsourced_answer`, `irrelevant_context`, `empty_retrieval` and `tool_failures`. `default` extends all three.
 
 ## The guard
 

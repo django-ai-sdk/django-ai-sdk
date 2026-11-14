@@ -102,7 +102,7 @@ class TestRecordingFailures:
             assert await guard.close() is None
         text = "\n".join(lines)
         assert "could not record turn" in text
-        assert "blocked" in text and "block_injection" in text
+        assert "blocked" in text and "injection_in_question" in text
         assert "ignore previous" not in text
 
     async def test_close_cancels_tool_results_still_being_masked(self):

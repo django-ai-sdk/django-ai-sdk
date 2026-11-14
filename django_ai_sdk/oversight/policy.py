@@ -85,7 +85,7 @@ class LensPack(list[Lens | type[Lens]]):
 
     List it in a policy's `lenses`, which takes its lenses in its place::
 
-        lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "pii_input"), Topic]
+        lenses = [LensPack(SecurityPack.lenses, "prompt_injection", "pii_question"), Topic]
 
     `overrides` set attributes on each lens taken, such as `stages`. The lenses are
     copies, so the pack keeps its own.
@@ -105,7 +105,7 @@ class RulePack(list[Rule]):
 
         rules = [
             SupportPolicy.rules,
-            RulePack(SecurityPack.rules, "mask_pii_in_answer", mode=Mode.ENFORCE),
+            RulePack(SecurityPack.rules, "pii_in_answer", mode=Mode.ENFORCE),
         ]
 
     The rules are copies, so setting `mode` or `notice` does not change the pack.

@@ -21,7 +21,7 @@ class TestDryRun:
         gate = result.stage(Stage.GATE)
         assert gate.blocked and gate.message == "Not like that."
         assert gate.answers["injection"].value == ["injection"]
-        assert "block_injection" in gate.rules
+        assert "injection_in_question" in gate.rules
         with pytest.raises(KeyError):
             result.stage(Stage.FINISH)
         assert not await Turn.objects.aexists()

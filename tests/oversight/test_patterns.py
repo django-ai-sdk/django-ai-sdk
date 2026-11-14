@@ -95,7 +95,7 @@ class TestInjectionWithoutAModel:
         return policy(
             "fc-readme",
             LensPack(SecurityPack.lenses, "prompt_injection"),
-            RulePack(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
+            RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE),
         )
 
     @pytest.mark.parametrize(
