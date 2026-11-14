@@ -130,17 +130,17 @@ class GateQuestionHook(OversightHook):
     TurnRequest says the stored thread vouches for it (`history_vouched`). A
     block ends the run before the first model call, with the policy's message
     as the answer. Otherwise the gate's notice waits on the guard for the stream,
-    and the request's `on_gated(request)` runs, so a caller can store the question
+    and the turn's `on_gated(turn)` runs, so a caller can store the question
     only once it passed.
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        request = turn_request(state)
-        if (guard := request.guard) is not None:
-            gate = request.gate_result = await judge_run_input(
-                state, guard, vouched=request.history_vouched
+        turn = turn_request(state)
+        if (guard := turn.guard) is not None:
+            gate = turn.gate_result = await judge_run_input(
+                state, guard, vouched=turn.history_vouched
             )
             if gate.blocked:
                 end_run_with_answer(state, gate.message, stop="blocked")
@@ -149,9 +149,9 @@ class GateQuestionHook(OversightHook):
                 guard.notices.pending.append(gate.notice)
             # Mask the sources the thread already cited, before any citations card shows them.
             await mask_sources(guard, current_registry.get())
-        request.first = len(state.data.get("messages") or [])
-        if request.on_gated is not None:
-            await request.on_gated(request)
+        turn.first = len(state.data.get("messages") or [])
+        if turn.on_gated is not None:
+            await turn.on_gated(turn)
 
 
 async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> StageResult:
@@ -297,10 +297,10 @@ def _as_tool_call(call: Any, state: State) -> ToolCall:
 
 def _agent_name(state: State) -> str:
     """The agent of a run that joined an outer turn, recorded with its tool calls."""
-    request = turn_request(state)
-    if request.guard is not None or request.agent is None:
+    turn = turn_request(state)
+    if turn.guard is not None or turn.agent is None:
         return ""
-    return str(getattr(request.agent, "name", "") or type(request.agent).__name__)
+    return str(getattr(turn.agent, "name", "") or type(turn.agent).__name__)
 
 
 def _block_tool_step(
@@ -447,29 +447,29 @@ class JudgeAnswerHook(OversightHook):
     allowed_hook_points = ["after_run"]  # noqa: RUF012
 
     async def run_async(self, state: State) -> None:
-        request = turn_request(state)
-        guard = request.guard
+        turn = turn_request(state)
+        guard = turn.guard
         if guard is None:
             return
         if (registry := current_registry.get()) is not None:
             await mask_sources(guard, registry)
             guard.set_sources(registry.all, seeded=registry.seeded)
-        if request.question_blocked:
+        if turn.question_blocked:
             return
         messages = list(state.data.get("messages") or [])
-        produced = messages[request.first :]
-        text = request.read_answer(produced) if request.read_answer else assistant_text(produced)
+        produced = messages[turn.first :]
+        text = turn.read_answer(produced) if turn.read_answer else assistant_text(produced)
         if not text:
             guard.note_error("no result")
             return
         finished = await guard.finish(text)
-        if request.answer_schema is not None:
-            withhold_unfit(guard, finished, request.answer_schema)
+        if turn.answer_schema is not None:
+            withhold_unfit(guard, finished, turn.answer_schema)
         if finished.changed:
-            if request.read_answer:
-                messages = [*messages[: request.first], replacement_answer(finished.text)]
+            if turn.read_answer:
+                messages = [*messages[: turn.first], replacement_answer(finished.text)]
             else:
-                messages = replace_answer(messages, request.first, finished.text)
+                messages = replace_answer(messages, turn.first, finished.text)
             state.set("messages", messages, handler_override=replace_values)
 
 

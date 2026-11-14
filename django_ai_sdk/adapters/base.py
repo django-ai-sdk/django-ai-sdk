@@ -547,7 +547,7 @@ class Stream:
         from django_ai_sdk.oversight.plugin import run_with_oversight
 
         # Oversight: the run opens, gates, checks and finishes the turn.
-        turn = self._turn.request if self._turn is not None else self.turn_request
+        turn = self._turn.turn if self._turn is not None else self.turn_request
         return await run_with_oversight(
             agent,
             messages,

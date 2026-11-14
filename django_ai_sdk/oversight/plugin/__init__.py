@@ -105,13 +105,13 @@ def joins_turn(outer: TurnGuard | None, policy_name: str) -> bool:
     return outer is not None and outer.policy is not None and outer.policy.name == policy_name
 
 
-def needs_own_turn_sync(request: TurnRequest) -> bool:
+def needs_own_turn_sync(turn: TurnRequest) -> bool:
     """Whether the run needs a turn of its own here, which only an async run opens.
 
     Sync code cannot await `get_oversight()`, so an agent that overrides it is
     assumed to need one, and so is a policy name that does not resolve.
     """
-    agent, oversight = policy_agent(request), request.oversight
+    agent, oversight = policy_agent(turn), turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
         return False
     try:
@@ -126,14 +126,14 @@ def needs_own_turn_sync(request: TurnRequest) -> bool:
     return bool(name) and not joins_turn(current_guard(), name)
 
 
-async def needs_own_turn(request: TurnRequest) -> bool:
-    """Whether the run of `request.agent` opens a turn of its own here. True when its policy cannot be told."""
-    agent, oversight = request.agent, request.oversight
+async def needs_own_turn(turn: TurnRequest) -> bool:
+    """Whether the run of `turn.agent` opens a turn of its own here. True when its policy cannot be told."""
+    agent, oversight = turn.agent, turn.oversight
     if agent is None or oversight in (False, "") or not is_enabled():
         return False
     try:
         name = policy_name(oversight) if oversight else ""
-        name = name or (await declared_policy(agent, channel=request.channel, user=request.user))[0]
+        name = name or (await declared_policy(agent, channel=turn.channel, user=turn.user))[0]
     except Exception:
         return True
     return bool(name) and not joins_turn(current_guard(), name)
@@ -236,14 +236,14 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     return guard
 
 
-def mask_stored_question(messages: list[ChatMessage], request: TurnRequest) -> None:
+def mask_stored_question(messages: list[ChatMessage], turn: TurnRequest) -> None:
     """Mask the caller's last user message as the gate masked it, so the caller stores that copy.
 
     Only its content is stored. When the masked text no longer splits back into
     the content and the attachments' context, the content is withheld rather
     than stored with what may be unmasked.
     """
-    gate = request.gate_result
+    gate = turn.gate_result
     if gate is not None and gate.changed and (question := last_user_message(messages)):
         content = user_content(question, gate.text)
         question.content = content if content is not None else str(UNCHECKED_TEXT)

@@ -146,7 +146,7 @@ class StreamTurn:
     """The oversight side of one streamed chat turn.
 
     The run opens and decides the turn (see `oversight.plugin`); this shows
-    what it decided. The Stream runs the agent with `request`, the run's
+    what it decided. The Stream runs the agent with `turn`, the run's
     TurnRequest, sends the `start()` events, passes every event through
     `pass_event`, then calls `finish`, or `blocked_reply_events()` when the gate
     blocked, or `end_early` when the turn ends before that, and always `aclose`,
@@ -156,7 +156,7 @@ class StreamTurn:
 
     def __init__(
         self,
-        request: TurnRequest | None,
+        turn: TurnRequest | None,
         message_id: str,
         writer: StreamWriter | None,
         registry: SourceRegistry | None,
@@ -187,17 +187,17 @@ class StreamTurn:
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
-        # A copy, so the adapter's request is never shared between streams. The
+        # A copy, so the adapter's TurnRequest is never shared between streams. The
         # stream closes the turn itself, after storing.
-        self.request = dataclasses.replace(request or TurnRequest())
-        self.request.message_id = message_id
-        self.request.keep_open = True
-        self.request.on_tool_results = stream_blocked_results
+        self.turn = dataclasses.replace(turn or TurnRequest())
+        self.turn.message_id = message_id
+        self.turn.keep_open = True
+        self.turn.on_tool_results = stream_blocked_results
 
     @property
     def guard(self) -> TurnGuard:
         """The run's own turn, or an inert guard until it opened one."""
-        return self.request.guard or _INERT
+        return self.turn.guard or _INERT
 
     @property
     def hold(self) -> bool:
@@ -227,7 +227,7 @@ class StreamTurn:
     @property
     def blocked_gate_result(self) -> StageResult | None:
         """The gate's result, when the run's gate hook blocked the question."""
-        return self.request.gate_result if self.request.question_blocked else None
+        return self.turn.gate_result if self.turn.question_blocked else None
 
     def blocked_reply_events(self) -> list[StreamEvent]:
         """The rest of the reply when the gate blocked: the policy's message, stored nowhere."""
@@ -339,8 +339,8 @@ class StreamTurn:
 
     async def aclose(self, error: str) -> None:
         """Close the turn, saying why it ended early, if it did."""
-        if self.request.guard is not None:
-            await self.request.guard.close(error=error or ("" if self.finished else "disconnected"))
+        if self.turn.guard is not None:
+            await self.turn.guard.close(error=error or ("" if self.finished else "disconnected"))
 
 
 def _held_progress(event: StreamEvent) -> StreamEvent | None:

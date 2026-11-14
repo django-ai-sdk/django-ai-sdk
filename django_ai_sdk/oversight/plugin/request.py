@@ -86,5 +86,5 @@ class TurnRequest:
             raise Blocked(finish.message, stage=str(Stage.FINISH), turn_id=self.guard.id)
 
     def hook_context(self, **extra: Any) -> dict[str, Any]:
-        """A hook_context holding this request, beside `extra` for other hooks."""
+        """A hook_context holding this TurnRequest, beside `extra` for other hooks."""
         return {**extra, REQUEST_KEY: self}
