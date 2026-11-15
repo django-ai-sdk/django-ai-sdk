@@ -391,6 +391,28 @@ class TestQdrantFileLockRetry:
         assert rag._cached_document_store is None
 
 
+class TestQdrantServerCollectionRace:
+    """Two first writes to a new collection on a Qdrant server: the second sees it exist."""
+
+    @pytest.mark.asyncio
+    async def test_a_collection_another_worker_just_created_is_used(self):
+        class Conflict(Exception):
+            status_code = 409
+
+        storage = QdrantStorageConfig(backend="server", location="http://qdrant:6333")
+        rag = QdrantBM25HybridRAG(
+            documents=[RagDocument(id="1", content="test", title="Test")],
+            config=QdrantBM25HybridRAGConfig(storage=storage),
+        )
+        raced, ready = MagicMock(), MagicMock()
+        raced.count_documents.side_effect = Conflict("Collection `memory_x` already exists!")
+        ready.count_documents.return_value = 0
+        with patch(
+            "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore", side_effect=[raced, ready]
+        ):
+            assert rag._create_document_store() is ready
+
+
 class TestQdrantRealFileLock:
     """Against a real lock held by another client, not a mocked constructor.
 

@@ -45,6 +45,11 @@ logger = get_logger(__name__)
 DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
+def _created_meanwhile(exc: BaseException) -> bool:
+    """Qdrant's 409 for a collection another worker created after this one looked."""
+    return getattr(exc, "status_code", None) == 409 and "already exists" in str(exc)
+
+
 def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
     return build_kwargs(
         {
@@ -133,15 +138,28 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         extra = storage.extra
 
         if storage.is_server:
-            return QdrantDocumentStore(
-                location=storage.location,
-                recreate_index=recreate,
-                return_embedding=True,
-                use_sparse_embeddings=True,
-                embedding_dim=self.config.embedding_dim,
-                similarity=storage.similarity,
-                **extra,
-            )
+            # The collection is created on first use. Two workers writing to a new one
+            # at once both try to create it, and the second gets a 409: use it then.
+            for attempt in Retrying(
+                stop=stop_after_delay(storage.lock_timeout),
+                wait=wait_exponential(multiplier=0.25, max=2),
+                retry=retry_if_exception(_created_meanwhile),
+                reraise=True,
+            ):
+                with attempt:
+                    store = QdrantDocumentStore(
+                        location=storage.location,
+                        recreate_index=recreate,
+                        return_embedding=True,
+                        use_sparse_embeddings=True,
+                        embedding_dim=self.config.embedding_dim,
+                        similarity=storage.similarity,
+                        **extra,
+                    )
+                    with contextlib.suppress(ValueError):
+                        store.count_documents()
+                    return store
+            raise RuntimeError("Failed to create QdrantDocumentStore after retries")
 
         if storage.is_persistent and storage.persist_path:
             os.makedirs(storage.persist_path, exist_ok=True)
