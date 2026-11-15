@@ -86,13 +86,18 @@ class TurnMasks:
             lenses, context, Stage.GATE, deadline_ms=deadline_ms(stage)
         )
         answers = {o.lens.name: o.answer for o in judged.answered}
+        errored = errored_lenses(judged.answered)
+        # What a tool or source returned and a lens could not judge (too long, down) is
+        # no finding: it is withheld below, and no rule acts on the turn because of it.
+        # The person's own history still fails closed.
+        from_tool = stage is Stage.TOOL
         matched = match_rules(
             guard.resolved,
             answers,
             Stage.GATE,
             done=set(),
-            errored=errored_lenses(judged.answered),
-            fail_closed=guard.fails_closed,
+            errored=errored,
+            fail_closed=guard.fails_closed and not from_tool,
         )
         groups, unpointed = collect_masks(
             matched,
@@ -117,7 +122,7 @@ class TurnMasks:
                     judged.restrict = merge_restrict(judged.restrict, action.names)
             if acting:
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
-        if unpointed:
+        if unpointed or (from_tool and errored and guard.fails_closed and not judged.blocked):
             judged.text = str(UNCHECKED_TEXT)
         elif groups:
             judged.text = mask_all(text, [group for _, group in groups])

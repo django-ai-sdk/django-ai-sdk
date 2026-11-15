@@ -257,6 +257,37 @@ class TestToolResultMasking:
             assert await opened.mask_result("c1", self.IBAN_RESULT) == self.IBAN_RESULT
             assert await guard.mask_text(self.IBAN_RESULT) == str(UNCHECKED_TEXT)
 
+    async def test_a_result_too_long_to_judge_is_withheld_without_firing_the_block(self):
+        # A gate lens behind an enforced block also reads tool results. One too long for
+        # its judge must be withheld, not count as the fraud the rule is about.
+        from django_ai_sdk.oversight import Block, JudgeLens
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
+        from django_ai_sdk.oversight.judges.base import TOO_LONG, Judge
+        from django_ai_sdk.oversight.types import Answer
+
+        class ShortOnly(Judge):
+            name = "short_only"
+
+            async def answer(self, lens, context):
+                return Answer(error=TOO_LONG) if len(context.input) > 100 else Answer(value=False)
+
+        @register_policy
+        class Fraud(Policy):
+            name = "test-fraud-long-result"
+            lenses = [  # noqa: RUF012
+                JudgeLens(name="pressure", question="Pushes a payment?", judges=[ShortOnly()])
+            ]
+            rules = [  # noqa: RUF012
+                Rule("stop_fraud", when=L("pressure").is_true, then=Block("No."), mode=ENFORCE)
+            ]
+
+        guard = await start("test-fraud-long-result")
+        assert not (await guard.gate()).blocked
+        assert await guard.mask_text("x" * 500) == str(UNCHECKED_TEXT)
+        turn = await closed_turn(guard)
+        assert turn.outcome != "blocked"
+        assert not await RuleMatch.objects.filter(turn=turn, rule="stop_fraud").aexists()
+
     async def test_a_result_a_gate_block_refuses_is_withheld_and_a_dict_is_masked(self):
         from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
         from django_ai_sdk.oversight.plugin.hooks import mask_tool_result
