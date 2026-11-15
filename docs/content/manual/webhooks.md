@@ -37,8 +37,8 @@ The view verifies and queues; a `django_tasks` worker runs the agent and posts t
 
 1. **Verify.** `verify(request)` checks the platform's signature. A failure is a 401. The endpoint is `csrf_exempt` and unauthenticated, so the signature is the only gate. Only a code-registered `WebhookIntegration` is reachable: an `MCPServerConfig` row builds a different type and gets a 404.
 2. **Parse.** `parse(request)` returns an `InboundEvent` to answer, `None` to acknowledge and drop (a ping, an edit, the bot's own message), or an `HttpResponse` to return verbatim (Slack's URL handshake).
-3. **Admit.** `ALLOW_FROM` (sender ids) and `ALLOW_WORKSPACES` (installations) must both admit the event. A refused event still gets a 200, so the platform does not redeliver it, and is logged with the ids to add.
-4. **Queue and acknowledge.** The event goes to the worker, and the platform gets `ack(event)` (an empty 200 by default).
+3. **Admit.** `ALLOW_FROM` (sender ids) and `ALLOW_WORKSPACES` (installations) must both admit the event, and the sender must be within `AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE`. A refused event still gets a 200, so the platform does not redeliver it, and is logged with the ids to add.
+4. **Queue and acknowledge.** The view sends `event_received` (`django_ai_sdk.integrations.webhooks.signals`); with `django_ai_sdk.workflows` installed, that starts the workflow event triggers on `<name>.message`. The event goes to the worker, and the platform gets `ack(event)` (an empty 200 by default).
 5. **Deduplicate.** The worker claims the event id with `cache.aadd` for `dedup_ttl` seconds, so a redelivery or a second run of the task is dropped. Use a cache every process shares in production. The claim stays when the run fails, since its tools may have acted: an event runs at most once, and a worker that dies mid-run leaves it unanswered.
 6. **Run.** The worker loads the conversation's thread, runs the agent as `RUN_AS` with `AI_SDK_WEBHOOK_TIMEOUT`, persists the turn and calls `reply(event, text)`. A failing or slow run still replies, with an error or timeout message.
 
@@ -83,7 +83,7 @@ Per integration, in `AI_SDK_INTEGRATIONS[<name>]`:
 | `ALLOW_FROM` | Platform user ids that may ask, or `"*"`. Unset admits everyone the platform delivers; a malformed value admits nobody. |
 | `ALLOW_WORKSPACES` | Installations (Slack `team_id`, GitHub `owner/repo`) that may ask, or `"*"`. |
 
-Settings: `AI_SDK_WEBHOOK_TIMEOUT` (default `120` seconds) and `AI_SDK_WEBHOOK_MAX_TEXT` (default `4000` characters of the question kept).
+Settings: `AI_SDK_WEBHOOK_TIMEOUT` (default `120` seconds), `AI_SDK_WEBHOOK_MAX_TEXT` (default `4000` characters of the question kept) and `AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE` (events per sender per minute; default `0`, no limit). The rate limit counts in the cache, so give every process the same one.
 
 ## Telegram
 
