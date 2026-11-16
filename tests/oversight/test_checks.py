@@ -277,6 +277,34 @@ class TestChecks:
         assert any(repr(loud) in msg for msg in found(".W015", {loud}))
         assert not found(".W015", {loud}, **notifiers)
 
+    def test_a_block_that_waits_for_a_reflect_lens_warns(self):
+        # When the gate lens fails closed, the rule waits for the reflect lens, and by
+        # reflect the block can no longer act.
+        from django_ai_sdk.oversight.checks import policy_checks
+
+        gate = JudgeLens(name="g", stages=[Stage.GATE], judges=[PatternJudge([r"x"])])
+        later = JudgeLens(name="later", stages=[Stage.REFLECT], judges=[PatternJudge([r"y"])])
+        both = L("g").is_true & L("later").is_true
+        mixed = policy(
+            "fc-reflect-block",
+            [gate, later],
+            [Rule("r", when=both, then=Block(), mode=ENFORCE)],
+        )
+        reported = policy(
+            "fc-reflect-report", [gate, later], [Rule("r", when=both, then=Block())]
+        )
+        alone = policy(
+            "fc-gate-block",
+            [gate, later],
+            [
+                Rule("r", when=L("g").is_true, then=Block(), mode=ENFORCE),
+                Rule("a", when=both, then=Alert("info"), mode=ENFORCE),
+            ],
+        )
+        warned = [m.msg for m in policy_checks(set()) if m.id.endswith(".W018")]
+        assert any(repr(mixed) in msg and "'r'" in msg for msg in warned)
+        assert not any(repr(reported) in msg or repr(alone) in msg for msg in warned)
+
     def test_a_policy_name_declared_twice_is_an_error(self, registry_snapshot: Any):
         class First(Policy):
             name = "test-twice"

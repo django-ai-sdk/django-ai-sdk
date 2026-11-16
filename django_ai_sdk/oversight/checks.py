@@ -33,7 +33,7 @@ from django_ai_sdk.oversight.registry import (
 )
 from django_ai_sdk.oversight.rules import Notify
 from django_ai_sdk.oversight.tasks import reflect_turn
-from django_ai_sdk.oversight.types import Capture, Mode, Stage
+from django_ai_sdk.oversight.types import INLINE_STAGES, Capture, Mode, Stage
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -263,6 +263,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
             continue
         messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
         messages.extend(lens_checks(name, resolved))
+        messages.extend(reflect_block_checks(name, resolved))
         if name in in_use:
             messages.extend(stream_mode_checks(name, resolved))
     return messages
@@ -293,6 +294,40 @@ def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool
                         id=f"{PREFIX}.W015",
                     )
                 )
+    return messages
+
+
+def reflect_block_checks(name: str, resolved: Any) -> list[Any]:
+    """Enforced rules that block or take tools away, reading a lens judged only at reflect.
+
+    When their inline lens fails closed (or leaves the rule undecided), the rule waits for
+    the reflect lens, and by reflect it can no longer block or take tools away.
+    """
+    messages: list[Any] = []
+    for rule in resolved.active_rules():
+        stopping = sorted({a.kind for a in rule.then} & {"block", "restrict_tools"})
+        if rule.mode is not Mode.ENFORCE or not stopping:
+            continue
+        lenses = [
+            lens
+            for n in sorted(rule.lenses())
+            if (lens := resolved.lenses.get(n)) is not None and lens.enabled
+        ]
+        inline = [lens.name for lens in lenses if set(lens.stages) & set(INLINE_STAGES)]
+        later = [lens.name for lens in lenses if set(lens.stages) == {Stage.REFLECT}]
+        if not (inline and later):
+            continue
+        messages.append(
+            Warning(
+                f"Enforced rule {rule.name!r} in policy {name!r} would {' or '.join(stopping)} "
+                f"on {inline}, but also reads {later}, judged only at reflect: when "
+                f"{inline} fail or leave it undecided, the rule waits for reflect, where it "
+                "can no longer act.",
+                hint="Judge those lenses inline too, or split the rule: one that blocks on "
+                "the inline lenses, and one for reflect that alerts or queues.",
+                id=f"{PREFIX}.W018",
+            )
+        )
     return messages
 
 
