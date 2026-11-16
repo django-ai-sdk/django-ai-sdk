@@ -244,7 +244,7 @@ class TestWorkflowServiceResume:
         enqueue.assert_called_once_with(str(run.id))
 
     async def test_a_resumed_run_waits_for_a_new_queue_entry(self, author):
-        """Its old task id is gone, so the sweep finds it if the new one never lands."""
+        """Its old DBOS workflow id is gone until the next attempt is queued."""
         from django_ai_sdk.workflows.models import WorkflowRun
 
         run = await self._run(author, "failed")

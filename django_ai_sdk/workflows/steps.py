@@ -34,7 +34,7 @@ class WorkflowStopped(Exception):
 
 
 class RunSuperseded(Exception):
-    """This worker no longer holds the run. It was swept, resumed or claimed again.
+    """This worker no longer holds the run. It was cancelled, failed as stale, or resumed.
 
     `RunRecorder` raises it before writing, so a stale worker stops instead of
     overwriting the newer attempt.

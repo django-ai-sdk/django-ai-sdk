@@ -148,7 +148,7 @@ class WorkflowService(PermissionsMixin):
             status=WorkflowRun.Status.PENDING,
             error="",
             completed_at=None,
-            # A fresh queue entry: until it lands, the sweep sees a never-queued run.
+            # The old attempt's DBOS workflow is done with; `requeue` sets the next one's.
             task_id=None,
             updated_at=Now(),
         )
