@@ -31,10 +31,11 @@ from django_ai_sdk.oversight.plugin.hooks import mask_sources, mask_tool_result
 from django_ai_sdk.oversight.plugin.request import TurnRequest
 from django_ai_sdk.oversight.rules import Block
 from django_ai_sdk.oversight.types import Outcome, Stage
+from django_ai_sdk.receipts import receipt
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Mapping
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.citations.grounding import Grounder
@@ -144,8 +145,12 @@ class StreamTurn:
         registry: SourceRegistry | None,
         artifact_ids: list[str],
         queue: asyncio.Queue[Any],
+        *,
+        receipts: Mapping[str, tuple[str, ...]] | None = None,
     ) -> None:
         self.writer = writer
+        # Receipt keys by tool name: what of a result a withheld answer keeps.
+        self.receipts = receipts or {}
         self.registry = registry
         # Artifacts stored during this answer, deleted if the answer is withheld.
         self.artifact_ids = artifact_ids
@@ -257,7 +262,7 @@ class StreamTurn:
         if finished.blocked:
             # Tool details first: if the artifacts fail to delete, they are still gone.
             if writer:
-                writer.drop_tool_details()
+                writer.drop_tool_details(self.receipts)
             await self.drop_artifacts()
         self._drop_blocked_inputs()
         events: list[StreamEvent] = self._emit_pending_notices()
@@ -265,7 +270,7 @@ class StreamTurn:
             events.append(self._emit_notice(finished.notice))
         if self.sent and writer:
             writer.message.metadata["oversight"] = stored_notices(self.sent)
-        events += _released(self.held, withheld=finished.blocked)
+        events += _released(self.held, withheld=finished.blocked, receipts=self.receipts)
         if self.hold:
             events.append(TextChunkEvent(content=finished.text))
         return events, finished
@@ -302,7 +307,7 @@ class StreamTurn:
         if not self.finished:
             self.writer.replace_text("")
             self.writer.drop_reasoning()
-            self.writer.drop_tool_details()
+            self.writer.drop_tool_details(self.receipts)
 
     async def aclose(self, error: str) -> None:
         if self.turn.guard is not None:
@@ -320,13 +325,19 @@ def _held_progress(event: StreamEvent) -> StreamEvent | None:
     return None
 
 
-def _released(held: list[StreamEvent], *, withheld: bool) -> list[StreamEvent]:
+def _released(
+    held: list[StreamEvent], *, withheld: bool, receipts: Mapping[str, tuple[str, ...]]
+) -> list[StreamEvent]:
     if withheld:
-        output = {"result": str(WITHHELD_OUTPUT)}
+        # A tool's receipt, else that it was withheld, in place of each result.
+        names = {e.tool_call_id: e.tool_name for e in held if isinstance(e, ToolCallStartEvent)}
+        outputs = [e for e in held if isinstance(e, ToolOutputEvent)]
         return [
-            event.model_copy(update={"tool_output": output})
-            for event in held
-            if isinstance(event, ToolOutputEvent)
+            event.model_copy(update={"tool_output": {"result": kept or str(WITHHELD_OUTPUT)}})
+            for event in outputs
+            for kept in [
+                receipt(event.tool_output, receipts.get(names.get(event.tool_call_id, "")))
+            ]
         ]
     # Starts were already sent. The complete input replaces the input chunks.
     return [e for e in held if not isinstance(e, ToolCallStartEvent | ToolInputChunkEvent)]

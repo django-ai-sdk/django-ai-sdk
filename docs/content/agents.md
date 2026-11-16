@@ -330,6 +330,20 @@ class MyAgent(Agent):
 
 When the stream sees the tool's result, the builder gets the tool's arguments and its result (a returned list or dict comes back as one). The artifact is then stored and streamed right after it as its own `artifact_*` tool part: the frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It works for any tool of the run: your own, package, MCP or RAG tools, also ones your `get_pipeline_adapter` adds after `get_tools()`.
 
+### Tool receipts
+
+When [oversight](/oversight/) withholds an answer, every tool call's arguments and result are dropped with it: they could reveal what was withheld. A tool that starts something durable, such as a workflow run or a payout claim, can declare the keys of its result that identify it, its receipt. Those keys are kept, so the chat can still show the run and the person does not start a second one:
+
+```python
+from django_ai_sdk import with_receipt
+
+start_run_tool = with_receipt(
+    Tool(name="start_workflow_run", ...), "run_id", "workflow_id", "workflow", "status"
+)
+```
+
+`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). Only the declared keys are kept, and only values that are whole numbers or short id-like strings (letters, digits, `_ . : -`, up to 128 characters); anything else is left out. The stored call and its released card get `{**receipt, "withheld": true}` as the result; arguments stay dropped. A failed call keeps nothing. Receipts are read from the streaming agent's tools and its subagents' (`Stream`).
+
 ---
 
 ## Retrieval-Augmented Generation (RAG)

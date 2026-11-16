@@ -50,6 +50,7 @@ from django_ai_sdk.oversight.stream import (
     StreamTurn,
     withdrawn_citations,
 )
+from django_ai_sdk.receipts import receipt_keys
 from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
@@ -245,12 +246,21 @@ class Stream:
                     cg = component.chat_generator
                     self.model_name = getattr(cg, "model", None) or getattr(cg, "model_name", None)
 
+        tools = getattr(self.agent_component, "tools", None) or []
+        delegations = [
+            tool
+            for tool in tools
+            if isinstance(getattr(tool, "_component", None), SubagentStreamFilter)
+        ]
         # Tool name and subagent name, for all subagents this agent delegated to.
         self._handoff_tools: dict[str, str] = {
-            tool.name: getattr(tool._component, "name", "") or tool.name
-            for tool in (getattr(self.agent_component, "tools", None) or [])
-            if isinstance(getattr(tool, "_component", None), SubagentStreamFilter)
+            tool.name: getattr(tool._component, "name", "") or tool.name for tool in delegations
         }
+        # Tool name and receipt keys, kept when oversight withholds the answer; a
+        # subagent's tool calls are stored on this answer too.
+        self._receipt_keys = receipt_keys(
+            [*tools, *(t for d in delegations for t in d._component._agent.tools or [])]
+        )
 
     @staticmethod
     def get_handoff_calls(message: ChatMessage) -> list[dict[str, Any]]:
@@ -768,6 +778,7 @@ class Stream:
             self.citation_registry,
             self._artifact_ids,
             queue,
+            receipts=self._receipt_keys,
         )
         # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""

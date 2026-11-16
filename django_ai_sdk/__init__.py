@@ -34,6 +34,7 @@ from django_ai_sdk.permissions import (
     PermissionDenied,
 )
 from django_ai_sdk.protocols.vercel import StreamChunk
+from django_ai_sdk.receipts import with_receipt
 from django_ai_sdk.responses import stream_response
 
 try:
@@ -76,4 +77,5 @@ __all__ = [
     "TerminalArtifact",
     "TestResultsArtifact",
     "stream_response",
+    "with_receipt",
 ]

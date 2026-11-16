@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -214,3 +215,63 @@ class TestModelErrorWhileHeld:
         assert all("secret plan" not in (m.content or "") for m in storage.stored)
         turn = await Turn.objects.aget()
         assert turn.error and turn.outcome == ""
+
+
+@pytest.mark.usefixtures("no_reflect_queue")
+@pytest.mark.django_db(transaction=True)
+class TestReceiptsOfAWithheldAnswer:
+    """A withheld answer keeps what a tool declared as its receipt, such as a run id."""
+
+    @staticmethod
+    def started(receipt: bool) -> tuple[Any, Any]:
+        from django_ai_sdk import with_receipt
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+        from haystack.tools import Tool
+
+        def start_workflow_run(workflow: str) -> dict:
+            return {
+                "run_id": "run_8f3a-01",
+                "workflow": workflow,
+                "status": "running",
+                "workflow_id": "not an id: Jan de Vries",
+                "note": "Started for Jan de Vries",
+            }
+
+        tool = Tool(
+            name="start_workflow_run",
+            description="Start a workflow run.",
+            function=start_workflow_run,
+            parameters={"type": "object", "properties": {"workflow": {"type": "string"}}},
+        )
+        if receipt:
+            tool = with_receipt(tool, "run_id", "workflow_id", "workflow", "status")
+        message = HaystackChatMessage.from_assistant(
+            tool_calls=[
+                HaystackToolCall(
+                    tool_name=tool.name, arguments={"workflow": "intake"}, id="call_1"
+                )
+            ]
+        )
+        return tool, message
+
+    async def test_the_stored_call_and_the_released_card_keep_only_the_receipt(self):
+        tool, message = self.started(receipt=True)
+        storage = Storage()
+        agent = make_agent([message, "Started."], storage, tools=[tool], policy="test-withhold")
+        parts = await chat(agent, "start intake")
+        receipt = {"run_id": "run_8f3a-01", "workflow": "intake", "status": "running", "withheld": True}
+        stored = storage.stored[-1].tool_calls
+        assert [(c["arguments"], c["result"]) for c in stored] == [({}, {"result": receipt})]
+        outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
+        assert outputs[-1] == receipt
+        assert "Jan" not in json.dumps(parts)
+
+    async def test_a_tool_without_a_receipt_keeps_nothing(self):
+        tool, message = self.started(receipt=False)
+        storage = Storage()
+        agent = make_agent([message, "Started."], storage, tools=[tool], policy="test-withhold")
+        parts = await chat(agent, "start intake")
+        assert [c["result"] for c in storage.stored[-1].tool_calls] == [None]
+        outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
+        assert outputs[-1] == {"result": str(WITHHELD_OUTPUT)}
