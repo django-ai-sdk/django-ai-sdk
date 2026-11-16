@@ -19,8 +19,9 @@ logger = get_logger(__name__)
 SKIPPED_META_KEY = "django_ai_sdk.skipped"
 # On a cut tool result: {"original_chars", "kept_chars"}.
 TRUNCATED_META_KEY = "django_ai_sdk.truncated"
-# On a stub result for a call oversight refused (True) or skipped with it (False).
-REFUSED_META_KEY = "django_ai_sdk.refused"
+# On a stub result for a call oversight blocked (True) or skipped with it (False).
+# The value stays as messages already stored carry it.
+BLOCKED_META_KEY = "django_ai_sdk.refused"
 # On a tool result oversight has checked for masking.
 MASKED_META_KEY = "django_ai_sdk.masked"
 
@@ -202,7 +203,7 @@ class RequireToolsHook:
 def default_hooks(agent: Any) -> dict[str, list[Any]]:
     """The tool hooks every Haystack Agent built for `agent` runs: logging and its limits.
 
-    Oversight's hooks join at run time (see `oversight.plugin.run_agent`).
+    Oversight's hooks join at run time (see `oversight.plugin.run_with_oversight`).
     """
     return _tool_hooks(
         {"before_tool": [LogToolCallsHook()]},

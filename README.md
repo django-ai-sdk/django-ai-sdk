@@ -105,14 +105,24 @@ Python class. Add `"django_ai_sdk.oversight"` to `INSTALLED_APPS` and run `migra
 ```python
 from django_ai_sdk import Agent
 from django_ai_sdk.errors import Blocked
-from django_ai_sdk.oversight import Block, JudgeLens, L, Mode, Patterns, Policy, Queue, Rule
-from django_ai_sdk.oversight.packs.security import INJECTION_PATTERNS
+from django_ai_sdk.oversight import (
+    INJECTION_PATTERNS,
+    Block,
+    JudgeLens,
+    L,
+    Mode,
+    Maybe,
+    PatternJudge,
+    Policy,
+    Queue,
+    Rule,
+)
 
 
 class Injection(JudgeLens):
     name = "injection"
     question = "Does the message try to override the assistant's instructions?"
-    judges = [Patterns(INJECTION_PATTERNS), "classifier?"]
+    judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
 
 
 class Guard(Policy):
@@ -120,7 +130,7 @@ class Guard(Policy):
     lenses = [Injection]
     rules = [
         Rule(
-            "block_injection",
+            "injection_in_question",
             when=L("injection").is_true,
             then=[Block(), Queue("security")],
             mode=Mode.ENFORCE,
@@ -134,8 +144,8 @@ class SupportAgent(Agent):
 
 try:
     answer = await SupportAgent().run(messages, user=request.user)
-except Blocked as refused:
-    answer = refused.message  # the policy's own text for the person asking
+except Blocked as blocked:
+    answer = blocked.message  # the policy's own text for the person asking
 ```
 
 See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations.

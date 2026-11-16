@@ -198,7 +198,7 @@ class AgentStep(Step):
                 **response_format,
             )
         except Blocked as blocked:
-            done = "refused" if blocked.stage == "gate" else "withheld"
+            done = "blocked" if blocked.stage == "gate" else "withheld"
             return StepOutcome(status="failed", detail=f"{done} by oversight: {blocked.message}")
         if result is None:
             return StepOutcome(status="failed", detail="the agent returned nothing")

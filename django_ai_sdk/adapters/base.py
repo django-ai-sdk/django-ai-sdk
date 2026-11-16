@@ -50,6 +50,7 @@ from django_ai_sdk.oversight.stream import (
     StreamTurn,
     withdrawn_citations,
 )
+from django_ai_sdk.receipts import receipt_keys
 from django_ai_sdk.tracing import bind as bind_trace
 from django_ai_sdk.utils import resolve_setting
 
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
+    from django_ai_sdk.oversight.plugin import TurnRequest
     from django_ai_sdk.storage.base import BaseStorageAdapter
 
 
@@ -187,6 +189,8 @@ class Stream:
     suggestion_generator: SuggestionGenerator | None = None
     # Per-run context for the agent's hooks, e.g. {"required_tools": [...]}.
     hook_context: dict[str, Any] | None = None
+    # Set per run by chat.
+    turn_request: TurnRequest | None = None
     # Artifacts shown after a tool's result (Agent.tool_artifacts), and the thread and
     # user they are stored for; set per run by Agent.stream.
     tool_artifacts: dict[str, ToolArtifact] = {}  # noqa: RUF012
@@ -198,7 +202,6 @@ class Stream:
     _grounder: Grounder | None = None
     # the citations tool call shown while the answer streams
     _citations_call_id: str | None = None
-    # The oversight side of the turn being streamed.
     _turn: StreamTurn | None = None
 
     # Message processing configuration
@@ -249,6 +252,9 @@ class Stream:
             for tool in (getattr(self.agent_component, "tools", None) or [])
             if isinstance(getattr(tool, "_component", None), SubagentStreamFilter)
         }
+        # Tool name and receipt keys, kept when oversight withholds the answer; a
+        # subagent's tool calls are stored on this answer too.
+        self._receipt_keys = receipt_keys(getattr(self.agent_component, "tools", None))
 
     @staticmethod
     def get_handoff_calls(message: ChatMessage) -> list[dict[str, Any]]:
@@ -541,11 +547,16 @@ class Stream:
         return asyncio.create_task(coro)
 
     async def _run_agent(self, agent: Any, messages: list[Any], callback: Any) -> Any:
-        from django_ai_sdk.oversight.plugin import run_agent
+        from django_ai_sdk.oversight.plugin import run_with_oversight
 
-        # Oversight: the run's hooks open, gate, check and finish the turn.
-        context = self._turn.context if self._turn is not None else self.hook_context
-        return await run_agent(agent, messages, hook_context=context, streaming_callback=callback)
+        turn = self._turn.turn if self._turn is not None else self.turn_request
+        return await run_with_oversight(
+            agent,
+            messages,
+            turn=turn,
+            hook_context=self.hook_context,
+            streaming_callback=callback,
+        )
 
     async def get_events(
         self,
@@ -754,21 +765,20 @@ class Stream:
             await asyncio.to_thread(self.generator.warm_up)
 
         pipeline_task: asyncio.Task[Any] | None = None
-        # Oversight: the run's turn learns the message id and streams the calls it refuses.
         turn = self._turn = StreamTurn(
-            dict(self.hook_context or {}),
+            self.turn_request,
             message_id,
             stream_writer,
             self.citation_registry,
             self._artifact_ids,
             queue,
+            receipts=self._receipt_keys,
         )
         # Why the turn ended early: the exception name, or "disconnected".
         turn_error = ""
 
         try:
             yield MessageStartEvent(message_id=message_id)
-            # Oversight: send the notices raised before the answer started.
             for event in await turn.start():
                 yield event
             # take snapshots of current contextvars
@@ -823,15 +833,14 @@ class Stream:
                 yield StreamEndEvent()
                 return
 
-            if turn.refusal is not None:
-                # Oversight: the gate refused the question. Nothing is stored.
+            if turn.blocked_gate_result is not None:
+                # The gate blocked the question: nothing is stored.
                 _finalize_called = True
-                for event in turn.refusal_events():
+                for event in turn.blocked_reply_events():
                     yield event
                 return
 
-            # Oversight: pass, mask or withhold the answer the run finished.
-            events, finished = await turn.afinish()
+            events, finished = await turn.finish()
             for event in events:
                 yield event
             finish_reason = CONTENT_FILTER if finished.blocked else None
@@ -850,7 +859,7 @@ class Stream:
             yield MessageEndEvent(finish_reason=finish_reason)
 
             # No follow-up suggestions for a masked or withheld answer.
-            if not finished.replaced and (suggestion := await self.get_suggestions(messages)):
+            if not finished.changed and (suggestion := await self.get_suggestions(messages)):
                 yield suggestion
 
         except Exception as critical_error:

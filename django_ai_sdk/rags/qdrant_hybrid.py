@@ -45,6 +45,11 @@ logger = get_logger(__name__)
 DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
+def _created_meanwhile(exc: BaseException) -> bool:
+    """Qdrant's 409 for a collection another worker created after this one looked."""
+    return getattr(exc, "status_code", None) == 409 and "already exists" in str(exc)
+
+
 def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
     return build_kwargs(
         {
@@ -133,15 +138,31 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
         extra = storage.extra
 
         if storage.is_server:
-            return QdrantDocumentStore(
-                location=storage.location,
-                recreate_index=recreate,
-                return_embedding=True,
-                use_sparse_embeddings=True,
-                embedding_dim=self.config.embedding_dim,
-                similarity=storage.similarity,
-                **extra,
-            )
+
+            def connect(recreate: bool) -> QdrantDocumentStore:
+                store = QdrantDocumentStore(
+                    location=storage.location,
+                    recreate_index=recreate,
+                    return_embedding=True,
+                    use_sparse_embeddings=True,
+                    embedding_dim=self.config.embedding_dim,
+                    similarity=storage.similarity,
+                    **extra,
+                )
+                # The collection is created on first use. A ValueError means there is
+                # no index yet, as `_has_existing_index` reads it.
+                with contextlib.suppress(ValueError):
+                    store.count_documents()
+                return store
+
+            try:
+                return connect(recreate)
+            except Exception as exc:
+                if not _created_meanwhile(exc):
+                    raise
+            # Another worker created the collection after this one looked: use it, and
+            # never recreate it, which would delete what that worker writes.
+            return connect(False)
 
         if storage.is_persistent and storage.persist_path:
             os.makedirs(storage.persist_path, exist_ok=True)

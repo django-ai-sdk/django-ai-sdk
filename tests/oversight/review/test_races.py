@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from asgiref.sync import async_to_sync
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
-from django_ai_sdk.oversight.reflect import areflect
+from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.schemas import ResolveIn
 from django_ai_sdk.oversight.services import OversightService
 from django_ai_sdk.permissions import ConflictError

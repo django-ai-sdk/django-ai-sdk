@@ -1,9 +1,7 @@
-"""Judges answer a judge lens: patterns, classifiers and model judges.
+"""Judge classes by the dotted path settings name them with ("class" in JUDGES).
 
-Each is imported on first use to break an import cycle: lenses imports
-judges.base, which loads this package, and an eager import of classifier or llm
-here would import lenses again while it is half initialised. Helpers like
-`base.resolve` stay in their modules.
+Imported lazily: lenses imports judges.base, and an eager import of classifier
+or llm here would import the half-initialised lenses again.
 """
 
 from __future__ import annotations
@@ -16,16 +14,15 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.judges.classifier import Classifier
     from django_ai_sdk.oversight.judges.llm import LLMJudge
     from django_ai_sdk.oversight.judges.local import LocalClassifier
-    from django_ai_sdk.oversight.judges.patterns import Patterns
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
     from django_ai_sdk.oversight.judges.typesafe import TypeSafe
 
-# Each judge by the module that declares it.
 _MODULES = {
     "Judge": "base",
     "Classifier": "classifier",
     "LLMJudge": "llm",
     "LocalClassifier": "local",
-    "Patterns": "patterns",
+    "PatternJudge": "patterns",
     "TypeSafe": "typesafe",
 }
 
@@ -41,6 +38,6 @@ __all__ = [
     "Judge",
     "LLMJudge",
     "LocalClassifier",
-    "Patterns",
+    "PatternJudge",
     "TypeSafe",
 ]

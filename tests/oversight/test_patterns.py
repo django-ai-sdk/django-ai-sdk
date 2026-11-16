@@ -16,7 +16,7 @@ from tests.oversight.helpers import gate, policy
 class Down(Judge):
     """A classifier that fails on every question."""
 
-    async def answer(self, lens, view):
+    async def answer(self, lens, context):
         raise RuntimeError("down")
 
 
@@ -58,12 +58,12 @@ class TestPatterns:
         ],
     )
     async def test_exfiltration_markup_is_found(self, answer):
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.packs.security import Exfiltration
         from django_ai_sdk.oversight.types import TurnContext
 
         lens = Exfiltration()
-        found = await ask(lens.finder, lens, TurnContext(output=answer))
+        found = await ask_judge(lens.finder, lens, TurnContext(output=answer))
         assert found is not None and found.value
 
     @pytest.mark.parametrize(
@@ -75,12 +75,12 @@ class TestPatterns:
         ],
     )
     async def test_ordinary_links_are_not(self, answer):
-        from django_ai_sdk.oversight.judges.base import ask
+        from django_ai_sdk.oversight.judges.base import ask_judge
         from django_ai_sdk.oversight.packs.security import Exfiltration
         from django_ai_sdk.oversight.types import TurnContext
 
         lens = Exfiltration()
-        found = await ask(lens.finder, lens, TurnContext(output=answer))
+        found = await ask_judge(lens.finder, lens, TurnContext(output=answer))
         assert found is not None and found.value == []
 
 
@@ -89,13 +89,13 @@ class TestInjectionWithoutAModel:
     """On a fresh install, with no judge aliases, the quickstart blocks."""
 
     def readme_policy(self) -> str:
-        from django_ai_sdk.oversight.packs import SecurityPack
-        from django_ai_sdk.oversight.policy import pick
+        from django_ai_sdk.oversight import SecurityPack
+        from django_ai_sdk.oversight.policy import LensPack, RulePack
 
         return policy(
             "fc-readme",
-            pick(SecurityPack.lenses, "prompt_injection"),
-            pick(SecurityPack.rules, "block_injection", mode=Mode.ENFORCE),
+            LensPack(SecurityPack.lenses, "injection_question"),
+            RulePack(SecurityPack.rules, "injection_in_question", mode=Mode.ENFORCE),
         )
 
     @pytest.mark.parametrize(
@@ -133,7 +133,7 @@ class TestInjectionWithoutAModel:
             assert (await gate(name, "an innocent looking question")).blocked
 
     def test_the_security_pack_needs_no_deadline_error_with_a_judge(self):
-        from django_ai_sdk.oversight.packs import SecurityPack  # noqa: F401
+        from django_ai_sdk.oversight import SecurityPack  # noqa: F401
 
         configured = {
             "DEFAULT_POLICY": "security",
@@ -147,15 +147,15 @@ class TestInjectionWithoutAModel:
 
 
 def compiled_in(value, found):
-    """Every compiled regex in `value`: a Patterns judge's, lists, tuples and dicts."""
+    """Every compiled regex in `value`: a PatternJudge's, lists, tuples and dicts."""
     import re
 
-    from django_ai_sdk.oversight.judges.patterns import Patterns
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
     if isinstance(value, re.Pattern):
         found.add(value)
-    elif isinstance(value, Patterns):
-        compiled_in([value.patterns, value.keywords], found)
+    elif isinstance(value, PatternJudge):
+        compiled_in(value.patterns, found)
     elif isinstance(value, dict):
         for item in value.values():
             compiled_in(item, found)
@@ -169,11 +169,11 @@ def builtin_patterns():
     """Every regex the SDK ships: personal data and secrets, the packs' lenses, helpers."""
     import re
 
-    from django_ai_sdk.oversight import patterns, presets
+    from django_ai_sdk.oversight import lenses, patterns
     from django_ai_sdk.oversight.judges import llm, local
-    from django_ai_sdk.oversight.judges.patterns import Patterns
-    from django_ai_sdk.oversight.packs import QualityPack, SafetyPack, SecurityPack
-    from django_ai_sdk.oversight.presets import PIILens, RefusalLens, SecretsLens
+    from django_ai_sdk.oversight.judges.patterns import PatternJudge
+    from django_ai_sdk.oversight import QualityPack, SafetyPack, SecurityPack
+    from django_ai_sdk.oversight.lenses import PIILens, RefusalLens, SecretsLens
 
     found: set[re.Pattern] = set()
     every = [PIILens(kinds=list(patterns.PII_PATTERNS)), SecretsLens(), RefusalLens()]
@@ -182,9 +182,9 @@ def builtin_patterns():
     for lens in every:
         judges = [lens.finder] if hasattr(lens, "finder") else getattr(lens, "judges", [])
         for judge in judges:
-            if isinstance(judge, Patterns):
+            if isinstance(judge, PatternJudge):
                 compiled_in(judge, found)
-    for module in (patterns, presets, llm, local):
+    for module in (patterns, lenses, llm, local):
         compiled_in(list(vars(module).values()), found)
     return sorted(found, key=lambda p: p.pattern)
 
@@ -254,15 +254,15 @@ class TestEveryBuiltInPatternIsLinear:
 
 class TestPatternsFind:
     def test_keywords_follow_flags(self):
-        from django_ai_sdk.oversight.judges.patterns import Patterns
+        from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
-        assert Patterns(keywords=["Acme"], flags=0).find("acme") == []
-        assert Patterns(keywords=["Acme"]).find("acme")
+        assert PatternJudge(keywords=["Acme"], flags=0).find("acme") == []
+        assert PatternJudge(keywords=["Acme"]).find("acme")
 
     def test_spans_come_by_position_with_or_without_a_verifier(self):
-        from django_ai_sdk.oversight.judges.patterns import Patterns
+        from django_ai_sdk.oversight.judges.patterns import PatternJudge
 
         table = {"late": r"b", "early": r"a"}
-        plain = Patterns(table).find("a b")
-        checked = Patterns(table, verify={"late": lambda _: True}).find("a b")
+        plain = PatternJudge(table).find("a b")
+        checked = PatternJudge(table, verify={"late": lambda _: True}).find("a b")
         assert [s.label for s in plain] == [s.label for s in checked] == ["early", "late"]

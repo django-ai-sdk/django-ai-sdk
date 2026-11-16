@@ -22,9 +22,9 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
-from django_ai_sdk.oversight.judges import Judge, LLMJudge
+from django_ai_sdk.oversight import Judge, LLMJudge
 from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
-from django_ai_sdk.oversight.policy import build
+from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall
 
 from tests.oversight.helpers import (
@@ -87,7 +87,7 @@ class TestClosedByDefault:
             def missing(self) -> str:
                 return "no API key"
 
-            async def answer(self, lens, view):  # noqa: ANN001, ANN201
+            async def answer(self, lens, context):  # noqa: ANN001, ANN201
                 pytest.fail("a missing judge is never asked")
 
         name = policy(
@@ -122,13 +122,13 @@ class TestClosedByDefault:
             fail_mode="open",
         )
         child = policy("fc-child", [], [], extends=[parent])
-        assert build(child).fail_mode == "open"
+        assert build_policy(child).fail_mode == "open"
         assert not (await gate(child)).blocked
 
     def test_a_policy_with_an_unknown_fail_mode_does_not_load(self):
         name = policy("fc-bad-mode", [], [], fail_mode="half")
         with pytest.raises(ImproperlyConfigured, match="fail_mode"):
-            build(name)
+            build_policy(name)
 
     async def test_an_unknown_policy_refuses_with_the_generic_message(self):
         result = await gate("fc-nobody-registers-this")
@@ -162,7 +162,7 @@ class TestFailModeAtEachStage:
     async def test_a_tool_removed_only_by_a_failed_lens_gets_the_generic_refusal(self):
         """The rule's own message would tell the person a rule matched, which it did not."""
         from django_ai_sdk.common import ChatMessage
-        from django_ai_sdk.oversight.guard import TOOL_UNAVAILABLE
+        from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE
 
         history_rule = policy(
             "fx-history-restrict-failed",
@@ -179,7 +179,7 @@ class TestFailModeAtEachStage:
         )
         messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
         checked = await (await start(history_rule)).gate_history(messages)
-        assert checked.blocked and checked.message == str(TOOL_UNAVAILABLE)
+        assert checked.blocked and checked.message == str(TOOL_UNAVAILABLE_MESSAGE)
         tool_rule = policy(
             "fx-tool-restrict-failed",
             [FnLens(name="t", subject=Subject.TOOL_CALL, stages=[Stage.TOOL], fn=broken)],
@@ -196,7 +196,7 @@ class TestFailModeAtEachStage:
         guard = await start(tool_rule)
         await guard.gate()
         refused = await guard.tool_call(ToolCall(name="send", arguments={}))
-        assert refused == str(TOOL_UNAVAILABLE)
+        assert refused == str(TOOL_UNAVAILABLE_MESSAGE)
 
     @pytest.mark.parametrize("action", [Queue("q"), Alert("high"), Notify()], ids=str)
     async def test_a_negated_test_on_a_failed_lens_does_not_hold(self, action):
@@ -254,21 +254,21 @@ class TestFailModeAtEachStage:
     async def test_conditions_are_three_valued(self):
         failed = Answer(error="RuntimeError")
         answers = {"a": failed, "b": Answer(value=True)}
-        assert (~L("a").is_true).evaluate(answers)  # failed, but not said to: false
-        assert not (~L("a").is_true).evaluate(answers, {"a"})
-        assert not (L("a").is_true | ~L("b").is_true).evaluate(answers, {"a"})
-        assert (L("a").is_true | L("b").is_true).evaluate(answers, {"a"})
-        assert not (L("a").is_false & L("b").is_true).evaluate(answers, {"a"})
-        assert L("a").missing.evaluate(answers, {"a"})
+        assert (~L("a").is_true).matches(answers)  # failed, but not said to: false
+        assert not (~L("a").is_true).matches(answers, {"a"})
+        assert not (L("a").is_true | ~L("b").is_true).matches(answers, {"a"})
+        assert (L("a").is_true | L("b").is_true).matches(answers, {"a"})
+        assert not (L("a").is_false & L("b").is_true).matches(answers, {"a"})
+        assert L("a").missing.matches(answers, {"a"})
         # An unsure answer kept after a later failure is usable: compared as usual.
-        assert L("a").is_true.evaluate({"a": Answer(value=True, confidence=0.4)}, {"a"})
+        assert L("a").is_true.matches({"a": Answer(value=True, confidence=0.4)}, {"a"})
 
     async def test_a_gate_failure_counts_at_finish(self):
         name = policy(
             "fx-cross",
             [
                 gate_flag(broken),
-                FnLens(name="f", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=yes),
+                FnLens(name="f", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=yes),
             ],
             [Rule("r", when=L("g").is_true & L("f").is_true, then=Block("no"), mode=ENFORCE)],
         )
@@ -311,14 +311,14 @@ class TestFailModeAtEachStage:
 
 
 class Said(Judge):
-    """A judge that answers what `fn(text, view)` returns."""
+    """A judge that answers what `fn(text, context)` returns."""
 
     def __init__(self, fn, name: str) -> None:
         self.fn = fn
         self.name = name
 
-    async def answer(self, lens, view):
-        result = self.fn(view.text(lens.subject), view)
+    async def answer(self, lens, context):
+        result = self.fn(context.text(lens.subject), context)
         return result if isinstance(result, Answer) else Answer(value=result)
 
 
@@ -361,7 +361,7 @@ class TestBrokenHandlers:
     @pytest.mark.parametrize("mode", ["closed", "open"])
     async def test_a_history_check_that_raises(self, mode):
         from django_ai_sdk.common import ChatMessage
-        from django_ai_sdk.oversight.guard import TurnGuard
+        from django_ai_sdk.oversight.guard.masking import TurnMasks
 
         history = [
             ChatMessage(role="user", content="earlier"),
@@ -370,7 +370,7 @@ class TestBrokenHandlers:
         ]
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "now")
-            with patch.object(TurnGuard, "_judged", raising):
+            with patch.object(TurnMasks, "mask_other_text", raising):
                 result = await guard.gate_history(history)
         assert "history check failed" in guard.error
         if mode == "closed":
@@ -383,19 +383,20 @@ class TestBrokenHandlers:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "go")
             await guard.gate()
-            with patch("django_ai_sdk.oversight.guard.tool.run_lenses", raising):
+            with patch("django_ai_sdk.oversight.guard.stages.answer_lenses", raising):
                 reason = await guard.tool_call(ToolCall(name="send", arguments={"x": 1}))
         assert "tool check failed" in guard.error
         assert reason == (str(Block.DEFAULT_MESSAGE) if mode == "closed" else None)
 
     @pytest.mark.parametrize("mode", ["closed", "open"])
     async def test_masking_a_tool_result_that_raises(self, mode):
-        from django_ai_sdk.oversight.guard import UNCHECKED_TEXT, TurnGuard
+        from django_ai_sdk.oversight.guard.masking import TurnMasks
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "go")
             await guard.gate()
-            with patch.object(TurnGuard, "_judged", raising):
+            with patch.object(TurnMasks, "mask_other_text", raising):
                 text = await guard.mask_text("mail jan@example.com")
         assert "tool result masking failed" in guard.error
         assert text == (str(UNCHECKED_TEXT) if mode == "closed" else "mail jan@example.com")
@@ -406,12 +407,12 @@ class TestBrokenHandlers:
 
         from tests.oversight.helpers import make_agent
 
-        with patch.object(TurnGuard, "_opened", raising):
+        with patch.object(TurnGuard, "under_policy", raising):
             guard = await TurnGuard.start(
                 make_agent([], None, policy="no-such-policy"), channel="api", input="hi"
             )
             gate_result = await guard.gate()
-        assert guard.active and guard.refused
+        assert guard.active and guard.blocked
         assert gate_result.blocked
         assert await guard.close() is None
         assert await Turn.objects.acount() == 0
@@ -423,8 +424,17 @@ class TestBrokenHandlers:
 
         from tests.oversight.helpers import agent_with
 
+        from django_ai_sdk.oversight.guard import stages
+
+        judge_stage = stages.judge_stage
+
+        async def finish_raising(guard, stage, **kwargs):  # noqa: ANN001, ANN202
+            if stage is Stage.FINISH:
+                raise RuntimeError("boom")
+            return await judge_stage(guard, stage, **kwargs)
+
         agent, _ = agent_with("an answer", policy="test-guard")
-        with patch("django_ai_sdk.oversight.guard.finish.acted_on", raising):
+        with patch.object(stages, "judge_stage", finish_raising):
             with pytest.raises(Blocked):
                 await agent.run([ChatMessage(role="user", content="hi")], channel="api")
         turn = await Turn.objects.aget()

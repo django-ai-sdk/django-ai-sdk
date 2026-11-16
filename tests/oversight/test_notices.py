@@ -92,7 +92,7 @@ class TestWhatTheClientIsTold:
     async def test_messages_people_see_are_translatable_and_stored_as_text(self):
         from django.utils.functional import Promise
         from django_ai_sdk.oversight import stream
-        from django_ai_sdk.oversight.guard import TOO_LONG_MESSAGE
+        from django_ai_sdk.oversight.guard.notices import TOO_LONG_MESSAGE
 
         for message in (
             Block.DEFAULT_MESSAGE,
@@ -103,7 +103,7 @@ class TestWhatTheClientIsTold:
             assert isinstance(message, Promise)
         guard = await start("test-withhold")
         finished = await guard.finish("anything")
-        assert type(finished.output) is str
+        assert type(finished.text) is str
         turn = await closed_turn(guard)
         row = await RuleMatch.objects.aget(turn=turn, rule="withhold")
         assert json.dumps(row.actions)
@@ -150,11 +150,11 @@ class TestRuleNotices:
         ]
 
     def test_the_notice_round_trips_and_can_be_picked_and_tuned(self):
-        from django_ai_sdk.oversight.policy import pick
+        from django_ai_sdk.oversight.policy import RulePack
 
         rule = ToldPolicy.rules[0]
         assert Rule.from_dict(rule.to_dict()).notice == "The fraud team is alerted."
-        [picked] = pick(ToldPolicy.rules, "fraud_to_team", notice="Told.")
+        [picked] = RulePack(ToldPolicy.rules, "fraud_to_team", notice="Told.")
         assert (picked.notice, rule.notice) == ("Told.", "The fraud team is alerted.")
 
     async def test_each_tool_call_keeps_its_own_answer(self):

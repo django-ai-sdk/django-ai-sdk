@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from django_ai_sdk.oversight.registry import get_policy_class, register_policy
-from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.oversight.registry import invalidate_policy
 from tests.oversight.helpers import TEST_POLICIES
 
 
@@ -21,15 +21,15 @@ def test_policies():
 
 @pytest.fixture(autouse=True)
 def _fresh_resolutions():
-    invalidate()
+    invalidate_policy()
     yield
-    invalidate()
+    invalidate_policy()
 
 
 @pytest.fixture
 def no_reflect_queue():
     """Close turns without queueing reflection."""
-    with patch("django_ai_sdk.oversight.persist.enqueue_reflect"):
+    with patch("django_ai_sdk.oversight.tasks.enqueue_reflect"):
         yield
 
 

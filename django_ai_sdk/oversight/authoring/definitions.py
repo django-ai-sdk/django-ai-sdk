@@ -1,21 +1,9 @@
-"""Turn a saved definition into a Policy class and validate it.
+"""Turn a saved definition into a Policy class (`origin = "authored"`) and validate it.
 
-An authored policy is a normal `Policy` subclass with `origin = "authored"`, so it is
-registered, built and run like a code policy. It gets the same checks as code, plus
-these. A definition may not:
-
-- use the name of a code policy, or a name that is not a slug
-- declare a lens or rule named like one it inherits, or extend parents where a later
-  one replaces an earlier one's: a lens or rule declared in code never changes at runtime
-- configure a lens beyond `INLINE_ARGS` (no regex, code or import path): keywords,
-  presets, judge aliases and registered validators only. Models, classifiers and
-  regexes must be aliases set by the deployment.
-- skip a policy listed in `MUST_EXTEND`
-- exceed MAX_EXTENDS parents, MAX_LENSES lenses, MAX_RULES rules or MAX_BYTES of JSON
-- keep more than a parent: a higher `capture`, a longer `retention`, or `fail_mode`
-  "open" over a parent that fails closed
-- build into what the system checks flag (`policy_errors`): the checks never see
-  an authored policy, so it is held to them here
+Beyond the code checks, a definition may extend only code policies, never replace
+an inherited lens or rule, configure lenses only within `INLINE_ARGS` (no regex,
+code or import path), never keep more than a parent (capture, retention, fail
+mode), and is held to the system checks, which never see authored policies.
 """
 
 from __future__ import annotations
@@ -26,13 +14,23 @@ from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 
-from django_ai_sdk.oversight.authoring.conf import INLINE_ARGS, setting
-from django_ai_sdk.oversight.checks.policies import policy_errors
-from django_ai_sdk.oversight.judges.base import alias_defined, alias_of, is_optional
+from django_ai_sdk.oversight.authoring.apps import authoring_setting
+from django_ai_sdk.oversight.checks import policy_errors
+from django_ai_sdk.oversight.judges.base import alias_defined
 from django_ai_sdk.oversight.lenses import OPTIONS, Lens, lens_from_dict
-from django_ai_sdk.oversight.policy import Policy, ResolvedPolicy, build, policy_lenses
-from django_ai_sdk.oversight.registry import get_invalid_policies, get_policy_class, validate_policy
-from django_ai_sdk.oversight.resolve import ancestors
+from django_ai_sdk.oversight.policy import (
+    Policy,
+    ResolvedPolicy,
+    policy_lenses,
+    policy_rules,
+    validate_policy,
+)
+from django_ai_sdk.oversight.registry import (
+    ancestors,
+    build_policy,
+    get_invalid_policies,
+    get_policy_class,
+)
 from django_ai_sdk.oversight.rules import Rule
 from django_ai_sdk.oversight.types import Capture, rank
 
@@ -41,10 +39,19 @@ MAX_EXTENDS = 20
 MAX_LENSES = 50
 MAX_RULES = 100
 MAX_BYTES = 256 * 1024
+# No code or regex: authored config runs on every turn and a bad regex could
+# backtrack for seconds. A regex or a model needs a deployment alias.
+INLINE_ARGS: dict[str, frozenset[str]] = {
+    "keywords": frozenset({"keywords"}),
+    "pii": frozenset({"kinds"}),
+    "secrets": frozenset(),
+    "refusal": frozenset(),
+    "length": frozenset({"max_chars"}),
+    "language": frozenset(),
+}
 RULE_KEYS = frozenset({"name", "when", "then", "mode", "message", "notice", "description"})
 POLICY_OPTIONS = frozenset({"capture", "stream_mode", "fail_mode", "retention"})
-# What any authored lens may set, and what each kind adds. Nothing here takes a
-# regex or names code: validators are names a developer registered.
+# Validators are names a developer registered.
 LENS_KEYS = frozenset(
     {"kind", "preset", "name", "label", "subject", "stages", "sample", "enabled"}
     | {"needs_grounding", "answer", *OPTIONS}
@@ -70,18 +77,19 @@ def is_authored(cls: type[Policy] | None) -> bool:
 
 
 def _judge_spec(spec: Any) -> Any:
-    """Return `spec` if a lens may use it: a known alias, or Patterns of keywords."""
+    """`spec` if a lens may use it: a known alias, an optional one, or keywords."""
     if isinstance(spec, str):
-        # A trailing "?" marks the alias optional. The lens skips it when it is not set up.
-        if not alias_of(spec) or (not is_optional(spec) and not alias_defined(spec)):
-            raise ValueError(f"no judge alias {alias_of(spec)!r} in AI_SDK_OVERSIGHT['JUDGES']")
+        if not alias_defined(spec):
+            raise ValueError(f"no judge alias {spec!r} in AI_SDK_OVERSIGHT['JUDGES']")
         return spec
-    if isinstance(spec, dict) and spec.get("class") == "Patterns" and "keywords" in INLINE_ARGS:
+    if isinstance(spec, dict) and "alias" in spec:
+        return dict(spec)
+    if isinstance(spec, dict) and spec.get("class") == "PatternJudge" and "keywords" in INLINE_ARGS:
         extra = sorted(set(spec) - {"class", "name"} - INLINE_ARGS["keywords"])
         if extra:
-            raise ValueError(f"Patterns takes only keywords here, not {extra}")
+            raise ValueError(f"PatternJudge takes only keywords here, not {extra}")
         return dict(spec)
-    raise ValueError(f"judge {spec!r} is an alias, or Patterns with keywords")
+    raise ValueError(f"judge {spec!r} is an alias, or PatternJudge with keywords")
 
 
 def _lens(config: Any) -> Lens:
@@ -126,14 +134,6 @@ def _rule(data: Any) -> Rule:
         raise ValueError(f"rule {data.get('name')!r}: {exc}") from None
 
 
-def in_force(definition: dict[str, Any], *, active: bool) -> dict[str, Any]:
-    """The definition that runs: without its own lenses and rules when it is off.
-
-    Its parents and options stay, so what it extends keeps running.
-    """
-    return definition if active else {**definition, "lenses": [], "rules": []}
-
-
 def build_policy_class(name: str, definition: dict[str, Any]) -> type[Policy]:
     """Build the Policy subclass for `definition`. Raises ValueError on a bad part."""
     options = dict(definition.get("options") or {})
@@ -154,15 +154,10 @@ def build_policy_class(name: str, definition: dict[str, Any]) -> type[Policy]:
 
 
 def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy], ResolvedPolicy]:
-    """Validate `definition` and return its class and resolved policy.
-
-    Raises DefinitionError with the problems found. Shape problems stop it early.
-    Inheritance and build problems are reported together. Validation runs only when
-    both pass.
-    """
+    """Return the class and resolved policy, or raise DefinitionError with every problem."""
     extends = [str(p) for p in definition.get("extends") or []]
     _fail_on(_shape_problems(name, definition, extends))
-    parents, problems = _parents(name, extends)
+    parents, problems = _parents(extends)
     try:
         cls = build_policy_class(name, definition)
     except ValueError as exc:
@@ -171,7 +166,7 @@ def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy
     _fail_on(_inherited_names(parents, cls))
     try:
         validate_policy(cls)
-        resolved = build(name, policy_class=cls)
+        resolved = build_policy(name, policy_class=cls)
     except (ImproperlyConfigured, LookupError, ValueError) as exc:
         raise DefinitionError([str(exc)]) from None
     _fail_on(_changed_from_parents(parents, resolved))
@@ -181,7 +176,6 @@ def check_definition(name: str, definition: dict[str, Any]) -> tuple[type[Policy
 
 
 def _shape_problems(name: str, definition: dict[str, Any], extends: list[str]) -> list[str]:
-    """Problems with the name, size and parents, found without building anything."""
     problems: list[str] = []
     if not NAME.match(name or ""):
         problems.append("the name is lowercase letters, digits, '-' and '_', up to 100")
@@ -202,21 +196,24 @@ def _shape_problems(name: str, definition: dict[str, Any], extends: list[str]) -
     missing = [p for p in extends if get_policy_class(p) is None]
     if missing:
         problems.append(f"no policy {missing} to extend")
+    authored = [p for p in extends if is_authored(get_policy_class(p))]
+    if authored:
+        problems.append(f"{authored} are authored: extend only policies declared in code and packs")
     if name in extends:
         problems.append("a policy cannot extend itself")
     return problems
 
 
-def _parents(name: str, extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
-    """Build each parent, and list a missing MUST_EXTEND or a parent that does not load."""
+def _parents(extends: list[str]) -> tuple[dict[str, ResolvedPolicy], list[str]]:
     problems: list[str] = []
-    required = [p for p in setting("MUST_EXTEND") if p not in ancestors(name, parents=extends)]
+    inherited = {*extends, *(ancestor for parent in extends for ancestor in ancestors(parent))}
+    required = [p for p in authoring_setting("MUST_EXTEND") if p not in inherited]
     if required:
         problems.append(f"every authored policy extends {required} (MUST_EXTEND)")
     parents: dict[str, ResolvedPolicy] = {}
     for parent in extends:
         try:
-            parents[parent] = build(parent)
+            parents[parent] = build_policy(parent)
         except Exception as exc:
             problems.append(f"policy {parent!r} does not load: {exc}")
     return parents, problems
@@ -225,7 +222,7 @@ def _parents(name: str, extends: list[str]) -> tuple[dict[str, ResolvedPolicy], 
 def _inherited_names(parents: dict[str, ResolvedPolicy], cls: type[Policy]) -> list[str]:
     """Own lenses and rules may not take a name a parent has, a preset's default included."""
     own_lenses = {lens.name for lens in policy_lenses(cls)}
-    own_rules = {rule.name for rule in cls.rules}
+    own_rules = {rule.name for rule in policy_rules(cls)}
     return [
         f"{what} {item!r} of {parent!r} is replaced: name yours differently"
         for parent, built in parents.items()
@@ -240,11 +237,7 @@ def _inherited_names(parents: dict[str, ResolvedPolicy], cls: type[Policy]) -> l
 def _changed_from_parents(
     parents: dict[str, ResolvedPolicy], resolved: ResolvedPolicy
 ) -> list[str]:
-    """Every lens and rule a parent has must come out of the build unchanged.
-
-    Own names are refused before the build, so this catches a later parent replacing
-    an earlier one's.
-    """
+    """Catches a later parent replacing an earlier one's lens or rule."""
     problems: list[str] = []
     for parent, built in parents.items():
         for lens_name, lens in built.lenses.items():
@@ -264,11 +257,7 @@ def _changed_from_parents(
 
 
 def _looser_than_parents(parents: dict[str, ResolvedPolicy], resolved: ResolvedPolicy) -> list[str]:
-    """A policy may keep less than each parent, never more.
-
-    Each value is the built one, so a parent's retention includes the RETENTION setting
-    for a kind it does not set, and the policy's own includes what another parent sets.
-    """
+    """A policy may keep less than each parent, never more (compared as built)."""
     problems: list[str] = []
     for parent, built in parents.items():
         if rank(tuple(Capture), resolved.capture) > rank(tuple(Capture), built.capture):
@@ -292,17 +281,3 @@ def _looser_than_parents(parents: dict[str, ResolvedPolicy], resolved: ResolvedP
 def _fail_on(problems: list[str]) -> None:
     if problems:
         raise DefinitionError(problems)
-
-
-__all__ = [
-    "MAX_BYTES",
-    "MAX_EXTENDS",
-    "MAX_LENSES",
-    "MAX_RULES",
-    "ORIGIN",
-    "DefinitionError",
-    "build_policy_class",
-    "check_definition",
-    "in_force",
-    "is_authored",
-]

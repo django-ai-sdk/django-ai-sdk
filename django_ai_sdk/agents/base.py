@@ -252,9 +252,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
 
-    # The policy for every turn of this agent, in chat and in run(). A Policy
-    # subclass or a registered policy name. None uses
-    # AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
+    # The policy for every turn, in chat and run(): a Policy subclass or a name.
+    # None uses AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
     oversight: type[Policy] | str | Literal[False] | None = None
 
     # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
@@ -278,7 +277,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         llm = cls.__dict__.get("llm")
         if callable(llm) and not isinstance(llm, staticmethod):
             cls.llm = staticmethod(llm)  # ty: ignore[invalid-assignment]
-        from django_ai_sdk.oversight.agent_run import validate_oversight
+        from django_ai_sdk.oversight.agents import validate_oversight
 
         validate_oversight(cls)
         # Don't register the base Agent class itself, or classes that
@@ -509,17 +508,17 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     async def get_oversight(
         self,
         *,
-        channel: str = "",
+        channel: str = "default",
         user: AbstractBaseUser | AnonymousUser | None = None,
         **kwargs: Any,
     ) -> type[Policy] | str | Literal[False] | None:
         """Return the policy for this turn. Defaults to `oversight`.
 
-        Override to pick a policy per instance, per user or per channel ("chat",
-        "api", "run", "workflow:<workflow>:<step>"). It may query the database.
-        Keep `**kwargs`, since more turn details may be passed later.
+        Override to pick a policy per instance, user or channel ("chat", "api",
+        "subagent", "workflow:<workflow>:<step>", "dry_run", an app's own, or
+        "default"; never None). It may query the database. Keep `**kwargs`.
 
-        If this raises, or names a policy that cannot load, the turn is refused unless
+        If this raises, or names a policy that cannot load, the turn is blocked unless
         AI_SDK_OVERSIGHT["FAIL_MODE"] is "open".
         """
         return self.oversight
@@ -841,7 +840,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         user: AbstractBaseUser | AnonymousUser | None = None,
         tools: bool = False,
         *,
-        channel: str = "run",
+        channel: str | None = None,
         oversight: type[Policy] | str | Literal[False] | None = None,
     ) -> T | str | None:
         """Run the agent to completion, as one turn under its oversight policy.
@@ -862,41 +861,37 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 extraction, ...) does not pay that cost unless it explicitly asks
                 for it. Ignored when response_format is set — tools and structured
                 output together are not supported yet (see Run.run).
-            channel: The channel the turn is recorded under, e.g. "api" or "cron".
+            channel: Where the turn came from, a name the app picks, e.g. "cron". The
+                turn is recorded under it and `get_oversight()` receives it. None
+                records "default".
             oversight: A policy for this call only (a Policy subclass or a name).
-                False runs without oversight. None (the default) applies
-                `get_oversight()`. Only for trusted code. The
-                HTTP endpoints never pass it.
+                False runs without oversight. None applies `get_oversight()`.
+                Only for trusted code; the HTTP endpoints never pass it.
 
-        The policy checks the history and the question first, then each tool call,
-        then the answer before it is returned. If a rule masks the question, the
-        last user message in the caller's list is masked in place, so the caller
-        stores the masked copy.
-
-        A run inside another turn joins that turn when the policy is the same (or
-        there is none). Otherwise it opens a child turn. The checks are Haystack
-        hooks on the run (see `oversight.plugin`), so an override of `run()` that
-        calls its own model is not checked: open a `turn()` for that.
+        If a rule masks the question, the last user message in the caller's list
+        is masked in place, so the caller stores the masked copy. The checks are
+        Haystack hooks on the run, so an override of `run()` that calls its own
+        model is not checked.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
 
         Raises:
-            Blocked: The policy refused the question or withheld the answer.
+            Blocked: The policy blocked the question or withheld the answer.
                 `Blocked.message` holds the text to show the user.
         """
 
         from django_ai_sdk.adapters.run import Run
         from django_ai_sdk.agents.tool_agent import default_hooks
         from django_ai_sdk.oversight.history import history_for, thread_storage
-        from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
+        from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
 
         resolved = self.response_format if response_format is self._UNSET else response_format
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
         given = as_chat_messages(messages)
 
-        async def admit(turn: Any) -> None:
-            keep_masked(given, turn)
+        async def admit(request: TurnRequest) -> None:
+            mask_stored_question(given, request)
 
         # Bind the thread so headless runs are traced to it.
         with bind_trace(thread_id=thread_id):
@@ -906,7 +901,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     f"{type(self).__name__}.get_run_adapter() must return a Run, "
                     f"not {type(adapter).__name__}."
                 )
-            # Oversight: the stored thread may stand for the history, so it is not judged again.
             sent, vouched = await history_for(
                 self,
                 await thread_storage(self, thread_id),
@@ -925,7 +919,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 else None,
                 max_agent_steps=self.max_agent_steps if with_tools else None,
                 hooks=default_hooks(self),
-                # Oversight: the run's hooks gate, check and finish this turn (see oversight.plugin).
                 request=TurnRequest(
                     agent=self,
                     channel=channel,
@@ -1173,7 +1166,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
-        # Before anything is stored: a refused chat must leave no trace in the thread.
+        # Before anything is stored: a blocked chat must leave no trace in the thread.
         thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
         if thread:
             await check_object_permissions(

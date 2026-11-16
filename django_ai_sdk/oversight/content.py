@@ -1,20 +1,22 @@
 """A turn's content: which text is kept, how it is masked, and how it is read back.
 
-Anything that can quote the turn is stored with its content. That includes
-judges' reasons, names a judge wrote itself for an `Entities` lens, per-item scores keyed
-by source URL. Capture decides what is kept, and
-forgetting the turn (`forget_turns`) or its expiry destroys it.
+Anything that can quote the turn (judges' reasons, judge-written entity names,
+scores keyed by source URL) is stored with the content, so Capture governs it and
+forgetting or expiry destroys it.
 """
 
 from __future__ import annotations
 
 import re
 from functools import cache
+from itertools import batched
 from typing import TYPE_CHECKING, Any
 
+from django.db import transaction
 from django.utils import timezone
 
-from django_ai_sdk.oversight.patterns import mask_all, mask_json
+from django_ai_sdk.oversight.lenses import PIILens, SecretsLens
+from django_ai_sdk.oversight.patterns import PII_PATTERNS, mask_all, mask_json
 from django_ai_sdk.oversight.types import (
     Answer,
     Capture,
@@ -24,7 +26,7 @@ from django_ai_sdk.oversight.types import (
     ToolCall,
     TurnContext,
 )
-from django_ai_sdk.utils import map_strings
+from django_ai_sdk.utils import map_strings, serialize
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -32,7 +34,7 @@ if TYPE_CHECKING:
     from django.db.models import QuerySet
 
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.guard.asking import Answered
+    from django_ai_sdk.oversight.guard.judging import Answered
     from django_ai_sdk.oversight.lenses import Lens
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
@@ -40,14 +42,12 @@ if TYPE_CHECKING:
 # Content sections that are added after close.
 SIDE_SECTIONS = frozenset({"texts"})
 
-
-# Stands in for each name a judge wrote itself for an `Entities` lens. One per name keeps
-# `.is_true` and counts right. The name itself is kept only in the content.
+# Stands in for each judge-written entity name, keeping `.is_true` and counts right.
 FOUND = "[found]"
 
-
-# Found text shorter than this is not masked, since it would hit ordinary words.
+# Shorter found text is not masked, since it would hit ordinary words.
 MIN_LITERAL = 3
+FORGET_BATCH = 500
 
 
 def as_source(item: Any) -> Source:
@@ -55,7 +55,6 @@ def as_source(item: Any) -> Source:
         return item
     if isinstance(item, dict):
         return Source.model_validate({k: v for k, v in item.items() if k in Source.model_fields})
-    # Any other object, such as a NumberedSource: read its text fields by name.
     return Source(
         **{
             name: str(getattr(item, name, "") or "")
@@ -68,16 +67,12 @@ def as_source(item: Any) -> Source:
 def capture_content(
     guard: TurnGuard, capture: Capture, keep: Masker | None
 ) -> dict[str, Any] | None:
-    """Build the turn's content to keep at `capture`. None for Capture.NONE.
-
-    `keep` is `masker_for_capture(capture, ...)`. It runs over every kept string,
-    including the history, sources and tool calls.
-    """
-    view = guard.context
+    """The turn's content to keep at `capture`; `keep` masks every kept string."""
+    context = guard.context
     if capture is Capture.NONE:
         return None
     base: dict[str, Any] = {
-        "agent": {"id": view.agent_id, "name": view.agent_name},
+        "agent": {"id": context.agent_id, "name": context.agent_name},
         # Lens spans point into the original text, which only FULL keeps.
         "capture": str(capture),
     }
@@ -85,34 +80,31 @@ def capture_content(
         # No text at all. Even a title or URL can reveal who the turn was about.
         return {
             **base,
-            "input_chars": len(guard.original_input or view.input),
-            "output_chars": len(guard.original_output or view.output),
-            "sources": [{"kind": s.kind, "seeded": s.seeded} for s in view.sources],
-            "tool_calls": [{"name": c.name, "error": c.error} for c in view.tool_calls],
+            "input_chars": len(guard.original_input or context.input),
+            "output_chars": len(guard.original_output or context.output),
+            "sources": [{"kind": s.kind, "seeded": s.seeded} for s in context.sources],
+            "tool_calls": [{"name": c.name, "error": c.error} for c in context.tool_calls],
         }
     assert keep is not None
     full = capture is Capture.FULL
     return {
         **base,
-        "input": guard.original_input if full else keep.text(view.input),
-        "output": (guard.original_output or view.output) if full else keep.text(view.output),
-        # What was shown or stored, when it differs from the original.
-        "shown_input": view.input if full and view.input != guard.original_input else None,
-        "shown_output": view.output
-        if full and guard.original_output and view.output != guard.original_output
+        "input": guard.original_input if full else keep.text(context.input),
+        "output": (guard.original_output or context.output) if full else keep.text(context.output),
+        "shown_input": context.input if full and context.input != guard.original_input else None,
+        "shown_output": context.output
+        if full and guard.original_output and context.output != guard.original_output
         else None,
-        "history": keep([h.model_dump() for h in view.history]),
-        "sources": keep([s.model_dump() for s in view.sources]),
-        "tool_calls": keep([c.model_dump(mode="json") for c in view.tool_calls]),
+        "history": keep([h.model_dump() for h in context.history]),
+        "sources": keep([s.model_dump() for s in context.sources]),
+        "tool_calls": keep([c.model_dump(mode="json") for c in context.tool_calls]),
     }
 
 
 class Masker:
-    """Masks every string that MASKED capture keeps.
+    """Masks every string MASKED capture keeps: lens-found text, then built-in detectors.
 
-    First the built-in detectors run (all `PII` kinds and `Secrets`). Then every
-    occurrence of text a lens found is replaced by its label, such as `[EMAIL]`,
-    longest first. `active=False` leaves text as is, for FULL capture.
+    `active=False` leaves text as is, for FULL capture.
     """
 
     def __init__(self, found: Mapping[str, str] | None = None, *, active: bool = True) -> None:
@@ -133,14 +125,14 @@ class Masker:
             text = self._pattern.sub(
                 lambda m: f"[{(self.found[m.group()] or 'masked').upper()}]", text
             )
-        return _mask_detected(text)
+        spans = [span for lens in _detectors() for span in lens.finder.find(text, lens.name)]
+        return mask_all(text, [(spans, "[{label}]")]) if spans else text
 
     def __call__(self, value: Any) -> Any:
-        """Mask every string in a JSON value."""
         return mask_json(value, self.text) if self.active else value
 
     def keys(self, value: dict[str, float]) -> dict[str, float]:
-        """Mask the keys of `value`, since a source's key can be its URL."""
+        """A source's key can be its URL."""
         masked: dict[str, float] = {}
         for key, score in value.items():
             name = self.text(key)
@@ -148,14 +140,8 @@ class Masker:
         return masked
 
 
-def masker_for_capture(
-    capture: Capture | str, found: Mapping[str, str] | None = None
-) -> Masker | None:
-    """Return the masker for text kept at `capture`. None when no text is kept.
-
-    FULL keeps text as is. MASKED masks it, using `found` from the turn's lenses.
-    NONE and METADATA keep no text.
-    """
+def capture_masker(capture: Capture | str, found: Mapping[str, str] | None = None) -> Masker | None:
+    """None when `capture` keeps no text."""
     if capture == Capture.FULL:
         return Masker(active=False)
     if capture == Capture.MASKED:
@@ -163,22 +149,21 @@ def masker_for_capture(
     return None
 
 
-def turn_found(guard: TurnGuard) -> dict[str, str]:
-    """Map each text this turn's entity lenses found to its label (see `found_literals`)."""
-    view = guard.context
-    said_output = guard.original_output or view.output
+def turn_literals(guard: TurnGuard) -> dict[str, str]:
+    context = guard.context
+    said_output = guard.original_output or context.output
     texts = {
         # Gate lenses read the question before the gate masked it.
-        Subject.INPUT: guard.original_input or view.input,
-        Subject.OUTPUT: said_output,
-        Subject.EXCHANGE: f"{view.input}\n\n{said_output}",
-        Subject.SOURCES: "\n\n".join(s.content for s in view.fresh_sources()),
+        Subject.QUESTION: guard.original_input or context.input,
+        Subject.ANSWER: said_output,
+        Subject.EXCHANGE: f"{context.input}\n\n{said_output}",
+        Subject.SOURCES: "\n\n".join(s.content for s in context.fresh_sources()),
     }
     return found_literals(guard.answered, texts)
 
 
 def unmasked_literals(masked: str, shown: str) -> dict[str, str]:
-    """Map each text that masking replaced in `shown` to store `masked` to its label.
+    """Map each text that masking replaced in `shown` to its label.
 
     shortcut: knows only the "[LABEL]" masks the SDK writes; a Mask with a custom
     template is not recovered. Store the found texts per turn if that is needed.
@@ -202,12 +187,10 @@ _MASK = re.compile(r"\[([A-Z][A-Z0-9_]*)\]")
 
 
 def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -> dict[str, str]:
-    """Map each text an `Entities` lens found to its label.
+    """Map each text an entities lens found to its label.
 
-    Only entities count. They find names and addresses, which the record must not
-    keep. Topic and keyword lenses point at ordinary words that stay readable.
-    `texts` holds the text each subject's lenses read. Spans outside it, such as
-    a tool call's, are skipped.
+    Only entities count: they find names and addresses, which the record must not
+    keep; other lenses point at ordinary words that stay readable.
     """
     found: dict[str, str] = {}
     for item in answered:
@@ -220,30 +203,13 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
     return found
 
 
-def _mask_detected(text: str) -> str:
-    """Mask personal data (every kind, all countries) and secrets in `text`."""
-    if not text:
-        return text
-    spans = [span for lens in _detectors() for span in lens.find(text)]
-    return mask_all(text, [(spans, "[{label}]")]) if spans else text
-
-
 @cache
 def _detectors() -> tuple[Any, ...]:
-    from django_ai_sdk.oversight.patterns import PII_PATTERNS
-    from django_ai_sdk.oversight.presets import PIILens, SecretsLens
-
     return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
 
 
 def stored_value(lens: Lens, answer: Answer) -> Any:
-    """Return the answer's value as stored in the record and shown to the client.
-
-    For an `Entities` lens, declared labels and the kinds code found stay as they
-    are. Any other name becomes FOUND, and the name itself is kept only in the content.
-    """
-    from django_ai_sdk.utils import serialize
-
+    """The value as stored and shown: judge-written entity names become FOUND."""
     value = serialize(answer.value)
     if lens.answer.kind != "entities" or not value:
         return value
@@ -255,30 +221,23 @@ def stored_value(lens: Lens, answer: Answer) -> Any:
 
 
 def without_nul(value: Any) -> Any:
-    """Remove NUL characters from every string in a JSON value, keys included."""
     return map_strings(value, lambda text: text.replace("\x00", ""), keys=True)
 
 
 def load_content(turn: Turn) -> dict[str, Any] | None:
-    """Load the turn's content. None when it has none or it expired (prune deletes it later)."""
     row = turn.content
     return None if row is None or expired(row) else row.stored
 
 
 def expired(row: TurnContent) -> bool:
-    """Whether the content is past its expiry, though prune has not deleted it yet."""
     return row.expires_at is not None and row.expires_at <= timezone.now()
 
 
 def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
-    """Add answer texts to the turn's content.
+    """Add answer texts, locking the row so concurrent writers both land.
 
-    The row is locked so two writers at once both land.
-    Returns False without writing when the content is gone, expired, or was
-    forgotten since.
+    False without writing when the content is gone, expired, or forgotten.
     """
-    from django.db import transaction
-
     from django_ai_sdk.oversight.models import TurnContent
 
     if turn.content_id is None:
@@ -298,18 +257,16 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
 
 
 def forget_thread(thread_id: Any) -> None:
-    """Forget the content of every turn in the thread (`forget_turns`)."""
     from django_ai_sdk.oversight.models import Turn
 
     forget_turns(Turn.objects.filter(thread_id=str(thread_id)))
 
 
 def forget_turns(turns: QuerySet[Turn]) -> None:
-    """Delete the turns' content and blank reviewers' notes on them. The turns stay.
+    """Delete the turns' content and reviewers' notes; the turns stay. Run in a transaction.
 
-    Run it in a transaction. The turns are locked first: a turn closing now either
-    waits and then finds itself flagged `content_forgotten`, or has stored its
-    content already and it is deleted here.
+    Locking first means a turn closing now either finds itself `content_forgotten`
+    or has stored its content already, which is deleted here.
     """
     from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
 
@@ -325,8 +282,24 @@ def forget_turns(turns: QuerySet[Turn]) -> None:
         Turn.objects.filter(pk__in=open_ids).update(content_forgotten=True)
 
 
+def forget_actor(actor_id: str) -> int:
+    """Clear `actor_id` from its turns, forgetting the content of threadless ones.
+
+    Threaded turns keep content until their thread is deleted. Run in a transaction;
+    safe to rerun (`oversight_forget_actor`). Returns how many turns named the actor.
+    """
+    from django_ai_sdk.oversight.models import Turn
+
+    if not actor_id:
+        return 0
+    turns = Turn.objects.filter(actor_id=actor_id)
+    threadless = turns.filter(thread_id="").values_list("pk", flat=True).iterator(FORGET_BATCH)
+    for batch in batched(threadless, FORGET_BATCH):
+        forget_turns(Turn.objects.filter(pk__in=batch))
+    return turns.update(actor_id="")
+
+
 def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext:
-    """Rebuild a TurnContext from the record, for reflect and review queues."""
     content = content or {}
     return TurnContext(
         turn_id=str(turn.id),
@@ -343,23 +316,3 @@ def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext
             ToolCall.model_validate(c) for c in content.get("tool_calls") or [] if c.get("name")
         ],
     )
-
-
-__all__ = [
-    "FOUND",
-    "SIDE_SECTIONS",
-    "Masker",
-    "add_to_content",
-    "as_source",
-    "capture_content",
-    "context_from_turn",
-    "expired",
-    "forget_thread",
-    "forget_turns",
-    "found_literals",
-    "load_content",
-    "masker_for_capture",
-    "stored_value",
-    "turn_found",
-    "without_nul",
-]

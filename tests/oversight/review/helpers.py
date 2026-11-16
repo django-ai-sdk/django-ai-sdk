@@ -8,7 +8,7 @@ from unittest.mock import patch
 from django.test import override_settings
 
 from django_ai_sdk.oversight.guard import TurnGuard
-from django_ai_sdk.oversight.resolve import invalidate
+from django_ai_sdk.oversight.registry import invalidate_policy
 from tests.factories.db import UserFactory, agrant
 from tests.oversight.helpers import make_agent
 
@@ -35,7 +35,7 @@ async def a_turn(
 ) -> str:
     """A closed test-guard turn: "salary" queues it for hr and labels it topic=hr."""
     with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": capture}):
-        invalidate()
+        invalidate_policy()
         guard = await TurnGuard.start(
             make_agent([], None, policy=policy),
             channel=channel,
@@ -46,10 +46,10 @@ async def a_turn(
         await guard.gate()
         await guard.finish(output)
         with (
-            patch("django_ai_sdk.oversight.persist.enqueue_reflect"),
-            patch("django_ai_sdk.oversight.persist.enqueue_notifications"),
+            patch("django_ai_sdk.oversight.tasks.enqueue_reflect"),
+            patch("django_ai_sdk.oversight.tasks.enqueue_notifications"),
         ):
             turn_id = await guard.close()
-    invalidate()
+    invalidate_policy()
     assert turn_id is not None
     return turn_id

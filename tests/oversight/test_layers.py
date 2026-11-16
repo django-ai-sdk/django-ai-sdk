@@ -22,11 +22,11 @@ OVERSIGHT = "django_ai_sdk.oversight"
 
 # The only core modules the rest of the SDK may import, and why it needs each one.
 SEAMS = {
-    f"{OVERSIGHT}.agent_run": "a subagent asks whether its run joins the turn it runs inside",
-    f"{OVERSIGHT}.agents": "a subagent finds the policy its agent declares in code",
+    f"{OVERSIGHT}.agents": "an agent checks the policy it declares in code",
     f"{OVERSIGHT}.conf": "the agent reads whether oversight is on, and its settings",
     f"{OVERSIGHT}.history": "a run and a chat pick the history the stored thread vouches for",
     f"{OVERSIGHT}.guard": "the adapter and subagents find the guard of the turn in flight",
+    f"{OVERSIGHT}.patterns": "a tool receipt leaves out values that look personal or secret",
     f"{OVERSIGHT}.policy": "agents and workflow steps accept a Policy",
     f"{OVERSIGHT}.plugin": "every Haystack Agent the SDK builds runs oversight as hooks from it",
     f"{OVERSIGHT}.registry": "an agent turns its Policy class into the policy's name",
@@ -115,7 +115,7 @@ def module_name(path: Path) -> str:
 
 
 def module_exists(module: str) -> bool:
-    # Names compared exactly, so `plugin.Turn` is no module next to `plugin/turn.py` on macOS.
+    # Names compared exactly, so `Foo` is no module next to `foo.py` on macOS.
     path = ROOT.joinpath(*module.split("."))
     names = {p.name for p in path.parent.iterdir()} if path.parent.is_dir() else set()
     return f"{path.name}.py" in names or (path.name in names and (path / "__init__.py").exists())

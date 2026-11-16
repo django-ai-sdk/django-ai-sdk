@@ -12,9 +12,9 @@ from django_ai_sdk.logger import get_logger
 logger = get_logger(__name__)
 
 __all__ = [
+    "IMAGE_EXTENSIONS",
     "MAX_QUOTES",
     "PAGE_DPI",
-    "IMAGE_EXTENSIONS",
     "PREVIEW_EXTENSIONS",
     "QUOTE_LETTERS",
     "get_pdf_engine",

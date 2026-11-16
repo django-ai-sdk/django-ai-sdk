@@ -1,24 +1,18 @@
-"""Who may read the oversight record, read its content, and answer its review queues.
-
-The default for the `oversight` permission domain: each operation needs the Django
-model permission in `MODEL_PERMISSIONS`, or the one an opt-in app added
-(`oversight.apps.extend`), never `is_staff`. Subclass it and override
-`scope_turns`/`scope_reviews` to narrow which turns a reader reaches (the oversight
-manual's Review API).
-"""
+"""Who may read the oversight record, read its content, and answer its review queues."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
+from django.utils.module_loading import import_string
 
 from django_ai_sdk.permissions import (
+    DOMAIN_PERMISSION_DEFAULTS,
     BasePermission,
     Operation,
     PermissionDomain,
     PermissionsMixin,
-    ahas_model_perm,
     user_pk,
 )
 
@@ -35,7 +29,7 @@ REVIEW = Operation.REVIEW_OVERSIGHT
 
 
 class OversightDefaultPermission(BasePermission):
-    """Check a model permission per operation, and narrow turns with the scope hooks."""
+    """A model permission per operation (never `is_staff`); override `scope_turns` to narrow."""
 
     MODEL_PERMISSIONS: dict[Operation, str] = {  # noqa: RUF012
         Operation.VIEW_OVERSIGHT_METRICS: "django_ai_sdk_oversight.view_turn",
@@ -47,7 +41,8 @@ class OversightDefaultPermission(BasePermission):
         from django_ai_sdk.oversight.apps import MODEL_PERMISSIONS as added
 
         perm = self.MODEL_PERMISSIONS.get(operation) or added.get(operation)
-        return perm is not None and await ahas_model_perm(user, perm)
+        ahas_perm = getattr(user, "ahas_perm", None)
+        return perm is not None and ahas_perm is not None and await ahas_perm(perm)
 
     def get_queryset_perms(
         self, user: UserType, operation: Operation, queryset: QuerySet
@@ -65,7 +60,6 @@ class OversightDefaultPermission(BasePermission):
         return queryset
 
     def scope_reviews(self, user: UserType, operation: Operation, queryset: QuerySet) -> QuerySet:
-        """Narrow review items to those whose turn `scope_turns` keeps."""
         from django_ai_sdk.oversight.models import Turn
 
         if type(self).scope_turns is OversightDefaultPermission.scope_turns:
@@ -74,28 +68,16 @@ class OversightDefaultPermission(BasePermission):
 
 
 class OversightAccess(PermissionsMixin):
-    """Checks the `oversight` permission domain."""
-
     domain = PermissionDomain.OVERSIGHT
 
     @classmethod
     async def scoped(cls, user: UserType, operation: Operation, queryset: QuerySet) -> QuerySet:
-        """Narrow `queryset` to what `user` may reach for `operation`.
-
-        Runs in a thread because a scope hook may query the database.
-        """
+        """In a thread, because a scope hook may query the database."""
         return await sync_to_async(cls.has_queryset_perms)(user, operation, queryset=queryset)
 
     @classmethod
     def get_default_permissions(cls) -> list[Any]:
-        """The domain's classes. An empty `AI_SDK_PERMISSIONS["oversight"]` falls back.
-
-        As for agents: a record open to everyone says so with `[AllowAll]`.
-        """
-        from django.utils.module_loading import import_string
-
-        from django_ai_sdk.permissions import DOMAIN_PERMISSION_DEFAULTS
-
+        """An empty setting falls back; a record open to everyone says `[AllowAll]`."""
         return super().get_default_permissions() or [
             import_string(path) for path in DOMAIN_PERMISSION_DEFAULTS[cls.domain]
         ]
@@ -104,12 +86,10 @@ class OversightAccess(PermissionsMixin):
     async def content_ids(
         cls, user: UserType, turn_ids: Iterable[Any], *, allowed: bool
     ) -> set[Any]:
-        """Return the ids in `turn_ids` whose content `user` may see.
+        """The ids whose content `user` may see: the one content gate of every read.
 
-        The one content gate of every read, a list or one turn: the CONTENT scope
-        (`get_queryset_perms`), never a per-object check. `allowed` is whether the
-        caller may see CONTENT at all, which it needs anyway, so the permission chain
-        runs once per read.
+        `allowed` is whether the caller may see CONTENT at all, so the permission
+        chain runs once per read.
         """
         from django_ai_sdk.oversight.models import Turn
 
@@ -121,7 +101,6 @@ class OversightAccess(PermissionsMixin):
 
 
 def reader_id(user: UserType) -> str:
-    """The user's pk as stored on a record, or "" for anonymous."""
     pk = user_pk(user)
     return "" if pk is None else str(pk)
 

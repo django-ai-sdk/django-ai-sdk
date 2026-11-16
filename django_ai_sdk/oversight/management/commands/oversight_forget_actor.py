@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from django_ai_sdk.oversight.signals import forget_actor
+from django_ai_sdk.oversight.content import forget_actor
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser

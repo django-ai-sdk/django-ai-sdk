@@ -141,7 +141,7 @@ class AgentService(PermissionsMixin):
     ) -> tuple[Any, bool]:
         """Run `agent` as one "api" turn and return (reply, blocked).
 
-        A refused or withheld reply returns the policy's message with blocked True.
+        A blocked or withheld reply returns the policy's message with blocked True.
         """
         try:
             result = await agent.run(messages, thread_id=thread_id, user=user, channel="api")

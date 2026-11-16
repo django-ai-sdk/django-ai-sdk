@@ -23,9 +23,6 @@ class PolicyIn(BaseModel):
     # capture, stream_mode, fail_mode and retention. A missing key is inherited.
     options: dict[str, Any] = Field(default_factory=dict)
 
-    def definition(self) -> dict[str, Any]:
-        return self.model_dump()
-
 
 class ActiveIn(BaseModel):
     """Turn the policy's own lenses and rules on or off. Its parents always run."""

@@ -60,7 +60,7 @@ async def list_oversight_reviews(
 
 @routes.get("/oversight/queues/", response=dict[str, int])
 async def list_oversight_queues(request: HttpRequest) -> Any:
-    return await OversightService.queues(user=request.user)
+    return await OversightService.list_queues(user=request.user)
 
 
 # 409 when the item is already closed.
@@ -74,7 +74,7 @@ async def resolve_oversight_review(request: HttpRequest, item_id: str, payload: 
 async def get_oversight_metrics(
     request: HttpRequest, days: int = 14, agent_id: str = "", policy: str = ""
 ) -> Any:
-    return await OversightService.summarize(
+    return await OversightService.get_metrics(
         user=request.user, days=days, agent_id=agent_id, policy=policy
     )
 

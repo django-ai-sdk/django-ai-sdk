@@ -50,7 +50,7 @@ class TestChat:
         assert storage.stored == []
         turn = await Turn.objects.aget()
         assert (turn.outcome, turn.severity, turn.channel) == ("blocked", "high", "chat")
-        assert await RuleMatch.objects.filter(rule="block_injection", acted=True).aexists()
+        assert await RuleMatch.objects.filter(rule="injection_in_question", acted=True).aexists()
 
     async def test_the_gate_masks_personal_data_before_the_model_sees_it(self):
         seen: list[str] = []
@@ -81,7 +81,10 @@ class TestChat:
         assert not await LensAnswer.objects.filter(stage="gate").aexists()
 
     async def test_a_broken_gate_follows_the_fail_mode(self):
-        broken = patch.object(TurnGuard, "_gate", side_effect=RuntimeError("broken rule"))
+        broken = patch(
+            "django_ai_sdk.oversight.guard.stages.judge_stage",
+            side_effect=RuntimeError("broken rule"),
+        )
         with broken:
             parts = await chat(make_agent(["Fine."], Storage()), "hello")
         assert text_of(parts) == str(Block.DEFAULT_MESSAGE)
@@ -122,7 +125,7 @@ class TestChat:
             lenses = [
                 PatternLens(
                     name="danger",
-                    subject=Subject.OUTPUT,
+                    subject=Subject.ANSWER,
                     stages=[Stage.FINISH],
                     patterns=[r"\bself-destruct\b"],
                 )
@@ -155,7 +158,7 @@ class TestChat:
             lenses = [
                 PIILens(name="mail_in", stages=[Stage.GATE], kinds=["email"]),
                 PIILens(
-                    name="mail_out", subject=Subject.OUTPUT, stages=[Stage.FINISH], kinds=["email"]
+                    name="mail_out", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"]
                 ),
             ]
             rules = [

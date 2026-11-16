@@ -8,6 +8,7 @@ import time
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django_ai_sdk.oversight import (
+    Maybe,
     CheckLens,
     Choice,
     Entities,
@@ -19,12 +20,11 @@ from django_ai_sdk.oversight import (
     Violation,
     register_validator,
 )
-from django_ai_sdk.oversight.judges.base import ask
+from django_ai_sdk.oversight.judges.base import ask_judge
 from django_ai_sdk.oversight.lenses import lens_from_dict
 from django_ai_sdk.oversight.patterns import (
     COUNTRY_PII_KINDS,
     DEFAULT_PII_KINDS,
-    MAX_SCAN_CHARS,
     PII_PATTERNS,
     bsn_ok,
     iban_ok,
@@ -33,7 +33,7 @@ from django_ai_sdk.oversight.patterns import (
     mask_all,
     mask_secrets,
 )
-from django_ai_sdk.oversight.presets import (
+from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
     LanguageLens,
     LengthLens,
@@ -44,7 +44,6 @@ from django_ai_sdk.oversight.presets import (
 )
 from django_ai_sdk.oversight.types import (
     Answer,
-    Source,
     Stage,
     Subject,
     TextSpan,
@@ -52,22 +51,13 @@ from django_ai_sdk.oversight.types import (
     TurnContext,
 )
 
-from tests.oversight.helpers import FnLens
-
-
-def view(text: str = "", output: str = "", sources: list[str] | None = None) -> TurnContext:
-    return TurnContext(
-        turn_id="t1",
-        input=text,
-        output=output,
-        sources=[Source(title=f"s{i}", content=c) for i, c in enumerate(sources or [])],
-    )
+from tests.oversight.helpers import FnLens, turn_context
 
 
 async def answer(lens, turn: TurnContext) -> Answer | None:
     """What the lens's one step answers about `turn`."""
     [step] = lens.steps()
-    return await ask(step, lens, turn)
+    return await ask_judge(step, lens, turn)
 
 
 class TestChecksums:
@@ -90,14 +80,14 @@ class TestChecksums:
 class TestPII:
     async def test_finds_valid_kinds_only(self):
         text = "Mail a@b.nl, IBAN NL91ABNA0417164300, bsn 111222333, fake bsn 111222334"
-        found = await answer(PIILens(kinds=[*DEFAULT_PII_KINDS, "bsn"]), view(text))
+        found = await answer(PIILens(kinds=[*DEFAULT_PII_KINDS, "bsn"]), turn_context(text))
         assert found.value == ["bsn", "email", "iban"]
         assert found.confidence == 1.0
         assert len(found.spans) == 3
         assert found.answerer == "patterns"
 
     async def test_nothing_found_is_a_quiet_no(self):
-        found = await answer(PIILens(), view("How do I reset my password?"))
+        found = await answer(PIILens(), turn_context("How do I reset my password?"))
         assert found.value == []
         # What patterns find is a fact, so a miss is as sure as a hit.
         assert found.confidence == 1
@@ -105,12 +95,12 @@ class TestPII:
 
     async def test_an_address_has_no_format_to_find(self):
         # Code finds what has a fixed shape; a street address or a name needs a model.
-        assert (await answer(PIILens(), view("Mijn adres is Jan Voornstraat 8"))).value == []
+        assert (await answer(PIILens(), turn_context("Mijn adres is Jan Voornstraat 8"))).value == []
 
     async def test_a_bsn_must_pass_the_eleven_check(self):
         bsn = PIILens(kinds=["bsn"])
-        assert (await answer(bsn, view("Mijn BSN is 123456789"))).value == []
-        assert (await answer(bsn, view("Mijn BSN is 111222333"))).value == ["bsn"]
+        assert (await answer(bsn, turn_context("Mijn BSN is 123456789"))).value == []
+        assert (await answer(bsn, turn_context("Mijn BSN is 111222333"))).value == ["bsn"]
 
     def test_an_unknown_kind_is_refused(self):
         with pytest.raises(ImproperlyConfigured):
@@ -118,7 +108,7 @@ class TestPII:
 
     async def test_secrets(self):
         text = "my key is sk-proj-abcdefghijklmnopqrstuvwxyz1234 and AKIAABCDEFGHIJKLMNOP"
-        assert (await answer(SecretsLens(), view(text))).value == ["api_key", "aws_key"]
+        assert (await answer(SecretsLens(), turn_context(text))).value == ["api_key", "aws_key"]
 
     def test_email_is_linear_on_hostile_input(self):
         email = re.compile(PII_PATTERNS["email"])
@@ -130,17 +120,22 @@ class TestPII:
         assert email.search("a@b.nl.").group() == "a@b.nl"
 
     async def test_patterns_read_all_of_a_long_text(self):
-        # Padding must not hide what comes after it, nor a match on a window's edge.
-        late = "x " * MAX_SCAN_CHARS + "a@b.nl"
-        found = await answer(PIILens(), view(late))
+        # Padding must not hide what comes after it.
+        late = "x " * 50_000 + "a@b.nl"
+        found = await answer(PIILens(), turn_context(late))
         assert found.value == ["email"] and late[found.spans[0].start :].startswith("a@b.nl")
-        edge = "x" * (MAX_SCAN_CHARS - 4) + " a@b.nl " + "y" * MAX_SCAN_CHARS
-        found = await answer(PIILens(), view(edge))
-        assert [edge[span.start : span.end] for span in found.spans] == ["a@b.nl"]
+
+    async def test_a_long_private_key_is_masked_whole(self):
+        # Longer than 2k chars, and across where 50k-char scan windows once split it.
+        key = "-----BEGIN RSA PRIVATE KEY-----\n" + ("A" * 64 + "\n") * 40
+        key += "-----END RSA PRIVATE KEY-----"
+        text = "x" * 48_000 + key + " tail"
+        found = await answer(SecretsLens(), turn_context(text))
+        assert mask(text, found.spans) == "x" * 48_000 + "[PRIVATE_KEY] tail"
 
     async def test_mask_replaces_spans_by_label(self):
         text = "write to a@b.nl now"
-        found = await answer(PIILens(), view(text))
+        found = await answer(PIILens(), turn_context(text))
         assert mask(text, found.spans) == "write to [EMAIL] now"
 
     def test_mask_all_masks_every_group_on_the_original_offsets(self):
@@ -165,17 +160,17 @@ class TestPII:
 class TestPatternLens:
     async def test_patterns_label_by_group(self):
         lens = PatternLens(name="x", patterns={"greeting": [r"\bhello\b"], "bye": r"\bbye\b"})
-        assert (await answer(lens, view("hello and bye"))).value == ["bye", "greeting"]
+        assert (await answer(lens, turn_context("hello and bye"))).value == ["bye", "greeting"]
 
     async def test_a_plain_list_labels_hits_with_the_lens_name(self):
         lens = PatternLens(name="competitor", keywords=["acme", "globex"])
-        assert (await answer(lens, view("acme or Globex"))).value == ["competitor"]
-        assert (await answer(lens, view("Is it cheaper?"))).value == []
+        assert (await answer(lens, turn_context("acme or Globex"))).value == ["competitor"]
+        assert (await answer(lens, turn_context("Is it cheaper?"))).value == []
 
     async def test_refusal_is_answered_by_its_patterns_without_a_classifier(self):
         lens = RefusalLens()
         lens.validate()
-        found = await answer(lens, view(output="Sorry, I can't help with that."))
+        found = await answer(lens, turn_context(output="Sorry, I can't help with that."))
         assert (found.value, found.confidence) == (True, 1.0)
 
     def test_it_answers_entities_only(self):
@@ -192,10 +187,10 @@ class TestPatternLens:
 
     def test_is_true_means_it_found_something(self):
         found, none = Answer(value=["email"]), Answer(value=[])
-        assert L("x").is_true.evaluate({"x": found})
-        assert not L("x").is_true.evaluate({"x": none})
-        assert L("x").is_false.evaluate({"x": none})
-        assert not L("x").is_false.evaluate({"x": found})
+        assert L("x").is_true.matches({"x": found})
+        assert not L("x").is_true.matches({"x": none})
+        assert L("x").is_false.matches({"x": none})
+        assert not L("x").is_false.matches({"x": found})
 
 
 class TestPatternsInTheWild:
@@ -211,7 +206,7 @@ class TestPatternsInTheWild:
         ],
     )
     async def test_an_iban_followed_by_a_currency_or_a_bic_is_masked(self, text):
-        found = await answer(PIILens(kinds=["iban"]), view(text))
+        found = await answer(PIILens(kinds=["iban"]), turn_context(text))
         assert found.value == ["iban"]
         masked = mask(text, found.spans)
         assert "[IBAN]" in masked and "0754" not in masked and "0417" not in masked
@@ -220,20 +215,20 @@ class TestPatternsInTheWild:
 
     async def test_a_card_followed_by_its_expiry_is_masked(self):
         text = "card 4111 1111 1111 1111 2027 please"
-        found = await answer(PIILens(kinds=["credit_card"]), view(text))
+        found = await answer(PIILens(kinds=["credit_card"]), turn_context(text))
         assert mask(text, found.spans) == "card [CREDIT_CARD] 2027 please"
 
     async def test_a_shape_that_fails_its_checksum_stays_unmasked(self):
-        found = await answer(PIILens(kinds=["iban"]), view("BE69539007547034 EUR"))
+        found = await answer(PIILens(kinds=["iban"]), turn_context("BE69539007547034 EUR"))
         assert found.value == []
 
     @pytest.mark.parametrize("text", ["4096 MB of memory", "HTTP 8080 OK", "In 1984 WE met"])
     async def test_a_number_and_a_unit_is_not_a_postcode(self, text):
-        assert (await answer(PIILens(kinds=["postcode_nl"]), view(text))).value == []
+        assert (await answer(PIILens(kinds=["postcode_nl"]), turn_context(text))).value == []
 
     @pytest.mark.parametrize("text", ["Damrak 1, 1012 LG Amsterdam", "postcode 1012LG"])
     async def test_a_postcode_still_is(self, text):
-        found = await answer(PIILens(kinds=["postcode_nl"]), view(text))
+        found = await answer(PIILens(kinds=["postcode_nl"]), turn_context(text))
         assert found.value == ["postcode_nl"]
 
     @pytest.mark.parametrize(
@@ -245,7 +240,7 @@ class TestPatternsInTheWild:
         ],
     )
     async def test_prose_about_a_password_is_not_one(self, text):
-        assert (await answer(SecretsLens(), view(text))).value == []
+        assert (await answer(SecretsLens(), turn_context(text))).value == []
 
     @pytest.mark.parametrize(
         "text",
@@ -261,7 +256,7 @@ class TestPatternsInTheWild:
         ],
     )
     async def test_a_password_assignment_is_one(self, text):
-        assert (await answer(SecretsLens(), view(text))).value == ["password_assignment"]
+        assert (await answer(SecretsLens(), turn_context(text))).value == ["password_assignment"]
 
     async def test_a_private_key_is_masked_whole(self):
         from django_ai_sdk.oversight.patterns import mask_secrets
@@ -279,11 +274,11 @@ class TestPIIKinds:
 
     async def test_country_kinds_are_off_by_default(self):
         assert not set(COUNTRY_PII_KINDS) & set(PIILens().finder.labels())
-        assert (await answer(PIILens(), view(self.TEXT))).value == ["phone"]
+        assert (await answer(PIILens(), turn_context(self.TEXT))).value == ["phone"]
 
     async def test_naming_them_turns_them_on(self):
         lens = PIILens(kinds=[*DEFAULT_PII_KINDS, "bsn", "phone_nl", "postcode_nl"])
-        found = await answer(lens, view(self.TEXT))
+        found = await answer(lens, turn_context(self.TEXT))
         assert found.value == ["bsn", "phone", "phone_nl", "postcode_nl"]
 
     def test_no_kinds_picked_means_the_defaults(self):
@@ -303,7 +298,7 @@ class TestPIIKinds:
         ],
     )
     async def test_keys(self, key, label):
-        assert (await answer(SecretsLens(), view(f"use {key} now"))).value == [label]
+        assert (await answer(SecretsLens(), turn_context(f"use {key} now"))).value == [label]
 
 
 def even(text):
@@ -311,31 +306,31 @@ def even(text):
         raise Violation("Odd amounts are not allowed.")
 
 
-def short_answers_only(text, view):
-    if len(view.output) > 5:
+def short_answers_only(text, context):
+    if len(context.output) > 5:
         raise Violation("The answer is long.")
 
 
 class TestCheckLens:
     async def test_a_violation_is_a_yes_with_its_message_as_the_reason(self):
         lens = CheckLens(name="even", validators=[even])
-        odd = await answer(lens, view("3"))
+        odd = await answer(lens, turn_context("3"))
         assert (odd.value, odd.rationale, odd.answerer) == (
             True,
             "Odd amounts are not allowed.",
             "check",
         )
-        assert (await answer(lens, view("4"))).value is False
+        assert (await answer(lens, turn_context("4"))).value is False
 
     async def test_a_validator_may_read_the_turn(self):
-        lens = CheckLens(name="short", subject=Subject.OUTPUT, validators=[short_answers_only])
-        assert (await answer(lens, view(output="a long answer"))).value is True
-        assert (await answer(lens, view(output="ok"))).value is False
+        lens = CheckLens(name="short", subject=Subject.ANSWER, validators=[short_answers_only])
+        assert (await answer(lens, turn_context(output="a long answer"))).value is True
+        assert (await answer(lens, turn_context(output="ok"))).value is False
 
     async def test_validators_by_name(self):
         register_validator("test_even")(even)
         lens = CheckLens(name="even", validators=["test_even"])
-        assert (await answer(lens, view("5"))).value is True
+        assert (await answer(lens, turn_context("5"))).value is True
 
     def test_an_unknown_validator_is_refused(self):
         with pytest.raises(ImproperlyConfigured, match="No validator"):
@@ -344,18 +339,18 @@ class TestCheckLens:
     def test_validators_answer_a_flag(self):
         with pytest.raises(ImproperlyConfigured, match="validators answer a Flag"):
             CheckLens(name="x", validators=[even], answer=Score).validate()
-        FnLens(name="x", answer=Score, fn=lambda text, view: 0.5).validate()
+        FnLens(name="x", answer=Score, fn=lambda text, context: 0.5).validate()
 
     def test_a_check_lens_needs_validators_or_its_own_check(self):
         with pytest.raises(ImproperlyConfigured, match="no `validators`"):
             CheckLens(name="x").validate()
 
     async def test_presets_answer_facts_about_the_turn(self):
-        long = await answer(LengthLens(max_chars=3), view("four"))
+        long = await answer(LengthLens(max_chars=3), turn_context("four"))
         assert (long.value, long.rationale) == (True, "4 characters")
         mismatch = await answer(
             LanguageLens(),
-            view(
+            turn_context(
                 "Wat is het adres van de winkel?", "The shop is on the main street and it is open."
             ),
         )
@@ -380,24 +375,13 @@ class TestFlag:
 class TestAttributesBelongWhereTheyAreRead:
     """An attribute a lens does not read is refused, never silently ignored."""
 
-    def test_a_judge_attribute_on_a_pattern_lens(self):
-        class Asks(PatternLens):
-            name = "asks"
-            patterns = ["x"]  # noqa: RUF012
-            question = "Is it x?"
-
-        with pytest.raises(ImproperlyConfigured, match="question"):
-            Asks().validate()
-
-    def test_an_option_of_another_answer_type(self):
-        with pytest.raises(ImproperlyConfigured, match="labels"):
-            JudgeLens(name="f", judges=["judge"], labels=["a"]).validate()
-        with pytest.raises(ImproperlyConfigured, match="yes"):
-            JudgeLens(name="s", judges=["judge"], answer=Score, yes="Yes!").validate()
-
     def test_an_attribute_no_lens_of_its_kind_has(self):
         with pytest.raises(ImproperlyConfigured, match="judges"):
             CheckLens(name="x", validators=[even], judges=["judge"])
+
+    def test_an_option_of_another_answer_type(self):
+        with pytest.raises(ValueError, match="labels"):
+            JudgeLens(name="f", judges=["judge"], labels=["a"])
 
     def test_options_left_out_take_the_answer_types_defaults(self):
         flag = JudgeLens(name="f", judges=["judge"])
@@ -440,12 +424,22 @@ class TestFromDict:
                 "name": "topic",
                 "answer": "choice",
                 "labels": ["hr", "other"],
-                "judges": ["judge?"],
+                "judges": [{"alias": "judge", "optional": True}],
                 "stages": ["reflect"],
             }
         )
         assert isinstance(lens, JudgeLens) and lens.answer is Choice
         assert lens.stages == (Stage.REFLECT,)
+
+    def test_an_optional_alias_has_one_json_form(self):
+        lens = lens_from_dict(
+            {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": True}]}
+        )
+        assert lens.judges == [Maybe("judge")]
+        with pytest.raises(ImproperlyConfigured, match="optional alias"):
+            lens_from_dict(
+                {"kind": "judge", "name": "t", "judges": [{"alias": "judge", "optional": False}]}
+            )
 
     def test_a_preset(self):
         lens = lens_from_dict({"kind": "pattern", "preset": "pii", "name": "p", "kinds": ["bsn"]})

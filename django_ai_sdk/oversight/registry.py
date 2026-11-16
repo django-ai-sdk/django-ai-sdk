@@ -1,32 +1,39 @@
-"""Process-wide registry of oversight policies, and of the validators check lenses name.
-
-Each installed app's `oversight` module is imported on startup, so decorating a
-Policy subclass there with `register_policy`, or a validator with
-`register_validator`, is enough.
+"""The registry of Policy classes, building one by name, and the cache.
 
 An invalid policy is left out and reported by the system check, so one app's
-typo does not stop the site from booting. When two classes use the same name, the
-first keeps it and the check fails until one is renamed.
+typo does not stop the site from booting.
 """
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import inspect
-from contextlib import contextmanager
-from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+import math
+import time
+import weakref
+from typing import TYPE_CHECKING
 
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
-from django_ai_sdk.oversight.actions import Mask
+from django_ai_sdk.oversight.conf import FAIL_MODES, STREAM_MODES, setting, validate_retention
+from django_ai_sdk.oversight.policy import (
+    Policy,
+    ResolvedPolicy,
+    default_fail_mode,
+    default_stream_mode,
+    policy_lenses,
+    policy_rules,
+    validate_choice,
+    validate_policy,
+    validate_rule,
+)
+from django_ai_sdk.oversight.rules import Mask
+from django_ai_sdk.oversight.types import Capture, rank
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping
-
-    from django_ai_sdk.oversight.lenses import Lens
-    from django_ai_sdk.oversight.policy import Policy
-    from django_ai_sdk.oversight.rules import Rule
+    from collections.abc import Awaitable, Callable
 
 logger = get_logger(__name__)
 
@@ -34,19 +41,7 @@ _registry: dict[str, type[Policy]] = {}
 
 # Rejected policies by name, with the reason. Read by the system check.
 _invalid: dict[str, str] = {}
-
-# Names used by more than one class, with every class path that uses them.
 _duplicates: dict[str, list[str]] = {}
-
-# Unregistered classes that stand in for registered ones in this context only, so a
-# check can build a policy against a draft parent that other turns never see.
-_drafts: ContextVar[Mapping[str, type[Policy]] | None] = ContextVar("policy_drafts", default=None)
-
-# Validators a check lens may name, by name.
-_validators: dict[str, Callable[..., Any]] = {}
-
-# Subjects a Mask can rewrite: the question, the answer, or both.
-MASKABLE = frozenset({"input", "output", "exchange"})
 
 
 def _path(cls: type) -> str:
@@ -54,7 +49,7 @@ def _path(cls: type) -> str:
 
 
 def _declaration(cls: type) -> tuple[str, str]:
-    """Identify where a class is declared, so a file imported under two module names counts once."""
+    """So a file imported under two module names counts once."""
     try:
         where = inspect.getfile(cls)
     except (TypeError, OSError):
@@ -63,7 +58,6 @@ def _declaration(cls: type) -> tuple[str, str]:
 
 
 def register_policy[T: type[Policy]](cls: T) -> T:
-    """Class decorator that registers a Policy, unless it is invalid."""
     try:
         validate_policy(cls)
     except ImproperlyConfigured as exc:
@@ -83,107 +77,25 @@ def register_policy[T: type[Policy]](cls: T) -> T:
         return cls
     # A re-import of the same declaration replaces the old class.
     _registry[cls.name] = cls
-    from django_ai_sdk.oversight.resolve import invalidate
-
-    invalidate(cls.name)
+    invalidate_policy(cls.name)
     return cls
 
 
 def unregister_policy(name: str) -> None:
-    """Remove a policy registered at runtime.
-
-    Later turns naming it find no policy and are refused, unless FAIL_MODE is "open".
-    """
+    """Later turns naming it find no policy and are blocked, unless FAIL_MODE is "open"."""
     _registry.pop(name, None)
     _invalid.pop(name, None)
-    from django_ai_sdk.oversight.resolve import invalidate
-
-    invalidate(name)
-
-
-def validate_policy(cls: type[Policy]) -> None:
-    """Raise ImproperlyConfigured unless every lens and rule is valid.
-
-    Inherited lenses are checked when the policy resolves (ai_sdk.oversight.E002),
-    because a parent may register after its child.
-    """
-    if not cls.name:
-        raise ImproperlyConfigured(f"{cls.__name__} must set a non-empty `name`.")
-    from django_ai_sdk.oversight.policy import policy_lenses
-
-    lenses: dict[str, Lens] = {}
-    for lens in policy_lenses(cls):
-        lens.validate()
-        if lens.name in lenses:
-            raise ImproperlyConfigured(f"Policy {cls.name!r} declares lens {lens.name!r} twice.")
-        lenses[lens.name] = lens
-    rules: set[str] = set()
-    for rule in cls.rules:
-        if rule.name in rules:
-            raise ImproperlyConfigured(f"Policy {cls.name!r} declares rule {rule.name!r} twice.")
-        validate_rule(rule, lenses)
-        rules.add(rule.name)
-
-
-def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
-    """Raise ImproperlyConfigured when `rule` does nothing, or a Mask reads a lens that cannot mask.
-
-    Only an Entities lens says where to mask, and only the question and the answer
-    are masked. A Mask over a Flag, Choice or Score lens, or over a lens on sources
-    or tool calls, could never mask anything. Lenses missing from `lenses` are
-    skipped here: an inherited one is not known until the policy resolves, which
-    refuses a rule naming a lens the policy does not have.
-    """
-    if not rule.then:
-        raise ImproperlyConfigured(f"Rule {rule.name!r} does nothing: give it `then`.")
-    for action in rule.then:
-        if not isinstance(action, Mask):
-            continue
-        for name in sorted(set(action.lenses) or rule.lenses()):
-            lens = lenses.get(name)
-            if lens is not None and lens.subject not in MASKABLE:
-                hint = (
-                    "a tool call's arguments are never masked: block the call (Block) or take "
-                    "the tool away (RestrictTools). Tool results are masked by the gate's mask "
-                    "rules."
-                    if lens.subject == "tool_call"
-                    else "only the question and the answer are masked."
-                )
-                raise ImproperlyConfigured(
-                    f"Rule {rule.name!r} masks what {lens.subject} lens {name!r} found, but {hint}"
-                )
-            if lens is not None and lens.answer.kind != "entities":
-                raise ImproperlyConfigured(
-                    f"Rule {rule.name!r} masks what {lens.answer.kind} lens {name!r} found, but "
-                    "only an entities lens says where: name the lenses to mask, "
-                    "Mask(lenses=[...])."
-                )
+    invalidate_policy(name)
 
 
 def get_policy_class(name: str) -> type[Policy] | None:
-    return (_drafts.get() or {}).get(name) or _registry.get(name)
-
-
-@contextmanager
-def drafted(classes: Mapping[str, type[Policy]]) -> Generator[None]:
-    """Look up `classes` before the registry inside this block, in this context only."""
-    token = _drafts.set({**(_drafts.get() or {}), **classes})
-    try:
-        yield
-    finally:
-        _drafts.reset(token)
+    return _registry.get(name)
 
 
 def policy_name(policy: type[Policy] | str) -> str:
-    """Return the name of `policy`, a name or a Policy subclass.
-
-    An unregistered subclass is registered here, so `oversight = SupportPolicy` on
-    an agent is enough.
-    """
+    """An unregistered subclass is registered here, so `oversight = SupportPolicy` is enough."""
     if isinstance(policy, str):
         return policy
-    from django_ai_sdk.oversight.policy import Policy
-
     if not (isinstance(policy, type) and issubclass(policy, Policy)):
         raise TypeError(f"Expected a Policy subclass or a policy name, got {policy!r}")
     known = _registry.get(policy.name)
@@ -204,68 +116,191 @@ def get_invalid_policies() -> dict[str, str]:
 
 
 def get_duplicate_policies() -> dict[str, list[str]]:
-    """Names used by more than one Policy class, with their class paths."""
     return {name: list(paths) for name, paths in _duplicates.items()}
 
 
-def register_validator(name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator that lets check lenses, and lenses from JSON, name a validator::
-
-    @register_validator("even_amount")
-    def validate_even(text):
-        ...
-    """
-
-    def register(validator: Callable[..., Any]) -> Callable[..., Any]:
-        _validators[name] = validator
-        return validator
-
-    return register
-
-
-def get_validator(validator: Callable[..., Any] | str) -> Callable[..., Any]:
-    """The validator itself, or the one registered under a name.
-
-    Raises ImproperlyConfigured for an unknown name. A name is never imported as a
-    path, so JSON cannot run code a developer did not register.
-    """
-    if callable(validator):
-        return validator
-    if validator not in _validators:
-        raise ImproperlyConfigured(
-            f"No validator {validator!r}; register it with register_validator."
-        )
-    return _validators[validator]
-
-
-def get_validators() -> dict[str, Callable[..., Any]]:
-    """Every validator registered in code."""
-    return dict(_validators)
-
-
 def reset_registry() -> None:
-    """Clear the registry and every cached resolution. For tests."""
-    from django_ai_sdk.oversight.resolve import invalidate
-
+    """For tests."""
     _registry.clear()
     _invalid.clear()
     _duplicates.clear()
-    invalidate()
+    invalidate_policy()
 
 
-__all__ = [
-    "drafted",
-    "get_duplicate_policies",
-    "get_invalid_policies",
-    "get_policies",
-    "get_policy_class",
-    "get_validator",
-    "get_validators",
-    "policy_name",
-    "register_policy",
-    "register_validator",
-    "reset_registry",
-    "unregister_policy",
-    "validate_policy",
-    "validate_rule",
-]
+def build_policy(name: str, *, policy_class: type[Policy] | None = None) -> ResolvedPolicy:
+    """Resolve `name` with its parents and the settings; `policy_class` builds a draft instead.
+
+    Raises LookupError for an unknown policy and ImproperlyConfigured for a cycle.
+    """
+    resolved = _from_code(name, (), policy_class=policy_class)
+    ceiling = Capture(setting("CAPTURE"))
+    if rank(tuple(Capture), resolved.capture) > rank(tuple(Capture), ceiling):
+        resolved.capture = ceiling
+        resolved.sources["policy.capture"] = "settings"
+    return resolved
+
+
+def _inherit(resolved: ResolvedPolicy, parent: ResolvedPolicy) -> None:
+    resolved.lenses.update(parent.lenses)
+    resolved.rules.update(parent.rules)
+    resolved.sources.update(parent.sources)
+    # Only carry over values the parent set itself. Values from settings already match.
+    for key in ("capture", "stream_mode", "fail_mode"):
+        if parent.sources.get(f"policy.{key}"):
+            setattr(resolved, key, getattr(parent, key))
+    if parent.sources.get("policy.retention"):
+        resolved.retention = {**resolved.retention, **parent.retention}
+
+
+def _from_code(
+    name: str, chain: tuple[str, ...], *, policy_class: type[Policy] | None = None
+) -> ResolvedPolicy:
+    if name in chain:
+        raise ImproperlyConfigured(f"Policy {name!r} extends itself: {' -> '.join((*chain, name))}")
+    cls = policy_class or get_policy_class(name)
+    if cls is None:
+        raise LookupError(f"No oversight policy {name!r}")
+    policy = cls()
+    resolved = ResolvedPolicy(
+        name=policy.name,
+        label=policy.label,
+        description=policy.description,
+        capture=Capture(setting("CAPTURE")),
+        stream_mode=default_stream_mode(),
+        fail_mode=default_fail_mode(),
+        retention=validate_retention(setting("RETENTION")),
+        origin=cls.origin,
+        extends=list(policy.extends),
+    )
+    for parent_name in policy.extends:
+        _inherit(resolved, _from_code(parent_name, (*chain, name)))
+    for lens in policy_lenses(cls):
+        resolved.lenses[lens.name] = copy.copy(lens)
+        resolved.sources[f"lens:{lens.name}"] = name
+    for rule in policy_rules(cls):
+        resolved.rules[rule.name] = copy.copy(rule)
+        resolved.sources[f"rule:{rule.name}"] = name
+    for rule in resolved.rules.values():
+        # Check again with inherited lenses, which registration could not see.
+        masked = {
+            lens for action in rule.then if isinstance(action, Mask) for lens in action.lenses
+        }
+        unknown = sorted((rule.lenses() | masked) - set(resolved.lenses))
+        try:
+            if unknown:
+                raise ImproperlyConfigured(f"Rule {rule.name!r} reads unknown lenses {unknown}.")
+            validate_rule(rule, resolved.lenses)
+        except ImproperlyConfigured as exc:
+            raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
+    if policy.capture is not None:
+        resolved.capture = Capture(policy.capture)
+        resolved.sources["policy.capture"] = name
+    try:
+        if policy.stream_mode is not None:
+            resolved.stream_mode = validate_choice("stream_mode", policy.stream_mode, STREAM_MODES)
+            resolved.sources["policy.stream_mode"] = name
+        if policy.fail_mode is not None:
+            resolved.fail_mode = validate_choice("fail_mode", policy.fail_mode, FAIL_MODES)
+            resolved.sources["policy.fail_mode"] = name
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"Policy {name!r}: {exc}") from None
+    if policy.retention:
+        resolved.retention = {**resolved.retention, **validate_retention(policy.retention)}
+        resolved.sources["policy.retention"] = name
+    return resolved
+
+
+# The system check does not stop a turn, so _from_code checks every value again.
+
+# name -> (ResolvedPolicy or None if it failed, ancestor names)
+_cache: dict[str, tuple[ResolvedPolicy | None, frozenset[str]]] = {}
+_broken: dict[str, str] = {}
+# Each loader registers or unregisters its app's policies when awaited.
+_loaders: list[Callable[[], Awaitable[None]]] = []
+_loaded_at = -math.inf
+# One lock per event loop: async_to_sync runs each call in a loop of its own, and a lock
+# is bound to the loop that first waits on it.
+_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def add_policy_loader(loader: Callable[[], Awaitable[None]]) -> None:
+    """Await `loader` before policy lookups. Idempotent."""
+    global _loaded_at
+    if loader not in _loaders:
+        _loaders.append(loader)
+        _loaded_at = -math.inf
+
+
+async def run_policy_loaders() -> None:
+    """At most once per RUNTIME_CACHE_SECONDS; concurrent lookups wait, so a burst reads once."""
+    global _loaded_at
+    if not _loaders or time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
+        return
+    async with _locks.setdefault(asyncio.get_running_loop(), asyncio.Lock()):
+        if time.monotonic() - _loaded_at < float(setting("RUNTIME_CACHE_SECONDS")):
+            return
+        started = time.monotonic()
+        for loader in list(_loaders):
+            try:
+                await loader()
+            except Exception:
+                logger.opt(exception=True).warning("An oversight policy loader failed")
+        _loaded_at = started
+
+
+async def get_resolved_policy(name: str) -> ResolvedPolicy | None:
+    """The effective policy, cached. None for an unknown or broken one: the caller decides."""
+    await run_policy_loaders()
+    cached = _cache.get(name)
+    if cached:
+        return cached[0]
+    resolved = _load_policy(name)
+    # Cache failures too, so a broken policy logs once, not once per turn.
+    _cache[name] = (resolved, frozenset(ancestors(name)))
+    return resolved
+
+
+def _load_policy(name: str) -> ResolvedPolicy | None:
+    try:
+        resolved = build_policy(name)
+    except Exception as exc:
+        _broken[name] = str(exc) or type(exc).__name__
+        if isinstance(exc, LookupError) and get_policy_class(name) is None:
+            # Unknown; a missing parent instead means the policy is broken.
+            logger.info("Oversight policy {!r} is unknown", name)
+        else:
+            logger.exception("Oversight policy {!r} cannot be loaded: {}", name, exc)
+        return None
+    _broken.pop(name, None)
+    return resolved
+
+
+def broken_reason(name: str) -> str:
+    return _broken.get(name, "")
+
+
+def ancestors(name: str) -> list[str]:
+    """Nearest first. build_policy() reports cycles."""
+    found: list[str] = []
+    todo = list(getattr(get_policy_class(name), "extends", []) or [])
+    while todo:
+        parent = todo.pop(0)
+        if parent in found or parent == name:
+            continue
+        found.append(parent)
+        todo.extend(getattr(get_policy_class(parent), "extends", []) or [])
+    return found
+
+
+def invalidate_policy(name: str | None = None) -> None:
+    """Clearing a policy also clears every policy that extends it."""
+    global _loaded_at
+    if name is None:
+        _cache.clear()
+        _loaded_at = -math.inf
+        return
+    for cached, (_, lineage) in list(_cache.items()):
+        if cached == name or name in lineage:
+            _cache.pop(cached, None)

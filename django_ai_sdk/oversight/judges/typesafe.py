@@ -1,9 +1,6 @@
-"""TypeSafe as a judge: a hosted commercial classification service, optional.
+"""TypeSafe, a hosted commercial classification service, as an optional judge.
 
-A `Classifier` that maps a lens to a TypeSafe question and reads back its
-judgments; the base handles what is sent, batching and per-source questions. It
-needs django-ai-sdk[typesafe] and TYPESAFE_API_KEY, and abstains without them
-(ai_sdk.oversight.W005). This module never logs what was sent or what came back.
+This module never logs what was sent or what came back.
 """
 
 from __future__ import annotations
@@ -33,25 +30,22 @@ if TYPE_CHECKING:
 
 # Seconds per request, retries included. Inline stages pass their remaining time instead.
 TYPESAFE_TIMEOUT = 20.0
-# Most characters of a turn per request. TypeSafe reads at most 32k tokens per
-# question (state plus question) and 64k per request. At 3 to 4 characters per
-# token, this keeps every question inside those limits.
+# Keeps every question inside TypeSafe's 32k tokens per question, 64k per request.
 REQUEST_CHARS = 100_000
 
 
 def typesafe_model() -> str | None:
-    """TYPESAFE_MODEL, or None to let typesafe-sdk choose."""
     return secret_setting("TYPESAFE_MODEL") or None
 
 
-# One client per event loop. Its connection pool is bound to the loop that opened it,
-# and background tasks under async_to_sync run on their own loop.
+# One client per event loop: its pool is bound to the loop that opened it, and
+# background tasks under async_to_sync run on their own loop.
 _clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[str, Any]] = (
     weakref.WeakKeyDictionary()
 )
 
 
-def _client(api_key: str) -> Any:
+def api_client(api_key: str) -> Any:
     from typesafe_sdk import AsyncTypeSafeClient
 
     loop = asyncio.get_running_loop()
@@ -63,15 +57,10 @@ def _client(api_key: str) -> Any:
 
 
 class TypeSafe(Classifier):
-    """Answer with TypeSafe, a hosted commercial classification service.
+    """Answer with TypeSafe. Abstains without the `typesafe` extra and TYPESAFE_API_KEY.
 
-    Needs the `typesafe` extra (pip install 'django-ai-sdk[typesafe]') and a
-    TYPESAFE_API_KEY, and abstains without them. `model` pins a model. It defaults
-    to TYPESAFE_MODEL, then to the SDK's default.
-
-    Flag, Choice and Score lenses become TypeSafe questions. A yes/no is a "noul",
-    a probability of yes. An Entities lens with `per_source = True` rates each
-    source, as `Classifier.per_source` does.
+    `model` defaults to TYPESAFE_MODEL, then the SDK's default. Flag, Choice and
+    Score lenses become TypeSafe questions (a yes/no is a "noul", a probability of yes).
     """
 
     external: ClassVar[str] = "TypeSafe"
@@ -95,7 +84,6 @@ class TypeSafe(Classifier):
         return ""
 
     def question(self, lens: JudgeLens) -> dict[str, Any] | None:
-        """Map `lens` to a TypeSafe question, or None when TypeSafe has no matching type."""
         kind = lens.answer.kind
         if kind == "flag":
             kind, criteria = "noul", {"true": lens.yes, "false": lens.no}
@@ -109,7 +97,6 @@ class TypeSafe(Classifier):
         return {"type": kind, "instructions": instructions, "criteria": criteria}
 
     def source_question(self, source: Source) -> dict[str, Any]:
-        """TypeSafe's yes/no question about whether the reply is taken from `source`."""
         return {
             "type": "noul",
             "instructions": {
@@ -128,7 +115,7 @@ class TypeSafe(Classifier):
 
             # Inline, a retry would land after the deadline, so make one attempt.
             options = {"timeout": timeout, "retry": RetryPolicy(max_retries=0)}
-        response = await _client(secret_setting("TYPESAFE_API_KEY")).system_one(
+        response = await api_client(secret_setting("TYPESAFE_API_KEY")).system_one(
             state=state, questions=questions, model=self.model or typesafe_model(), **options
         )
         answers = {}
@@ -142,17 +129,14 @@ class TypeSafe(Classifier):
 def judgment_answer(
     response: Any, name: str, question: dict[str, Any], model: str | None = None
 ) -> Answer | None:
-    """TypeSafe's judgment on question `name` as an Answer, or None when missing."""
-    # The pinned model wins over the setting, as it does when the request is sent.
     model = getattr(response, "model", None) or model or typesafe_model() or ""
     if (noul := getattr(response, "nouls", {}).get(name)) is not None:
-        # A noul is a probability of yes. Its distance from 0.5 is its certainty.
         yes = float(noul.noul)
         return yes_answer(yes, model, f"yes {yes:.2f}")
     if (choice := getattr(response, "choices", {}).get(name)) is not None:
         return _rated(choice.choice, choice, question, model)
     if (score := getattr(response, "scores", {}).get(name)) is not None:
-        # A score is a level index from 0 to levels - 1. Scale it to 0..1.
+        # A level index from 0 to levels - 1, scaled to 0..1.
         value = float(score.score)
         levels = len(score.legend or {}) or len(question.get("criteria") or [])
         if levels > 1:
@@ -162,11 +146,9 @@ def judgment_answer(
 
 
 def _rated(value: Any, judged: Any, question: dict[str, Any], model: str) -> Answer:
-    """A choice or score judgment as an Answer, with its likeliest answers as rationale."""
     probabilities = dict(judged.probabilities or {})
     confidence = getattr(judged, "confidence", None)
     if confidence is None and probabilities:
-        # Use the likeliest level's probability as the confidence.
         confidence = max(float(p or 0) for p in probabilities.values())
     return Answer(
         value=value,
@@ -177,7 +159,6 @@ def _rated(value: Any, judged: Any, question: dict[str, Any], model: str) -> Ans
 
 
 def _rationale(probabilities: dict[str, Any], question: dict[str, Any]) -> str:
-    """List the likeliest answers with their probabilities. Score levels use their names."""
     criteria = question.get("criteria")
     names = list(criteria) if isinstance(criteria, list) else []
 
@@ -189,10 +170,3 @@ def _rationale(probabilities: dict[str, Any], question: dict[str, Any]) -> str:
     return ranked_rationale(
         (label_name(label), float(probability or 0)) for label, probability in probabilities.items()
     )
-
-
-__all__ = [
-    "REQUEST_CHARS",
-    "TypeSafe",
-    "judgment_answer",
-]

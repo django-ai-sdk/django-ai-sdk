@@ -1,25 +1,24 @@
 """The quality pack: was the answer good, and did retrieval find the right things?
 
-The RAG triad, "taken from" and helpfulness run in the background (reflect), so
-they add no latency. Refusals, wrong-language replies, empty retrieval and failed
-tools are checked at finish. Every judge is an optional alias: with none defined,
-the judge lenses are skipped and the checks still run.
+Judge lenses run in reflect, adding no latency, and are skipped when no judge
+alias is defined; the plain checks run at finish.
 """
 
 from __future__ import annotations
 
-from django_ai_sdk.oversight.actions import Alert, Queue
-from django_ai_sdk.oversight.conditions import L
-from django_ai_sdk.oversight.lenses import Entities, JudgeLens, Score
-from django_ai_sdk.oversight.policy import Policy
-from django_ai_sdk.oversight.presets import (
+from django_ai_sdk.oversight.judges.base import Maybe
+from django_ai_sdk.oversight.lenses import (
     EmptyRetrievalLens,
+    Entities,
+    JudgeLens,
     LanguageLens,
     RefusalLens,
+    Score,
     ToolErrorsLens,
 )
+from django_ai_sdk.oversight.policy import Policy
 from django_ai_sdk.oversight.registry import register_policy
-from django_ai_sdk.oversight.rules import Rule
+from django_ai_sdk.oversight.rules import Alert, L, Queue, Rule
 from django_ai_sdk.oversight.types import Stage, Subject
 
 
@@ -35,7 +34,7 @@ class ContextRelevance(JudgeLens):
     low, high = "unrelated", "exactly what is needed"
     subject = Subject.SOURCES
     stages = (Stage.REFLECT,)
-    judges = ["classifier?"]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class Groundedness(JudgeLens):
@@ -49,10 +48,10 @@ class Groundedness(JudgeLens):
         "pleasantries neither help nor hurt."
     )
     low, high = "unsupported", "fully supported"
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     stages = (Stage.REFLECT,)
     needs_grounding = True
-    judges = ["classifier?"]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class TakenFrom(JudgeLens):
@@ -61,12 +60,12 @@ class TakenFrom(JudgeLens):
     label = "Taken from"
     question = "Which of the retrieved sources is the answer taken from?"
     guidance = "Name each source a fact in the answer comes from; none when it rests on none."
-    subject = Subject.OUTPUT
+    subject = Subject.ANSWER
     stages = (Stage.REFLECT,)
     # The labels are the turn's sources. A classifier rates each one.
     per_source = True
     # Asked for every answer, since one without sources can be taken from none.
-    judges = ["classifier?"]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class AnswerRelevance(JudgeLens):
@@ -77,7 +76,7 @@ class AnswerRelevance(JudgeLens):
     low, high = "beside the point", "fully addresses it"
     subject = Subject.EXCHANGE
     stages = (Stage.REFLECT,)
-    judges = ["classifier?"]  # noqa: RUF012
+    judges = [Maybe("classifier")]  # noqa: RUF012
 
 
 class Helpfulness(JudgeLens):
@@ -89,7 +88,7 @@ class Helpfulness(JudgeLens):
     low, high = "useless", "excellent"
     subject = Subject.EXCHANGE
     stages = (Stage.REFLECT,)
-    judges = ["classifier?", "judge?"]  # noqa: RUF012
+    judges = [Maybe("classifier"), Maybe("judge")]  # noqa: RUF012
     sample = 0.25
 
 
@@ -112,42 +111,32 @@ class QualityPack(Policy):
     ]
     rules = [
         Rule(
-            "review_ungrounded",
+            "ungrounded_answer",
             when=(L("groundedness") < 0.5) & L("groundedness").confident(0.7),
             then=Queue("quality"),
             description="Answers the sources do not support go to a person.",
         ),
         Rule(
-            "review_unsourced",
+            "unsourced_answer",
             # No confidence gate. An unsure verdict is worth a look too.
             when=L("taken_from").present & ~L("taken_from").is_true,
             then=Queue("quality"),
             description="Answers taken from none of the sources, or no answer, go to a person.",
         ),
         Rule(
-            "review_irrelevant_context",
+            "irrelevant_context",
             when=(L("context_relevance") < 0.3) & L("context_relevance").confident(0.7),
             then=Queue("retrieval"),
             description="Retrieval that found the wrong things, to tune the knowledge base.",
         ),
         Rule(
-            "note_empty_retrieval",
+            "empty_retrieval",
             when=L("empty_retrieval").is_true,
             then=Alert("info"),
         ),
         Rule(
-            "note_tool_failures",
+            "tool_failures",
             when=L("tool_errors") >= 0.5,
             then=Alert("warning"),
         ),
     ]
-
-
-__all__ = [
-    "AnswerRelevance",
-    "ContextRelevance",
-    "Groundedness",
-    "Helpfulness",
-    "QualityPack",
-    "TakenFrom",
-]

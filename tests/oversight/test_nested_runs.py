@@ -82,31 +82,30 @@ class TestNestedRuns:
         assert not model.asked
 
     async def test_the_child_turn_links_to_its_parent(self):
-        from django_ai_sdk.oversight.agent_run import turn
+        from django_ai_sdk.oversight.plugin import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None and child.guard.parent_turn_id == outer.id
-        async with turn(agent, channel="chat", input="hi") as alone:
-            assert alone.guard is not None and alone.guard.parent_turn_id == ""
+            child, opened_own = await open_turn(agent, channel="chat", input="hi")
+        assert opened_own and child.parent_turn_id == outer.id
+        alone, opened_own = await open_turn(agent, channel="chat", input="hi")
+        assert opened_own and alone.parent_turn_id == ""
 
     async def test_the_child_turn_keeps_the_outer_person_and_removed_tools(self):
-        from django_ai_sdk.oversight.agent_run import turn
+        from django_ai_sdk.oversight.plugin import open_turn
 
         agent, _ = agent_with("x", policy=RunPolicy)
         outer = await self.outer()
         outer.actor_id, outer.restrict = "7", ["send"]
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None
-                assert (child.guard.actor_id, child.guard.restrict) == ("7", ["send"])
-                assert not child.guard.allows_tool("send")
+            child, _ = await open_turn(agent, channel="chat", input="hi")
+        assert (child.actor_id, child.restrict) == ("7", ["send"])
+        assert not child.allows_tool("send")
         outer.restrict = []
         with guarding(outer):
-            async with turn(agent, channel="chat", input="hi") as child:
-                assert child.guard is not None and child.guard.restrict == []
+            child, _ = await open_turn(agent, channel="chat", input="hi")
+        assert child.restrict == []
 
     async def test_the_same_policy_or_none_joins(self):
         same, _ = agent_with("Fine.", policy=LenientPolicy)
@@ -197,13 +196,13 @@ class TestSubagents:
         handed: list[list[Any]] = []
         from django_ai_sdk.oversight import plugin as runs
 
-        run_agent = runs.run_agent
+        run_with_oversight = runs.run_with_oversight
 
         async def spy(agent: Any, messages: list[Any], **kwargs: Any) -> Any:
             handed.append(messages)
-            return await run_agent(agent, messages, **kwargs)
+            return await run_with_oversight(agent, messages, **kwargs)
 
-        monkeypatch.setattr(runs, "run_agent", spy)
+        monkeypatch.setattr(runs, "run_with_oversight", spy)
         context = [HaystackChatMessage.from_user(f"my key is {SECRET}")]
         await component.run_async(messages=context, task="who")
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")
@@ -225,6 +224,43 @@ class TestSubagents:
         assert lenient.context.tool_calls == []
         child = await Turn.objects.aget(parent_turn_id=lenient.id)
         assert child.policy == "test-guard"
+
+    async def test_its_streamed_tool_results_are_masked_by_its_own_policy(self):
+        # The coordinator's policy masks nothing, so the card and the stored thread
+        # would show what the subagent's policy hid from its own model.
+        tool = Tool(
+            name="patient",
+            description="patient",
+            function=lambda: "Mail jan@example.com about it.",
+            parameters={"type": "object", "properties": {}},
+        )
+
+        class Care(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "care"
+            oversight = "test-guard"
+            tools = [lambda **kw: tool]  # noqa: RUF012
+
+            def get_llm(self, **kwargs: Any) -> Any:
+                return MockChatGenerator(responses=[call("patient"), "done"])
+
+        lenient = await TurnGuard.start(
+            make_agent([], None, policy="test-lenient"), channel="chat", input="x"
+        )
+        streamed: list[Any] = []
+
+        async def sink(chunk: Any) -> None:
+            if chunk.tool_call_result:
+                streamed.append(chunk.tool_call_result.result)
+
+        component = await delegation(Care)
+        with guarding(lenient):
+            await component.run_async(
+                messages=[HaystackChatMessage.from_user("x")], task="look", streaming_callback=sink
+            )
+        assert streamed
+        assert all("jan@example.com" not in str(result) for result in streamed)
 
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []

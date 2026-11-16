@@ -1,8 +1,6 @@
-"""Read-only admin for the oversight record.
+"""Read-only admin for the oversight record, scoped like the review API.
 
-It needs only metrics access, so it never shows content (turn text, reasons,
-notes) or who asked in which thread. Turns and their rows are narrowed by the
-same scope hooks as the review API.
+It needs only metrics access, so it never shows content or who asked in which thread.
 """
 
 from __future__ import annotations
@@ -13,6 +11,7 @@ from asgiref.sync import async_to_sync
 from django.contrib import admin
 
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
+from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -27,18 +26,12 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 
 class ScopedAdmin(ReadOnlyAdmin):
-    """Rows of the turns the reader's METRICS scope keeps, as in the review API.
-
-    Only for readers the `oversight` permission domain allows METRICS, on top of
-    Django's own view permission.
-    """
+    """Rows of the turns the reader's METRICS scope keeps, on top of Django's view permission."""
 
     # The path from a row to its turn; "" for the turn itself.
     turn_path = "turn"
 
     def may_read(self, request: Any) -> bool:
-        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
-
         return async_to_sync(OversightAccess.has_perms)(request.user, METRICS, raise_on_deny=False)
 
     def has_module_permission(self, request: Any) -> bool:
@@ -48,8 +41,6 @@ class ScopedAdmin(ReadOnlyAdmin):
         return super().has_view_permission(request, obj) and self.may_read(request)
 
     def get_queryset(self, request: Any) -> Any:
-        from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
-
         turns = OversightAccess.has_queryset_perms(
             request.user, METRICS, queryset=Turn.objects.all()
         )
@@ -68,7 +59,6 @@ class TurnAdmin(ScopedAdmin):
 
 @admin.register(LensAnswer)
 class LensAnswerAdmin(ScopedAdmin):
-    # Reasons live in the turn's content, which the admin does not show.
     list_display = ("created_at", "lens", "stage", "answerer", "value", "confidence", "error")
     list_filter = ("lens", "stage", "answerer")
 
@@ -81,7 +71,6 @@ class RuleMatchAdmin(ScopedAdmin):
 
 @admin.register(ReviewItem)
 class ReviewItemAdmin(ScopedAdmin):
-    # The reviewer's note is content, which the admin does not show.
     list_display = ("created_at", "queue", "rule", "status", "agree")
     list_filter = ("queue", "status")
     # The note is content, and who closed it is kept out like who asked.

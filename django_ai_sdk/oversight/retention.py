@@ -1,8 +1,4 @@
-"""Delete expired oversight data in batches.
-
-The oversight manual's Retention section lists what goes. Each batch is its own
-transaction, so a backlog never holds one long lock.
-"""
+"""Delete expired oversight data, one transaction per batch so a backlog never holds a long lock."""
 
 from __future__ import annotations
 
@@ -17,7 +13,6 @@ if TYPE_CHECKING:
 
     from django.db.models import QuerySet
 
-# Rows deleted per transaction.
 BATCH_SIZE = 500
 
 
@@ -40,7 +35,6 @@ def prune(*, now: datetime | None = None, batch_size: int = BATCH_SIZE) -> dict[
 
 
 def _in_batches(qs: QuerySet, size: int, delete: Callable[[list[Any]], int]) -> int:
-    """Delete the rows of `qs` in batches, one transaction per batch."""
     total = 0
     while True:
         ids = list(qs.order_by("pk").values_list("pk", flat=True)[:size])
@@ -73,9 +67,6 @@ def _delete_turns(ids: list[Any]) -> int:
 
 
 def _delete_rows(model: Any, ids: list[Any]) -> int:
-    """Delete `model` rows by pk. Returns how many of `model` went, not counting cascades."""
+    """Returns how many of `model` went, not counting cascades."""
     _, by_model = model.objects.filter(pk__in=ids).delete()
     return by_model.get(model._meta.label, 0)
-
-
-__all__ = ["BATCH_SIZE", "prune"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -45,12 +46,12 @@ def held_policy(policy: str, withhold: bool) -> None:
         lenses = [
             FnLens(
                 name="withhold",
-                subject=Subject.OUTPUT,
+                subject=Subject.ANSWER,
                 stages=[Stage.FINISH],
                 fn=lambda text, v: withhold,
             ),
             PIILens(
-                name="mail_out", subject=Subject.OUTPUT, stages=[Stage.FINISH], kinds=["email"]
+                name="mail_out", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"]
             ),
         ]
         rules = [
@@ -128,7 +129,7 @@ class TestAutoHoldsTheAnswer:
 
         from django_ai_sdk.views.schemas import Message
 
-        async def slow(text, view):
+        async def slow(text, context):
             await asyncio.sleep(0.5)
             return True
 
@@ -138,7 +139,7 @@ class TestAutoHoldsTheAnswer:
             lenses = [
                 FnLens(
                     name="bad",
-                    subject=Subject.OUTPUT,
+                    subject=Subject.ANSWER,
                     stages=[Stage.FINISH],
                     fn=slow,
                 )
@@ -214,3 +215,102 @@ class TestModelErrorWhileHeld:
         assert all("secret plan" not in (m.content or "") for m in storage.stored)
         turn = await Turn.objects.aget()
         assert turn.error and turn.outcome == ""
+
+
+@pytest.mark.usefixtures("no_reflect_queue")
+@pytest.mark.django_db(transaction=True)
+class TestReceiptsOfAWithheldAnswer:
+    """A withheld answer keeps what a tool declared as its receipt, such as a run id."""
+
+    @staticmethod
+    def started(receipt: bool) -> tuple[Any, Any]:
+        from django_ai_sdk import with_receipt
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+        from haystack.tools import Tool
+
+        def start_workflow_run(workflow: str) -> dict:
+            return {
+                "run_id": "run_8f3a-01",
+                "workflow": workflow,
+                "status": "running",
+                "workflow_id": "not an id: Jan de Vries",
+                "note": "Started for Jan de Vries",
+            }
+
+        tool = Tool(
+            name="start_workflow_run",
+            description="Start a workflow run.",
+            function=start_workflow_run,
+            parameters={"type": "object", "properties": {"workflow": {"type": "string"}}},
+        )
+        if receipt:
+            tool = with_receipt(tool, "run_id", "workflow_id", "workflow", "status")
+        message = HaystackChatMessage.from_assistant(
+            tool_calls=[
+                HaystackToolCall(
+                    tool_name=tool.name, arguments={"workflow": "intake"}, id="call_1"
+                )
+            ]
+        )
+        return tool, message
+
+    async def test_the_stored_call_and_the_released_card_keep_only_the_receipt(self):
+        tool, message = self.started(receipt=True)
+        storage = Storage()
+        agent = make_agent([message, "Started."], storage, tools=[tool], policy="test-withhold")
+        parts = await chat(agent, "start intake")
+        receipt = {"run_id": "run_8f3a-01", "workflow": "intake", "status": "running", "withheld": True}
+        stored = storage.stored[-1].tool_calls
+        assert [(c["arguments"], c["result"]) for c in stored] == [({}, {"result": receipt})]
+        outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
+        assert outputs[-1] == receipt
+        assert "Jan" not in json.dumps(parts)
+
+    async def test_a_tool_without_a_receipt_keeps_nothing(self):
+        tool, message = self.started(receipt=False)
+        storage = Storage()
+        agent = make_agent([message, "Started."], storage, tools=[tool], policy="test-withhold")
+        parts = await chat(agent, "start intake")
+        assert [c["result"] for c in storage.stored[-1].tool_calls] == [None]
+        outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
+        assert outputs[-1] == {"result": str(WITHHELD_OUTPUT)}
+
+
+class TestReceiptKeysAndValues:
+    @staticmethod
+    def tool(name: str, *keys: str) -> Any:
+        from django_ai_sdk import with_receipt
+        from haystack.tools import Tool
+
+        tool = Tool(name=name, description=name, function=dict, parameters={"type": "object"})
+        return with_receipt(tool, *keys) if keys else tool
+
+    def test_subagents_report_their_tools_receipt_keys_at_any_depth(self):
+        from types import SimpleNamespace
+
+        from django_ai_sdk.agents.subagent import SubagentStreamFilter
+        from django_ai_sdk.receipts import receipt_keys
+        from haystack.tools import ComponentTool
+
+        def delegate(name: str, *tools: Any) -> Any:
+            stream_filter = SubagentStreamFilter(SimpleNamespace(tools=list(tools)), name=name)
+            return ComponentTool(component=stream_filter, name=name, description=name)
+
+        inner = delegate("ask_payroll", self.tool("start_payout", "claim_id"))
+        outer = delegate("ask_care", self.tool("start", "run_id"), inner)
+        tools = [self.tool("start", "workflow_id"), self.tool("lookup"), outer]
+        assert receipt_keys(tools) == {
+            "start": ("workflow_id", "run_id"),
+            "start_payout": ("claim_id",),
+        }
+
+    @pytest.mark.parametrize(
+        "value",
+        ["NL91ABNA0417164300", "111222333", 111222333, "sk-proj-abcdefghijklmnopqrstuvwx"],
+    )
+    def test_a_value_that_looks_personal_or_secret_is_left_out(self, value):
+        from django_ai_sdk.receipts import receipt
+
+        kept = receipt({"run_id": "run_1", "ref": value}, ("run_id", "ref"))
+        assert kept == {"run_id": "run_1", "withheld": True}

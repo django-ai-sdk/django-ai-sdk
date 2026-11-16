@@ -11,7 +11,7 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     Mask,
-    Patterns,
+    PatternJudge,
     PIILens,
     Policy,
     Rule,
@@ -61,14 +61,14 @@ class TestMasksThatCannotPoint:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
             guard = await start(name, "Jan asked")
         gate = await guard.gate()
-        assert not gate.blocked and gate.input == "Jan asked"
+        assert not gate.blocked and gate.text == "Jan asked"
         assert (await closed_turn(guard)).outcome == "allowed"
 
     async def test_an_answer_that_cannot_be_masked_is_withheld(self):
-        name = masking_policy("test-no-spans-out", found_without_spans, subject=Subject.OUTPUT)
+        name = masking_policy("test-no-spans-out", found_without_spans, subject=Subject.ANSWER)
         guard = await start(name)
         finished = await guard.finish("Ask Jan.")
-        assert finished.blocked and finished.output == str(Block.DEFAULT_MESSAGE)
+        assert finished.blocked and finished.text == str(Block.DEFAULT_MESSAGE)
         assert (await closed_turn(guard)).outcome == "blocked"
 
     async def test_a_mask_with_nothing_to_mask_is_not_recorded_as_masking(self):
@@ -81,7 +81,7 @@ class TestMasksThatCannotPoint:
                     answer=Choice,
                     labels=["hr", "other"],
                     stages=[Stage.GATE],
-                    judges=[Patterns(keywords={"hr": ["salary"]})],
+                    judges=[PatternJudge(keywords={"hr": ["salary"]})],
                 ),
                 PIILens(name="mail", stages=[Stage.GATE], kinds=["email"]),
             ]
@@ -96,7 +96,7 @@ class TestMasksThatCannotPoint:
 
         guard = await start("test-mask-on-topic", "What about my salary?")
         gate = await guard.gate()
-        assert (gate.blocked, gate.masked, gate.notice) == (False, False, None)
+        assert (gate.blocked, gate.changed, gate.notice) == (False, False, None)
         turn = await closed_turn(guard)
         assert turn.outcome == "allowed"
         assert not (await RuleMatch.objects.aget(turn=turn, rule="mask_hr_mail")).acted
@@ -108,7 +108,7 @@ class TestMasksThatChangeNothing:
 
     @pytest.mark.parametrize("span", [(900, 950), (3, 3), (-1, 2)], ids=["past", "empty", "neg"])
     async def test_a_span_outside_the_question_blocks(self, span):
-        def lying(text, view):
+        def lying(text, context):
             return Answer(value=["email"], spans=[TextSpan(start=span[0], end=span[1])])
 
         name = policy(
@@ -118,11 +118,11 @@ class TestMasksThatChangeNothing:
         )
         guard = await start(name, "mail a@b.nl please")
         gate = await guard.gate()
-        assert gate.blocked and not gate.masked
+        assert gate.blocked and not gate.changed
         assert (await closed_turn(guard)).outcome == "blocked"
 
     async def test_a_mask_that_changes_nothing_did_not_act(self):
-        def masks_its_own_label(text, view):
+        def masks_its_own_label(text, context):
             # Points at text that already reads as its mask.
             return Answer(value=["email"], spans=[TextSpan(start=0, end=7, label="email")])
 
@@ -133,20 +133,20 @@ class TestMasksThatChangeNothing:
         )
         guard = await start(name, "[EMAIL] is here")
         gate = await guard.gate()
-        assert not gate.masked and not gate.blocked
+        assert not gate.changed and not gate.blocked
         turn = await closed_turn(guard)
         assert turn.outcome == "allowed"
         assert not (await RuleMatch.objects.aget(turn=turn, rule="m")).acted
 
 
 def test_a_span_across_question_and_answer_masks_both_sides():
-    from django_ai_sdk.oversight.guard.asking import Answered
-    from django_ai_sdk.oversight.guard.masks import _spans_for
+    from django_ai_sdk.oversight.guard.judging import Answered
+    from django_ai_sdk.oversight.guard.masking import spans_for
 
     lens = JudgeLens(name="who", answer=Entities, subject=Subject.EXCHANGE)
     # "ask Jan" + "\n\n" + "Jansen here": one name across the blank line.
     found = Answered(lens, Stage.FINISH, Answer(value=["Jan Jansen"], spans=[TextSpan(start=4, end=15)]))
-    question = _spans_for([found], {"who"}, Subject.INPUT, "ask Jan")
-    answer = _spans_for([found], {"who"}, Subject.OUTPUT, "ask Jan")
+    question = spans_for([found], {"who"}, Subject.QUESTION, "ask Jan")
+    answer = spans_for([found], {"who"}, Subject.ANSWER, "ask Jan")
     assert [(s.start, s.end) for s in question] == [(4, 7)]
     assert [(s.start, s.end) for s in answer] == [(0, 6)]

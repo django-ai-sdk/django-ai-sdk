@@ -28,15 +28,15 @@ from django_ai_sdk.oversight import (
 from django_ai_sdk.oversight.content import (
     FOUND,
     load_content,
-    masker_for_capture,
+    capture_masker,
     stored_value,
     unmasked_literals,
 )
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.patterns import DEFAULT_PII_KINDS
-from django_ai_sdk.oversight.persist import split_answer
-from django_ai_sdk.oversight.reflect import areflect
+from django_ai_sdk.oversight.recording import split_answer
+from django_ai_sdk.oversight.reflection import run_reflection
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, TextSpan, ToolCall
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 
@@ -73,28 +73,28 @@ MASTER = base64.b64encode(b"k" * 32).decode()
 OTHER = base64.b64encode(b"o" * 32).decode()
 
 
-def _naming_judge(text, view):
+def _naming_judge(text, context):
     # A judge that names who it found in its own words (no `labels`), and says where.
-    at = view.input.find(NAME)
+    at = context.input.find(NAME)
     if at < 0:
         return Answer(value=[])
     return Answer(value=[NAME], spans=[TextSpan(start=at, end=at + len(NAME), label="person")])
 
 
-def _judged(text, view):
+def _judged(text, context):
     return Answer(value=True, confidence=0.9, rationale=f"It quotes {NAME}, {EMAIL}, {BSN}, {KEY}")
 
 
-def _taken(text, view):
+def _taken(text, context):
     # Like TypeSafe.per_source: the titles of the sources, each one's score by its key.
     return Answer(
-        value=[s.title for s in view.sources],
+        value=[s.title for s in context.sources],
         confidence=0.9,
-        items={s.key: 0.9 for s in view.sources},
+        items={s.key: 0.9 for s in context.sources},
     )
 
 
-def _later(text, view):
+def _later(text, context):
     return Answer(value=True, rationale=f"Later: {EMAIL} again")
 
 
@@ -104,11 +104,11 @@ class PrivacyPolicy(Policy):
     lenses = [  # noqa: RUF012
         PIILens(name="pii_in", stages=[Stage.GATE], kinds=[*DEFAULT_PII_KINDS, "bsn"]),
         FnLens(name="who", answer=Entities, stages=[Stage.GATE], fn=_naming_judge),
-        FnLens(name="judged", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=_judged),
+        FnLens(name="judged", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_judged),
         FnLens(
-            name="taken", answer=Entities, subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=_taken
+            name="taken", answer=Entities, subject=Subject.ANSWER, stages=[Stage.FINISH], fn=_taken
         ),
-        FnLens(name="later", subject=Subject.OUTPUT, stages=[Stage.REFLECT], fn=_later),
+        FnLens(name="later", subject=Subject.ANSWER, stages=[Stage.REFLECT], fn=_later),
     ]
     rules = [  # noqa: RUF012
         # Report mode: nothing is masked by a rule, so capture alone decides.
@@ -270,7 +270,7 @@ class TestWhatCaptureKeeps:
 
     async def test_reflect_keeps_its_words_like_close_did(self):
         turn = await run_turn("masked")
-        assert await areflect(str(turn.id)) == 1
+        assert await run_reflection(str(turn.id)) == 1
         later = await LensAnswer.objects.aget(turn=turn, lens="later")
         assert later.value is True
         assert (await _kept(turn))["texts"][str(later.id)] == {"rationale": "Later: [EMAIL] again"}
@@ -301,13 +301,13 @@ class TestWhatTheClientSees:
 class TestTheRecordsValue:
     def test_an_entities_value_keeps_labels_and_counts_names(self):
         from django_ai_sdk.oversight.packs.quality import TakenFrom
-        from django_ai_sdk.oversight.packs.security import PIIInput
+        from django_ai_sdk.oversight.lenses import PIILens
 
         titles = Answer(value=[f"Dossier {EMAIL} (BSN {BSN})"], answerer="typesafe")
         assert stored_value(TakenFrom(), titles) == [FOUND]
         # Patterns report kinds; a person, like a judge, may type anything.
-        assert stored_value(PIIInput(), Answer(value=["email"], answerer="patterns")) == ["email"]
-        assert stored_value(PIIInput(), Answer(value=["email"], answerer="human")) == [FOUND]
+        assert stored_value(PIILens(), Answer(value=["email"], answerer="patterns")) == ["email"]
+        assert stored_value(PIILens(), Answer(value=["email"], answerer="human")) == [FOUND]
         labelled = JudgeLens(name="kind", answer=Entities, labels=["hr", "pay"])
         assert stored_value(labelled, Answer(value=["hr", NAME], answerer="judge")) == ["hr", FOUND]
         assert stored_value(JudgeLens(name="f"), Answer(value=True)) is True
@@ -320,25 +320,25 @@ class TestTheRecordsValue:
             rationale=f"It quotes {IBAN}.",
             items={f"https://crm/{EMAIL}": 0.95},
         )
-        columns, masked = split_answer(lens, "finish", answer, keep=masker_for_capture("masked"))
+        columns, masked = split_answer(lens, "finish", answer, keep=capture_masker("masked"))
         assert "rationale" not in columns and "items" not in columns
         assert masked == {"rationale": "It quotes [IBAN].", "items": {"https://crm/[EMAIL]": 0.95}}
-        assert split_answer(lens, "finish", answer, keep=masker_for_capture("full"))[1] == {
+        assert split_answer(lens, "finish", answer, keep=capture_masker("full"))[1] == {
             "rationale": f"It quotes {IBAN}.",
             "items": {f"https://crm/{EMAIL}": 0.95},
         }
         for capture in ("metadata", "none"):
-            assert split_answer(lens, "finish", answer, keep=masker_for_capture(capture))[1] == {}
+            assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
 
     def test_a_found_name_is_masked_before_the_detectors_cut_it_apart(self):
-        keep = masker_for_capture("masked", {f"Jan Jansen <{EMAIL}>": "person"})
+        keep = capture_masker("masked", {f"Jan Jansen <{EMAIL}>": "person"})
         assert keep.text(f"Mail Jan Jansen <{EMAIL}> today.") == "Mail [PERSON] today."
 
     def test_an_earlier_answerers_names_stay_out_of_the_trail(self):
         lens = JudgeLens(name="who", answer=Entities)
         earlier = Answer(value=[NAME], confidence=0.4, answerer="judge")
         answer = Answer(value=[NAME, "Piet"], answerer="strong", trail=[earlier])
-        columns, kept = split_answer(lens, "reflect", answer, keep=masker_for_capture("full"))
+        columns, kept = split_answer(lens, "reflect", answer, keep=capture_masker("full"))
         assert [step["value"] for step in columns["trail"]] == [[FOUND]]
         assert kept == {"value": [NAME, "Piet"], "trail": [[NAME]]}
 

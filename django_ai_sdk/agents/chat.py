@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.common import ChatMessage
-    from django_ai_sdk.oversight.plugin import Turn
+    from django_ai_sdk.oversight.plugin import TurnRequest
     from django_ai_sdk.storage.base import BaseStorageAdapter
     from django_ai_sdk.storage.schemas import ThreadInfo
 
@@ -38,11 +38,9 @@ async def chat_turn(
 ) -> Any:
     """Pick the history, then stream. The run's hooks open the turn and gate it."""
     from django_ai_sdk.oversight.history import history_for
-    from django_ai_sdk.oversight.plugin import TurnRequest, keep_masked
+    from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
 
-    # Prefer the stored thread over the client's history. The client's copy may
-    # be unmasked or made up. If there is no usable stored copy, the client's
-    # history is judged as sent.
+    # Prefer the stored thread: the client's copy may be unmasked or made up.
     sent, vouched = await history_for(
         agent, storage_adapter if thread else None, messages, channel="chat", user=user
     )
@@ -60,19 +58,14 @@ async def chat_turn(
             f"Applied max_history={agent.max_history}, kept {len(messages)} most recent messages"
         )
 
-    async def admit(turn: Turn | None) -> None:
-        """Store the question as the gate left it, then title the thread.
-
-        Oversight: the run's gate hook calls this once the question passed, so a
-        refused question is never stored.
-        """
-        keep_masked(messages, turn)
+    async def admit(request: TurnRequest) -> None:
+        """Called once the gate passed the question, so a blocked question is never stored."""
+        mask_stored_question(messages, request)
         question_id = await _store_question(messages, storage_adapter, thread_id)
-        if turn is not None and question_id:
-            turn.guard.user_message_id = question_id
+        if request.guard is not None and question_id:
+            request.guard.user_message_id = question_id
         if agent.title_generation and thread and not thread.title:
             # A failed title must not fail the reply.
-            # Oversight: off on purpose. The title uses the question after the gate.
             try:
                 title = await generate_thread_title(
                     agent=agent, messages=messages, thread_id=thread.id, user=user
@@ -107,9 +100,7 @@ async def chat_turn(
         from django_ai_sdk.adapters.base import Stream
 
         if isinstance(adapter, Stream) and adapter.agent_component is not None:
-            # Oversight: the run's hooks open, gate, check and finish the turn
-            # (see oversight.plugin); the Stream shows what they decided.
-            request = TurnRequest(
+            adapter.turn_request = TurnRequest(
                 agent=agent,
                 channel="chat",
                 user=user,
@@ -117,7 +108,7 @@ async def chat_turn(
                 history_vouched=vouched,
                 on_gated=admit,
             )
-            adapter.hook_context = request.context(**context)
+            adapter.hook_context = context or None
             return adapter
         adapter.hook_context = context or None
         return await _unguardable(agent, adapter, messages, admit, user, thread_id)
@@ -136,23 +127,21 @@ async def _unguardable(
     agent: Agent,
     adapter: Any,
     messages: list[ChatMessage],
-    admit: Callable[[Turn | None], Awaitable[None]],
+    admit: Callable[[TurnRequest], Awaitable[None]],
     user: AbstractBaseUser | AnonymousUser | None,
     thread_id: str | None,
 ) -> Any:
-    """An adapter that is no Haystack Agent: refused under a policy, unless it fails open.
-
-    Oversight: nothing can check its tool calls or its answer.
-    """
+    """A non-Haystack adapter can't be checked: blocked under a policy unless it fails open."""
     from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.plugin import TurnRequest
     from django_ai_sdk.oversight.stream import close_unguardable
 
     guard = await TurnGuard.start(
         agent, channel="chat", user=user, thread_id=thread_id, messages=messages
     )
-    if guard.active and (refusal := await close_unguardable(guard)) is not None:
-        return refusal
-    await admit(None)
+    if guard.active and (blocked_stream := await close_unguardable(guard)) is not None:
+        return blocked_stream
+    await admit(TurnRequest())
     return adapter
 
 

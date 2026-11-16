@@ -149,7 +149,7 @@ register_error_code(
 )
 register_error_code(ErrorCode.INVALID_REQUEST, message=_("The request was invalid."), status=400)
 # 400 like CONTENT_FILTERED. A 403 would look like an auth failure, but the
-# refusal is about the content, not the user.
+# block is about the content, not the user.
 register_error_code(
     ErrorCode.BLOCKED, message=_("This assistant's policy stopped this answer."), status=400
 )
@@ -194,7 +194,7 @@ class UserError(AiSdkError, ValueError):
 
 
 class Blocked(AiSdkError):
-    """Raised by `Agent.run()` when the policy refuses the question or withholds the answer.
+    """Raised by `Agent.run()` when the policy blocks the question or withholds the answer.
 
     Show `message` to the user as the reply. `stage` is "gate" or "finish".
     """

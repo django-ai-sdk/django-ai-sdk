@@ -1,8 +1,4 @@
-"""Read-only admin that lists the authored policies.
-
-Saves go through `AuthoringService`, which validates the definition. The admin never
-changes a row.
-"""
+"""Read-only admin for authored policies; saves go through the validating `AuthoringService`."""
 
 from __future__ import annotations
 
@@ -18,6 +14,3 @@ class AuthoredPolicyAdmin(ReadOnlyAdmin):
     list_filter = ("active",)
     search_fields = ("name", "label")
     date_hierarchy = "updated_at"
-
-
-__all__ = ["AuthoredPolicyAdmin"]

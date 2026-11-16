@@ -8,17 +8,13 @@ from django.db import models
 
 
 class AuthoredPolicy(models.Model):
-    """A policy an operator defined at runtime.
-
-    `active` False turns its own lenses and rules off: the policies it extends still run.
-    Deleting the row unregisters the policy, so turns that name it are refused.
-    """
+    """`active` False turns its own lenses and rules off; the policies it extends still run."""
 
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
     name = models.SlugField(max_length=100, unique=True)
     label = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
-    # Names of parent policies: code policies, packs or other authored policies.
+    # Names of parent policies: code policies and packs, never another authored policy.
     extends = models.JSONField(default=list, blank=True)
     # Lens and rule dicts in the shape `definitions.build_policy_class` reads.
     lenses = models.JSONField(default=list, blank=True)
@@ -48,6 +44,3 @@ class AuthoredPolicy(models.Model):
             "rules": list(self.rules or []),
             "options": dict(self.options or {}),
         }
-
-
-__all__ = ["AuthoredPolicy"]

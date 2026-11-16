@@ -77,7 +77,7 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 5. **`SourceEvent`**: RAG sources, streamed with citation indices
 6. **`DataEvent` (`oversight`)**: what oversight's finish did to the answer, such as text to show instead
 7. **`TextEndEvent`**: the answer's text is complete; citations are placed after it
-8. **`MessageEndEvent`**: after the message is finalized; `finish_reason` is `content-filter` when oversight refused the question or withheld the answer
+8. **`MessageEndEvent`**: after the message is finalized; `finish_reason` is `content-filter` when oversight blocked the question or withheld the answer
 9. **`SuggestionEvent`**: optional follow-up suggestions
 10. **`StreamEndEvent`**: the run is done
 11. **`ErrorEvent`**: pipeline failures, instead of a hanging stream

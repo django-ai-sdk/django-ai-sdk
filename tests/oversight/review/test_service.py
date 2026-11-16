@@ -334,7 +334,7 @@ class TestReviews:
     async def test_queues_count_open_items(self):
         await a_turn()
         await a_turn("salary again")
-        assert await OversightService.queues(user=await reader(REVIEW)) == {"hr": 2}
+        assert await OversightService.list_queues(user=await reader(REVIEW)) == {"hr": 2}
 
 
 @pytest.mark.django_db(transaction=True)
@@ -342,7 +342,7 @@ class TestMetrics:
     async def test_counts_over_the_window(self):
         await a_turn()
         await a_turn("hello", "hi", channel="webhook:x")
-        metrics = await OversightService.summarize(user=await reader(METRICS))
+        metrics = await OversightService.get_metrics(user=await reader(METRICS))
         assert metrics.turns == 2
         assert sum(metrics.by_outcome.values()) == 2
         assert metrics.by_report_outcome == {"blocked": 1}
@@ -357,13 +357,13 @@ class TestMetrics:
 
     async def test_a_policy_narrows_it(self):
         await a_turn()
-        metrics = await OversightService.summarize(user=await reader(METRICS), policy="other")
+        metrics = await OversightService.get_metrics(user=await reader(METRICS), policy="other")
         assert metrics.turns == 0
         assert metrics.queues == {}
 
 
 def test_visible_content_shows_the_turn_as_kept_and_nothing_beside_it():
-    from django_ai_sdk.oversight.services.turns import visible_content
+    from django_ai_sdk.oversight.services import visible_content
 
     kept = {
         "input": "q",

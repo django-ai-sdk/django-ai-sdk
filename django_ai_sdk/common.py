@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, NewType
 from pydantic import BaseModel, Field
 
 from .logger import get_logger
+from .receipts import receipt
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -221,11 +222,15 @@ class StreamWriter:
         """Drop the reasoning, which could reveal a withheld answer."""
         self._reasoning_chunks = []
 
-    def drop_tool_details(self) -> None:
-        """Keep only tool call names. Arguments and results could reveal a withheld answer."""
+    def drop_tool_details(self, receipts: Mapping[str, tuple[str, ...]]) -> None:
+        """Keep only tool call names. Arguments and results could reveal a withheld answer.
+
+        A tool in `receipts` (receipt keys by tool name) keeps its receipt as its result.
+        """
         for call in self.message.tool_calls:
+            kept = receipt(call["result"], receipts.get(call["name"]))
             call["arguments"] = {}
-            call["result"] = None
+            call["result"] = {"result": kept} if kept else None
 
     async def finalize(self, finish_reason: str = "") -> ChatMessage:
         """Complete the message"""

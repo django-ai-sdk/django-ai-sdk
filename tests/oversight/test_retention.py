@@ -10,7 +10,6 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.core.management import call_command
 from django.db import connection
-from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django_ai_sdk.oversight.checks import check_oversight_retention
@@ -23,20 +22,11 @@ from django_ai_sdk.oversight.models import (
 )
 from django_ai_sdk.oversight.retention import prune
 
-from tests.oversight.helpers import closed_turn, start
+from tests.oversight.review.helpers import a_turn
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 LATER = timedelta(days=1)
-
-
-async def a_turn(text: str = "What about my salary?", output: str = "Ask jan@example.com.") -> str:
-    """A closed test-guard turn: "salary" queues it for hr."""
-    with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):
-        guard = await start("test-guard", text)
-        await guard.gate()
-        await guard.finish(output)
-        return str((await closed_turn(guard)).id)
 
 
 async def expire(turn_id: str, *, content: bool = False, turn: bool = False) -> None:
@@ -137,7 +127,7 @@ class TestNothingPrunes:
         assert await sync_to_async(self.ids)() == []
 
     async def test_a_turn_open_for_more_than_a_day_warns_until_swept(self):
-        # W017: a run that crashed outside run_agent leaves its turn open until the sweep.
+        # W017: a run that crashed outside run_with_oversight leaves its turn open until the sweep.
         turn_id = await a_turn()
         await Turn.objects.filter(id=turn_id).aupdate(
             status="open", created_at=timezone.now() - timedelta(days=2)

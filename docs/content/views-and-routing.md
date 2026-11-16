@@ -282,7 +282,7 @@ async def run_thread(request, thread_id: str, payload: ChatRequest):
             chat_messages, thread_id=thread_id, user=request.user, channel="api"
         )
     except Blocked as blocked:
-        # The agent's oversight policy refused: its message is the reply.
+        # The agent's oversight policy blocked it: its message is the reply.
         return RunResponse(result=blocked.message, thread_id=thread_id, blocked=True)
     return RunResponse(result=result, thread_id=thread_id)
 ```

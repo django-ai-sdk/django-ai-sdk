@@ -23,7 +23,7 @@ from django_ai_sdk.oversight import (
     Rule,
 )
 from django_ai_sdk.oversight.content import without_nul
-from django_ai_sdk.oversight.guard import UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 from django_ai_sdk.oversight.models import LensAnswer, Turn
 from django_ai_sdk.oversight.types import Answer, Stage, Subject
 from tests.oversight.helpers import (
@@ -52,7 +52,7 @@ class TestRecordingFailures:
         side = RuntimeError("bug")
         with (
             closed(),
-            patch("django_ai_sdk.oversight.guard.state.evaluate_rules", side_effect=side),
+            patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
             assert (await guard.gate()).blocked
@@ -62,13 +62,13 @@ class TestRecordingFailures:
     async def test_a_finish_that_broke_closed_is_recorded_blocked(self):
         name = policy(
             "fx-crash-finish",
-            [FnLens(name="f", subject=Subject.OUTPUT, stages=[Stage.FINISH], fn=yes)],
+            [FnLens(name="f", subject=Subject.ANSWER, stages=[Stage.FINISH], fn=yes)],
             [Rule("r", when=L("f").is_true, then=Alert(), mode=ENFORCE)],
         )
         side = RuntimeError("bug")
         with (
             closed(),
-            patch("django_ai_sdk.oversight.guard.state.evaluate_rules", side_effect=side),
+            patch("django_ai_sdk.oversight.guard.judging.match_rules", side_effect=side),
         ):
             guard = await start(name)
             assert (await guard.finish("hello")).blocked
@@ -86,8 +86,8 @@ class TestRecordingFailures:
 
     async def test_a_caller_that_refuses_a_passed_result_records_it_blocked(self):
         guard = await start("test-guard", "mail a@b.nl")
-        assert (await guard.gate()).masked
-        guard.refuse("masked result does not fit its schema")
+        assert (await guard.gate()).changed
+        guard.block("masked result does not fit its schema")
         turn = await closed_turn(guard)
         assert turn.outcome == "blocked"
         assert turn.error == "masked result does not fit its schema"
@@ -97,18 +97,18 @@ class TestRecordingFailures:
         assert (await guard.gate()).blocked
         with (
             log_lines() as lines,
-            patch("django_ai_sdk.oversight.guard.persist_turn", side_effect=DatabaseError("x")),
+            patch("django_ai_sdk.oversight.guard.record_turn", side_effect=DatabaseError("x")),
         ):
             assert await guard.close() is None
         text = "\n".join(lines)
         assert "could not record turn" in text
-        assert "blocked" in text and "block_injection" in text
+        assert "blocked" in text and "injection_in_question" in text
         assert "ignore previous" not in text
 
     async def test_close_cancels_tool_results_still_being_masked(self):
-        async def slow_pii(text, view):
+        async def slow_pii(text, context):
             await asyncio.sleep(1.0)
-            spans = PIILens(name="pii", kinds=["email"]).find(text)
+            spans = PIILens(name="pii", kinds=["email"]).finder.find(text, "pii")
             return Answer(value=[span.label for span in spans], spans=spans)
 
         name = policy(
@@ -123,7 +123,7 @@ class TestRecordingFailures:
         with contextlib.suppress(asyncio.CancelledError):
             await first
         await closed_turn(guard)
-        assert all(f.done() for f in guard._masking_results.values())
+        assert all(f.done() for f in guard.masks.results.values())
         await asyncio.sleep(0.1)
         assert not guard.answered
 
@@ -132,7 +132,7 @@ class TestRecordingFailures:
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
         assert await guard.mask_result("c1", "write to c@d.nl") == "write to [EMAIL]"
         assert await guard.mask_result("c1", "a@b.nl") == "[EMAIL]"
-        assert len(guard._masking_results) == 2
+        assert len(guard.masks.results) == 2
 
     async def test_a_finding_in_a_tool_result_leaves_the_turns_labels_alone(self):
         guard = await start("test-guard", "hello")
@@ -207,18 +207,18 @@ class TestRecordingFailures:
     def test_a_masked_result_that_no_longer_fits_is_recorded_blocked(self):
         from pydantic import BaseModel
 
-        from django_ai_sdk.oversight.agent_run import withhold_unfit
-        from django_ai_sdk.oversight.guard import FinishResult
+        from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
+        from django_ai_sdk.oversight.guard.stages import StageResult
 
         class Count(BaseModel):
             n: int
 
-        refused: list[str] = []
-        guard = type("Guard", (), {"refuse": lambda self, error="": refused.append(error)})()
-        finished = FinishResult(output='{"n": "[NUMBER]"}', replaced=True)
-        withhold_unfit(guard, finished, Count)
-        assert finished.blocked and finished.message == str(Block.DEFAULT_MESSAGE)
-        assert refused == ["masked result does not fit its schema"]
+        blocked: list[str] = []
+        guard = type("Guard", (), {"block": lambda self, error="": blocked.append(error)})()
+        finish = StageResult(text='{"n": "[NUMBER]"}', changed=True)
+        withhold_unfit(guard, finish, Count)
+        assert finish.blocked and finish.message == str(Block.DEFAULT_MESSAGE)
+        assert blocked == ["masked result does not fit its schema"]
 
 
 def test_a_user_id_fits_wherever_a_person_is_recorded():

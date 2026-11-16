@@ -10,69 +10,88 @@ import hashlib
 import inspect
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ImproperlyConfigured
+
 from django_ai_sdk.oversight.conf import setting
+from django_ai_sdk.oversight.policy import Policy
+from django_ai_sdk.oversight.registry import policy_name
 
 if TYPE_CHECKING:
     from django_ai_sdk.agents.base import Agent
 
-# Length of an agent's fingerprint in hex characters.
 FINGERPRINT_CHARS = 16
+# The channel of a turn whose caller named none.
+DEFAULT_CHANNEL = "default"
 
 
 def agent_key(agent: Agent) -> str:
-    """The id that turns use for an agent.
-
-    A runtime agent built on a registered class uses its own id, not the class's.
-    """
+    """A runtime agent built on a registered class uses its own id, not the class's."""
     return str(getattr(agent, "agent_id", "") or "")
 
 
-async def acode_policy(agent: Agent, *, channel: str = "", user: Any = None) -> tuple[str, str]:
-    """Return the policy name the agent's code asks for, and the reason.
+def turn_channel(channel: str | None) -> str:
+    return DEFAULT_CHANNEL if channel is None else channel
 
-    The reason is "agent", "off" or "default". Calls `get_oversight()` when the
-    agent has it, else reads its `oversight` attribute. Errors from the hook, and
-    TypeError for a value that names no policy, propagate so the caller decides.
+
+async def declared_policy(
+    agent: Agent, *, channel: str | None = None, user: Any = None
+) -> tuple[str, str]:
+    """(policy name, reason "agent" | "off" | "default") the agent's code asks for.
+
+    Errors from `get_oversight()` propagate, so the caller decides (fail mode).
     """
     getter = getattr(agent, "get_oversight", None)
     if callable(getter):
-        chosen = getter(channel=channel, user=user)
+        chosen = getter(channel=turn_channel(channel), user=user)
         if inspect.isawaitable(chosen):
             chosen = await chosen
     else:
         chosen = getattr(agent, "oversight", None)
-    return _code_choice(chosen)
+    return _policy_name_and_reason(chosen)
 
 
-def code_policy(agent: Any) -> tuple[str, str]:
-    """Like `acode_policy`, but reads only the `oversight` attribute. Used by checks."""
-    return _code_choice(getattr(agent, "oversight", None))
+def attribute_policy(agent: Any) -> tuple[str, str]:
+    """Like `declared_policy` without calling `get_oversight()`, so sync code can ask."""
+    return _policy_name_and_reason(getattr(agent, "oversight", None))
 
 
-def policy_needs_await(agent: Any) -> bool:
-    """Whether only an async run can tell the agent's policy: it overrides
-    `get_oversight()`."""
+def overrides_get_oversight(agent: Any) -> bool:
+    """Whether only an async run can tell the agent's policy."""
     from django_ai_sdk.agents.base import Agent
 
     # The base method only returns `oversight`, which sync code reads itself.
-    overridden = "get_oversight" in getattr(agent, "__dict__", {}) or (
+    return "get_oversight" in getattr(agent, "__dict__", {}) or (
         getattr(type(agent), "get_oversight", Agent.get_oversight) is not Agent.get_oversight
     )
-    return overridden
 
 
-def _code_choice(chosen: Any) -> tuple[str, str]:
-    from django_ai_sdk.oversight.registry import policy_name
-
+def _policy_name_and_reason(chosen: Any) -> tuple[str, str]:
     if chosen is False:
         return "", "off"
     if chosen is None:
         return str(setting("DEFAULT_POLICY") or ""), "default"
     if chosen == "":
-        # As for the `oversight` attribute, "" is no policy name. Unchecked, it would
-        # run the turn unguarded.
+        # Unchecked, "" would run the turn unguarded.
         raise TypeError('get_oversight() returned ""; return None for the default, or False')
     return policy_name(chosen), "agent"
+
+
+def validate_oversight(cls: type) -> None:
+    """Fail at import on an `oversight` value that would silently leave the agent unguarded.
+
+    Registering a Policy subclass here lets the system checks see it.
+    """
+    value = cls.__dict__.get("oversight")
+    if value is None or value is False or (isinstance(value, str) and value):
+        return
+    if isinstance(value, type):
+        if issubclass(value, Policy):
+            policy_name(value)
+            return
+    raise ImproperlyConfigured(
+        f"{cls.__qualname__}.oversight must be a Policy subclass, a policy's name, False "
+        f"or None, not {value!r}."
+    )
 
 
 def fingerprint(agent: Agent) -> str:
@@ -88,13 +107,3 @@ def fingerprint(agent: Agent) -> str:
     parts.append(",".join(sorted(getattr(t, "__name__", str(t)) for t in tools)))
     parts.append(",".join(sorted(getattr(agent, "integrations", []) or [])))
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:FINGERPRINT_CHARS]
-
-
-__all__ = [
-    "FINGERPRINT_CHARS",
-    "acode_policy",
-    "agent_key",
-    "code_policy",
-    "fingerprint",
-    "policy_needs_await",
-]
