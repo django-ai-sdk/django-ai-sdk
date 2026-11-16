@@ -151,15 +151,10 @@ async def status(workflow_id: str) -> Any:
 
 
 __all__ = [
-    "WORKFLOW_MODULES",
     "cancel",
     "client",
-    "config",
-    "destroy",
     "enqueue",
-    "fresh_connections",
     "launch",
-    "register_workflows",
     "send",
     "status",
 ]
