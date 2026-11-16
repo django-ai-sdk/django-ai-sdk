@@ -6,11 +6,12 @@ Runs execute on DBOS (`workflows.durable`); the lifecycle is told in the workflo
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from pydantic import ValidationError
@@ -162,6 +163,60 @@ def requeue_pending() -> int:
     for run_id in pending:
         requeue(str(run_id))
     return len(pending)
+
+
+# DBOS workflow statuses under which DBOS still runs, recovers or dequeues the workflow.
+ACTIVE_STATUSES = frozenset({"PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"})
+
+
+def fail_stale_runs() -> int:
+    """Fail every running run whose DBOS workflow no longer runs. Returns how many.
+
+    A run is checked once its `heartbeat_at` is older than
+    AI_SDK_WORKFLOWS['STALE_AFTER_SECONDS']. One whose DBOS workflow ended, was
+    cancelled, ran out of recovery attempts or is gone would stay running forever,
+    so it is failed, and its unfinished step rows with it; `resume` takes it up
+    again. A run DBOS still runs is left alone, however old its heartbeat: a long
+    step, an approval waiting for days, a run waiting for a worker to recover it.
+
+    The worker calls it at start and every minute; a host may schedule it as well.
+    """
+    from django_ai_sdk.durable import runtime
+    from django_ai_sdk.workflows.conf import setting
+
+    now = timezone.now()
+    cutoff = now - timedelta(seconds=setting("STALE_AFTER_SECONDS"))
+    stale = list(
+        WorkflowRun.objects.filter(status=WorkflowRun.Status.RUNNING)
+        .filter(Q(heartbeat_at__lt=cutoff) | Q(heartbeat_at__isnull=True))
+        .values_list("pk", "attempt", "task_id")
+    )
+    if not stale:
+        return 0
+    ids = [task_id for _, _, task_id in stale if task_id]
+    workflows = (
+        runtime.client().list_workflows(workflow_ids=ids, load_input=False, load_output=False)
+        if ids
+        else []
+    )
+    running = {w.workflow_id for w in workflows if str(w.status) in ACTIVE_STATUSES}
+    failed = 0
+    for pk, attempt, task_id in stale:
+        if task_id in running:
+            continue
+        with transaction.atomic():
+            if not WorkflowRun.objects.held(pk, attempt).update(
+                status=WorkflowRun.Status.FAILED,
+                error="Stopped: its worker no longer runs it. Resume it to go on.",
+                completed_at=now,
+            ):
+                continue
+            StepRun.objects.filter(
+                run_id=pk, status__in=(StepRun.Status.RUNNING, StepRun.Status.WAITING)
+            ).update(status=StepRun.Status.FAILED, detail="its worker stopped", completed_at=now)
+        logger.warning("Workflow run %s had no worker (DBOS workflow %s); failed it", pk, task_id)
+        failed += 1
+    return failed
 
 
 async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
@@ -410,6 +465,7 @@ __all__ = [
     "enqueue_run",
     "execute_run",
     "fail_run",
+    "fail_stale_runs",
     "RunRecorder",
     "open_run",
     "queue_run",

@@ -160,6 +160,37 @@ class TestRuns:
         assert await claim_run(str(run.pk), workflow_id="second") is None
         assert await claim_run(str(run.pk), workflow_id="first") is not None
 
+    async def test_a_run_whose_workflow_no_longer_runs_is_failed_once_stale(self, dbos):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from django_ai_sdk.workflows.runs import fail_stale_runs, open_run
+
+        long_ago = timezone.now() - timedelta(hours=1)
+        orphan = await open_run(definition(echo("a")))
+        await WorkflowRun.objects.filter(pk=orphan.pk).aupdate(
+            status="running", attempt=1, task_id="gone", heartbeat_at=long_ago
+        )
+        await StepRun.objects.acreate(run=orphan, sequence=0, step_name="a", status="running")
+        fresh = await open_run(definition(echo("a")))
+        await WorkflowRun.objects.filter(pk=fresh.pk).aupdate(
+            status="running", attempt=1, task_id="gone-too", heartbeat_at=timezone.now()
+        )
+        owner = await user("owner@example.com")
+        waiting = await queue_run(definition(echo("a"), gate()), user=owner)
+        await settled(waiting.pk, step_waiting="gate")
+        # Waiting for days for its approval: DBOS still runs it.
+        await WorkflowRun.objects.filter(pk=waiting.pk).aupdate(heartbeat_at=long_ago)
+
+        assert await sync_to_async(fail_stale_runs)() == 1
+
+        orphan = await WorkflowRun.objects.aget(pk=orphan.pk)
+        assert orphan.status == "failed" and "Resume" in orphan.error
+        assert (await StepRun.objects.aget(run=orphan)).status == "failed"
+        assert (await WorkflowRun.objects.aget(pk=fresh.pk)).status == "running"
+        assert (await WorkflowRun.objects.aget(pk=waiting.pk)).status == "running"
+
     async def test_the_turn_a_step_opened_is_recorded_on_its_row(self, dbos):
         run = await settled((await queue_run(definition(StepDefinition(type="turn", name="t")))).pk)
 

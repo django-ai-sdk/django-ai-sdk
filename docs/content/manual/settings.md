@@ -83,6 +83,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
 | `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host’s own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
 | `AI_SDK_WORKFLOWS["SCHEDULES_ENABLED"]` | `True` | `False` makes every cron occurrence start nothing, such as on a staging copy of production; the schedules stay as they are. See [Triggers](/manual/workflows/#triggers). |
+| `AI_SDK_WORKFLOWS["STALE_AFTER_SECONDS"]` | `900` | How long a `running` run may go without progress before the worker checks it against DBOS, and fails it when its DBOS workflow no longer runs. See [Durable runs on DBOS](/manual/workflows/#durable-runs-on-dbos). |
 
 ## Oversight
 

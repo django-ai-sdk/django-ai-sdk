@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import signal
 import threading
 from typing import Any
@@ -9,8 +10,12 @@ from typing import Any
 from django.core.management.base import BaseCommand
 from django.db import connection
 
+logger = logging.getLogger(__name__)
+
 # How often a standby worker checks whether the running one has stopped.
 STANDBY_SECONDS = 2.0
+# How often the running worker does its upkeep (`Command.upkeep`).
+UPKEEP_SECONDS = 60.0
 
 
 class Command(BaseCommand):
@@ -33,18 +38,30 @@ class Command(BaseCommand):
         if not self.take_worker_lock(stop):
             return
         runtime.launch()
-        synced = sync_schedules()
-        requeued = requeue_pending()
-        worker_launched.send(sender=type(self))
-        self.stdout.write(
-            f"DBOS worker running: {len(synced)} cron trigger(s), {requeued} pending run(s) "
-            "queued again. Stop with Ctrl-C or SIGTERM."
-        )
         try:
-            stop.wait()
+            synced = sync_schedules()
+            requeued = requeue_pending()
+            worker_launched.send(sender=type(self))
+            self.stdout.write(
+                f"DBOS worker running: {len(synced)} cron trigger(s), {requeued} pending run(s) "
+                "queued again. Stop with Ctrl-C or SIGTERM."
+            )
+            self.upkeep()
+            while not stop.wait(UPKEEP_SECONDS):
+                self.upkeep()
         finally:
             # Let the step in flight finish; DBOS recovers what is left on the next start.
             runtime.destroy()
+
+    def upkeep(self) -> None:
+        """Fail the runs whose DBOS workflow no longer runs (`runs.fail_stale_runs`)."""
+        from django_ai_sdk.workflows.runs import fail_stale_runs
+
+        try:
+            if failed := fail_stale_runs():
+                self.stderr.write(f"{failed} run(s) had stopped without a worker; failed them.")
+        except Exception:
+            logger.exception("Could not check for stale workflow runs")
 
     def take_worker_lock(self, stop: threading.Event) -> bool:
         """Wait until this is the only worker. False when stopped while waiting.

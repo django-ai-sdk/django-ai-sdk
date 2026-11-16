@@ -74,6 +74,10 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
     "STEPS": (lambda value: isinstance(value, dict), "a dict of step classes by key"),
     "LISTENERS": (lambda value: isinstance(value, dict), "a dict of listener classes by key"),
     "SCHEDULES_ENABLED": (lambda value: isinstance(value, bool), "True or False"),
+    "STALE_AFTER_SECONDS": (
+        lambda value: isinstance(value, int) and not isinstance(value, bool) and value > 0,
+        "a positive number of seconds",
+    ),
 }
 
 
