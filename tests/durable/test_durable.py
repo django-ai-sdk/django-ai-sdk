@@ -121,6 +121,8 @@ class TestRuns:
 
         assert run.status == "completed"
         assert steps.calls == {"a": 1, "h": 2}
+        # Run twice, under one key: an effect keyed on it happens once.
+        assert steps.keys == [f"{run.pk}:h", f"{run.pk}:h"]
 
     async def test_a_run_that_never_reached_dbos_is_queued_when_the_worker_starts(self, dbos):
         from django_ai_sdk.workflows.runs import open_run, requeue_pending

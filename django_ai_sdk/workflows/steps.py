@@ -108,6 +108,13 @@ class Step:
 
     A step runs once every step it `requires` has completed, and its result is
     filed under `name`.
+
+    A step runs at least once, not exactly once. A worker that dies mid-step, or
+    before DBOS records the step as done, runs it again when the run is recovered,
+    and a resumed run runs again every step that did not complete. A step with a
+    side effect outside the run's own rows (a payment, a booking, a sent message)
+    must make it idempotent by `idempotency_key(ctx)`: pass it to the API as its
+    idempotency key, or store it with the effect and do nothing when it is there.
     """
 
     # The step's key in the run's record, and the name later steps require.
@@ -146,8 +153,18 @@ class Step:
         return ""
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
-        """Do the work and report the outcome."""
+        """Do the work and report the outcome. It may run more than once (see the class)."""
         raise NotImplementedError
+
+    def idempotency_key(self, ctx: WorkflowContext) -> str:
+        """"<run id>:<step name>": the same every time this step of this run runs.
+
+        It stays the same across recovery and resume, so an effect done under it is
+        done once however often the step runs. Only a recorded run has one.
+        """
+        if not ctx.run_id or not self.name:
+            raise RuntimeError("Only a step of a recorded run has an idempotency key.")
+        return f"{ctx.run_id}:{self.name}"
 
     # A waiting step (`waits = True`) implements these three instead of doing work in run().
 

@@ -25,6 +25,7 @@ def dbos(tmp_path, settings):
 
     steps.calls.clear()
     steps.release.clear()
+    steps.keys.clear()
     from django.db import connection
 
     settings.AI_SDK_DBOS = {

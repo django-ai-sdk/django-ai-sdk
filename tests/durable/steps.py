@@ -40,6 +40,8 @@ def add(a: int, b: int) -> int:
 
 # Set to let HoldStep finish; cleared, it waits. A worker "dies" while it waits.
 release = threading.Event()
+# The idempotency key HoldStep saw, each time it ran.
+keys: list[str] = []
 
 
 class HoldStep(Step):
@@ -47,6 +49,7 @@ class HoldStep(Step):
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
         calls[self.name] = calls.get(self.name, 0) + 1
+        keys.append(self.idempotency_key(ctx))
         while not release.is_set():
             await asyncio.sleep(0.05)
         return StepOutcome(output="held")
