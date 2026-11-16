@@ -225,6 +225,43 @@ class TestSubagents:
         child = await Turn.objects.aget(parent_turn_id=lenient.id)
         assert child.policy == "test-guard"
 
+    async def test_its_streamed_tool_results_are_masked_by_its_own_policy(self):
+        # The coordinator's policy masks nothing, so the card and the stored thread
+        # would show what the subagent's policy hid from its own model.
+        tool = Tool(
+            name="patient",
+            description="patient",
+            function=lambda: "Mail jan@example.com about it.",
+            parameters={"type": "object", "properties": {}},
+        )
+
+        class Care(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "care"
+            oversight = "test-guard"
+            tools = [lambda **kw: tool]  # noqa: RUF012
+
+            def get_llm(self, **kwargs: Any) -> Any:
+                return MockChatGenerator(responses=[call("patient"), "done"])
+
+        lenient = await TurnGuard.start(
+            make_agent([], None, policy="test-lenient"), channel="chat", input="x"
+        )
+        streamed: list[Any] = []
+
+        async def sink(chunk: Any) -> None:
+            if chunk.tool_call_result:
+                streamed.append(chunk.tool_call_result.result)
+
+        component = await delegation(Care)
+        with guarding(lenient):
+            await component.run_async(
+                messages=[HaystackChatMessage.from_user("x")], task="look", streaming_callback=sink
+            )
+        assert streamed
+        assert all("jan@example.com" not in str(result) for result in streamed)
+
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []
         guard = await TurnGuard.start(make_agent([], None), channel="chat", input="x")

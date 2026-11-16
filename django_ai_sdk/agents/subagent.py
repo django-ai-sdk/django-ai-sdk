@@ -172,6 +172,11 @@ def _tool_chunks_only(
 ) -> StreamingCallbackT | None:
     """Return a callback forwarding only tool chunks, tagged with ``name``.
     ``seen`` collects the ids of forwarded tool results.
+
+    Haystack streams a tool result before the after_tool hooks mask it, so a
+    forwarded result is masked here by the subagent's own guard (current while
+    its run streams): the coordinator's policy may not hide what this one does.
+    A sync run only ever joins the coordinator's turn, whose stream masks it.
     """
     if callback is None:
         return None
@@ -186,7 +191,7 @@ def _tool_chunks_only(
             if not (chunk.tool_calls or chunk.tool_call_result):
                 return
             record(chunk)
-            result = callback(_tag_subagent(chunk, name))
+            result = callback(_tag_subagent(await _masked_by_child(chunk), name))
             if inspect.isawaitable(result):
                 await result
 
@@ -198,6 +203,16 @@ def _tool_chunks_only(
                 callback(_tag_subagent(chunk, name))
 
     return filtered
+
+
+async def _masked_by_child(chunk: StreamingChunk) -> StreamingChunk:
+    """`chunk` with its tool result masked as the subagent's model reads it."""
+    from django_ai_sdk.oversight.plugin import mask_streamed_result
+
+    if chunk.tool_call_result is None:
+        return chunk
+    result = await mask_streamed_result(chunk.tool_call_result)
+    return dataclasses.replace(chunk, tool_call_result=result)
 
 
 def _handoff_context(messages: list[ChatMessage]) -> list[ChatMessage]:

@@ -19,6 +19,7 @@ needs its own must not run. The SDK runs every Haystack Agent through here.
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -41,16 +42,34 @@ from django_ai_sdk.oversight.plugin.hooks import (
     OversightHook,
     RecordUsageHook,
     StopClosedTurnHook,
+    mask_tool_result,
 )
 from django_ai_sdk.oversight.plugin.request import TurnRequest
 from django_ai_sdk.oversight.registry import policy_name
 
 if TYPE_CHECKING:
+    from haystack.dataclasses import ToolCallResult
+
     from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.policy import Policy
 
 # A Haystack run that names no agent runs under DEFAULT_POLICY, recorded under this name.
 UNNAMED_AGENT = SimpleNamespace(name="Haystack agent", oversight=None)
+
+
+async def mask_streamed_result(result: ToolCallResult) -> ToolCallResult:
+    """`result` masked by the current turn, as its model reads it after the tool hooks.
+
+    Haystack streams a tool result before those hooks run, so a stream that
+    forwards it elsewhere (a subagent's to its coordinator) masks it here first.
+    """
+    guard = current_guard()
+    if guard is None:
+        return result
+    masked = await mask_tool_result(guard, result.origin.id or "", result.result)
+    if masked is result.result:
+        return result
+    return dataclasses.replace(result, result=masked)
 
 
 def policy_agent(turn: TurnRequest) -> Any:
