@@ -53,6 +53,27 @@ def enqueue(run_id: str) -> str:
     return queued
 
 
+def runs_under_other_versions() -> dict[str, str]:
+    """Unfinished runs DBOS keeps under another AI_SDK_DBOS['VERSION']: {run id: version}.
+
+    A worker recovers and dequeues only its own version's runs, so these wait until
+    a worker of their version runs, or until they are cancelled and resumed, which
+    queues them under the current one. The worker warns about them at start.
+    """
+    current = runtime.setting("VERSION")
+    unfinished = runtime.client().list_workflows(
+        name=RUN_WORKFLOW,
+        status=["PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"],
+        load_input=False,
+        load_output=False,
+    )
+    return {
+        w.workflow_id.split(":")[0]: str(w.app_version)
+        for w in unfinished
+        if w.app_version != current
+    }
+
+
 @DBOS.workflow(name=RUN_WORKFLOW)
 async def run_workflow(run_id: str) -> str:
     """Claim the run, walk its steps, close it. Returns how it ended."""
@@ -118,6 +139,7 @@ __all__ = [
     "fire_cron",
     "perform",
     "run_workflow",
+    "runs_under_other_versions",
     "wait",
     "workflow_id",
 ]

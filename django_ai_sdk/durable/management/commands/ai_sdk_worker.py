@@ -55,6 +55,7 @@ class Command(BaseCommand):
                 f"DBOS worker running: {len(synced)} cron trigger(s), {requeued} pending run(s) "
                 "queued again. Stop with Ctrl-C or SIGTERM."
             )
+            self.warn_other_versions()
             self.upkeep()
             last_upkeep = time.monotonic()
             while not stop.wait(LOCK_CHECK_SECONDS):
@@ -71,6 +72,21 @@ class Command(BaseCommand):
             runtime.destroy()
             if self.lock_connection is not None:
                 self.lock_connection.close()
+
+    def warn_other_versions(self) -> None:
+        """Warn about unfinished runs this worker's VERSION leaves alone."""
+        from django_ai_sdk.durable.conf import setting
+        from django_ai_sdk.workflows.durable import runs_under_other_versions
+
+        if others := runs_under_other_versions():
+            versions = ", ".join(sorted(set(others.values())))
+            message = (
+                f"{len(others)} unfinished run(s) wait under AI_SDK_DBOS['VERSION'] {versions}, "
+                f"not {setting('VERSION')!r}, and this worker does not run them. Run a worker "
+                "of their version until they finish, or cancel and resume them."
+            )
+            logger.warning(message)
+            self.stderr.write(message)
 
     def upkeep(self) -> None:
         """Fail the runs whose DBOS workflow no longer runs (`runs.fail_stale_runs`)."""

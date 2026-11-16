@@ -19,7 +19,8 @@ DEFAULTS: dict[str, Any] = {
     # Who owns the workflows, queues and schedules in the system tables.
     "APP_NAME": "django-ai-sdk",
     # Pinned, so a deploy recovers the runs the last one left. Change it only when step
-    # code changes in a way an unfinished run cannot replay.
+    # code changes in a way an unfinished run cannot replay: runs left under the old
+    # version are no longer run (the worker warns about them at start).
     "VERSION": "1",
     # False behind a pooler in transaction mode (PgBouncer), which drops LISTEN.
     "USE_LISTEN_NOTIFY": True,

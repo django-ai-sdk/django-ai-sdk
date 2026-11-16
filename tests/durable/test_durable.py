@@ -193,6 +193,22 @@ class TestRuns:
         assert (await WorkflowRun.objects.aget(pk=fresh.pk)).status == "running"
         assert (await WorkflowRun.objects.aget(pk=waiting.pk)).status == "running"
 
+    async def test_runs_left_under_another_version_are_listed(self, dbos):
+        from django_ai_sdk.workflows.durable import QUEUE, RUN_WORKFLOW, runs_under_other_versions
+
+        old = {"queue_name": QUEUE, "workflow_name": RUN_WORKFLOW, "app_version": "0"}
+        await runtime.client().enqueue_async({**old, "workflow_id": "old-run:2"}, "old-run")
+        await settled((await queue_run(definition(echo("a")))).pk)
+
+        assert await sync_to_async(runs_under_other_versions)() == {"old-run": "0"}
+        from io import StringIO
+
+        from django_ai_sdk.durable.management.commands.ai_sdk_worker import Command
+
+        err = StringIO()
+        await sync_to_async(Command(stderr=err).warn_other_versions)()
+        assert "1 unfinished run(s) wait under AI_SDK_DBOS['VERSION'] 0" in err.getvalue()
+
     async def test_the_turn_a_step_opened_is_recorded_on_its_row(self, dbos):
         run = await settled((await queue_run(definition(StepDefinition(type="turn", name="t")))).pk)
 
