@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -34,23 +34,27 @@ def setting(key: str) -> Any:
     return setting_from("AI_SDK_DBOS", DEFAULTS, key)
 
 
+# DATABASES OPTIONS that are Django's own, not libpq connection parameters.
+DJANGO_ONLY_OPTIONS = frozenset(
+    {"isolation_level", "assume_role", "server_side_binding", "pool", "cursor_factory"}
+)
+
+
 def database_url() -> str:
     """Where DBOS keeps its tables: AI_SDK_DBOS['DATABASE_URL'], or the default database.
 
-    Postgres shares the project's database, in its own schema. SQLite gets a file
-    next to the project's, since two writers in one file would lock each other.
+    Postgres shares the project's database, in its own schema, with the same
+    connection parameters: DATABASES OPTIONS such as `sslmode` become query
+    parameters, and a HOST that is a socket directory becomes `?host=`. SQLite
+    gets a file next to the project's, since two writers in one file would lock
+    each other.
     """
     if url := setting("DATABASE_URL"):
         return url
     db = settings.DATABASES["default"]
     engine = db.get("ENGINE", "")
     if "postgresql" in engine:
-        auth = quote(db.get("USER") or "", safe="")
-        if db.get("PASSWORD"):
-            auth += ":" + quote(str(db["PASSWORD"]), safe="")
-        host = db.get("HOST") or "localhost"
-        port = f":{db['PORT']}" if db.get("PORT") else ""
-        return f"postgresql://{auth}@{host}{port}/{quote(str(db['NAME']), safe='')}"
+        return _postgres_url(db)
     if "sqlite" in engine:
         name = str(db.get("NAME") or "")
         if not name or name == ":memory:" or name.startswith("file:"):
@@ -62,6 +66,28 @@ def database_url() -> str:
     raise ImproperlyConfigured(
         f"DBOS runs on Postgres or SQLite, not {engine!r}. Set AI_SDK_DBOS['DATABASE_URL']."
     )
+
+
+def _postgres_url(db: dict[str, Any]) -> str:
+    auth = quote(db.get("USER") or "", safe="")
+    if db.get("PASSWORD"):
+        auth += ":" + quote(str(db["PASSWORD"]), safe="")
+    params = {
+        key: str(value)
+        for key, value in (db.get("OPTIONS") or {}).items()
+        if key not in DJANGO_ONLY_OPTIONS
+        and isinstance(value, str | int)
+        and not isinstance(value, bool)
+    }
+    host, port = str(db.get("HOST") or "localhost"), str(db.get("PORT") or "")
+    if host.startswith("/"):
+        # A unix socket directory has no place in the URL's authority: libpq takes it as ?host=.
+        params.update(host=host, **({"port": port} if port else {}))
+        host, port = "", ""
+    if port:
+        host = f"{host}:{port}"
+    query = f"?{urlencode(params)}" if params else ""
+    return f"postgresql://{auth}@{host}/{quote(str(db['NAME']), safe='')}{query}"
 
 
 __all__ = ["DEFAULTS", "database_url", "setting"]

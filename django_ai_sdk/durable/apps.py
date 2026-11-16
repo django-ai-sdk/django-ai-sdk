@@ -12,8 +12,14 @@ class DurableConfig(AppConfig):
     verbose_name = "Durable runs (DBOS)"
 
     def ready(self) -> None:
+        from importlib.util import find_spec
+
         from django.apps import apps
 
+        if find_spec("dbos") is None:
+            raise ImproperlyConfigured(
+                "'django_ai_sdk.durable' needs DBOS: install django-ai-sdk[dbos]."
+            )
         if not apps.is_installed("django_ai_sdk.workflows"):
             raise ImproperlyConfigured(
                 "'django_ai_sdk.durable' runs workflows: add 'django_ai_sdk.workflows' too."

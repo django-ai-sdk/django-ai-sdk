@@ -102,11 +102,11 @@ Workflows need the `django_ai_sdk.durable` app and the `dbos` extra. One dict, `
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_DBOS["DATABASE_URL"]` | `""` | Where DBOS keeps its tables. Empty uses `DATABASES["default"]`: the same Postgres database, or a file next to a SQLite one. |
+| `AI_SDK_DBOS["DATABASE_URL"]` | `""` | Where DBOS keeps its tables. Empty uses `DATABASES["default"]`: the same Postgres database with its connection `OPTIONS` (such as `sslmode`) and a socket `HOST`, or a file next to a SQLite one. |
 | `AI_SDK_DBOS["SCHEMA"]` | `"dbos"` | The Postgres schema for DBOS's tables. |
 | `AI_SDK_DBOS["APP_NAME"]` | `"django-ai-sdk"` | Who owns the workflows, queues and schedules in those tables. |
 | `AI_SDK_DBOS["VERSION"]` | `"1"` | Pinned, so a deploy recovers the runs the last one left. Change it only when step code changes in a way an unfinished run cannot replay: a worker runs only its own version's runs, and warns at start about the ones left under another. See [Durable runs on DBOS](/manual/workflows/#durable-runs-on-dbos). |
-| `AI_SDK_DBOS["USE_LISTEN_NOTIFY"]` | `True` | `False` behind a pooler in transaction mode (PgBouncer), which drops `LISTEN`. |
+| `AI_SDK_DBOS["USE_LISTEN_NOTIFY"]` | `True` | `False` behind a pooler in transaction mode (PgBouncer), which drops `LISTEN`. Web processes may use the pooler; the worker must reach Postgres directly, because it holds a session advisory lock that transaction pooling releases. |
 | `AI_SDK_DBOS["QUEUES"]` | `{"workflows": {}, "default": {"worker_concurrency": 8}}` | Queues by name, with DBOS `register_queue` options. A task's `queue_name` must be one of them. Leave `workflows` uncapped: a run waiting for an approval holds a slot for as long as it waits. |
 
 ## Webhooks
