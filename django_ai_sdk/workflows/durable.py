@@ -59,7 +59,7 @@ async def run_workflow(run_id: str) -> str:
     from django_ai_sdk.workflows.runs import execute_run
 
     try:
-        run = await execute_run(run_id, perform=perform, wait=wait)
+        run = await execute_run(run_id, perform=perform, wait=wait, workflow_id=DBOS.workflow_id)
     except (WorkflowStopped, RunSuperseded) as exc:
         # An outcome the rows already record, not a failure of the workflow.
         logger.info("Workflow run %s ended: %s", run_id, exc)

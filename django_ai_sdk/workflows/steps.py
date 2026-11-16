@@ -41,6 +41,18 @@ class RunSuperseded(Exception):
     """
 
 
+class StepRecorded(Exception):
+    """The step's row already holds this attempt's outcome: the step does not run again.
+
+    `RunRecorder` raises it when a step finished and was recorded, but its worker died
+    before DBOS checkpointed it. The runner takes `outcome` as the step's.
+    """
+
+    def __init__(self, outcome: StepOutcome) -> None:
+        super().__init__(outcome.detail)
+        self.outcome = outcome
+
+
 class OnError(StrEnum):
     """What a step's failure does to the rest of the run."""
 
@@ -401,6 +413,7 @@ __all__ = [
     "RunSuperseded",
     "Step",
     "StepOutcome",
+    "StepRecorded",
     "WorkflowContext",
     "WorkflowStopped",
 ]

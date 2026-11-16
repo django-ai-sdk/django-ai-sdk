@@ -24,7 +24,7 @@ from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 from django_ai_sdk.workflows.registry import ADHOC, is_registered
 from django_ai_sdk.workflows.runner import perform_now, run_steps
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
-from django_ai_sdk.workflows.steps import RunSuperseded
+from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepRecorded
 
 if TYPE_CHECKING:
     import uuid
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.workflows.models import Workflow
     from django_ai_sdk.workflows.runner import Perform, Wait
-    from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
+    from django_ai_sdk.workflows.steps import Step, WorkflowContext
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +164,13 @@ def requeue_pending() -> int:
     return len(pending)
 
 
-async def claim_run(run_id: str) -> WorkflowRun | None:
+async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
     """Claim a pending run for this worker. None when it is not pending.
 
     One conditional UPDATE, so a duplicate delivery or a finished run claims nothing.
+    `workflow_id` is the DBOS workflow claiming it, stored as `task_id`. A run already
+    running under that id is this workflow's own: it claimed the run and its worker
+    died before DBOS recorded the claim, so the claim is taken up again, not refused.
     """
     now = timezone.now()
     claimed = await WorkflowRun.objects.filter(
@@ -177,22 +180,31 @@ async def claim_run(run_id: str) -> WorkflowRun | None:
         attempt=F("attempt") + 1,
         heartbeat_at=now,
         started_at=Coalesce(F("started_at"), now),
+        **({"task_id": workflow_id} if workflow_id else {}),
     )
+    if not claimed and workflow_id:
+        claimed = await WorkflowRun.objects.filter(
+            pk=run_id, status=WorkflowRun.Status.RUNNING, task_id=workflow_id
+        ).aupdate(heartbeat_at=now)
     if not claimed:
         return None
     return await WorkflowRun.objects.aget(pk=run_id)
 
 
 async def execute_run(
-    run_id: str, *, perform: Perform = perform_now, wait: Wait | None = None
+    run_id: str,
+    *,
+    perform: Perform = perform_now,
+    wait: Wait | None = None,
+    workflow_id: str | None = None,
 ) -> WorkflowRun | None:
     """Claim `run_id`, walk its steps and close it. None when there was nothing to claim.
 
-    `workflows.durable` calls this with DBOS's `perform` and `wait`, so every unit
-    is a checkpoint. The defaults do the same walk here and now, as tests and
-    inline callers do; such a run cannot wait for an approval.
+    `workflows.durable` calls this with DBOS's `perform`, `wait` and workflow id, so
+    every unit is a checkpoint. The defaults do the same walk here and now, as tests
+    and inline callers do; such a run cannot wait for an approval.
     """
-    claimed = await perform("claim", lambda: _claim(run_id))
+    claimed = await perform("claim", lambda: _claim(run_id, workflow_id))
     if claimed is None:
         logger.info("Workflow run %s is not pending; nothing to claim", run_id)
         return None
@@ -211,8 +223,8 @@ async def execute_run(
     return run
 
 
-async def _claim(run_id: str) -> dict[str, Any] | None:
-    run = await claim_run(run_id)
+async def _claim(run_id: str, workflow_id: str | None) -> dict[str, Any] | None:
+    run = await claim_run(run_id, workflow_id=workflow_id)
     if run is None:
         return None
     return {"attempt": run.attempt, "completed": serialize(await _already_completed(run))}
@@ -304,7 +316,10 @@ class RunRecorder(RunListener):
         """Claim this step's row for this attempt.
 
         The run claim already keeps other workers out, so a row left running by an
-        earlier attempt is taken over. A completed row never is.
+        earlier attempt is taken over. A completed row never is: the walk skips the
+        steps earlier attempts completed, so a completed row here is this attempt's
+        own, written before its worker died and DBOS recorded the step. It raises
+        `StepRecorded` with what the row holds, and the step does not run again.
         """
         await self.beat()
         sequence = self.sequence[step.name]
@@ -328,9 +343,9 @@ class RunRecorder(RunListener):
             )
         )
         if not claimed:
-            raise RunSuperseded(
-                f"step {step.name!r} (sequence {sequence}) of run {self.run.pk} "
-                f"already completed under another attempt"
+            row = await StepRun.objects.aget(run=self.run, sequence=sequence)
+            raise StepRecorded(
+                StepOutcome(output=row.output, detail=row.detail, turn_id=row.turn_id)
             )
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:

@@ -12,6 +12,7 @@ from django_ai_sdk.workflows.steps import (
     OnError,
     RunSuperseded,
     StepOutcome,
+    StepRecorded,
     WorkflowContext,
     WorkflowStopped,
 )
@@ -154,9 +155,13 @@ class _StepRunner:
         if reason := await step.skip_if(ctx):
             return await self._settle(step, StepOutcome(status="skipped", detail=reason))
 
-        await self._notify(
-            self._listeners_for(step), lambda listener: listener.on_step_start(ctx, step)
-        )
+        try:
+            await self._notify(
+                self._listeners_for(step), lambda listener: listener.on_step_start(ctx, step)
+            )
+        except StepRecorded as recorded:
+            self.outcomes[step.name] = recorded.outcome
+            return recorded.outcome
         if waiting:
             # Only the recorder hears it: for the listeners the step has not ended.
             return await self._settle(

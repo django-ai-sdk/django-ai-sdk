@@ -249,13 +249,13 @@ The run row keeps a copy of the definition (`workflow_definition`) taken when th
 
 In the worker, the DBOS workflow calls `execute_run(run_id)`, with each unit checkpointed (below). It:
 
-1. **Claims** the run with one conditional update: `pending` becomes `running`, `attempt` goes up by one and `heartbeat_at` is set. A second delivery of the same run, or a delivery of a run that already finished, claims nothing and stops there.
+1. **Claims** the run with one conditional update: `pending` becomes `running`, `attempt` goes up by one and `heartbeat_at` is set. A second delivery of the same run, or a delivery of a run that already finished, claims nothing and stops there. The claim stores the DBOS workflow id as `task_id`, so a workflow whose worker died after the claim but before DBOS recorded it finds the run running under its own id and takes it up again.
 2. Validates the run's inputs against the definition's `input_fields`, when it declares any.
 3. Compiles the definition to `Step` objects and listeners, and runs them through `run_steps` with a `RunRecorder` (JSON and code share this path).
 4. **Replays** completed steps from a previous attempt, so a resumed run continues where it left off and does not re-date the rows it is trusting.
 5. Marks the run `completed` with `{step name: output}` for every completed step. A failed step whose `on_error` is `stop` marks the run `failed`.
 
-At every step the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When it is not (the run was cancelled, or resumed and claimed again), it raises `RunSuperseded` before it writes anything, and the walk stops.
+At every step the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When it is not (the run was cancelled, or resumed and claimed again), it raises `RunSuperseded` before it writes anything, and the walk stops. A step whose row this attempt already completed (its worker died after writing it, before DBOS recorded the step) is not run again: the row's outcome is taken as the step's.
 
 Called directly, `execute_run(run_id)` does the same walk in the calling process without checkpoints, as an inline demo endpoint does. Such a run cannot wait: an approval step in it fails at once. In a host's tests, `django_ai_sdk.durable.testing.run_inline(monkeypatch)` in an autouse fixture makes every queued run execute that way, with no DBOS tables needed.
 

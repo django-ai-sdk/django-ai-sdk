@@ -134,6 +134,32 @@ class TestRuns:
         await sync_to_async(requeue_pending)()
         assert steps.calls == {"a": 1}
 
+    async def test_a_claim_whose_checkpoint_was_lost_is_taken_up_again(self, dbos):
+        from django.utils import timezone
+
+        from django_ai_sdk.workflows.durable import QUEUE, RUN_WORKFLOW
+        from django_ai_sdk.workflows.runs import open_run
+
+        run = await open_run(definition(echo("a")))
+        # Its workflow claimed it, and the worker died before DBOS recorded the claim.
+        await WorkflowRun.objects.filter(pk=run.pk).aupdate(
+            status="running", attempt=1, task_id=str(run.pk), heartbeat_at=timezone.now()
+        )
+        await runtime.enqueue(RUN_WORKFLOW, str(run.pk), workflow_id=str(run.pk), queue=QUEUE)
+        run = await settled(run.pk)
+
+        assert (run.status, run.attempt) == ("completed", 1)
+        assert steps.calls == {"a": 1}
+
+    async def test_another_workflow_does_not_take_a_running_claim(self, dbos):
+        from django_ai_sdk.workflows.runs import claim_run, open_run
+
+        run = await open_run(definition(echo("a")))
+        assert await claim_run(str(run.pk), workflow_id="first") is not None
+
+        assert await claim_run(str(run.pk), workflow_id="second") is None
+        assert await claim_run(str(run.pk), workflow_id="first") is not None
+
     async def test_the_turn_a_step_opened_is_recorded_on_its_row(self, dbos):
         run = await settled((await queue_run(definition(StepDefinition(type="turn", name="t")))).pk)
 
@@ -160,6 +186,29 @@ class TestRuns:
         run = await WorkflowRun.objects.aget(pk=run.pk)
         assert run.task_id == f"{run.pk}:2"
         assert steps.calls == {"a": 1}
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_a_step_its_own_attempt_recorded_before_dying_is_not_run_again(settings):
+    from django.utils import timezone
+
+    from django_ai_sdk.workflows.runs import claim_run, open_run, walk_run
+    from tests.durable.conftest import STEPS
+
+    settings.AI_SDK_WORKFLOWS = {"STEPS": STEPS}
+    steps.calls.clear()
+    run = await open_run(definition(echo("a"), echo("b", requires=["a"])))
+    run = await claim_run(str(run.pk))
+    # This attempt ran "a" and recorded it; its worker died before DBOS checkpointed it.
+    await StepRun.objects.acreate(
+        run=run, sequence=0, step_name="a", status="completed", output="a:", completed_at=timezone.now()
+    )
+
+    await walk_run(run, completed={})
+
+    run = await WorkflowRun.objects.aget(pk=run.pk)
+    assert (run.status, run.outputs["a"]) == ("completed", "a:")
+    assert steps.calls == {"b": 1}
 
 
 @pytest.mark.django_db(transaction=True)
