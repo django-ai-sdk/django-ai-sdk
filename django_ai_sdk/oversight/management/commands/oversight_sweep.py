@@ -97,7 +97,7 @@ class Command(BaseCommand):
                     reflect_attempts__gte=REFLECT_ATTEMPTS,
                 )
             )
-            # Looked up per call, not bound at import: a patched task stays patched in no other caller.
+            # Looked up when called, so a test's patch of the task never sticks to this module.
             count = sum(tasks.enqueue_reflect(key) for key in keys)
         self.stdout.write(
             f"{count} turn{'' if count == 1 else 's'} {'would be queued' if dry_run else 'queued'}"

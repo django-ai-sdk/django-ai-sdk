@@ -65,6 +65,8 @@ class Judge(ABC):
     external: ClassVar[str] = ""
     timeout: float = DEFAULT_TIMEOUT
     name: str = ""
+    # The most characters of one text it reads; longer is TOO_LONG. 0: no limit.
+    TEXT_CHARS: ClassVar[int] = 0
 
     def __init__(self, *, name: str = "", timeout: float | None = None) -> None:
         if name:

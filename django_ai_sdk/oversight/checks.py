@@ -122,7 +122,6 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
         f"a dict of positive milliseconds or None by stage ({_listed(DEADLINE_STAGES)})",
     ),
     "MAX_INPUT_CHARS": (_is_positive_or_none, "a positive number of characters, or None"),
-    "OTHER_TEXT_CHUNK_CHARS": (_is_count, "a whole number of characters of at least 1"),
     "MAX_OTHER_TEXT_CHUNKS": (_is_count, "a whole number of chunks of at least 1"),
     "CLIENT_DETAIL": (lambda value: value in CLIENT_DETAILS, f"one of {_listed(CLIENT_DETAILS)}"),
     "FAIL_MODE": (lambda value: value in FAIL_MODES, f"one of {_listed(FAIL_MODES)}"),

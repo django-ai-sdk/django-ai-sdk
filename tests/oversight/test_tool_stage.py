@@ -303,11 +303,7 @@ class TestToolResultMasking:
 
 @pytest.mark.django_db(transaction=True)
 class TestOverLengthResults:
-    """A result longer than a judge reads is judged in chunks that it can read."""
-
-    @staticmethod
-    def chunked(**extra):
-        return override_settings(AI_SDK_OVERSIGHT={"OTHER_TEXT_CHUNK_CHARS": 100, **extra})
+    """A result longer than a judge reads is judged in chunks that it reads."""
 
     @staticmethod
     def short_judge(fn):
@@ -316,6 +312,7 @@ class TestOverLengthResults:
 
         class Short(Judge):
             name = "short"
+            TEXT_CHARS = 100
 
             async def answer(self, lens, context):
                 text = context.input
@@ -342,35 +339,74 @@ class TestOverLengthResults:
         )
         return policy(name, [lens], [Rule("m", when=L("names").is_true, then=Mask(), mode=ENFORCE)])
 
+    async def blocks(self, name, fn, when, text, **lens):
+        """Whether a block rule `when` on lens "x", answered by `fn` per chunk, withholds `text`."""
+        from django_ai_sdk.oversight import Block, JudgeLens
+        from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
+
+        judged = JudgeLens(name="x", question="?", judges=[self.short_judge(fn)], **lens)
+        guard = await start(
+            policy(name, [judged], [Rule("r", when=when, then=Block("No."), mode=ENFORCE)])
+        )
+        return await guard.mask_text(text) == str(BLOCKED_TEXT)
+
     async def test_names_in_every_chunk_and_on_a_boundary_are_masked(self):
         # 98 + "Jan" straddles the first 100-character chunk's end.
         text = "x" * 98 + "Jan" + "y" * 150 + "Jan" + "z" * 120
         guard = await start(self.masking("test-chunk-mask"))
-        with self.chunked():
-            masked = await guard.mask_text(text)
+        masked = await guard.mask_text(text)
         assert "Jan" not in masked
         assert masked.count("[PERSON]") == 2
         assert masked.startswith("x" * 98) and masked.endswith("z" * 120)
 
     async def test_a_flag_in_one_chunk_blocks_the_result(self):
-        from django_ai_sdk.oversight import Block, JudgeLens
-        from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
         from django_ai_sdk.oversight.types import Answer
 
-        judge = self.short_judge(lambda text: Answer(value="wire it now" in text))
-        lens = JudgeLens(name="pressure", question="Pushes a payment?", judges=[judge])
-        stop = Rule("stop", when=L("pressure").is_true, then=Block("No."), mode=ENFORCE)
-        name = policy("test-chunk-block", [lens], [stop])
-        guard = await start(name)
-        with self.chunked():
-            assert await guard.mask_text("x" * 250 + "wire it now") == str(BLOCKED_TEXT)
-            assert await guard.mask_text("x" * 260) == "x" * 260
+        def pressure(text):
+            return Answer(value="wire it now" in text)
+
+        assert await self.blocks(
+            "test-chunk-flag", pressure, L("x").is_true, "x" * 250 + "wire it now"
+        )
+        assert not await self.blocks("test-chunk-flag", pressure, L("x").is_true, "x" * 260)
+
+    async def test_a_low_score_in_one_chunk_is_not_outweighed_by_a_high_one(self):
+        from django_ai_sdk.oversight import Score
+        from django_ai_sdk.oversight.types import Answer
+
+        def grounded(text):
+            return Answer(value=0.2 if "made up" in text else 0.9, confidence=0.9)
+
+        text = "x" * 250 + "made up"
+        assert await self.blocks("test-chunk-score", grounded, L("x") < 0.5, text, answer=Score)
+
+    async def test_a_confident_finding_is_not_diluted_by_an_unsure_chunk(self):
+        from django_ai_sdk.oversight.types import Answer
+
+        def injection(text):
+            found = "ignore all rules" in text
+            return Answer(value=found, confidence=0.95 if found else 0.3)
+
+        when = L("x").is_true & L("x").confident(0.8)
+        text = "x" * 250 + "ignore all rules"
+        assert await self.blocks("test-chunk-confident", injection, when, text, min_confidence=0)
+
+    async def test_a_no_in_one_chunk_is_not_outweighed_by_a_yes(self):
+        from django_ai_sdk.oversight.types import Answer
+
+        def on_topic(text):
+            return Answer(value="off topic" not in text, confidence=0.9)
+
+        assert await self.blocks(
+            "test-chunk-false", on_topic, L("x").is_false, "x" * 250 + "off topic"
+        )
+        assert not await self.blocks("test-chunk-false", on_topic, L("x").is_false, "x" * 260)
 
     async def test_more_chunks_than_allowed_is_too_long_as_before(self):
         from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
 
         guard = await start(self.masking("test-chunk-cap"))
-        with self.chunked(MAX_OTHER_TEXT_CHUNKS=2):
+        with override_settings(AI_SDK_OVERSIGHT={"MAX_OTHER_TEXT_CHUNKS": 2}):
             assert await guard.mask_text("Jan " * 100) == str(UNCHECKED_TEXT)
 
     async def test_a_chunk_that_errors_withholds_the_whole_result(self):
@@ -388,8 +424,7 @@ class TestOverLengthResults:
         mask = Rule("m", when=L("names").is_true, then=Mask(), mode=ENFORCE)
         name = policy("test-chunk-down", [lens], [mask])
         guard = await start(name)
-        with self.chunked():
-            assert await guard.mask_text("Jan" + "x" * 200 + "down") == str(UNCHECKED_TEXT)
+        assert await guard.mask_text("Jan" + "x" * 200 + "down") == str(UNCHECKED_TEXT)
 
 
 @pytest.mark.django_db(transaction=True)

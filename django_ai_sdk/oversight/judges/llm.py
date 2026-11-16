@@ -131,6 +131,7 @@ class LLMJudge(Judge):
 
     external: ClassVar[str] = "model gateway"
     timeout = JUDGE_TIMEOUT
+    TEXT_CHARS: ClassVar[int] = INPUT_CHARS
     instructions = JUDGE_INSTRUCTIONS
 
     def __init__(

@@ -31,9 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "DEADLINE_MS": {"gate": 1000, "tool": 1000, "finish": 2_000},
     # Longer questions are blocked at the gate: lenses would only read part of them.
     "MAX_INPUT_CHARS": 100_000,
-    # A tool result or source longer than a judge reads is judged in chunks this long,
+    # A tool result or source longer than a judge reads is judged in chunks it reads,
     # at most this many; beyond that it is too long, as before.
-    "OTHER_TEXT_CHUNK_CHARS": 5_000,
     "MAX_OTHER_TEXT_CHUNKS": 10,
     "CLIENT_DETAIL": "actions",
     "FAIL_MODE": "closed",

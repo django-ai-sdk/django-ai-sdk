@@ -146,11 +146,11 @@ class StreamTurn:
         artifact_ids: list[str],
         queue: asyncio.Queue[Any],
         *,
-        receipts: Mapping[str, tuple[str, ...]] | None = None,
+        receipts: Mapping[str, tuple[str, ...]],
     ) -> None:
         self.writer = writer
         # Receipt keys by tool name: what of a result a withheld answer keeps.
-        self.receipts = receipts or {}
+        self.receipts = receipts
         self.registry = registry
         # Artifacts stored during this answer, deleted if the answer is withheld.
         self.artifact_ids = artifact_ids
@@ -331,13 +331,13 @@ def _released(
     if withheld:
         # A tool's receipt, else that it was withheld, in place of each result.
         names = {e.tool_call_id: e.tool_name for e in held if isinstance(e, ToolCallStartEvent)}
-        outputs = [e for e in held if isinstance(e, ToolOutputEvent)]
-        return [
-            event.model_copy(update={"tool_output": {"result": kept or str(WITHHELD_OUTPUT)}})
-            for event in outputs
-            for kept in [
-                receipt(event.tool_output, receipts.get(names.get(event.tool_call_id, "")))
-            ]
-        ]
+        released: list[StreamEvent] = []
+        for event in held:
+            if not isinstance(event, ToolOutputEvent):
+                continue
+            kept = receipt(event.tool_output, receipts.get(names.get(event.tool_call_id, "")))
+            output = {"result": kept or str(WITHHELD_OUTPUT)}
+            released.append(event.model_copy(update={"tool_output": output}))
+        return released
     # Starts were already sent. The complete input replaces the input chunks.
     return [e for e in held if not isinstance(e, ToolCallStartEvent | ToolInputChunkEvent)]

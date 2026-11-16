@@ -275,3 +275,42 @@ class TestReceiptsOfAWithheldAnswer:
         assert [c["result"] for c in storage.stored[-1].tool_calls] == [None]
         outputs = [p["output"] for p in parts if p.get("type") == "tool-output-available"]
         assert outputs[-1] == {"result": str(WITHHELD_OUTPUT)}
+
+
+class TestReceiptKeysAndValues:
+    @staticmethod
+    def tool(name: str, *keys: str) -> Any:
+        from django_ai_sdk import with_receipt
+        from haystack.tools import Tool
+
+        tool = Tool(name=name, description=name, function=dict, parameters={"type": "object"})
+        return with_receipt(tool, *keys) if keys else tool
+
+    def test_subagents_report_their_tools_receipt_keys_at_any_depth(self):
+        from types import SimpleNamespace
+
+        from django_ai_sdk.agents.subagent import SubagentStreamFilter
+        from django_ai_sdk.receipts import receipt_keys
+        from haystack.tools import ComponentTool
+
+        def delegate(name: str, *tools: Any) -> Any:
+            stream_filter = SubagentStreamFilter(SimpleNamespace(tools=list(tools)), name=name)
+            return ComponentTool(component=stream_filter, name=name, description=name)
+
+        inner = delegate("ask_payroll", self.tool("start_payout", "claim_id"))
+        outer = delegate("ask_care", self.tool("start", "run_id"), inner)
+        tools = [self.tool("start", "workflow_id"), self.tool("lookup"), outer]
+        assert receipt_keys(tools) == {
+            "start": ("workflow_id", "run_id"),
+            "start_payout": ("claim_id",),
+        }
+
+    @pytest.mark.parametrize(
+        "value",
+        ["NL91ABNA0417164300", "111222333", 111222333, "sk-proj-abcdefghijklmnopqrstuvwx"],
+    )
+    def test_a_value_that_looks_personal_or_secret_is_left_out(self, value):
+        from django_ai_sdk.receipts import receipt
+
+        kept = receipt({"run_id": "run_1", "ref": value}, ("run_id", "ref"))
+        assert kept == {"run_id": "run_1", "withheld": True}

@@ -186,12 +186,13 @@ def _tool_chunks_only(
             seen.add(chunk.tool_call_result.origin.id or "")
 
     if async_sink:
+        from django_ai_sdk.oversight.plugin import mask_streamed_result
 
         async def filtered(chunk: StreamingChunk) -> None:
             if not (chunk.tool_calls or chunk.tool_call_result):
                 return
             record(chunk)
-            result = callback(_tag_subagent(await _masked_by_child(chunk), name))
+            result = callback(_tag_subagent(await mask_streamed_result(chunk), name))
             if inspect.isawaitable(result):
                 await result
 
@@ -203,16 +204,6 @@ def _tool_chunks_only(
                 callback(_tag_subagent(chunk, name))
 
     return filtered
-
-
-async def _masked_by_child(chunk: StreamingChunk) -> StreamingChunk:
-    """`chunk` with its tool result masked as the subagent's model reads it."""
-    from django_ai_sdk.oversight.plugin import mask_streamed_result
-
-    if chunk.tool_call_result is None:
-        return chunk
-    result = await mask_streamed_result(chunk.tool_call_result)
-    return dataclasses.replace(chunk, tool_call_result=result)
 
 
 def _handoff_context(messages: list[ChatMessage]) -> list[ChatMessage]:
@@ -314,6 +305,12 @@ class SubagentStreamFilter:
         self._subagent = subagent
         self._thread_id = thread_id
         self._user = user
+
+    def receipt_keys(self) -> dict[str, tuple[str, ...]]:
+        """The receipt keys of this subagent's tools, and of its own subagents', by name."""
+        from django_ai_sdk.receipts import receipt_keys
+
+        return receipt_keys(getattr(self._agent, "tools", None))
 
     def _build_turn(self) -> TurnRequest:
         """The delegation's turn, under the subagent's policy, in the coordinator's channel."""

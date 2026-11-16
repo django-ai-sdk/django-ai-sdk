@@ -26,6 +26,7 @@ SEAMS = {
     f"{OVERSIGHT}.conf": "the agent reads whether oversight is on, and its settings",
     f"{OVERSIGHT}.history": "a run and a chat pick the history the stored thread vouches for",
     f"{OVERSIGHT}.guard": "the adapter and subagents find the guard of the turn in flight",
+    f"{OVERSIGHT}.patterns": "a tool receipt leaves out values that look personal or secret",
     f"{OVERSIGHT}.policy": "agents and workflow steps accept a Policy",
     f"{OVERSIGHT}.plugin": "every Haystack Agent the SDK builds runs oversight as hooks from it",
     f"{OVERSIGHT}.registry": "an agent turns its Policy class into the policy's name",
