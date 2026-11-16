@@ -220,6 +220,29 @@ class TestRuns:
         assert run.task_id == f"{run.pk}:2"
         assert steps.calls == {"a": 1}
 
+    @pytest.mark.usefixtures("registry")
+    async def test_the_step_in_flight_at_a_cancel_keeps_its_result_and_is_not_redone(self, dbos):
+        owner = await user("owner@example.com")
+        workflow = register_workflow(
+            definition(StepDefinition(type="hold", name="h"), echo("b", requires=["h"]), name="held")
+        )
+        run = await queue_run(workflow, user=owner)
+        deadline = time.monotonic() + 20
+        while steps.calls.get("h") != 1:
+            assert time.monotonic() < deadline, "the hold step never started"
+            await asyncio.sleep(0.05)
+
+        await WorkflowService.cancel(str(run.pk), user=owner)
+        steps.release.set()
+        await workflow_finished(run.pk)
+        row = await StepRun.objects.aget(run=run, step_name="h")
+        assert (row.status, row.output) == ("completed", "held")
+
+        run = await WorkflowService.resume(str(run.pk), user=owner)
+        run = await settled(run.pk)
+        assert run.status == "completed"
+        assert steps.calls == {"h": 1, "b": 1}
+
 
 @pytest.mark.django_db(transaction=True)
 async def test_a_step_its_own_attempt_recorded_before_dying_is_not_run_again(settings):

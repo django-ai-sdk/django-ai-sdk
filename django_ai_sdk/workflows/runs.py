@@ -347,13 +347,18 @@ class RunRecorder(RunListener):
 
     async def beat(self) -> None:
         """Mark the run alive, or raise `RunSuperseded` once it is no longer ours (cancelled)."""
-        alive = await WorkflowRun.objects.held(self.run.pk, self.attempt).aupdate(
-            heartbeat_at=timezone.now()
-        )
-        if not alive:
-            raise RunSuperseded(
-                f"run {self.run.pk} is no longer running under attempt {self.attempt}"
+        if not await self._alive():
+            raise self._superseded()
+
+    async def _alive(self) -> bool:
+        return bool(
+            await WorkflowRun.objects.held(self.run.pk, self.attempt).aupdate(
+                heartbeat_at=timezone.now()
             )
+        )
+
+    def _superseded(self) -> RunSuperseded:
+        return RunSuperseded(f"run {self.run.pk} is no longer running under attempt {self.attempt}")
 
     async def on_run_end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
         """Write the run's ending. The runner calls this before any listener's."""
@@ -404,8 +409,25 @@ class RunRecorder(RunListener):
             )
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
-        """Write a step's outcome. Upserts, because a skipped step never started."""
-        await self.beat()
+        """Write a step's outcome. Upserts, because a skipped step never started.
+
+        A step that ran while its run was stopped (cancelled, or failed as stale)
+        still gets its outcome written, so a resume does not do it again; then
+        `RunSuperseded` stops the walk. Not once a later attempt took the run.
+        """
+        if await self._alive():
+            await self._write(step, outcome)
+            return
+        if (
+            outcome.status in ("completed", "failed")
+            and await WorkflowRun.objects.filter(pk=self.run.pk, attempt=self.attempt)
+            .exclude(status=WorkflowRun.Status.RUNNING)
+            .aexists()
+        ):
+            await self._write(step, outcome)
+        raise self._superseded()
+
+    async def _write(self, step: Step, outcome: StepOutcome) -> None:
         await StepRun.objects.aupdate_or_create(
             run=self.run,
             sequence=self.sequence[step.name],

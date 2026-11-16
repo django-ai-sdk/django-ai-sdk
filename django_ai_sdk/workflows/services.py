@@ -159,6 +159,8 @@ class WorkflowService(PermissionsMixin):
     ) -> WorkflowRun:
         """Stop a pending or running run. The step in flight finishes; none after it starts.
 
+        The step in flight keeps its outcome, so a resume does not run it again.
+
         Only the user it runs as cancels it, as for resume. Resume picks it up again.
         A step waiting for approval stops waiting at once, freeing its worker slot.
         """

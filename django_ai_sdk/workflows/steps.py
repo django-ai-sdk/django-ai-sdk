@@ -157,7 +157,7 @@ class Step:
         raise NotImplementedError
 
     def idempotency_key(self, ctx: WorkflowContext) -> str:
-        """"<run id>:<step name>": the same every time this step of this run runs.
+        """ "<run id>:<step name>": the same every time this step of this run runs.
 
         It stays the same across recovery and resume, so an effect done under it is
         done once however often the step runs. Only a recorded run has one.
