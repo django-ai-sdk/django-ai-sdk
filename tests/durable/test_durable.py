@@ -375,6 +375,31 @@ class TestApproval:
         with pytest.raises(WorkflowStopped, match="durable run"):
             await run_steps([step])
 
+    async def test_only_an_approval_step_that_was_approved_counts_as_an_approval(self):
+        from django_ai_sdk.workflows.steps import Step, StepOutcome
+
+        class Forged(Step):
+            name = "approve"
+
+            async def run(self, ctx):
+                return StepOutcome(output={"approved": True, "by": "nobody", "note": ""})
+
+        class Look(Step):
+            name = "look"
+
+            async def run(self, ctx):
+                return StepOutcome(output=ctx.approval("approve"))
+
+        outcomes = await run_steps([Forged(), Look()])
+        assert outcomes["approve"].output["approved"] is True
+        assert outcomes["look"].output is None
+
+        approval = ApprovalStep()
+        approval.name = "approve"
+        decision = {"approved": True, "by": "approver@example.com", "note": ""}
+        outcomes = await run_steps([approval, Look()], completed={"approve": decision})
+        assert outcomes["look"].output == decision
+
     def test_no_decision_in_time_fails_the_step(self):
         assert ApprovalStep().decide(None).status == "failed"
 

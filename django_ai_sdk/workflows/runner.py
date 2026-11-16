@@ -68,7 +68,9 @@ class _StepRunner:
     ) -> None:
         self.steps = list(steps)
         self.outcomes: dict[str, StepOutcome] = {}
-        self.ctx = WorkflowContext(steps=self.outcomes, **context)
+        self.ctx = WorkflowContext(
+            steps=self.outcomes, declared={step.name: step for step in self.steps}, **context
+        )
         self.listeners = list(listeners)
         self.recorder = recorder
         self.recorded = completed

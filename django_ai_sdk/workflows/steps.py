@@ -90,6 +90,8 @@ class WorkflowContext:
     # name, or "adhoc") and its id, for listeners that report on the run.
     workflow: str = ""
     run_id: str = ""
+    # The run's steps by name, so `approval` knows which one is an approval step.
+    declared: Mapping[str, Step] = field(default_factory=dict, repr=False)
 
     def input(self, name: str, default: Any = None) -> Any:
         """One of the run's declared inputs."""
@@ -101,6 +103,23 @@ class WorkflowContext:
         if outcome is None or outcome.status != "completed":
             return default
         return outcome.output
+
+    def approval(self, name: str) -> dict[str, Any] | None:
+        """The approval `{approved, by, note}` step `name` completed with, or None.
+
+        Check an approval with this, not with `step(name)`: any step can be named
+        "approve" and produce `{"approved": true}`, but only an `ApprovalStep`
+        completes by a person's decision through `WorkflowService.decide`, and only
+        when they approved. None for any other step, a rejection, a timeout, or a
+        step that did not run.
+        """
+        outcome = self.steps.get(name)
+        if not isinstance(self.declared.get(name), ApprovalStep) or outcome is None:
+            return None
+        decision = outcome.output
+        if outcome.status != "completed" or not isinstance(decision, dict):
+            return None
+        return dict(decision) if decision.get("approved") is True else None
 
 
 class Step:
