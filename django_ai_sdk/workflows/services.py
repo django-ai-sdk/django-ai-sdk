@@ -9,7 +9,7 @@ from django.db.models.functions import Now
 from pydantic import ValidationError
 
 from django_ai_sdk.durable import runtime
-from django_ai_sdk.errors import UserError
+from django_ai_sdk.errors import ErrorCode, UserError
 from django_ai_sdk.permissions import Operation, PermissionDomain, PermissionsMixin, user_pk
 from django_ai_sdk.workflows.definitions import inputs_json_schema
 from django_ai_sdk.workflows.listeners import get_listener_registry
@@ -48,6 +48,16 @@ async def _resync_schedules(key: str) -> None:
         await async_schedules(key)
     except Exception:
         logger.exception("Could not sync workflow schedules; the worker syncs them on start")
+
+
+class DecisionConflict(UserError):
+    """The step is not waiting for a decision: decided already, out of time, or stopped.
+
+    A 409: the request was fine, but the run moved on. Over HTTP the SDK's views
+    answer it with code `conflict`.
+    """
+
+    code = ErrorCode.CONFLICT
 
 
 class WorkflowService(PermissionsMixin):
@@ -216,7 +226,9 @@ class WorkflowService(PermissionsMixin):
 
         Needs APPROVE_WORKFLOW on the run, which nobody has on a run that acts as them
         or that they started.
-        Only a waiting step is decided, once: the first decision wins. A run the caller
+        Only a waiting step is decided, once: the first decision wins. A step that is
+        no longer waiting (decided, out of time, cancelled) raises `DecisionConflict`;
+        a decision taken in time is never lost to the step's timeout. A run the caller
         may not see raises `WorkflowRun.DoesNotExist`.
         """
         from django_ai_sdk.workflows.models import StepRun, WorkflowRun
@@ -235,7 +247,7 @@ class WorkflowService(PermissionsMixin):
             run=run, step_name=step, status=StepRun.Status.WAITING
         ).aupdate(status=StepRun.Status.RUNNING, detail=f"decided by {by}"[:255])
         if not claimed:
-            raise UserError(f"Step {step!r} of run {run.pk} is not waiting for a decision.")
+            raise DecisionConflict(f"Step {step!r} of run {run.pk} is not waiting for a decision.")
         decision = {"approved": bool(approved), "by": by, "note": note[:1000]}
         try:
             await runtime.send(
@@ -597,4 +609,4 @@ list_workflows = async_to_sync(WorkflowService.list_workflows)
 list_workflow_runs = async_to_sync(WorkflowService.list_runs)
 get_workflow_run = async_to_sync(WorkflowService.get_run)
 
-__all__ = ["WorkflowService"]
+__all__ = ["DecisionConflict", "WorkflowService"]

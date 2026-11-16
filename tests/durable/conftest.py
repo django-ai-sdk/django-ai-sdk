@@ -16,6 +16,7 @@ STEPS = {
     "echo": "tests.durable.steps.EchoStep",
     "turn": "tests.durable.steps.TurnStep",
     "hold": "tests.durable.steps.HoldStep",
+    "quick_approval": "tests.durable.steps.QuickApprovalStep",
 }
 
 

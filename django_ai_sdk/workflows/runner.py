@@ -38,6 +38,9 @@ Perform = Callable[[str, Callable[[], Awaitable[Any]]], Awaitable[Any]]
 # when the run cannot wait, which only a durable run can.
 Wait = Callable[[str, float], Awaitable[Any]]
 
+# How long a step whose wait ran out waits again for a decision taken just then.
+DECISION_IN_FLIGHT_SECONDS = 60.0
+
 
 async def perform_now(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
     """Do `unit` here and now: the in-process `Perform`."""
@@ -187,10 +190,20 @@ class _StepRunner:
         if pending.status != "waiting":
             return pending
         assert self.wait is not None
-        decision = await self.wait(f"approval:{step.name}", step.wait_seconds())
+        seconds = step.wait_seconds()
+        while (decision := await self.wait(f"approval:{step.name}", seconds)) is None:
+            # Out of time, unless a decision was taken meanwhile and is on its way.
+            if await self.perform(f"expire:{step.name}", lambda: self._expire(step)):
+                break
+            seconds = DECISION_IN_FLIGHT_SECONDS
         return await self.perform(
             f"decide:{step.name}", lambda: self._settle(step, step.decide(decision))
         )
+
+    async def _expire(self, step: Step) -> bool:
+        """End `step`'s wait. False when a decision was taken first: it is on its way."""
+        expire = getattr(self.recorder, "expire", None)
+        return True if expire is None else await expire(step)
 
     def _listeners_for(self, step: Step) -> list[RunListener]:
         """Run-wide listeners fire for every step; a step's own fire for it alone."""

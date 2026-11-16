@@ -408,6 +408,23 @@ class RunRecorder(RunListener):
                 StepOutcome(output=row.output, detail=row.detail, turn_id=row.turn_id)
             )
 
+    async def expire(self, step: Step) -> bool:
+        """End a waiting step's wait that ran out. False when a decision was taken first.
+
+        The same conditional update on `waiting` as `WorkflowService.decide`'s, so
+        exactly one of them wins: a decision taken in time is never lost, and one
+        that comes too late is refused.
+        """
+        rows = StepRun.objects.filter(run=self.run, sequence=self.sequence[step.name])
+        if await rows.filter(status=StepRun.Status.WAITING).aupdate(
+            status=StepRun.Status.FAILED,
+            detail="no decision came in time",
+            completed_at=timezone.now(),
+        ):
+            return True
+        # Decided (running) means the decision is being sent; anything else ended the wait.
+        return not await rows.filter(status=StepRun.Status.RUNNING).aexists()
+
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
         """Write a step's outcome. Upserts, because a skipped step never started.
 
@@ -419,7 +436,7 @@ class RunRecorder(RunListener):
             await self._write(step, outcome)
             return
         if (
-            outcome.status in ("completed", "failed")
+            outcome.status == "completed"
             and await WorkflowRun.objects.filter(pk=self.run.pk, attempt=self.attempt)
             .exclude(status=WorkflowRun.Status.RUNNING)
             .aexists()

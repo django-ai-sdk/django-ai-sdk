@@ -317,6 +317,41 @@ class TestApproval:
         assert rows["gate"].detail == "rejected by approver@example.com: no"
         assert rows["b"].status == "skipped"
 
+    async def test_a_decision_taken_as_the_wait_runs_out_is_kept(self, dbos, monkeypatch):
+        owner = await user("owner@example.com")
+        approver = await user("approver@example.com", is_superuser=True)
+        quick = StepDefinition(type="quick_approval", name="gate", requires=["a"])
+        run = await queue_run(
+            definition(echo("a"), quick, echo("b", requires=["gate"])), user=owner
+        )
+        await settled(run.pk, step_waiting="gate")
+        send = runtime.send
+
+        async def late(*args, **kwargs):
+            await asyncio.sleep(2)  # The step's one-second wait runs out meanwhile.
+            await send(*args, **kwargs)
+
+        monkeypatch.setattr(runtime, "send", late)
+        await WorkflowService.decide(str(run.pk), "gate", approved=True, user=approver)
+        run = await settled(run.pk)
+
+        assert run.status == "completed"
+        assert run.outputs["gate"]["approved"] is True
+
+    async def test_a_decision_after_the_wait_ran_out_is_a_conflict(self, dbos):
+        from django_ai_sdk.workflows.services import DecisionConflict
+
+        owner = await user("owner@example.com")
+        approver = await user("approver@example.com", is_superuser=True)
+        quick = StepDefinition(type="quick_approval", name="gate", requires=["a"])
+        run = await settled((await queue_run(definition(echo("a"), quick), user=owner)).pk)
+        assert run.status == "failed"
+
+        with pytest.raises(DecisionConflict):
+            await WorkflowService.decide(str(run.pk), "gate", approved=True, user=approver)
+        gate = await StepRun.objects.aget(run=run, step_name="gate")
+        assert (gate.status, gate.detail) == ("failed", "no decision came in time")
+
     async def test_an_in_process_run_cannot_wait(self):
         step = ApprovalStep()
         step.name = "gate"
