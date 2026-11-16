@@ -11,7 +11,7 @@ import hashlib
 from typing import TYPE_CHECKING
 
 from django_ai_sdk.oversight.agents import FINGERPRINT_CHARS
-from django_ai_sdk.oversight.conf import deadline_ms
+from django_ai_sdk.oversight.conf import deadline_ms, setting
 from django_ai_sdk.oversight.guard.judging import (
     Answered,
     Matched,
@@ -28,9 +28,10 @@ from django_ai_sdk.oversight.guard.notices import (
     removed_tool_message,
 )
 from django_ai_sdk.oversight.guard.stages import StageResult
+from django_ai_sdk.oversight.judges.base import TOO_LONG
 from django_ai_sdk.oversight.patterns import mask_all
 from django_ai_sdk.oversight.rules import Block, Mask, RestrictTools
-from django_ai_sdk.oversight.types import Mode, Stage, Subject, TextSpan, TurnContext
+from django_ai_sdk.oversight.types import Answer, Mode, Stage, Subject, TextSpan, TurnContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -42,6 +43,10 @@ if TYPE_CHECKING:
 
 # (spans to hide, replacement template)
 MaskGroup = tuple[list[TextSpan], str]
+
+# Chunks of over-length other text overlap by this much (at most a tenth of a chunk),
+# so a name on a boundary is whole in one of them.
+CHUNK_OVERLAP = 200
 
 
 class TurnMasks:
@@ -82,9 +87,7 @@ class TurnMasks:
         if not text:
             return judged
         context = guard.context.model_copy(update={"input": text, "answers": {}})
-        judged.answered = await answer_lenses(
-            lenses, context, Stage.GATE, deadline_ms=deadline_ms(stage)
-        )
+        judged.answered = await answer_other_text(lenses, context, deadline_ms(stage))
         answers = {o.lens.name: o.answer for o in judged.answered}
         errored = errored_lenses(judged.answered)
         # What a tool or source returned and a lens could not judge (too long, down) is
@@ -165,6 +168,94 @@ class TurnMasks:
 
     async def cancel(self) -> None:
         await cancel_all(self.results.values())
+
+
+async def answer_other_text(
+    lenses: list[Lens], context: TurnContext, deadline: float | None
+) -> list[Answered]:
+    """Answer `lenses` about other text; a lens it is too long for is asked chunk by chunk.
+
+    Flags and scores take the worst chunk, entities the union of what each chunk
+    found, spans moved back to where they are in the text. A lens keeps its
+    too-long answer when the text needs more than MAX_OTHER_TEXT_CHUNKS chunks
+    or any chunk fails, so FAIL_MODE decides about the whole text as before.
+    """
+    answered = await answer_lenses(lenses, context, Stage.GATE, deadline_ms=deadline)
+    too_long = [o.lens for o in answered if o.answer.error == TOO_LONG and _combinable(o.lens)]
+    if not too_long:
+        return answered
+    chunks = split_chunks(context.input, setting("OTHER_TEXT_CHUNK_CHARS"))
+    if not 1 < len(chunks) <= setting("MAX_OTHER_TEXT_CHUNKS"):
+        return answered
+    parts = await asyncio.gather(
+        *(
+            answer_lenses(
+                too_long,
+                context.model_copy(update={"input": chunk}),
+                Stage.GATE,
+                deadline_ms=deadline,
+            )
+            for _, chunk in chunks
+        )
+    )
+    by_lens = [{o.lens.name: o for o in part} for part in parts]
+    return [
+        _combined(
+            item,
+            [
+                (offset, part.get(item.lens.name))
+                for (offset, _), part in zip(chunks, by_lens, strict=True)
+            ],
+        )
+        if item.lens in too_long
+        else item
+        for item in answered
+    ]
+
+
+def split_chunks(text: str, size: int) -> list[tuple[int, str]]:
+    """(offset, chunk) pairs of at most `size` characters covering `text`, overlapping."""
+    step = size - min(CHUNK_OVERLAP, size // 10)
+    starts = [0]
+    while starts[-1] + size < len(text):
+        starts.append(starts[-1] + step)
+    return [(start, text[start : start + size]) for start in starts]
+
+
+def _combinable(lens: Lens) -> bool:
+    return lens.answer.kind in {"flag", "score", "entities"}
+
+
+def _combined(whole: Answered, parts: list[tuple[int, Answered | None]]) -> Answered:
+    """One answer from every chunk's, or `whole` unless every chunk answered."""
+    answers = [(offset, part.answer) for offset, part in parts if part and not part.errored]
+    if len(answers) != len(parts) or not all(a.ok for _, a in answers):
+        return whole
+    values = [a.value for _, a in answers]
+    kind = whole.lens.answer.kind
+    if kind == "flag":
+        value: object = any(values)
+    elif kind == "score":
+        value = max(values)
+    else:
+        value = sorted(set().union(*values))
+    # Each chunk's spans moved back into the whole text; the overlap finds some twice.
+    spans = sorted(
+        {(s.start + offset, s.end + offset, s.label) for offset, a in answers for s in a.spans}
+    )
+    first = answers[0][1]
+    answer = Answer(
+        value=value,
+        confidence=min(a.confidence for _, a in answers),
+        rationale=f"Judged in {len(answers)} chunks.",
+        spans=[TextSpan(start=start, end=end, label=label) for start, end, label in spans],
+        answerer=first.answerer,
+        model=first.model,
+        latency_ms=max((a.latency_ms or 0.0) for _, a in answers),
+        tokens=sum(a.tokens or 0 for _, a in answers) or None,
+        cost=sum(a.cost or 0.0 for _, a in answers) or None,
+    )
+    return Answered(whole.lens, whole.stage, answer, aside=whole.aside)
 
 
 def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:

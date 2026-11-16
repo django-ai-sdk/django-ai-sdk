@@ -33,6 +33,7 @@ from tests.oversight.helpers import (
     make_agent,
     masking_policy,
     oversight_parts,
+    policy,
     start,
 )
 
@@ -298,6 +299,97 @@ class TestToolResultMasking:
         masked = await mask_tool_result(guard, "c1", {"email": "a@b.nl"})
         assert "a@b.nl" not in masked and "[EMAIL]" in masked
         assert await mask_tool_result(guard, "c2", {"n": 1}) == {"n": 1}
+
+
+@pytest.mark.django_db(transaction=True)
+class TestOverLengthResults:
+    """A result longer than a judge reads is judged in chunks that it can read."""
+
+    @staticmethod
+    def chunked(**extra):
+        return override_settings(AI_SDK_OVERSIGHT={"OTHER_TEXT_CHUNK_CHARS": 100, **extra})
+
+    @staticmethod
+    def short_judge(fn):
+        from django_ai_sdk.oversight.judges.base import TOO_LONG, Judge
+        from django_ai_sdk.oversight.types import Answer
+
+        class Short(Judge):
+            name = "short"
+
+            async def answer(self, lens, context):
+                text = context.input
+                return Answer(error=TOO_LONG) if len(text) > 100 else fn(text)
+
+        return Short()
+
+    @staticmethod
+    def names(text):
+        from django_ai_sdk.oversight.types import Answer, TextSpan
+
+        spans = []
+        start = text.find("Jan")
+        while start >= 0:
+            spans.append(TextSpan(start=start, end=start + 3, label="person"))
+            start = text.find("Jan", start + 1)
+        return Answer(value=["person"] if spans else [], spans=spans)
+
+    def masking(self, name: str) -> str:
+        from django_ai_sdk.oversight import Entities, JudgeLens, Mask
+
+        lens = JudgeLens(
+            name="names", question="Names?", answer=Entities, judges=[self.short_judge(self.names)]
+        )
+        return policy(name, [lens], [Rule("m", when=L("names").is_true, then=Mask(), mode=ENFORCE)])
+
+    async def test_names_in_every_chunk_and_on_a_boundary_are_masked(self):
+        # 98 + "Jan" straddles the first 100-character chunk's end.
+        text = "x" * 98 + "Jan" + "y" * 150 + "Jan" + "z" * 120
+        guard = await start(self.masking("test-chunk-mask"))
+        with self.chunked():
+            masked = await guard.mask_text(text)
+        assert "Jan" not in masked
+        assert masked.count("[PERSON]") == 2
+        assert masked.startswith("x" * 98) and masked.endswith("z" * 120)
+
+    async def test_a_flag_in_one_chunk_blocks_the_result(self):
+        from django_ai_sdk.oversight import Block, JudgeLens
+        from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
+        from django_ai_sdk.oversight.types import Answer
+
+        judge = self.short_judge(lambda text: Answer(value="wire it now" in text))
+        lens = JudgeLens(name="pressure", question="Pushes a payment?", judges=[judge])
+        stop = Rule("stop", when=L("pressure").is_true, then=Block("No."), mode=ENFORCE)
+        name = policy("test-chunk-block", [lens], [stop])
+        guard = await start(name)
+        with self.chunked():
+            assert await guard.mask_text("x" * 250 + "wire it now") == str(BLOCKED_TEXT)
+            assert await guard.mask_text("x" * 260) == "x" * 260
+
+    async def test_more_chunks_than_allowed_is_too_long_as_before(self):
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
+
+        guard = await start(self.masking("test-chunk-cap"))
+        with self.chunked(MAX_OTHER_TEXT_CHUNKS=2):
+            assert await guard.mask_text("Jan " * 100) == str(UNCHECKED_TEXT)
+
+    async def test_a_chunk_that_errors_withholds_the_whole_result(self):
+        from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT
+
+        def names_or_down(text):
+            if "down" in text:
+                raise RuntimeError("down")
+            return self.names(text)
+
+        from django_ai_sdk.oversight import Entities, JudgeLens, Mask
+
+        judge = self.short_judge(names_or_down)
+        lens = JudgeLens(name="names", question="Names?", answer=Entities, judges=[judge])
+        mask = Rule("m", when=L("names").is_true, then=Mask(), mode=ENFORCE)
+        name = policy("test-chunk-down", [lens], [mask])
+        guard = await start(name)
+        with self.chunked():
+            assert await guard.mask_text("Jan" + "x" * 200 + "down") == str(UNCHECKED_TEXT)
 
 
 @pytest.mark.django_db(transaction=True)

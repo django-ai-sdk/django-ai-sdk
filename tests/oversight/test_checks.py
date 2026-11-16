@@ -56,6 +56,8 @@ class TestSettingsSchema:
             CAPTURE="metadata",
             RETENTION={"content": 30},
             MAX_INPUT_CHARS=None,
+            OTHER_TEXT_CHUNK_CHARS=2000,
+            MAX_OTHER_TEXT_CHUNKS=4,
             JUDGES={"judge": {"class": "LLMJudge", "model": "m"}},
         )
 
@@ -72,6 +74,8 @@ class TestSettingsSchema:
             ("DEADLINE_MS", {"gate": "1s"}),
             ("DEADLINE_MS", 1000),
             ("MAX_INPUT_CHARS", -1),
+            ("OTHER_TEXT_CHUNK_CHARS", 0),
+            ("MAX_OTHER_TEXT_CHUNKS", None),
             ("RETENTION", {"content": 0}),
             ("JUDGES", ["judge"]),
             ("NOTIFIERS", "myapp.Slack"),
