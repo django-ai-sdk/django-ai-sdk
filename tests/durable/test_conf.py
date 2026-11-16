@@ -7,13 +7,12 @@ from typing import Any
 import pytest
 from django.test import override_settings
 
-from django_ai_sdk.durable.conf import database_url
+from django_ai_sdk.durable.conf import _postgres_url, database_url
 
 
 def _url(**db: Any) -> str:
-    default = {"ENGINE": "django.db.backends.postgresql", "NAME": "app", "USER": "u", "PASSWORD": "p@ss"}
-    with override_settings(DATABASES={"default": {**default, **db}}, AI_SDK_DBOS={}):
-        return database_url()
+    # The builder itself: overriding DATABASES mid-run would disturb other tests' connections.
+    return _postgres_url({"NAME": "app", "USER": "u", "PASSWORD": "p@ss", **db})
 
 
 def test_a_managed_postgres_keeps_its_ssl_options() -> None:

@@ -86,6 +86,8 @@ class TestRuns:
         assert run.task_id == str(run.pk)
         rows = [(row.step_name, row.status) async for row in StepRun.objects.filter(run=run)]
         assert rows == [("a", "completed"), ("b", "completed")]
+        # The row closes inside "run:end"; DBOS saves that unit just after. Wait for it.
+        assert await (await runtime.client().retrieve_workflow_async(run.task_id)).get_result() == "done"
         checkpoints = [
             step["function_name"]
             for step in await runtime.client().list_workflow_steps_async(run.task_id)
