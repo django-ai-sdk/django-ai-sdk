@@ -9,6 +9,7 @@ once DBOS recovers it, so a task must be safe to repeat, as with any queue.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING, Any
@@ -17,11 +18,11 @@ from asgiref.sync import async_to_sync, sync_to_async
 from dbos import DBOS
 from django.db import close_old_connections
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 from django.utils.module_loading import import_string
 from django_tasks.backends.base import BaseTaskBackend
 from django_tasks.base import Task, TaskError, TaskResult, TaskResultStatus
 from django_tasks.signals import task_enqueued
-from django_tasks.utils import get_random_id, normalize_json
 
 from django_ai_sdk.durable import runtime
 
@@ -55,7 +56,8 @@ async def _call(module_path: str, args: list[Any], kwargs: dict[str, Any]) -> An
         value = await sync_to_async(_in_fresh_connections, thread_sensitive=False)(
             task.func, args, kwargs
         )
-    return normalize_json(value)
+    # A task's result must be JSON; a round trip turns tuples into lists and refuses the rest.
+    return json.loads(json.dumps(value))
 
 
 def _in_fresh_connections(func: Any, args: list[Any], kwargs: dict[str, Any]) -> Any:
@@ -86,7 +88,7 @@ class DBOSTaskBackend(BaseTaskBackend):
         self.validate_task(task)
         result = TaskResult(
             task=task,
-            id=get_random_id(),
+            id=get_random_string(32),
             status=TaskResultStatus.READY,
             enqueued_at=timezone.now(),
             started_at=None,
