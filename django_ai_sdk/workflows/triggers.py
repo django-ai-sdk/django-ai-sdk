@@ -14,9 +14,10 @@ A workflow declares its triggers (`schemas.CronTrigger`, `schemas.EventTrigger`)
 Either way the run's id comes from what fired it (the occurrence, or the
 idempotency key), so firing twice opens one run.
 
-Who a run acts as: `run_as` on a workflow declared in code, or the creator of a
-stored workflow. A stored definition cannot name an account, or authoring a
-workflow would be a way to act as anyone.
+Who a run acts as: `run_as` on a workflow declared in code, or whoever last wrote a
+stored workflow's steps (`created_by`). A stored definition cannot name an account,
+and editing one makes the editor its account, or authoring a workflow would be a
+way to act as anyone.
 """
 
 from __future__ import annotations
@@ -101,7 +102,7 @@ def declared_workflows() -> list[tuple[str, WorkflowDefinition, Workflow | None]
 async def run_user(
     trigger: CronTrigger | EventTrigger, record: Workflow | None
 ) -> AbstractBaseUser | None:
-    """Who a triggered run acts as: `run_as` in code, the creator of a stored workflow."""
+    """Who a triggered run acts as: `run_as` in code, or who last wrote a stored workflow's steps."""
     from django_ai_sdk.tasks import aget_principal
     from django_ai_sdk.utils import aget_active_user
 

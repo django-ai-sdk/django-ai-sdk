@@ -7,12 +7,25 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+class CreateModelIfMissing(migrations.CreateModel):
+    """CreateModel that leaves an existing table alone.
+
+    Up to 0.1.2a21 the core app's own 0001 created these tables in every project,
+    with or without this app. A project that adds this app later has them already.
+    """
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):  # noqa: ANN001, ANN201
+        table = to_state.apps.get_model(app_label, self.name)._meta.db_table
+        if table not in schema_editor.connection.introspection.table_names():
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
 class Migration(migrations.Migration):
     """
     The workflow tables, as 0.1.2a21 shipped them; 0004 brings them up to date.
 
-    A database from 0.1.2a21 or earlier already ran this as state only (the core
-    app created the tables then), so it never runs again there.
+    A database that ran this in 0.1.2a21 or earlier does not run it again. One whose
+    core app made the tables without this app installed gets their state only.
     """
 
     initial = True
@@ -23,7 +36,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.CreateModel(
+        CreateModelIfMissing(
             name="WorkflowSettings",
             fields=[
                 (
@@ -58,7 +71,7 @@ class Migration(migrations.Migration):
                 "ordering": ["name"],
             },
         ),
-        migrations.CreateModel(
+        CreateModelIfMissing(
             name="WorkflowRun",
             fields=[
                 (
@@ -121,7 +134,7 @@ class Migration(migrations.Migration):
                 "ordering": ["-created_at"],
             },
         ),
-        migrations.CreateModel(
+        CreateModelIfMissing(
             name="WorkflowRunStep",
             fields=[
                 (

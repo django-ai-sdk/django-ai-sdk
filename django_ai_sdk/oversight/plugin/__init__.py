@@ -30,6 +30,7 @@ from django_ai_sdk.oversight.agents import (
     declared_policy,
     overrides_get_oversight,
 )
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.conf import is_enabled
 from django_ai_sdk.oversight.guard import (
     TurnGuard,
@@ -203,11 +204,13 @@ async def run_with_oversight(
     agent = apply_oversight(agent)
     if turn.oversight is False:
         # Unguarded on purpose: it does not join the outer turn either.
-        with guarding(None):
+        with guarding(None), settled():
             return await agent.run_async(messages=messages, **kwargs)
     guard = turn.guard = await _open(turn, messages)
     if guard is None:
-        return await agent.run_async(messages=messages, **kwargs)
+        # No policy, or joined the outer turn: its model calls are accounted for.
+        with settled():
+            return await agent.run_async(messages=messages, **kwargs)
     async with closing_turn(guard, keep_open=turn.keep_open):
         with guarding(guard):
             return await agent.run_async(messages=messages, **kwargs)

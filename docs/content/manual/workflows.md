@@ -172,7 +172,7 @@ AI_SDK_WORKFLOWS = {
 
 | Model | Purpose |
 | --- | --- |
-| `Workflow` | A persisted, named workflow: `name`, `slug` (registry key, shared with code declarations), `definition` (JSON), `active`, `created_by`. |
+| `Workflow` | A persisted, named workflow: `name`, `slug` (registry key, shared with code declarations), `definition` (JSON), `active`, `created_by` (who last wrote its steps, and so who its triggered runs act as). |
 | `WorkflowRun` | One execution: status `pending` / `running` / `completed` / `failed` / `cancelled`, `trigger` (what started it: `manual`, `cron:<trigger>` or `event:<trigger>`), `attempt` (how many times a worker claimed it), `heartbeat_at` (when it last made progress: the claim or a step boundary), `workflow_key` (set by the server: the stored workflow's slug, the registered workflow's name, or `adhoc`), `workflow_definition` snapshot, `inputs` (the declared inputs the caller supplied; undeclared keys are dropped), `outputs` (`{step name: output}` for every completed step), `error`, `task_id` (the DBOS workflow id of the current attempt), `user` (who it acts as), `started_by` (the person who asked for it, when one did: the starter of a manual run, or the operator who fired a trigger by hand). |
 | `StepRun` | Per-step progress: `sequence`, `step_name`, `output`, status `pending` / `running` / `completed` / `failed` / `skipped` / `waiting` (an approval step), `detail` / `error`, `turn_id` (the oversight turn its model call opened), timestamps. |
 

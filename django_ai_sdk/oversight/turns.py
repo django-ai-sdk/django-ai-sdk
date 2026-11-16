@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from django_ai_sdk.common import last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
-from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding, unguarded
+from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
 from django_ai_sdk.oversight.history import thread_history, thread_storage
 from django_ai_sdk.oversight.plugin import open_turn
 from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
@@ -140,7 +140,8 @@ async def turn(
     An exception other than `Blocked` is recorded as the run's error.
     """
     if oversight is False:
-        with guarding(None), unguarded():
+        # As in Agent.run: this block opts out, without turning off agents run inside it.
+        with guarding(None), settled():
             yield OpenTurn(agent, None, thread_id=thread_id, messages=messages, input=input)
         return
     guard, opened = await open_turn(
@@ -161,7 +162,8 @@ async def turn(
             yield current
         return
     async with closing_turn(guard, error=lambda: current.error):
-        with guarding(guard), settled():
+        # Not settled: a model call counts as overseen once this turn's gate has run.
+        with guarding(guard):
             yield current
 
 
