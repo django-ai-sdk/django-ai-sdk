@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from django_ai_sdk.oversight import tasks
 from django_ai_sdk.oversight.reflection import REFLECT_ATTEMPTS, claimable_q, mark_reflect_failed
-from django_ai_sdk.oversight.tasks import enqueue_reflect
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
@@ -97,7 +97,8 @@ class Command(BaseCommand):
                     reflect_attempts__gte=REFLECT_ATTEMPTS,
                 )
             )
-            count = sum(enqueue_reflect(key) for key in keys)
+            # Looked up per call, not bound at import: a patched task stays patched in no other caller.
+            count = sum(tasks.enqueue_reflect(key) for key in keys)
         self.stdout.write(
             f"{count} turn{'' if count == 1 else 's'} {'would be queued' if dry_run else 'queued'}"
         )

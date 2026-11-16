@@ -533,6 +533,19 @@ class TestReflectPending:
         # The test settings run tasks at once.
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "done"
 
+    async def test_a_sweep_first_loaded_under_a_patch_still_queues(self):
+        """A random test order once loaded the command while a test patched the task."""
+        import importlib
+
+        from django_ai_sdk.oversight.management.commands import oversight_sweep
+
+        with patch("django_ai_sdk.oversight.tasks.enqueue_reflect"):
+            importlib.reload(oversight_sweep)
+        turn_id = await self.lost()
+        await age(turn_id, 30)
+        with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
+            assert await reflect_pending("--reflect-after", "10m") == "1 turn queued"
+
     async def test_a_dead_workers_turn_is_queued_again(self):
         turn_id = await self.lost()
         await claim_for_reflect(turn_id)
