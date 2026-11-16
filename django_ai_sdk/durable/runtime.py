@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import asynccontextmanager
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
+
+from asgiref.sync import sync_to_async
+from django.db import close_old_connections
 
 from django_ai_sdk.durable.conf import database_url, setting
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from dbos import DBOSClient, DBOSConfig
 
 logger = logging.getLogger(__name__)
@@ -47,6 +53,21 @@ def config() -> DBOSConfig:
         "serializer": serializer(),
         "use_listen_notify": setting("USE_LISTEN_NOTIFY"),
     }
+
+
+@asynccontextmanager
+async def fresh_connections() -> AsyncGenerator[None]:
+    """Close broken or expired database connections around a durable unit.
+
+    What Django does around a request, so a database restart fails the unit in
+    flight, not every unit after it. Async ORM calls share one thread, and so do
+    these closes.
+    """
+    await sync_to_async(close_old_connections)()
+    try:
+        yield
+    finally:
+        await sync_to_async(close_old_connections)()
 
 
 def register_workflows() -> None:
@@ -136,6 +157,7 @@ __all__ = [
     "config",
     "destroy",
     "enqueue",
+    "fresh_connections",
     "launch",
     "register_workflows",
     "send",

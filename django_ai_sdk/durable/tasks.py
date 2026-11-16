@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import async_to_sync, sync_to_async
 from dbos import DBOS
+from django.db import close_old_connections
 from django.utils import timezone
 from django.utils.module_loading import import_string
 from django_tasks.backends.base import BaseTaskBackend
@@ -47,11 +48,23 @@ async def run_task(module_path: str, args: list[Any], kwargs: dict[str, Any]) ->
 async def _call(module_path: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
     task: Task = import_string(module_path)
     if iscoroutinefunction(task.func):
-        value = await task.func(*args, **kwargs)
+        async with runtime.fresh_connections():
+            value = await task.func(*args, **kwargs)
     else:
         # Off the event loop, and not serialized behind other tasks' sync code.
-        value = await sync_to_async(task.func, thread_sensitive=False)(*args, **kwargs)
+        value = await sync_to_async(_in_fresh_connections, thread_sensitive=False)(
+            task.func, args, kwargs
+        )
     return normalize_json(value)
+
+
+def _in_fresh_connections(func: Any, args: list[Any], kwargs: dict[str, Any]) -> Any:
+    """`func` between closes of this thread's broken or expired connections."""
+    close_old_connections()
+    try:
+        return func(*args, **kwargs)
+    finally:
+        close_old_connections()
 
 
 class DBOSTaskBackend(BaseTaskBackend):

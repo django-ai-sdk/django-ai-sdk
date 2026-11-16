@@ -88,7 +88,8 @@ async def perform(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
     """
 
     async def checkpointed() -> Any:
-        return _dump(await unit())
+        async with runtime.fresh_connections():
+            return _dump(await unit())
 
     return _load(await DBOS.run_step_async({"name": label}, checkpointed))
 
