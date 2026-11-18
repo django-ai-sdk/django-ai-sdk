@@ -221,9 +221,12 @@ def run_with_oversight_sync(
 ) -> dict[str, Any]:
     """Run with oversight from sync code, which cannot open a turn.
 
-    Inside a turn its tool calls are blocked (the guard is async only). Ask
-    `needs_own_turn_sync(turn)` first: a run that needs its own turn must not run.
+    Inside a turn its tool calls are blocked (the guard is async only). A run that
+    needs its own turn raises RuntimeError; ask `needs_own_turn_sync(turn)` first
+    to answer instead.
     """
+    if needs_own_turn_sync(turn):
+        raise RuntimeError("This run needs a turn of its own: use run_with_oversight.")
     return apply_oversight(agent).run(messages=messages, hook_context=turn.hook_context(), **kwargs)
 
 
