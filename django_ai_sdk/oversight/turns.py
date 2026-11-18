@@ -20,7 +20,6 @@ from django_ai_sdk.common import last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
-from django_ai_sdk.oversight.history import thread_history, thread_storage
 from django_ai_sdk.oversight.plugin import open_turn
 from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
 from django_ai_sdk.oversight.types import Stage
@@ -45,27 +44,16 @@ class OpenTurn:
 
     def __init__(
         self,
-        agent: Any,
         guard: TurnGuard | None,
         *,
-        thread_id: str | None,
         messages: list[ChatMessage] | None,
         input: str | None,
     ) -> None:
-        self.agent = agent
         self.guard = guard
-        self.thread_id = thread_id
         # The history and question to send the model, masked by the gate.
         self.messages: list[ChatMessage] = list(messages or [])
         self.input = input if input is not None else last_user_text(self.messages)
-        # An error that did not raise, such as "no result". Recorded at close.
-        self.error = ""
         self._gated = False
-
-    @property
-    def id(self) -> str:
-        """The turn's id, or "" when no turn opened."""
-        return self.guard.id if self.guard is not None else ""
 
     async def gate(self) -> str:
         """Judge the history and the question before the model reads them.
@@ -73,23 +61,15 @@ class OpenTurn:
         Returns the question, masked if a rule said so. `messages` then holds the
         history and question to send. Raises `Blocked`.
         """
-        if self._gated:
+        guard = self.guard
+        if self._gated or guard is None:
             return self.input
         self._gated = True
-        guard = self.guard
-        if guard is None:
-            return self.input
-        vouched = None
         if self.messages:
-            self.messages = _working_copy(self.messages)
-            storage = await thread_storage(self.agent, self.thread_id)
-            vouched = (
-                await thread_history(guard.resolved, storage, self.messages) if storage else None
-            )
-            if vouched is not None:
-                self.messages = vouched
-            # A history the stored thread vouched for is not judged again.
-            checked = await guard.gate_history(self.messages, history=vouched is None)
+            # Copies, but the question stays shared so masking reaches the caller.
+            question = last_user_message(self.messages)
+            self.messages = [m if m is question else m.model_copy(deep=True) for m in self.messages]
+            checked = await guard.gate_history(self.messages)
             if checked.blocked:
                 raise _blocked(guard, Stage.GATE, checked.message)
         gate = await guard.gate()
@@ -128,7 +108,6 @@ async def turn(
     *,
     channel: str,
     user: AbstractBaseUser | AnonymousUser | None = None,
-    thread_id: str | None = None,
     messages: list[ChatMessage] | None = None,
     input: str | None = None,
     oversight: type[Policy] | str | Literal[False] | None = None,
@@ -142,35 +121,26 @@ async def turn(
     if oversight is False:
         # As in Agent.run: this block opts out, without turning off agents run inside it.
         with guarding(None), settled():
-            yield OpenTurn(agent, None, thread_id=thread_id, messages=messages, input=input)
+            yield OpenTurn(None, messages=messages, input=input)
         return
     guard, opened = await open_turn(
         agent,
         channel=channel,
         user=user,
-        thread_id=thread_id,
         messages=messages,
         input=input,
         oversight=oversight,
     )
-    current = OpenTurn(
-        agent, guard if opened else None, thread_id=thread_id, messages=messages, input=input
-    )
+    current = OpenTurn(guard if opened else None, messages=messages, input=input)
     if not opened:
         # Joined the outer turn, or no policy: an opt-out on purpose.
         with settled():
             yield current
         return
-    async with closing_turn(guard, error=lambda: current.error):
+    async with closing_turn(guard):
         # Not settled: a model call counts as overseen once this turn's gate has run.
         with guarding(guard):
             yield current
-
-
-def _working_copy(messages: list[ChatMessage]) -> list[ChatMessage]:
-    """Copy every message but the last user message, which stays shared so masking reaches the caller."""
-    question = last_user_message(messages)
-    return [m if m is question else m.model_copy(deep=True) for m in messages]
 
 
 def _blocked(guard: TurnGuard, stage: Stage, message: str) -> Blocked:

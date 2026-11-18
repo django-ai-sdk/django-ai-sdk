@@ -114,9 +114,7 @@ def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]
 
 
 @contextlib.asynccontextmanager
-async def closing_turn(
-    guard: TurnGuard, *, keep_open: bool = False, error: Callable[[], str] = str
-) -> AsyncGenerator[None]:
+async def closing_turn(guard: TurnGuard, *, keep_open: bool = False) -> AsyncGenerator[None]:
     """Close `guard` when the block ends, recording an exception as the run's error.
 
     A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
@@ -126,14 +124,14 @@ async def closing_turn(
         yield
     except BaseException as exc:
         if isinstance(exc, Blocked):
-            await guard.close(error=error())
+            await guard.close()
         elif isinstance(exc, GeneratorExit | asyncio.CancelledError):
             await guard.close(error="disconnected")
         else:
             await guard.close(error=type(exc).__name__)
         raise
     if not keep_open:
-        await guard.close(error=error())
+        await guard.close()
 
 
 def current_guard() -> TurnGuard | None:
