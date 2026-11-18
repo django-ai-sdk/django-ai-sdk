@@ -27,6 +27,7 @@ from haystack.dataclasses import ChatRole, TextContent
 from pydantic import ValidationError
 
 from django_ai_sdk.adapters.citations.registry import current_registry
+from django_ai_sdk.adapters.run import get_user_text
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
@@ -36,7 +37,7 @@ from django_ai_sdk.agents.tool_agent import (
     tool_failed,
     tool_results,
 )
-from django_ai_sdk.common import ChatMessage, last_user_message
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
 from django_ai_sdk.oversight.plugin.request import REQUEST_KEY, TurnRequest
@@ -161,31 +162,49 @@ class GateQuestionHook(OversightHook):
 async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> StageResult:
     """Judge history, then question, masking each in the run's messages."""
     messages = list(state.data.get("messages") or [])
+    asked = question_index(messages)
     # The question as rendered (e.g. a subagent's user_prompt); the turn opened before that.
-    question = next((m.text or "" for m in reversed(messages) if m.is_from(ChatRole.USER)), "")
-    guard.original_input = guard.context.input = question
-    said = [
+    question = ChatMessage(
+        role="user", content=said_text(messages[asked]) if asked is not None else ""
+    )
+    guard.original_input = guard.context.input = question.content
+    earlier = [
         i
         for i, m in enumerate(messages)
-        if m.role in (ChatRole.USER, ChatRole.ASSISTANT) and m.text
+        if i != asked and m.role in (ChatRole.USER, ChatRole.ASSISTANT) and said_text(m)
     ]
-    judged = [
-        ChatMessage(role=messages[i].role.value, content=messages[i].text or "") for i in said
-    ]
-    if judged:
-        checked = await guard.gate_history(judged, history=not vouched)
-        if checked.blocked:
-            return checked
+    # Always last, even when empty: gate_history takes the last message for the question.
+    judged = [*(as_judged(messages[i]) for i in earlier), question]
+    checked = await guard.gate_history(judged, history=not vouched)
+    if checked.blocked:
+        return checked
     gate = await guard.gate()
     if gate.blocked:
         return gate
-    if gate.changed and (question := last_user_message(judged)) is not None:
+    if gate.changed:
         question.content = gate.text
-    for index, copy in zip(said, judged, strict=True):
-        if copy.content != messages[index].text:
-            messages[index] = masked_message(messages[index], copy.content)
+    for index, copy in zip([*earlier, asked], judged, strict=True):
+        text = get_user_text(copy)
+        if index is not None and text != said_text(messages[index]):
+            messages[index] = masked_message(messages[index], text)
     state.set("messages", messages, handler_override=replace_values)
     return gate
+
+
+def question_index(messages: list[HaystackChatMessage]) -> int | None:
+    """The last message, if a person sent it. Every other text is history."""
+    said = [i for i, m in enumerate(messages) if m.role in (ChatRole.USER, ChatRole.ASSISTANT)]
+    return said[-1] if said and messages[said[-1]].is_from(ChatRole.USER) else None
+
+
+def said_text(message: HaystackChatMessage) -> str:
+    """Every text part: the model reads them all."""
+    return "\n\n".join(message.texts)
+
+
+def as_judged(message: HaystackChatMessage) -> ChatMessage:
+    role = "user" if message.is_from(ChatRole.USER) else "assistant"
+    return ChatMessage(role=role, content=said_text(message))
 
 
 def masked_message(message: HaystackChatMessage, text: str) -> HaystackChatMessage:

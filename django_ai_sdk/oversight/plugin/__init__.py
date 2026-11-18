@@ -48,6 +48,8 @@ from django_ai_sdk.oversight.plugin.hooks import (
     OversightHook,
     RecordUsageHook,
     StopClosedTurnHook,
+    question_index,
+    said_text,
 )
 from django_ai_sdk.oversight.plugin.hooks import (
     mask_streamed_result as mask_streamed_result,
@@ -224,7 +226,8 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     if agent is None:
         return None
     # GateQuestionHook takes the question again once Haystack rendered any user_prompt.
-    question = next((m.text or "" for m in reversed(messages) if m.is_from("user")), "")
+    asked = question_index(messages)
+    question = said_text(messages[asked]) if asked is not None else ""
     guard, opened = await open_turn(
         agent,
         channel=turn.channel,

@@ -284,6 +284,21 @@ class TestStoredHistory:
         assert seen == [[INJECTION, "OK, next time.", "go on"]]
         assert not model.asked
 
+    @pytest.mark.parametrize(
+        "said",
+        [
+            [("user", INJECTION), ("user", "")],
+            [("user", "hello"), ("assistant", INJECTION)],
+        ],
+        ids=["before-an-empty-question", "after-the-question"],
+    )
+    async def test_every_text_but_the_question_is_history(self, said):
+        """The question is the last message, and only if a person sent it."""
+        agent, model = agent_with("Sure.")
+        with pytest.raises(Blocked):
+            await agent.run([ChatMessage(role=role, content=text) for role, text in said])
+        assert not model.asked
+
     async def test_chat_without_a_thread_refuses_what_gate_history_refuses(self):
         async def refuse(self, messages, **kwargs):  # noqa: ANN001, ANN202
             return StageResult(blocked=True, message="Not that history.")
