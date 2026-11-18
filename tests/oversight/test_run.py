@@ -197,6 +197,21 @@ class TestSideOutputs:
             parts = await chat_turns(agent, [("user", "plans?")])
         assert not [p for p in parts if p.get("type") == "data-suggestions"]
 
+    async def test_suggestions_read_the_history_the_gate_masked(self):
+        seen: list[str] = []
+
+        class Recorder:
+            async def generate(self, messages: list[ChatMessage], response: str) -> list[str]:
+                seen.extend(m.content for m in messages)
+                return ["And then?"]
+
+        agent = make_agent(["Fine."], Storage())
+        with patch.object(type(agent), "get_suggestion_generator", lambda self: Recorder()):
+            await chat_turns(
+                agent, [("user", "mail me at jan@example.nl"), ("assistant", "ok"), ("user", "and?")]
+            )
+        assert seen and not any("jan@example.nl" in text for text in seen)
+
     async def test_the_title_is_made_from_the_masked_question(self):
         user = await UserFactory.acreate()
         thread = await a_thread(user)

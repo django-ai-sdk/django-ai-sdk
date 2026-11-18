@@ -11,6 +11,7 @@ from haystack.dataclasses import StreamingChunk, ToolCallResult
 
 from django_ai_sdk.agents.tool_agent import BLOCKED_META_KEY
 from django_ai_sdk.artifacts.schemas import CitationsData
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.events import (
     DataEvent,
     MessageEndEvent,
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.citations.grounding import Grounder
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
-    from django_ai_sdk.common import ChatMessage, StreamWriter
+    from django_ai_sdk.common import StreamWriter
     from django_ai_sdk.events import StreamEvent
 
 # The guard a stream reads before the run opened its turn: allows everything.
@@ -181,6 +182,15 @@ class StreamTurn:
     @property
     def guard(self) -> TurnGuard:
         return self.turn.guard or _INERT
+
+    def as_gated(self, messages: list[ChatMessage]) -> list[ChatMessage]:
+        """The conversation as the gate left it, masked."""
+        if not self.guard.active:
+            return messages
+        context = self.guard.context
+        history = [ChatMessage.model_validate(h.model_dump()) for h in context.history]
+        question = [ChatMessage(role="user", content=context.input)] if context.input else []
+        return [*history, *question]
 
     @property
     def hold(self) -> bool:
