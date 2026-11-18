@@ -28,10 +28,10 @@ from django_ai_sdk.oversight.guard.notices import (
     removed_tool_message,
 )
 from django_ai_sdk.oversight.guard.stages import StageResult
-from django_ai_sdk.oversight.judges.base import TOO_LONG
+from django_ai_sdk.oversight.judges.base import TOO_LONG, build_judge
 from django_ai_sdk.oversight.patterns import mask_all
 from django_ai_sdk.oversight.rules import Block, Mask, RestrictTools
-from django_ai_sdk.oversight.types import Answer, Mode, Stage, Subject, TextSpan, TurnContext
+from django_ai_sdk.oversight.types import Mode, Stage, Subject, TextSpan, TurnContext
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -74,42 +74,62 @@ class TurnMasks:
         return [group for _, group in groups]
 
     async def mask_other_text(
-        self, lenses: list[Lens], text: str, stage: Stage, *, blocks: bool = False
+        self,
+        lenses: list[Lens],
+        text: str,
+        stage: Stage,
+        *,
+        blocks: bool = False,
+        withhold_unchecked: bool = False,
     ) -> StageResult:
         """Judge `text` like the gate judges the question, and mask it.
 
         Text a mask cannot locate is replaced whole with UNCHECKED_TEXT. Only
         protective actions are kept (with `blocks`, also Block and RestrictTools),
-        so other text never triggers alerts or notifications.
+        so other text never triggers alerts or notifications. With
+        `withhold_unchecked`, a lens that fails fires no rule: under a closed
+        policy the text is withheld whole instead.
         """
         guard = self.guard
         judged = StageResult(stage, text=text)
         if not text:
             return judged
         context = guard.context.model_copy(update={"input": text, "answers": {}})
-        judged.answered = await answer_other_text(lenses, context, deadline_ms(stage))
-        answers = {o.lens.name: o.answer for o in judged.answered}
-        errored = errored_lenses(judged.answered)
-        # What a tool or source returned and a lens could not judge (too long, down) is
-        # no finding: it is withheld below, and no rule acts on the turn because of it.
-        # The person's own history still fails closed.
-        from_tool = stage is Stage.TOOL
-        matched = match_rules(
-            guard.resolved,
-            answers,
-            Stage.GATE,
-            done=set(),
-            errored=errored,
-            fail_closed=guard.fails_closed and not from_tool,
-        )
-        groups, unpointed = collect_masks(
-            matched,
-            judged.answered,
-            subject=Subject.QUESTION,
-            context=context,
-            closed=guard.fails_closed,
-        )
-        for match in matched:
+        views = await judge_other_text(lenses, context, deadline_ms(stage))
+        judged.answered = list({id(o): o for view in views for o in view}.values())
+        errored = False
+        unpointed = False
+        groups: list[MaskGroup] = []
+        by_rule: dict[str, Matched] = {}
+        # Each chunk is decided on its own and what any of them decides holds, so a
+        # finding in one chunk is never outweighed by another.
+        for answered in views:
+            failed = errored_lenses(answered)
+            errored = errored or bool(failed)
+            found = match_rules(
+                guard.resolved,
+                {o.lens.name: o.answer for o in answered},
+                Stage.GATE,
+                done=set(),
+                errored=failed,
+                fail_closed=guard.fails_closed and not withhold_unchecked,
+            )
+            located, missed = collect_masks(
+                found,
+                answered,
+                subject=Subject.QUESTION,
+                context=context,
+                closed=guard.fails_closed,
+            )
+            groups += [group for _, group in located]
+            unpointed = unpointed or bool(missed)
+            for match in found:
+                first = by_rule.setdefault(match.rule.name, match)
+                if first is not match:
+                    kinds = {a.kind for a in first.acted}
+                    first.acted += [a for a in match.acted if a.kind not in kinds]
+                    first.failed = first.failed and match.failed
+        for match in by_rule.values():
             acting: list[Action] = [
                 a
                 for a in match.acted
@@ -125,10 +145,11 @@ class TurnMasks:
                     judged.restrict = merge_restrict(judged.restrict, action.names)
             if acting:
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
-        if unpointed or (from_tool and errored and guard.fails_closed and not judged.blocked):
+        withheld = withhold_unchecked and errored and guard.fails_closed and not judged.blocked
+        if unpointed or withheld:
             judged.text = str(UNCHECKED_TEXT)
         elif groups:
-            judged.text = mask_all(text, [group for _, group in groups])
+            judged.text = mask_all(text, groups)
         judged.changed = judged.text != text
         return judged
 
@@ -144,7 +165,11 @@ class TurnMasks:
             lenses = other_text_lenses(guard.resolved) if guard.active else []
             if not lenses or not text:
                 return text
-            judged = await self.mask_other_text(lenses, text, Stage.TOOL, blocks=True)
+            # What a tool or source returned and a lens could not judge (too long, down)
+            # is no finding about the turn: the result is withheld instead.
+            judged = await self.mask_other_text(
+                lenses, text, Stage.TOOL, blocks=True, withhold_unchecked=True
+            )
             if judged.restrict is not None:
                 guard.restrict = merge_restrict(guard.restrict, judged.restrict)
             if judged.blocked:
@@ -170,23 +195,26 @@ class TurnMasks:
         await cancel_all(self.results.values())
 
 
-async def answer_other_text(
+async def judge_other_text(
     lenses: list[Lens], context: TurnContext, deadline: float | None
-) -> list[Answered]:
-    """Answer `lenses` about other text; a lens it is too long for is asked chunk by chunk.
+) -> list[list[Answered]]:
+    """Answers about other text, one list per part of it that rules read on its own.
 
-    Flags and scores take the worst chunk, entities the union of what each chunk
-    found, spans moved back to where they are in the text. A lens keeps its
-    too-long answer when the text needs more than MAX_OTHER_TEXT_CHUNKS chunks
-    or any chunk fails, so FAIL_MODE decides about the whole text as before.
+    Lenses the text is too long for are asked about each chunk their judges read
+    (at most MAX_OTHER_TEXT_CHUNKS), spans moved back to where they are in the
+    text; each chunk's answers come with the other lenses' answers on the whole.
+    A text that needs more chunks keeps its too-long answers, so FAIL_MODE decides.
     """
     answered = await answer_lenses(lenses, context, Stage.GATE, deadline_ms=deadline)
-    too_long = [o.lens for o in answered if o.answer.error == TOO_LONG and _combinable(o.lens)]
-    if not too_long:
-        return answered
-    chunks = split_chunks(context.input, setting("OTHER_TEXT_CHUNK_CHARS"))
+    too_long = [o.lens for o in answered if o.answer.error == TOO_LONG]
+    size = chunk_chars(too_long)
+    if size is None:
+        return [answered]
+    chunks = split_chunks(context.input, size)
     if not 1 < len(chunks) <= setting("MAX_OTHER_TEXT_CHUNKS"):
-        return answered
+        return [answered]
+    # All chunks at once, within the stage deadline: a history text judged in chunks
+    # asks up to MAX_OTHER_TEXT_CHUNKS times the judges a short one does.
     parts = await asyncio.gather(
         *(
             answer_lenses(
@@ -198,19 +226,25 @@ async def answer_other_text(
             for _, chunk in chunks
         )
     )
-    by_lens = [{o.lens.name: o for o in part} for part in parts]
+    whole = [o for o in answered if o.lens not in too_long]
     return [
-        _combined(
-            item,
-            [
-                (offset, part.get(item.lens.name))
-                for (offset, _), part in zip(chunks, by_lens, strict=True)
-            ],
-        )
-        if item.lens in too_long
-        else item
-        for item in answered
+        [*whole, *(_moved(o, offset) for o in part)]
+        for (offset, _), part in zip(chunks, parts, strict=True)
     ]
+
+
+def chunk_chars(lenses: Iterable[Lens]) -> int | None:
+    """The fewest characters any judge of `lenses` reads, or None when none has a limit."""
+    limits: list[int] = []
+    for lens in lenses:
+        for step in lens.steps():
+            try:
+                limit = build_judge(step).TEXT_CHARS
+            except Exception:  # It answers its error when asked.
+                continue
+            if limit:
+                limits.append(limit)
+    return min(limits, default=None)
 
 
 def split_chunks(text: str, size: int) -> list[tuple[int, str]]:
@@ -222,40 +256,14 @@ def split_chunks(text: str, size: int) -> list[tuple[int, str]]:
     return [(start, text[start : start + size]) for start in starts]
 
 
-def _combinable(lens: Lens) -> bool:
-    return lens.answer.kind in {"flag", "score", "entities"}
-
-
-def _combined(whole: Answered, parts: list[tuple[int, Answered | None]]) -> Answered:
-    """One answer from every chunk's, or `whole` unless every chunk answered."""
-    answers = [(offset, part.answer) for offset, part in parts if part and not part.errored]
-    if len(answers) != len(parts) or not all(a.ok for _, a in answers):
-        return whole
-    values = [a.value for _, a in answers]
-    kind = whole.lens.answer.kind
-    if kind == "flag":
-        value: object = any(values)
-    elif kind == "score":
-        value = max(values)
-    else:
-        value = sorted(set().union(*values))
-    # Each chunk's spans moved back into the whole text; the overlap finds some twice.
-    spans = sorted(
-        {(s.start + offset, s.end + offset, s.label) for offset, a in answers for s in a.spans}
-    )
-    first = answers[0][1]
-    answer = Answer(
-        value=value,
-        confidence=min(a.confidence for _, a in answers),
-        rationale=f"Judged in {len(answers)} chunks.",
-        spans=[TextSpan(start=start, end=end, label=label) for start, end, label in spans],
-        answerer=first.answerer,
-        model=first.model,
-        latency_ms=max((a.latency_ms or 0.0) for _, a in answers),
-        tokens=sum(a.tokens or 0 for _, a in answers) or None,
-        cost=sum(a.cost or 0.0 for _, a in answers) or None,
-    )
-    return Answered(whole.lens, whole.stage, answer, aside=whole.aside)
+def _moved(item: Answered, offset: int) -> Answered:
+    """`item` about a chunk, its spans moved to where they are in the whole text."""
+    spans = [
+        s.model_copy(update={"start": s.start + offset, "end": s.end + offset})
+        for s in item.answer.spans
+    ]
+    answer = item.answer.model_copy(update={"spans": spans})
+    return Answered(item.lens, item.stage, answer, item.failed, item.aside)
 
 
 def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:

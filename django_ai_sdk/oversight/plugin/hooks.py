@@ -46,7 +46,7 @@ from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
     from haystack.components.agents.state.state import State
-    from haystack.dataclasses import ToolCallResult
+    from haystack.dataclasses import StreamingChunk, ToolCallResult
     from pydantic import BaseModel
 
     from django_ai_sdk.adapters.citations import SourceRegistry
@@ -385,6 +385,22 @@ async def mask_tool_result(guard: TurnGuard, call_id: str, result: Any) -> Any:
         else part
         for index, part in enumerate(result)
     ]
+
+
+async def mask_streamed_result(chunk: StreamingChunk) -> StreamingChunk:
+    """`chunk` with its tool result masked by the current turn, as its model reads it.
+
+    Haystack streams a tool result before the after_tool hooks mask it, so a stream
+    that forwards it elsewhere (a subagent's to its coordinator) masks it here first.
+    """
+    guard = current_guard()
+    result = chunk.tool_call_result
+    if guard is None or result is None:
+        return chunk
+    masked = await mask_tool_result(guard, result.origin.id or "", result.result)
+    if masked is result.result:
+        return chunk
+    return dataclasses.replace(chunk, tool_call_result=dataclasses.replace(result, result=masked))
 
 
 class RecordUsageHook(OversightHook):

@@ -196,6 +196,14 @@ def _shorter(pattern: re.Pattern[str], valid: Verifier, text: str, start: int, e
 
 
 _SECRETS = compile_patterns(SECRET_PATTERNS)
+_PII = compile_patterns(PII_PATTERNS)
+
+
+def finds_personal_or_secret(text: str) -> bool:
+    """Whether any built-in personal data kind (verified) or secret is in `text`."""
+    return bool(regex_spans(_SECRETS, text)) or any(
+        next(valid_spans(pattern, PII_VERIFY.get(kind), text), None) for kind, pattern in _PII
+    )
 
 
 def mask_secrets(text: str) -> str:

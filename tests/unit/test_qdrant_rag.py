@@ -409,8 +409,10 @@ class TestQdrantServerCollectionRace:
         ready.count_documents.return_value = 0
         with patch(
             "django_ai_sdk.rags.qdrant_hybrid.QdrantDocumentStore", side_effect=[raced, ready]
-        ):
-            assert rag._create_document_store() is ready
+        ) as store:
+            assert rag._create_document_store(recreate=True) is ready
+        # Recreating again would delete the collection the other worker just created.
+        assert [c.kwargs["recreate_index"] for c in store.call_args_list] == [True, False]
 
 
 class TestQdrantRealFileLock:

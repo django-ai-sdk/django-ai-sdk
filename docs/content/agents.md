@@ -342,7 +342,7 @@ start_run_tool = with_receipt(
 )
 ```
 
-`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). Only the declared keys are kept, and only values that are whole numbers or short id-like strings (letters, digits, `_ . : -`, up to 128 characters); anything else is left out. The stored call and its released card get `{**receipt, "withheld": true}` as the result; arguments stay dropped. A failed call keeps nothing. Receipts are read from the streaming agent's tools and its subagents' (`Stream`).
+`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). The declared keys are trusted: you, the tool's author, chose them. Their values are still screened: only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters) are kept, and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key); anything else is left out. The stored call and its released card get `{**receipt, "withheld": true}` as the result; arguments stay dropped. A failed call keeps nothing. Receipts are read from the streaming agent's tools and its subagents', at any depth (`Stream`).
 
 ---
 
