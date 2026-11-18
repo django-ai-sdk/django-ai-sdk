@@ -609,7 +609,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             built = await build_subagent(subagent_cls, thread_id=thread_id, user=user)
             if built is None:
                 continue
-            sub_agent, subagent = built
+            haystack_agent, subagent = built
             agent_id = subagent.agent_id
 
             name = subagent_tool_name(subagent_cls)
@@ -626,7 +626,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     # A delegation opens a child turn under the subagent's policy,
                     # or joins the coordinator's turn when the policy is the same.
                     component=SubagentStreamFilter(
-                        sub_agent,
+                        haystack_agent,
                         name=subagent_cls.name or name,
                         subagent=subagent,
                         thread_id=thread_id,
