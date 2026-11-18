@@ -17,8 +17,12 @@ from haystack.dataclasses import (
 
 from django_ai_sdk.adapters.citations.grounding import Grounder, rebase, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
+from django_ai_sdk.adapters.run import (
+    ATTACHMENT_CONTEXT_META_KEY,
+    get_user_message,
+    get_user_text,
+)
 from django_ai_sdk.adapters.run import Run as Run  # re-exported: Run lived here
-from django_ai_sdk.adapters.run import get_user_message, get_user_text
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
 from django_ai_sdk.agents.tool_agent import decode_tool_result, returned_error
@@ -312,9 +316,12 @@ class Stream:
                 continue
             # merging is text-only, inlined images are dropped here
             texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
+            # Merged, attachment context is no longer apart: the gate judges all of it.
+            hinted = any(a.context for m in group for a in m.attachments)
+            meta = {ATTACHMENT_CONTEXT_META_KEY: 0} if hinted else None
             for role, content in merge_messages(texts):
                 if role == "user":
-                    converted_messages.append(HaystackChatMessage.from_user(content))
+                    converted_messages.append(HaystackChatMessage.from_user(content, meta=meta))
                 elif role == "assistant":
                     converted_messages.append(HaystackChatMessage.from_assistant(content))
 

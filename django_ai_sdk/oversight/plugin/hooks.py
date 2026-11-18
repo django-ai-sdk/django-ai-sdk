@@ -27,7 +27,7 @@ from haystack.dataclasses import ChatRole, TextContent
 from pydantic import ValidationError
 
 from django_ai_sdk.adapters.citations.registry import current_registry
-from django_ai_sdk.adapters.run import ATTACHMENT_CONTEXT_META_KEY, get_user_text
+from django_ai_sdk.adapters.run import ATTACHMENT_CONTEXT_META_KEY
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
@@ -185,7 +185,7 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
     if gate.changed:
         question.content = gate.text
     for index, copy in zip([*earlier, asked], judged, strict=True):
-        text = get_user_text(copy)
+        text = copy.content + "".join(a.context for a in copy.attachments)
         if index is not None and text != said_text(messages[index]):
             messages[index] = masked_message(messages[index], text)
     state.set("messages", messages, handler_override=replace_values)
@@ -211,7 +211,7 @@ def as_judged(message: HaystackChatMessage) -> ChatMessage:
     at = message.meta.get(ATTACHMENT_CONTEXT_META_KEY)
     if at is None:
         return ChatMessage(role=role, content=text)
-    context = Attachment(document_id="", context=text[at + len("\n\n") :])
+    context = Attachment(document_id="", context=text[at:])
     return ChatMessage(role=role, content=text[:at], attachments=[context])
 
 

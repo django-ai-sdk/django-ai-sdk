@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from django.test import override_settings
+from django_ai_sdk.adapters.base import Stream
 from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight import (
@@ -499,7 +500,8 @@ class TestAttachments:
             await chat_turns(agent, [("user", "hi")], thread_id=str(thread.id), user=user)
         assert calls == [{"history": False}]
 
-    async def test_a_stored_thread_judges_earlier_attachment_context_on_a_run(self):
+    @pytest.mark.parametrize("merged", [False, True], ids=["apart", "merged"])
+    async def test_a_stored_thread_judges_earlier_attachment_context_on_a_run(self, merged):
         """Rebuilt from the document each turn, so the thread never vouched for it."""
         user = await UserFactory.acreate()
         thread = await a_thread(user)
@@ -521,6 +523,7 @@ class TestAttachments:
             patch.object(agent.protocol_handler, "to_chat_messages", return_value=conversation),
             patch("django_ai_sdk.memories.services.MemoryService.resolve_attachments", resolve),
             patch("django_ai_sdk.oversight.history.thread_history", vouched),
+            patch.object(Stream, "merge_messages", merged),
         ):
             parts = await chat_turns(
                 agent, [("user", "and now?")], thread_id=str(thread.id), user=user

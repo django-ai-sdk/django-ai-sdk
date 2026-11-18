@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# On a user message whose text ends in attachment context: where that context starts.
+# On a user message: where its attachment context starts, 0 when it can't be told apart.
 ATTACHMENT_CONTEXT_META_KEY = "django_ai_sdk.attachment_context_at"
 
 
