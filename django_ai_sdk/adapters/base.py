@@ -280,7 +280,7 @@ class Stream:
         ]
         # Recorded with the turn that made them: the run hands them back, but they are not this
         # answer's, so they count as stored already.
-        ids = [call.id for call in calls]
+        ids = [call.id for call in calls if call.id]
         self._persisted_tool_ids.update(ids)
         self._persisted_tool_output_ids.update(ids)
         replayed = [HaystackChatMessage.from_assistant(message.content or None, tool_calls=calls)]
