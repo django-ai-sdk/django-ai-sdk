@@ -225,7 +225,6 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     agent = policy_agent(turn)
     if agent is None:
         return None
-    outer = current_guard()
     # GateQuestionHook takes the question again once Haystack rendered any user_prompt.
     asked = question_index(messages)
     question = said_text(messages[asked]) if asked is not None else ""
@@ -240,8 +239,7 @@ async def _open(turn: TurnRequest, messages: list[Any]) -> TurnGuard | None:
     if not opened:
         return None
     guard.message_id = turn.message_id or guard.message_id
-    # A child turn's blocked calls reach the outer turn's stream, which drops their arguments.
-    guard.on_tool_results = turn.on_tool_results or (outer.on_tool_results if outer else None)
+    guard.on_tool_results = turn.on_tool_results
     return guard
 
 

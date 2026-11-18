@@ -328,6 +328,8 @@ class SubagentStreamFilter:
             thread_id=self._thread_id or None,
             # The coordinator reads this, so finish judges it.
             read_answer=subagent_response,
+            # Its blocked calls reach the coordinator's stream, which drops their arguments.
+            on_tool_results=outer.on_tool_results if outer is not None else None,
         )
 
     def _span(self) -> Any:

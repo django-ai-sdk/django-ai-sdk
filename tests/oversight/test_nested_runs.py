@@ -11,7 +11,8 @@ from django.test import override_settings
 from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from haystack.dataclasses import ToolCall as HaystackToolCall
-from haystack.tools import Tool
+from haystack import component
+from haystack.tools import ComponentTool, Tool
 
 from django_ai_sdk.agents import Agent
 from django_ai_sdk.common import ChatMessage
@@ -290,6 +291,35 @@ class TestSubagents:
         assert SECRET not in json.dumps([m.tool_calls for m in storage.stored], default=str)
         outputs = [p["toolCallId"] for p in parts if p.get("type") == "tool-output-available"]
         assert outputs.count("s1") == 1
+
+    async def test_an_agent_run_inside_a_tool_sends_no_result_the_stream_never_announced(self):
+        ran: list[str] = []
+        send = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="send", arguments={"text": SECRET}, id="s1")]
+        )
+        inner = secret_subagent(ran, send, "done")
+
+        @component
+        class Research:
+            @component.output_types(result=str)
+            def run(self, query: str) -> dict:
+                raise NotImplementedError
+
+            @component.output_types(result=str)
+            async def run_async(self, query: str) -> dict:
+                messages = [ChatMessage(role="user", content=query)]
+                return {"result": str(await inner().run(messages, tools=True))}
+
+        tool = ComponentTool(component=Research(), name="research", description="research")
+        use = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="research", arguments={"query": "go"}, id="r1")]
+        )
+        agent = make_agent([use, "Done."], Storage(), tools=[tool], policy="test-masking")
+        parts = await chat(agent, "go")
+        assert ran == []
+        announced = {p["toolCallId"] for p in parts if p.get("type") == "tool-input-start"}
+        outputs = {p["toolCallId"] for p in parts if p.get("type", "").startswith("tool-output")}
+        assert outputs <= announced
 
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []
