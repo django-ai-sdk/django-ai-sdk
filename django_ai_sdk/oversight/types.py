@@ -173,6 +173,8 @@ class TurnContext(BaseModel):
     """Everything a lens may read when it runs."""
 
     turn_id: str = ""
+    # The conversation, so a check in code can look up what its earlier turns did.
+    thread_id: str = ""
     channel: str = ""
     agent_id: str = ""
     agent_name: str = ""

@@ -135,6 +135,7 @@ A pydantic `ValidationError` also returns its field `errors`. Ninja's and DRF's 
 ## What the model sees
 
 - A tool that raises gives the model the error text, as Haystack does, so it can fix its arguments or pick another tool. The model may repeat that text to the user; if your tools' errors can carry secrets, return a safe error instead of raising, or rewrite results in an `after_tool` hook.
+- A tool that returns a dict with an `error` key, such as `{"error": "No client 'C-032'."}`, counts as failed, just like one that raises: the stored call is marked `error`, and oversight neither counts it as a source nor attaches an artifact to it.
 - A tool result longer than `AI_SDK_TOOL_OUTPUT_LIMIT` (100,000 characters, about 25k tokens) is cut to its start, with a note up front saying how much the model sees. Set `ToolAgentConfig.max_tool_output_chars` per agent, or `0` to turn it off. The limit is per result: a run that gathers many results can still overflow the context window, which ends the turn with `context_overflow`.
 
 ## Vector stores

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import uuid
@@ -22,6 +21,7 @@ from django_ai_sdk.adapters.run import Run as Run  # re-exported: Run lived here
 from django_ai_sdk.adapters.run import get_user_message, get_user_text
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
+from django_ai_sdk.agents.tool_agent import decode_tool_result, returned_error
 from django_ai_sdk.artifacts.schemas import turn_artifacts
 from django_ai_sdk.artifacts.tool_artifacts import build_artifact
 from django_ai_sdk.common import (
@@ -89,12 +89,7 @@ def parse_tool_output(obj: Any) -> Any:
         obj = obj.to_dict()
 
     if obj is None or isinstance(obj, (bool, int, float, str)):
-        if isinstance(obj, str):
-            try:
-                return ast.literal_eval(obj)
-            except (ValueError, SyntaxError):
-                return obj
-        return obj
+        return decode_tool_result(obj)
 
     if isinstance(obj, dict):
         return {k: parse_tool_output(v) for k, v in obj.items()}
@@ -103,6 +98,16 @@ def parse_tool_output(obj: Any) -> Any:
         return [parse_tool_output(item) for item in obj]
 
     return str(obj)
+
+
+def stored_tool_output(result: ToolCallResult) -> dict[str, Any]:
+    """A tool result as stored and streamed, decoded once.
+
+    `error` is set when the call raised or returned {"error": ...}.
+    """
+    output = parse_tool_output(result.to_dict())
+    output["error"] = bool(result.error) or returned_error(output.get("result"))
+    return output
 
 
 # Marker appended when a tool result is cut to the size limit.
@@ -279,6 +284,11 @@ class Stream:
             )
             for tc in self.get_handoff_calls(message)
         ]
+        # Recorded with the turn that made them: the run hands them back, but they are not this
+        # answer's, so they count as stored already.
+        ids = [call.id for call in calls]
+        self._persisted_tool_ids.update(ids)
+        self._persisted_tool_output_ids.update(ids)
         replayed = [HaystackChatMessage.from_assistant(message.content or None, tool_calls=calls)]
         for tool_call, call in zip(self.get_handoff_calls(message), calls, strict=True):
             replayed.append(
@@ -364,7 +374,7 @@ class Stream:
             )
 
         for tool_result in message.tool_call_results:
-            tool_output = parse_tool_output(tool_result.to_dict())
+            tool_output = stored_tool_output(tool_result)
             chunks.append(
                 MessageChunk(
                     type="tool_output",
@@ -659,7 +669,7 @@ class Stream:
                     logger.debug(f"Tool call result: {result.result}")
                 if self._turn is not None:
                     result = await self._turn.mask_tool_result(result)
-                tool_output = parse_tool_output(result.to_dict())
+                tool_output = stored_tool_output(result)
                 self._persist_tool(
                     stream_writer,
                     MessageChunk(
@@ -671,7 +681,7 @@ class Stream:
                     ),
                 )
                 yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
-                if not result.error:
+                if not tool_output["error"]:
                     async for event in self._tool_artifact(stream_writer, result):
                         yield event
 

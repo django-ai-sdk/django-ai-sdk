@@ -303,6 +303,7 @@ def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext
     content = content or {}
     return TurnContext(
         turn_id=str(turn.id),
+        thread_id=turn.thread_id,
         channel=turn.channel,
         agent_id=turn.agent_id,
         agent_name=turn.agent_name,

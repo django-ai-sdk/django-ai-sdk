@@ -33,6 +33,7 @@ from django_ai_sdk.agents.tool_agent import (
     answer_calls_with,
     pending_tool_calls,
     replace_messages,
+    tool_failed,
     tool_results,
 )
 from django_ai_sdk.common import ChatMessage, last_user_message
@@ -90,6 +91,14 @@ class StopClosedTurnHook(OversightHook):
         self.run(state)
 
 
+# On the system message that tells the model which tools oversight took away.
+TOOLS_REMOVED_META_KEY = "django_ai_sdk.oversight.tools_removed"
+TOOLS_REMOVED_NOTE = gettext_lazy(
+    "These tools are not available for this message: {names}. Answer without them, and "
+    "don't say you used them."
+)
+
+
 class LimitToolChoiceHook(OversightHook):
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
@@ -100,7 +109,19 @@ class LimitToolChoiceHook(OversightHook):
         # Haystack hands this same list to the model and the ToolInvoker for the
         # step, so filtering it in place takes the tools away.
         tools = state.data["tools"]
-        tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
+        kept = [tool for tool in tools if guard.allows_tool(tool.name)]
+        removed = sorted({tool.name for tool in tools} - {tool.name for tool in kept})
+        tools[:] = kept
+        messages = state.data.get("messages") or []
+        told = [m.meta.get(TOOLS_REMOVED_META_KEY) for m in messages]
+        # Each step gets the full list again, so the model is told once per set removed.
+        if removed and removed not in told and "messages" in state.schema:
+            # The system prompt may still describe them; told nothing, a model says it used them.
+            note = HaystackChatMessage.from_system(
+                str(TOOLS_REMOVED_NOTE).format(names=", ".join(removed)),
+                meta={TOOLS_REMOVED_META_KEY: removed},
+            )
+            state.set("messages", [note])
 
     async def run_async(self, state: State) -> None:
         self.run(state)
@@ -316,7 +337,7 @@ class MaskToolResultHook(OversightHook):
                     result=masked
                     if isinstance(masked, str)
                     else "\n".join(p.text for p in masked if isinstance(p, TextContent)),
-                    error=bool(result.error),
+                    error=tool_failed(result),
                     agent=_agent_name(state),
                 )
             )

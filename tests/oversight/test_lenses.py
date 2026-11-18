@@ -95,7 +95,9 @@ class TestPII:
 
     async def test_an_address_has_no_format_to_find(self):
         # Code finds what has a fixed shape; a street address or a name needs a model.
-        assert (await answer(PIILens(), turn_context("Mijn adres is Jan Voornstraat 8"))).value == []
+        assert (
+            await answer(PIILens(), turn_context("Mijn adres is Jan Voornstraat 8"))
+        ).value == []
 
     async def test_a_bsn_must_pass_the_eleven_check(self):
         bsn = PIILens(kinds=["bsn"])
@@ -112,9 +114,10 @@ class TestPII:
 
     def test_email_is_linear_on_hostile_input(self):
         email = re.compile(PII_PATTERNS["email"])
-        started = time.perf_counter()
-        assert email.search("a." * 20_000) is None
-        assert time.perf_counter() - started < 0.05
+        for hostile in ("a." * 20_000, "a-" * 20_000, "a [dot] " * 5_000, "a " * 20_000 + "[at]"):
+            started = time.perf_counter()
+            assert email.search(hostile) is None
+            assert time.perf_counter() - started < 0.1
         for address in ("jan.de+x@example.co.uk", "foo.bar@sub.example.com"):
             assert email.search(address).group() == address
         assert email.search("a@b.nl.").group() == "a@b.nl"
@@ -212,6 +215,79 @@ class TestPatternsInTheWild:
         assert "[IBAN]" in masked and "0754" not in masked and "0417" not in masked
         # Only the IBAN: what follows it stays.
         assert masked.split("[IBAN]")[1].split()[0] in {"EUR", "GKCCBEBB", "ABNANL2A"}
+
+    @pytest.mark.parametrize(
+        ("text", "kind", "secret"),
+        [
+            ("rekening nl91abna0417164300 graag", "iban", "0417"),
+            ("Duitse rekening de89-3704-0044-0532-0130-00 ok", "iban", "0532"),
+            ("IBAN NL91\u200bABNA\u200b0417\u200b1643\u200b00 ok", "iban", "0417"),
+            ("BSN 111.222.333 ok", "bsn", "222"),
+            ("BSN 111-222-333 ok", "bsn", "222"),
+            ("BSN 1234 56 782 ok", "bsn", "782"),
+            ("overdracht bsn111222333 ok", "bsn", "222"),
+            ("BSN 111 222 333 ok", "bsn", "222"),
+            ("BSN 111\ufeff222\ufeff333 ok", "bsn", "222"),
+            ("iban mt84malt011000012345mtlcast001s ok", "iban", "0123"),
+            ("bel 06 41 27 88 35 ok", "phone_nl", "88"),
+            ("bel (06) 41278835 ok", "phone_nl", "41278835"),
+            ("bel 06/41278835 ok", "phone_nl", "41278835"),
+            ("bel 06-41-27-88-35 ok", "phone_nl", "88"),
+            ("mail sanne\uff20gmail.com ok", "email", "gmail"),
+            ("mail mehmet [at] ziggo [dot] nl ok", "email", "ziggo"),
+            ("mail jan (AT) example.co.uk ok", "email", "example"),
+            ("mail sanne punt devries apenstaartje gmail punt com ok", "email", "devries"),
+        ],
+    )
+    async def test_numbers_in_other_formats_are_masked(self, text, kind, secret):
+        found = await answer(
+            PIILens(kinds=["iban", "bsn", "phone_nl", "email"]), turn_context(text)
+        )
+        assert found.value == [kind]
+        masked = mask(text, found.spans)
+        assert secret not in masked and masked.endswith(" ok") or masked.endswith("graag")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "offerte 2026-1187",
+            "Totaal 1.170,00",
+            "op 2026/11/17 om 14:00",
+            "INC-0152",
+            # Nine digits that pass the 11-check, labelled as something else.
+            "Garage invoice no. 202611188 for the door",
+            "factuurnummer: 202611188",
+            "Order #202611188",
+            "bestelnummer 202611188",
+            # A date and a time.
+            "afspraak 03-11-2026 14:00",
+            "op 01.02.2026 09:00",
+            # "at" and "dot" as words.
+            "Ik ben (at) home om 5 uur",
+            "we meet at the office dot com later",
+            "kijk op punt 3 en punt 4",
+        ],
+    )
+    async def test_dates_amounts_and_numbers_are_not_masked(self, text):
+        found = await answer(
+            PIILens(kinds=["iban", "bsn", "phone_nl", "email"]), turn_context(text)
+        )
+        assert found.value == []
+
+    @pytest.mark.parametrize(
+        ("text", "masked"),
+        [
+            ("invoice 111222333 and bsn 123456782", "invoice 111222333 and bsn [BSN]"),
+            # Only the label itself: not a longer word, and not a label further back.
+            ("ordered 123456782", "ordered [BSN]"),
+            ("referendum 123456782", "referendum [BSN]"),
+            ("ticket 123456782", "ticket [BSN]"),
+            ("invoice for client 123456782", "invoice for client [BSN]"),
+        ],
+    )
+    async def test_only_a_label_right_before_a_number_makes_it_no_bsn(self, text, masked):
+        found = await answer(PIILens(kinds=["bsn"]), turn_context(text))
+        assert mask(text, found.spans) == masked
 
     async def test_a_card_followed_by_its_expiry_is_masked(self):
         text = "card 4111 1111 1111 1111 2027 please"

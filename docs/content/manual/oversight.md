@@ -101,6 +101,7 @@ Every lens:
 | `sample` | `1.0` | Share of turns the reflect stage judges. Inline stages never sample. |
 | `enabled` | `True` | Off: the lens never runs. |
 | `needs_grounding` | `False` | Only asked when the turn has sources or tool results to judge against. |
+| `judges_tool_results` | `True` | Whether the question can be asked of a tool result. A gate lens that an enforced block or `restrict_tools` rule reads also judges every tool result; `False` keeps it to the question, for a lens about the person writing. A lens a `Mask` rule reads masks tool results either way. |
 
 Each kind adds its own:
 
@@ -182,7 +183,7 @@ The answer is judged whole, at finish: nothing judges it while it streams. A too
 | `Mask(lenses=None, template="[{label}]")` | gate, finish, reflect | `masked` |
 | `Queue(queue="default")`, `Notify(to=None, severity="warning")`, `Alert(severity="warning")` | any | `flagged` |
 
-`Alert` and `Notify` both mark the turn at their severity; `Notify` also sends the match to the notifiers. A severity is `info`, `warning`, `high` or `critical` (`Severity`, or its string); a blocked turn is at least `high`. `Block.DEFAULT_MESSAGE` is "This request can't be answered here."
+`Alert` and `Notify` both mark the turn at their severity; `Notify` also sends the match to the notifiers. While a rule's review is still open on an earlier turn of the same thread, a new match of that rule is recorded and queued, but sends nothing to the notifiers; once the review is resolved, the next match notifies again. A tool call a rule blocks gets the same refusal at once when the model sends it again unchanged; a changed call, such as a note without the part that was refused, is judged again. A severity is `info`, `warning`, `high` or `critical` (`Severity`, or its string); a blocked turn is at least `high`. `Block.DEFAULT_MESSAGE` is "This request can't be answered here."
 
 `Mask` masks the spans of `lenses` (default: every lens the rule reads), each replaced by `template` with the label in capitals (`[EMAIL]`). Every lens it masks must be an `Entities` lens on the question or the answer (`input`, `output` or `exchange`; not `sources`, and not `tool_call`: arguments are judged, never rewritten, so block the call or take the tool away instead), or the policy is refused when it is built. Tool results are masked by the gate's mask rules. An enforced `Mask` that cannot point at what it should mask (a lens it reads failed while the policy fails closed, or answered without spans) blocks instead. Reflect masks only the stored message, and only when the stored text is the text it judged; it appends a `reflect` notice to the message.
 

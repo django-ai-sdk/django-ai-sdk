@@ -138,6 +138,76 @@ class TestHeadless:
         # A Notify marks the turn at its severity by itself, without an Alert beside it.
         assert (await Turn.objects.aget(id=guard.id)).severity == "high"
 
+    def test_reflect_reads_the_gate_answer_not_one_on_a_tool_result(self):
+        from datetime import UTC, datetime, timedelta
+
+        from django_ai_sdk.oversight.reflection import answers_from
+
+        worry = FnLens(name="worry", stages=[Stage.GATE], fn=lambda text, v: True)
+        at = datetime(2026, 1, 1, tzinfo=UTC)
+
+        def row(stage: str, value: bool, later: int) -> SimpleNamespace:
+            return SimpleNamespace(
+                lens="worry",
+                stage=stage,
+                value=value,
+                error="",
+                confidence=1.0,
+                answerer="x",
+                model="",
+                created_at=at + timedelta(seconds=later),
+            )
+
+        # The gate said no about the question; masking later judged a client record yes.
+        rows = [row("gate", False, 0), row("tool", True, 1)]
+        assert answers_from(rows, {"worry": worry})["worry"].value is False
+
+    async def test_an_open_review_is_not_sent_again_in_its_thread(self):
+        from django_ai_sdk.oversight import Notify, Queue
+        from django_ai_sdk.oversight.models import ReviewItem
+        from django_ai_sdk.oversight.notifiers import Notifier
+
+        sent: list[dict] = []
+
+        class Collect(Notifier):
+            async def send(self, event):
+                sent.append(event)
+
+        @register_policy
+        class Watch(Policy):
+            name = "test-watch"
+            lenses = [FnLens(name="worry", stages=[Stage.GATE], fn=lambda text, v: True)]
+            rules = [
+                Rule(
+                    "alert_lead",
+                    when=L("worry").is_true,
+                    then=[Queue("safeguarding"), Notify(severity="critical")],
+                    mode=ENFORCE,
+                )
+            ]
+
+        async def turn(thread: str) -> None:
+            guard = await start("test-watch", "x", thread_id=thread)
+            await guard.gate()
+            await guard.close()
+
+        with override_settings(AI_SDK_OVERSIGHT={"NOTIFIERS": [Collect()]}):
+            await turn("t-1")
+            await turn("t-1")
+            await turn("t-2")
+            # Each turn is listed for review; the lead is told once per thread.
+            assert await ReviewItem.objects.acount() == 3
+            assert len(sent) == 2
+            # Once someone resolves it, the next match is raised again.
+            await ReviewItem.objects.filter(turn__thread_id="t-1").aupdate(
+                status=ReviewItem.Status.DONE
+            )
+            await turn("t-1")
+        assert await ReviewItem.objects.filter(status=ReviewItem.Status.OPEN).acount() == 2
+        assert len(sent) == 3
+        # Every turn still records that the rule matched.
+        assert await RuleMatch.objects.filter(rule="alert_lead").acount() == 4
+
     async def test_a_broken_finish_withholds_the_answer_unless_open(self):
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
             opened = await start("test-guard", "x")

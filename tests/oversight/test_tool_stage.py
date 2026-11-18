@@ -114,6 +114,22 @@ class TestTools:
         turn_id = await guard.close()
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="no_secret_tools").acount() == 1
 
+    async def test_a_corrected_call_after_a_refusal_is_judged_again(self):
+        guard = await TurnGuard.start(make_agent([], None), channel="test", input="go")
+        await guard.gate()
+        refused = ToolCall(name="send", arguments={"text": "sk-proj-abcdefghijklmnopqrstuvwxyz12"})
+        assert await guard.tool_call(refused) == "No."
+        assert guard.allows_tool("send")
+        assert await guard.tool_call(ToolCall(name="send", arguments={"text": "hello"})) is None
+        await guard.close()
+
+    async def test_a_lens_reads_the_turns_thread(self):
+        guard = await TurnGuard.start(
+            make_agent([], None), channel="test", thread_id="t-42", input="go"
+        )
+        assert guard.context.thread_id == "t-42"
+        await guard.close()
+
     async def test_a_headless_tool_loop_reports_its_calls(self):
         from haystack.components.generators.chat import MockChatGenerator
         from haystack.dataclasses import ChatMessage as HaystackChatMessage
@@ -289,6 +305,55 @@ class TestToolResultMasking:
         assert turn.outcome != "blocked"
         assert not await RuleMatch.objects.filter(turn=turn, rule="stop_fraud").aexists()
 
+    async def test_a_lens_about_the_writer_does_not_judge_tool_results(self):
+        from django_ai_sdk.oversight import Block, L, PatternLens, Policy, RestrictTools, Rule
+        from django_ai_sdk.oversight.guard.masking import other_text_lenses
+        from django_ai_sdk.oversight.registry import get_resolved_policy
+
+        @register_policy
+        class Writer(Policy):
+            name = "test-writer"
+            lenses = [
+                PatternLens(
+                    name="relative",
+                    stages=[Stage.GATE],
+                    patterns=[r"my mother"],
+                    judges_tool_results=False,
+                ),
+                PatternLens(name="leak", stages=[Stage.GATE], patterns=[r"wire it"]),
+            ]
+            rules = [
+                Rule(
+                    "records_for_staff",
+                    when=L("relative").is_true,
+                    then=RestrictTools(["lookup"]),
+                    mode=ENFORCE,
+                ),
+                Rule("no_leak", when=L("leak").is_true, then=Block(), mode=ENFORCE),
+            ]
+
+        policy = await get_resolved_policy("test-writer")
+        assert [lens.name for lens in other_text_lenses(policy)] == ["leak"]
+        guard = await start("test-writer")
+        await guard.gate()
+        # A record that mentions someone's mother takes no tools away mid-turn.
+        assert await guard.mask_text("Visited; my mother said hi") == "Visited; my mother said hi"
+        assert guard.restrict is None
+
+    async def test_a_masking_lens_masks_tool_results_whatever_it_says(self):
+        from django_ai_sdk.oversight import L, Mask, PIILens, Policy, Rule
+        from django_ai_sdk.oversight.guard.masking import other_text_lenses
+        from django_ai_sdk.oversight.registry import get_resolved_policy
+
+        @register_policy
+        class Masked(Policy):
+            name = "test-mask-anyway"
+            lenses = [PIILens(name="pii", stages=[Stage.GATE], judges_tool_results=False)]
+            rules = [Rule("mask_pii", when=L("pii").is_true, then=Mask(), mode=ENFORCE)]
+
+        policy = await get_resolved_policy("test-mask-anyway")
+        assert [lens.name for lens in other_text_lenses(policy)] == ["pii"]
+
     async def test_a_result_a_gate_block_refuses_is_withheld_and_a_dict_is_masked(self):
         from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
         from django_ai_sdk.oversight.plugin.hooks import mask_tool_result
@@ -436,6 +501,30 @@ class TestToolsTakenAwayInChat:
             assert offered() == ["lookup"]
             guard.restrict = []
             assert offered() == []
+
+    async def test_the_model_is_told_once_which_tools_were_taken_away(self):
+        from haystack.components.agents.state.state import State
+        from haystack.dataclasses import ChatMessage
+
+        from django_ai_sdk.oversight.guard import guarding
+        from django_ai_sdk.oversight.plugin.hooks import TOOLS_REMOVED_META_KEY, LimitToolChoiceHook
+
+        from tests.oversight.helpers import lookup_tool
+
+        lookup, _ = lookup_tool()
+        send = dataclasses.replace(lookup, name="send")
+        state = State(schema={"messages": {"type": list[ChatMessage]}})
+        state.set("messages", [ChatMessage.from_user("hi")])
+        guard = await start("test-guard")
+        with guarding(guard):
+            guard.restrict = ["send"]
+            for _ in range(2):
+                # Every step offers the full list again.
+                state.data["tools"] = [lookup, send]
+                LimitToolChoiceHook().run(state)
+        notes = [m for m in state.get("messages") if m.meta.get(TOOLS_REMOVED_META_KEY)]
+        assert [n.meta[TOOLS_REMOVED_META_KEY] for n in notes] == [["send"]]
+        assert "send" in notes[0].text
 
     async def test_a_closed_turn_stops_the_run_and_limits_no_tools(self):
         from haystack.components.agents.state.state import State

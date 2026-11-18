@@ -34,7 +34,7 @@ def luhn_ok(digits: str) -> bool:
 
 def iban_ok(value: str) -> bool:
     """ISO 13616 mod-97."""
-    compact = re.sub(r"\s+", "", value).upper()
+    compact = re.sub(r"[^A-Za-z0-9]", "", value).upper()
     if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", compact):
         return False
     rearranged = compact[4:] + compact[:4]
@@ -60,22 +60,51 @@ _NOT_POSTCODE_LETTERS = (
     "TV PC VS AN AS AT BE BY DO GO HE IF IN IS IT ME MY NO OF ON OR SO TO UP US WE"
 ).split()
 
+# What may split the groups of a Dutch-written number (iban, bsn, phone_nl): a space, dash,
+# dot or slash, or an invisible character.
+_SEP = r"[\s\-./\u200b\u200c\u200d\u2060\ufeff]"
+
+# An address spelled out to get past a filter: "jan [at] example [dot] nl", "jan (at) example.nl",
+# "jan apenstaartje example punt nl". A bare "at" and "dot" are left alone: they are prose too.
+# It starts where a run of name characters starts, and no run backtracks, so it stays linear.
+_AT = r"\s{0,3}(?:[\[({<]\s{0,3}(?i:at|@)\s{0,3}[\])}>]|\s(?i:apenstaartje)\s)\s{0,3}"
+_DOT = r"(?:\.|\s{0,3}(?:[\[({<]\s{0,3}(?i:dot|punt|\.)\s{0,3}[\])}>]|\s(?i:dot|punt)\s)\s{0,3})"
+_SPELLED_EMAIL = (
+    rf"(?<![\w+-])[\w+-]{{1,64}}+(?:{_DOT}[\w+-]{{1,64}}+){{0,4}}"
+    rf"{_AT}[\w-]{{1,63}}+(?:{_DOT}[\w-]{{1,63}}+){{1,8}}\b"
+)
+
 # Personal data by kind. Checksummed kinds come first, because when two kinds
 # overlap the earlier one keeps the span. Matched case-sensitively.
 PII_PATTERNS: dict[str, str] = {
     # Bounded repeats so a long run of "a." can't backtrack for seconds.
-    "email": r"\b[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}\b",
-    "iban": r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b",
+    # A full-width @ too: it reads the same.
+    "email": rf"\b[\w.+-]{{1,64}}[@\uff20][\w-]{{1,63}}(?:\.[\w-]{{1,63}}){{1,8}}\b|{_SPELLED_EMAIL}",
+    # Any case, groups split by spaces, dashes, dots or invisible characters; mod-97 decides.
+    "iban": rf"\b[A-Za-z]{{2}}\d{{2}}(?:{_SEP}?[A-Za-z0-9]{{4}}){{2,7}}(?:{_SEP}?[A-Za-z0-9]{{1,4}})?\b",
     "credit_card": r"\b(?:\d[ -]?){12,18}\d\b",
-    "bsn": r"\b\d{9}\b|\b\d{4}\.\d{2}\.\d{3}\b",
+    # Nine digits, whole or in groups (1234.56.782, 111-222-333); the 11-check decides.
+    # Not \b: a BSN glued to its label ("bsn111222333") has no word boundary before it.
+    "bsn": rf"(?<!\d)(?:\d{{9}}|\d{{4}}{_SEP}\d{{2}}{_SEP}\d{{3}}|\d{{3}}{_SEP}\d{{3}}{_SEP}\d{{3}})(?!\d)",
     # International format, with a country code after + or 00.
     "phone": r"(?<![\w+])(?:\+|00)\d{1,3}[\s-]?(?:\(0\)[\s-]?)?\d(?:[\s-]?\d){6,11}\b",
     # Dutch national format, like 06-12345678 or 020 123 4567.
-    "phone_nl": r"\b0(?:6|[1-9]\d)[\s-]?\d{3,4}[\s-]?\d{3,4}\b",
+    # Ten digits starting with 0, in any grouping (06-12345678, 06 12 34 56 78, 06/12345678,
+    # (06) 12345678, 020 123 4567), but not a date and a time (03-11-2026 14:00).
+    "phone_nl": rf"(?<![\w+])(?!\d\d([-./])\d\d\1\d{{4}}\b)"
+    rf"(?:\(0\d{{1,3}}\)\s?(?:{_SEP}?\d){{6,8}}|0(?:{_SEP}?\d){{9}})(?!\d)",
     "ip_address": r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b",
     "postcode_nl": rf"\b[1-9]\d{{3}}\s?(?!(?:{'|'.join(_NOT_POSTCODE_LETTERS)})\b)[A-Z]{{2}}\b",
 }
 PII_VERIFY: dict[str, Verifier] = {"iban": iban_ok, "credit_card": luhn_ok, "bsn": bsn_ok}
+# What, right before a match, makes it something else: "invoice no. 202611188" is an invoice
+# number, though one in eleven such numbers passes the BSN 11-check. Only one of these labels
+# directly before the number counts, so "factuur 111222333" leaves a real BSN unmasked: that
+# is the trade for not masking every eleventh invoice or order number.
+PII_NOT_AFTER: dict[str, str] = {
+    "bsn": r"(?i)\b(?:invoice|factuur|order|bestel|bestelling|referentie|reference|kenmerk)"
+    r"(?:nummer|nr|number)?(?:\s*(?:no|nr|number|nummer|#)\.?)?\s*[:#]?\s*$",
+}
 DEFAULT_PII_KINDS: tuple[str, ...] = ("email", "iban", "credit_card", "phone", "ip_address")
 # Used only when named.
 COUNTRY_PII_KINDS: tuple[str, ...] = ("bsn", "phone_nl", "postcode_nl")

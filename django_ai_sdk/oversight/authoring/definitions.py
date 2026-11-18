@@ -54,7 +54,7 @@ POLICY_OPTIONS = frozenset({"capture", "stream_mode", "fail_mode", "retention"})
 # Validators are names a developer registered.
 LENS_KEYS = frozenset(
     {"kind", "preset", "name", "label", "subject", "stages", "sample", "enabled"}
-    | {"needs_grounding", "answer", *OPTIONS}
+    | {"needs_grounding", "judges_tool_results", "answer", *OPTIONS}
 )
 KIND_KEYS = {
     "pattern": frozenset(),
