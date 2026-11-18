@@ -95,11 +95,8 @@ def watching_turns() -> Generator[list[str]]:
     A run that joins an outer turn opens none, so it adds nothing.
     """
     opened: list[str] = []
-    token = _watched.set(opened)
-    try:
+    with scoped(_watched, opened):
         yield opened
-    finally:
-        _watched.reset(token)
 
 
 def note_opened(guard: TurnGuard) -> None:
