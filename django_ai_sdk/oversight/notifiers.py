@@ -71,10 +71,7 @@ def notify_events(
     stage: str = "",
     outcome: str | None = None,
 ) -> list[tuple[dict[str, Any], list[str]]]:
-    """(the "oversight.match" event, notifier names) for each Notify that acted.
-
-    A rule whose review is still open in the thread is not sent again.
-    """
+    """(the "oversight.match" event, notifier names) for each Notify that acted."""
     notifying = [m for m in matched if any(isinstance(a, Notify) for a in m.acted)]
     events = []
     for match in not_yet_raised(turn_id, thread_id, notifying):

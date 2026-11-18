@@ -5,8 +5,8 @@
         answer = await my_model(question)
         return await t.finish(answer)  # masked; raises Blocked
 
-It opens, joins or skips a turn as `run_with_oversight` does (`oversight.plugin`),
-and inside it the SDK's generators count as overseen (`oversight.calls`).
+It opens, joins or skips a turn as `run_with_oversight` does, and inside it the SDK's
+generators count as overseen.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 class OpenTurn:
-    """The turn that `turn()` yields. Gate the question, then finish the answer.
+    """The turn that `turn()` yields.
 
     When no turn opened (no policy, oversight off, or the run joined an outer
     turn), `guard` is None and `gate()` and `finish()` return their input.
@@ -83,7 +83,7 @@ class OpenTurn:
         return self.input
 
     async def finish(self, result: Any) -> Any:
-        """Return the answer as the policy allows it, or raise `Blocked`.
+        """The answer as the policy allows it; raises `Blocked`.
 
         A Pydantic model comes back as the same model, rebuilt from its masked
         JSON. Anything else comes back as its masked text.

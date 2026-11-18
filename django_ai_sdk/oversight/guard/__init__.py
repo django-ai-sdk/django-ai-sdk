@@ -91,7 +91,6 @@ def is_unguarded() -> bool:
 def watching_turns() -> Generator[list[str]]:
     """Collect the ids of the turns opened inside the block, in order.
 
-    For a caller that records which turn its work ran in, such as a workflow step.
     A run that joins an outer turn opens none, so it adds nothing.
     """
     opened: list[str] = []
@@ -202,7 +201,7 @@ class TurnGuard:
     # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     blocked: bool = False
-    # The gate ran, so a model call now counts as seen (`oversight.calls`).
+    # The gate ran, so a model call now counts as seen.
     gated: bool = False
     original_input: str = ""
     original_output: str = ""

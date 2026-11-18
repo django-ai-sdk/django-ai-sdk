@@ -119,7 +119,7 @@ async def ask_judge(
         )
 
     try:
-        # A judge's own model calls are oversight, not the turn's (`oversight.calls`).
+        # A judge's own model calls are oversight, not the turn's.
         with settled():
             answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
     except TimeoutError:

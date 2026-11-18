@@ -55,7 +55,6 @@ class PatternJudge(Judge):
             if (words := [group] if isinstance(group, str) else list(group))
         ]
         self.verify = verify or {}
-        # A label to what, right before a match, makes it something else.
         self.not_after = {label: re.compile(p, flags) for label, p in (not_after or {}).items()}
         self.miss_confidence = miss_confidence
 
