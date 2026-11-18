@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import timedelta
 from io import StringIO
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -418,3 +419,35 @@ class TestForgettingRacesAClose:
         turn = Turn.objects.get(id=guard.id)
         assert (turn.status, turn.content_id, turn.content_forgotten) == ("closed", None, True)
         assert not TurnContent.objects.exists()
+
+    def test_a_review_closed_during_a_forget_keeps_no_note(self):
+        from asgiref.sync import async_to_sync
+        from django_ai_sdk.oversight.schemas import ResolveIn
+        from django_ai_sdk.oversight.services import OversightService
+
+        from tests.oversight.review.helpers import CONTENT, METRICS, REVIEW, reader
+
+        async def queued() -> tuple[ReviewItem, Any]:
+            guard = await start("test-guard", QUESTION, thread_id="t-race-note")
+            await guard.gate()
+            await closed_turn(guard)
+            item = await ReviewItem.objects.acreate(turn_id=guard.id, queue="q")
+            return item, await reader(METRICS, CONTENT, REVIEW)
+
+        item, user = async_to_sync(queued)()
+        forgot = threading.Event()
+
+        def forget() -> None:
+            with transaction.atomic():
+                content.forget_thread("t-race-note")
+                forgot.set()
+                time.sleep(0.5)
+
+        def resolve() -> None:
+            forgot.wait(5)
+            verdict = ResolveIn(agree=True, note="Jan said so")
+            async_to_sync(OversightService.resolve_review)(str(item.id), verdict, user=user)
+
+        race(forget, resolve)
+        item.refresh_from_db()
+        assert (item.status, item.note) == ("done", "")
