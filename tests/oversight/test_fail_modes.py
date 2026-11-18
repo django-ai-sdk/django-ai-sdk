@@ -23,7 +23,7 @@ from django_ai_sdk.oversight import (
     register_policy,
 )
 from django_ai_sdk.oversight import Judge, LLMJudge
-from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
+from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall
 
@@ -228,6 +228,25 @@ class TestFailModeAtEachStage:
             [Rule("r", when=L("g").is_true & L("other").is_true, then=Block(), mode=ENFORCE)],
         )
         assert not (await gate(name)).blocked
+
+    async def test_a_failure_blocks_but_never_alerts_or_queues(self):
+        name = policy(
+            "fx-failed-quiet",
+            [gate_flag(broken)],
+            [
+                Rule(
+                    "r",
+                    when=L("g").is_true,
+                    then=[Block(), Alert("critical"), Queue("q")],
+                    mode=ENFORCE,
+                )
+            ],
+        )
+        guard = await start(name)
+        assert (await guard.gate()).blocked
+        turn = await closed_turn(guard)
+        assert turn.severity == "high"
+        assert not await ReviewItem.objects.filter(turn=turn).aexists()
 
     async def test_a_policy_may_opt_out_with_fail_mode_open(self):
         name = policy(

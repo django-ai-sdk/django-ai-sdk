@@ -259,8 +259,8 @@ def match_rules(
     reflect lenses can share a rule, unless what has answered already decides
     one that stops the turn at the gate or finish. A test on an `errored` lens is
     unknown, never true. With `fail_closed`, a failed lens that leaves an enforced rule
-    undecided fires it when it would block, mask or restrict tools here; alerts never
-    fire on failure.
+    undecided fires it with only its block, mask or tool restriction here: a failure
+    never alerts, queues or notifies.
     """
     answered = set(answers) | set(errored)
     # A failed lens may keep an unsure answer for the record; it decides nothing.
@@ -297,12 +297,10 @@ def match_rules(
             continue
         if rule.when.matches(answers, errored):
             matched.append(Matched(rule, stage, acted))
-        elif (
-            fail_closed
-            and rule.when.matches(known, errored) is None
-            and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
-        ):
-            matched.append(Matched(rule, stage, acted, failed=True))
+        elif fail_closed and rule.when.matches(known, errored) is None:
+            kept = [a for a in acted if a.kind in FAIL_CLOSED_ACTIONS]
+            if kept:
+                matched.append(Matched(rule, stage, kept, failed=True))
     return matched
 
 
