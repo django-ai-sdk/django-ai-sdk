@@ -27,7 +27,7 @@ from django_ai_sdk.oversight.guard.stages import (
     MAX_HISTORY_JUDGED,
     StageResult,
 )
-from django_ai_sdk.oversight.models import RuleMatch
+from django_ai_sdk.oversight.models import ReviewItem, RuleMatch
 from django_ai_sdk.oversight.types import (
     Stage,
 )
@@ -298,6 +298,13 @@ class TestStoredHistory:
         with pytest.raises(Blocked):
             await agent.run([ChatMessage(role=role, content=text) for role, text in said])
         assert not model.asked
+
+    async def test_a_reply_after_the_question_leaves_it_the_question(self):
+        """A client may end on an assistant message; the question is still the person's."""
+        agent = make_agent(["Fine."], Storage())
+        said = [("user", "what is my salary?"), ("assistant", "Let me look that up:")]
+        await chat_turns(agent, said)
+        assert await ReviewItem.objects.filter(queue="hr").aexists()
 
     async def test_chat_without_a_thread_refuses_what_gate_history_refuses(self):
         async def refuse(self, messages, **kwargs):  # noqa: ANN001, ANN202

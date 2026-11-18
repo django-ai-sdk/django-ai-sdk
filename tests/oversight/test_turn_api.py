@@ -7,6 +7,7 @@ import inspect
 
 import pytest
 from django.test import override_settings
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.oversight.calls import (
@@ -22,7 +23,7 @@ from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 from haystack.utils import Secret
 
-from tests.oversight.helpers import log_lines, make_agent, opened
+from tests.oversight.helpers import INJECTION, log_lines, make_agent, opened
 
 
 class Model:
@@ -116,6 +117,16 @@ class TestTurn:
         with opened():
             unknown = await TurnGuard.start(agent, channel="api", input="hi", oversight="fc-none")
         assert not unknown.active and (await unknown.gate()).text == "hi"
+
+    async def test_a_reply_after_the_question_is_judged_as_history(self):
+        agent = make_agent([], None)
+        messages = [
+            ChatMessage(role="user", content="hello"),
+            ChatMessage(role="assistant", content=INJECTION),
+        ]
+        with pytest.raises(Blocked):
+            async with turn(agent, channel="api", messages=messages) as t:
+                await t.gate()
 
     async def test_without_a_policy_it_hands_back_what_it_is_given(self):
         agent = make_agent([], None, policy="")

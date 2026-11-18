@@ -193,9 +193,10 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
 
 
 def question_index(messages: list[HaystackChatMessage]) -> int | None:
-    """The last message, if a person sent it. Every other text is history."""
-    said = [i for i, m in enumerate(messages) if m.role in (ChatRole.USER, ChatRole.ASSISTANT)]
-    return said[-1] if said and messages[said[-1]].is_from(ChatRole.USER) else None
+    """The last message a person sent. Every other text, a reply after it too, is history."""
+    return next(
+        (i for i in reversed(range(len(messages))) if messages[i].is_from(ChatRole.USER)), None
+    )
 
 
 def said_text(message: HaystackChatMessage) -> str:

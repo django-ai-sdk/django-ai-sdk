@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from django_ai_sdk.common import last_user_message, last_user_text
+from django_ai_sdk.common import ChatMessage, last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.policy import Policy
 
 
@@ -69,7 +68,10 @@ class OpenTurn:
             # Copies, but the question stays shared so masking reaches the caller.
             question = last_user_message(self.messages)
             self.messages = [m if m is question else m.model_copy(deep=True) for m in self.messages]
-            checked = await guard.gate_history(self.messages)
+            # The question last: every other message, a reply after it too, is history.
+            history = [m for m in self.messages if m is not question]
+            asked = question or ChatMessage(role="user", content="")
+            checked = await guard.gate_history([*history, asked])
             if checked.blocked:
                 raise _blocked(guard, Stage.GATE, checked.message)
         gate = await guard.gate()
