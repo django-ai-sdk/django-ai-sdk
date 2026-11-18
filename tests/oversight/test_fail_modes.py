@@ -220,6 +220,15 @@ class TestFailModeAtEachStage:
         with opened():
             assert not (await (await start(name)).gate()).blocked
 
+    async def test_a_failed_lens_does_not_overturn_what_answered(self):
+        """One judge said no to a rule that needs both: a second that is down changes nothing."""
+        name = policy(
+            "fx-and-decided",
+            [gate_flag(broken), gate_flag(lambda text, context: False, "other")],
+            [Rule("r", when=L("g").is_true & L("other").is_true, then=Block(), mode=ENFORCE)],
+        )
+        assert not (await gate(name)).blocked
+
     async def test_a_policy_may_opt_out_with_fail_mode_open(self):
         name = policy(
             "fx-opt-out",

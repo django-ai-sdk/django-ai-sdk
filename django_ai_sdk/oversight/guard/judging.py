@@ -258,10 +258,13 @@ def match_rules(
     A rule waits until every lens it reads has had its chance, so gate and
     reflect lenses can share a rule, unless what has answered already decides
     one that stops the turn at the gate or finish. A test on an `errored` lens is
-    unknown, never true. With `fail_closed`, a failed lens fires an enforced rule only
-    when it would block, mask or restrict tools here; alerts never fire on failure.
+    unknown, never true. With `fail_closed`, a failed lens that leaves an enforced rule
+    undecided fires it when it would block, mask or restrict tools here; alerts never
+    fire on failure.
     """
     answered = set(answers) | set(errored)
+    # A failed lens may keep an unsure answer for the record; it decides nothing.
+    known = {name: answer for name, answer in answers.items() if name not in errored}
     matched: list[Matched] = []
     for rule in policy.active_rules():
         if rule.name in done:
@@ -292,14 +295,13 @@ def match_rules(
         )
         if pending and not (stops and rule.when.matches(answers, {*errored, *pending}) is True):
             continue
-        failed = (
-            fail_closed
-            and bool(reads & set(errored))
-            and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
-        )
         if rule.when.matches(answers, errored):
             matched.append(Matched(rule, stage, acted))
-        elif failed:
+        elif (
+            fail_closed
+            and rule.when.matches(known, errored) is None
+            and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
+        ):
             matched.append(Matched(rule, stage, acted, failed=True))
     return matched
 
