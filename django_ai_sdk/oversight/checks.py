@@ -268,8 +268,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
             continue
         messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
         messages.extend(lens_checks(name, resolved))
-        messages.extend(reflect_block_checks(name, resolved))
-        messages.extend(mask_wait_checks(name, resolved))
+        messages.extend(waiting_rule_checks(name, resolved))
         if name in in_use:
             messages.extend(stream_mode_checks(name, resolved))
     return messages
@@ -303,70 +302,47 @@ def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool
     return messages
 
 
-def reflect_block_checks(name: str, resolved: Any) -> list[Any]:
-    """Enforced rules that block or take tools away, reading a lens judged only at reflect.
-
-    When their inline lens fails closed (or leaves the rule undecided), the rule waits for
-    the reflect lens, and by reflect it can no longer block or take tools away.
-    """
+def waiting_rule_checks(name: str, resolved: Any) -> list[Any]:
+    """Enforced rules that wait for a lens judged too late for them to act."""
     messages: list[Any] = []
+    gate_masking = {lens.name for lens in gate_masking_lenses(resolved)}
     for rule in resolved.active_rules():
-        stopping = sorted({a.kind for a in rule.then} & {"block", "restrict_tools"})
-        if rule.mode is not Mode.ENFORCE or not stopping:
+        if rule.mode is not Mode.ENFORCE:
             continue
         lenses = [
             lens
             for n in sorted(rule.lenses())
             if (lens := resolved.lenses.get(n)) is not None and lens.enabled
         ]
+        stopping = sorted({a.kind for a in rule.then} & {"block", "restrict_tools"})
         inline = [lens.name for lens in lenses if set(lens.stages) & set(INLINE_STAGES)]
-        later = [lens.name for lens in lenses if set(lens.stages) == {Stage.REFLECT}]
-        if not (inline and later):
-            continue
-        messages.append(
-            Warning(
-                f"Enforced rule {rule.name!r} in policy {name!r} would {' or '.join(stopping)} "
-                f"on {inline}, but also reads {later}, judged only at reflect: when "
-                f"{inline} fail or leave it undecided, the rule waits for reflect, where it "
-                "can no longer act.",
-                hint="Judge those lenses inline too, or split the rule: one that blocks on "
-                "the inline lenses, and one for reflect that alerts or queues.",
-                id=f"{PREFIX}.W018",
+        reflect_only = [lens.name for lens in lenses if set(lens.stages) == {Stage.REFLECT}]
+        if stopping and inline and reflect_only:
+            messages.append(
+                Warning(
+                    f"Enforced rule {rule.name!r} in policy {name!r} would "
+                    f"{' or '.join(stopping)} on {inline}, but also reads {reflect_only}, "
+                    f"judged only at reflect: when {inline} fail or leave it undecided, the "
+                    "rule waits for reflect, where it can no longer act.",
+                    hint="Judge those lenses inline too, or split the rule: one that blocks on "
+                    "the inline lenses, and one for reflect that alerts or queues.",
+                    id=f"{PREFIX}.W018",
+                )
             )
-        )
-    return messages
-
-
-def mask_wait_checks(name: str, resolved: Any) -> list[Any]:
-    """Enforced rules that mask the question, reading a lens judged after the gate.
-
-    The rule waits for that lens, so by then the model has read the question unmasked.
-    """
-    messages: list[Any] = []
-    gate = {lens.name for lens in gate_masking_lenses(resolved)}
-    for rule in resolved.active_rules():
         masks = [a for a in rule.then if isinstance(a, Mask)]
-        if rule.mode is not Mode.ENFORCE or not masks:
-            continue
-        masked = sorted(gate & {n for a in masks for n in a.lenses or rule.lenses()})
-        later = sorted(
-            n
-            for n in rule.lenses()
-            if (lens := resolved.lenses.get(n)) is not None
-            and lens.enabled
-            and Stage.GATE not in lens.stages
-        )
-        if not (masked and later):
-            continue
-        messages.append(
-            Warning(
-                f"Enforced rule {rule.name!r} in policy {name!r} masks {masked} in the "
-                f"question, but also reads {later}, judged after the gate: the rule waits "
-                "for them, so the model reads the question unmasked.",
-                hint="Split the rule: one that masks on the gate lenses, and one for the others.",
-                id=f"{PREFIX}.W019",
+        masked = sorted(gate_masking & {n for a in masks for n in a.lenses or rule.lenses()})
+        after_gate = [lens.name for lens in lenses if Stage.GATE not in lens.stages]
+        if masked and after_gate:
+            messages.append(
+                Warning(
+                    f"Enforced rule {rule.name!r} in policy {name!r} masks {masked} in the "
+                    f"question, but also reads {after_gate}, judged after the gate: the rule "
+                    "waits for them, so the model reads the question unmasked.",
+                    hint="Split the rule: one that masks on the gate lenses, and one for the "
+                    "others.",
+                    id=f"{PREFIX}.W019",
+                )
             )
-        )
     return messages
 
 
