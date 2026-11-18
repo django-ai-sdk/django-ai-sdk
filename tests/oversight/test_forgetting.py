@@ -112,6 +112,17 @@ class TestForgetTurns:
         assert await LensAnswer.objects.filter(turn=turn).aexists()
         assert not await TurnContent.objects.aexists()
 
+    async def test_an_interrupted_turn_forgotten_then_closing_stores_nothing(self):
+        guard = await start("test-guard", QUESTION)
+        await guard.gate()
+        # oversight_sweep found it, but its run was only slow.
+        await Turn.objects.filter(id=guard.id).aupdate(status=Turn.Status.INTERRUPTED)
+        await sync_to_async(forget_turns)(Turn.objects.filter(id=guard.id))
+        await guard.finish(ANSWER)
+        turn = await closed_turn(guard)
+        assert (turn.content_id, turn.content_forgotten) == (None, True)
+        assert not await TurnContent.objects.aexists()
+
     async def test_another_turn_keeps_its_content(self):
         gone, kept = await a_threadless_turn(), await a_threadless_turn()
         await sync_to_async(forget_turns)(Turn.objects.filter(id=gone))

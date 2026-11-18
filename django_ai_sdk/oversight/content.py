@@ -265,8 +265,9 @@ def forget_thread(thread_id: Any) -> None:
 def forget_turns(turns: QuerySet[Turn]) -> None:
     """Delete the turns' content and reviewers' notes; the turns stay. Run in a transaction.
 
-    Locking first means a turn closing now either finds itself `content_forgotten`
-    or has stored its content already, which is deleted here.
+    Locking first means a turn closing now, or later after it was swept as interrupted,
+    either finds itself `content_forgotten` or has stored its content already, which is
+    deleted here.
     """
     from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
 
@@ -277,9 +278,10 @@ def forget_turns(turns: QuerySet[Turn]) -> None:
     # SET_NULL clears the turns' content link.
     TurnContent.objects.filter(pk__in=[c for _, c, _ in locked if c is not None]).delete()
     ReviewItem.objects.filter(turn_id__in=ids).exclude(note="").update(note="")
-    open_ids = [pk for pk, _, status in locked if status == Turn.Status.OPEN]
-    if open_ids:
-        Turn.objects.filter(pk__in=open_ids).update(content_forgotten=True)
+    # An interrupted turn may still close: it stores nothing either.
+    unclosed = [pk for pk, _, status in locked if status != Turn.Status.CLOSED]
+    if unclosed:
+        Turn.objects.filter(pk__in=unclosed).update(content_forgotten=True)
 
 
 def forget_actor(actor_id: str) -> int:
