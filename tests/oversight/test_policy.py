@@ -281,6 +281,10 @@ class TestRuleEvaluation:
         # Restricting tools early would lose the mask at finish; blocking ends the turn.
         assert not at_gate(either, RestrictTools(["search"]), Mask())
         assert at_gate(either, Block(), Mask())
+        # At the tool stage a block only refuses the call, so the rule waits for finish.
+        rule.when, rule.then = L("secrets_tool_call").is_true | (L("groundedness") < 0.5), [Block()]
+        called = {"secrets_tool_call": ans(["key"])}
+        assert rule not in [m.rule for m in match_rules(resolved, called, Stage.TOOL, done=set())]
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build_policy("test-parent")

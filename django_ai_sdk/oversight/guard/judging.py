@@ -257,7 +257,7 @@ def match_rules(
 
     A rule waits until every lens it reads has had its chance, so gate and
     reflect lenses can share a rule. A rule that would block or restrict tools
-    here does not wait when the lenses that have answered already decide it, like
+    at the gate or finish does not wait when the lenses that have answered already decide it, like
     an `any` with one test true; one that masks still waits, to see every lens's
     spans. A test on an `errored` lens is unknown,
     never true. With `fail_closed`, a failed lens fires an enforced rule only
@@ -286,9 +286,12 @@ def match_rules(
                 acted.append(Block(rule.message))
         pending = {name for name in reads if _still_to_answer(policy, name, stage, answered)}
         kinds = {a.kind for a in acted}
-        # A block ends the turn, so its other actions do not matter. A tool restriction
-        # that also masks waits, or the mask would never see the answer.
-        stops = "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
+        # A block at the gate or finish ends the turn, so its other actions do not matter;
+        # at the tool stage it only refuses the call. A tool restriction that also masks
+        # waits, or the mask would never see the answer.
+        stops = stage is not Stage.TOOL and (
+            "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
+        )
         if pending and not (stops and rule.when.matches(answers, {*errored, *pending}) is True):
             continue
         failed = (
