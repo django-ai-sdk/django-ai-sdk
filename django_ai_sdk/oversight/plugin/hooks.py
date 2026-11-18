@@ -27,7 +27,7 @@ from haystack.dataclasses import ChatRole, TextContent
 from pydantic import ValidationError
 
 from django_ai_sdk.adapters.citations.registry import current_registry
-from django_ai_sdk.adapters.run import get_user_text
+from django_ai_sdk.adapters.run import ATTACHMENT_CONTEXT_META_KEY, get_user_text
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
@@ -37,7 +37,7 @@ from django_ai_sdk.agents.tool_agent import (
     tool_failed,
     tool_results,
 )
-from django_ai_sdk.common import ChatMessage
+from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
 from django_ai_sdk.oversight.plugin.request import REQUEST_KEY, TurnRequest
@@ -203,8 +203,14 @@ def said_text(message: HaystackChatMessage) -> str:
 
 
 def as_judged(message: HaystackChatMessage) -> ChatMessage:
+    """A copy to judge, with any attachment context apart from what the person wrote."""
+    text = said_text(message)
     role = "user" if message.is_from(ChatRole.USER) else "assistant"
-    return ChatMessage(role=role, content=said_text(message))
+    at = message.meta.get(ATTACHMENT_CONTEXT_META_KEY)
+    if at is None:
+        return ChatMessage(role=role, content=text)
+    context = Attachment(document_id="", context=text[at + len("\n\n") :])
+    return ChatMessage(role=role, content=text[:at], attachments=[context])
 
 
 def masked_message(message: HaystackChatMessage, text: str) -> HaystackChatMessage:

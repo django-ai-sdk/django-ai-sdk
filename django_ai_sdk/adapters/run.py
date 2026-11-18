@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# On a user message whose text ends in attachment context: where that context starts.
+ATTACHMENT_CONTEXT_META_KEY = "django_ai_sdk.attachment_context_at"
+
 
 def get_user_text(message: ChatMessage) -> str:
     """User text followed by the context line of each attachment."""
@@ -35,14 +38,18 @@ def user_content(message: ChatMessage, text: str) -> str | None:
 def get_user_message(message: ChatMessage) -> HaystackChatMessage:
     """Haystack user message, multimodal when images were inlined for a vision model."""
     text = get_user_text(message)
+    # The gate judges attachment context apart: a stored thread never vouches for it.
+    meta = {ATTACHMENT_CONTEXT_META_KEY: len(message.content)} if text != message.content else None
     images = [
         ImageContent(base64_image=a.data, mime_type=a.media_type)
         for a in message.attachments
         if a.data
     ]
     if not images:
-        return HaystackChatMessage.from_user(text)
-    return HaystackChatMessage.from_user(content_parts=[text, *images] if text else images)
+        return HaystackChatMessage.from_user(text, meta=meta)
+    return HaystackChatMessage.from_user(
+        meta=meta, content_parts=[text, *images] if text else images
+    )
 
 
 class Run:

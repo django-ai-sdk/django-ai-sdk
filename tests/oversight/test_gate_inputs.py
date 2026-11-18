@@ -491,3 +491,31 @@ class TestAttachments:
         ):
             await chat_turns(agent, [("user", "hi")], thread_id=str(thread.id), user=user)
         assert calls == [{"history": False}]
+
+    async def test_a_stored_thread_judges_earlier_attachment_context_on_a_run(self):
+        """Rebuilt from the document each turn, so the thread never vouched for it."""
+        user = await UserFactory.acreate()
+        thread = await a_thread(user)
+        agent = make_agent(["Fine."], Storage())
+        earlier = ChatMessage(
+            role="user", content="first", attachments=[Attachment(document_id="d0")]
+        )
+        conversation = [earlier, ChatMessage(role="assistant", content="ok")]
+        conversation.append(ChatMessage(role="user", content="and now?"))
+
+        async def resolve(thread_id, messages, **kwargs):  # noqa: ANN001, ANN202
+            for attachment in earlier.attachments:
+                attachment.context = INJECTION
+
+        async def vouched(policy, storage, messages):  # noqa: ANN001, ANN202
+            return messages
+
+        with (
+            patch.object(agent.protocol_handler, "to_chat_messages", return_value=conversation),
+            patch("django_ai_sdk.memories.services.MemoryService.resolve_attachments", resolve),
+            patch("django_ai_sdk.oversight.history.thread_history", vouched),
+        ):
+            parts = await chat_turns(
+                agent, [("user", "and now?")], thread_id=str(thread.id), user=user
+            )
+        assert text_of(parts) != "Fine."
