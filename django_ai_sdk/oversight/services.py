@@ -137,7 +137,7 @@ class OversightService(OversightAccess):
             content=visible_content(content),
             content_state=state,
             answers=[_answer_out(a, resolved, texts if shown else None) for a in answers],
-            reviews=[_review_out(r, shown=shown) for r in reviews],
+            reviews=[_review_out(r, shown=content is not None) for r in reviews],
             error=turn.error,
             parent_turn_id=str(turn.parent_turn_id or ""),
             agent_fingerprint=turn.agent_fingerprint,
@@ -187,7 +187,12 @@ class OversightService(OversightAccess):
             rows = {row.id: row for row in await _turn_rows(listed, shown, reviews)}
         return Page[ReviewOut](
             items=[
-                _review_out(r, rows.get(str(r.turn_id)), shown=r.turn_id in shown) for r in items
+                _review_out(
+                    r,
+                    rows.get(str(r.turn_id)),
+                    shown=r.turn_id in shown and load_content(r.turn) is not None,
+                )
+                for r in items
             ],
             limit=limit,
             next_cursor=next_cursor,
@@ -218,7 +223,9 @@ class OversightService(OversightAccess):
         await cls.has_perms(user, REVIEW)
         if verdict.dismiss == (verdict.agree is not None):
             raise UserError("Say whether the rule was right (agree), or dismiss the item.")
-        scoped = await cls.scoped(user, REVIEW, ReviewItem.objects.select_related("turn"))
+        scoped = await cls.scoped(
+            user, REVIEW, ReviewItem.objects.select_related("turn", "turn__content")
+        )
         pk = as_uuid(item_id)
         item = await scoped.filter(pk=pk).afirst() if pk else None
         if item is None:
@@ -231,7 +238,8 @@ class OversightService(OversightAccess):
             "resolved_at": timezone.now(),
             "resolved_by_id": me,
             "agree": verdict.agree,
-            "note": verdict.note,
+            # The note is content: kept only while the turn's content is.
+            "note": verdict.note if load_content(item.turn) is not None else "",
         }
         claimed = await ReviewItem.objects.filter(
             pk=item.pk, status=ReviewItem.Status.OPEN
@@ -514,7 +522,7 @@ def _answer_out(
 
 
 def _review_out(item: Any, row: TurnOut | None = None, *, shown: bool) -> ReviewOut:
-    """`shown`: the reader may see the turn's content, which includes the note."""
+    """`shown`: the reader may see the turn's content, which includes the note, and it is kept."""
     return ReviewOut(
         id=str(item.id),
         turn_id=str(item.turn_id),
