@@ -95,7 +95,7 @@ class StopClosedTurnHook(OversightHook):
 
 # On the system message that tells the model which tools oversight took away.
 TOOLS_REMOVED_META_KEY = "django_ai_sdk.oversight.tools_removed"
-TOOLS_REMOVED_NOTE = gettext_lazy(
+TOOLS_REMOVED_MESSAGE = gettext_lazy(
     "These tools are not available for this message: {names}. Answer without them, and "
     "don't say you used them."
 )
@@ -120,7 +120,7 @@ class LimitToolChoiceHook(OversightHook):
         if removed and removed not in told and "messages" in state.schema:
             # The system prompt may still describe them; told nothing, a model says it used them.
             note = HaystackChatMessage.from_system(
-                str(TOOLS_REMOVED_NOTE).format(names=", ".join(removed)),
+                str(TOOLS_REMOVED_MESSAGE).format(names=", ".join(removed)),
                 meta={TOOLS_REMOVED_META_KEY: removed},
             )
             state.set("messages", [note])

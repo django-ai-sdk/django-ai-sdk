@@ -288,7 +288,7 @@ def match_rules(
         pending = {name for name in reads if _still_to_answer(policy, name, stage, answered)}
         kinds = {a.kind for a in acted}
         # A block at the gate or finish ends the turn, so its other actions do not matter;
-        # at the tool stage it only refuses the call. A tool restriction that also masks
+        # at the tool stage it only blocks the call. A tool restriction that also masks
         # waits, or the mask would never see the answer.
         stops = stage is not Stage.TOOL and (
             "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
