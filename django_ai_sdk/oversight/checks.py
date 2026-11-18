@@ -22,6 +22,7 @@ from django_ai_sdk.oversight.conf import (
     setting,
 )
 from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
+from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
 from django_ai_sdk.oversight.judges.base import Judge, Maybe, alias_defined, build_judge
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.notifiers import configured_notifiers
@@ -32,7 +33,7 @@ from django_ai_sdk.oversight.registry import (
     get_invalid_policies,
     get_policies,
 )
-from django_ai_sdk.oversight.rules import Notify
+from django_ai_sdk.oversight.rules import Mask, Notify
 from django_ai_sdk.oversight.tasks import reflect_turn
 from django_ai_sdk.oversight.types import INLINE_STAGES, Capture, Mode, Stage
 
@@ -268,6 +269,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
         messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
         messages.extend(lens_checks(name, resolved))
         messages.extend(reflect_block_checks(name, resolved))
+        messages.extend(mask_wait_checks(name, resolved))
         if name in in_use:
             messages.extend(stream_mode_checks(name, resolved))
     return messages
@@ -330,6 +332,39 @@ def reflect_block_checks(name: str, resolved: Any) -> list[Any]:
                 hint="Judge those lenses inline too, or split the rule: one that blocks on "
                 "the inline lenses, and one for reflect that alerts or queues.",
                 id=f"{PREFIX}.W018",
+            )
+        )
+    return messages
+
+
+def mask_wait_checks(name: str, resolved: Any) -> list[Any]:
+    """Enforced rules that mask the question, reading a lens judged after the gate.
+
+    The rule waits for that lens, so by then the model has read the question unmasked.
+    """
+    messages: list[Any] = []
+    gate = {lens.name for lens in gate_masking_lenses(resolved)}
+    for rule in resolved.active_rules():
+        masks = [a for a in rule.then if isinstance(a, Mask)]
+        if rule.mode is not Mode.ENFORCE or not masks:
+            continue
+        masked = sorted(gate & {n for a in masks for n in a.lenses or rule.lenses()})
+        later = sorted(
+            n
+            for n in rule.lenses()
+            if (lens := resolved.lenses.get(n)) is not None
+            and lens.enabled
+            and Stage.GATE not in lens.stages
+        )
+        if not (masked and later):
+            continue
+        messages.append(
+            Warning(
+                f"Enforced rule {rule.name!r} in policy {name!r} masks {masked} in the "
+                f"question, but also reads {later}, judged after the gate: the rule waits "
+                "for them, so the model reads the question unmasked.",
+                hint="Split the rule: one that masks on the gate lenses, and one for the others.",
+                id=f"{PREFIX}.W019",
             )
         )
     return messages

@@ -423,6 +423,7 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 | `ai_sdk.oversight.W015` | A policy in use has an enforced `Notify` rule, but `NOTIFIERS` is empty: nobody is told. |
 | `ai_sdk.oversight.W017` | Deploy check, against a database (`check --deploy --database default`): turns have been open for more than a day, so `oversight_sweep` does not run. |
 | `ai_sdk.oversight.W018` | An enforced rule that blocks or takes tools away reads a lens judged at the gate, tool stage or finish and one judged only at reflect. When the inline lens fails closed or leaves the rule undecided, the rule waits for reflect, where it can no longer block or take tools away. Judge those lenses inline too, or split the rule. |
+| `ai_sdk.oversight.W019` | An enforced rule masks the question with a gate lens, but also reads a lens judged after the gate. The rule waits for that lens, so the model reads the question unmasked. Split the rule: one that masks on the gate lenses, and one for the others. |
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 

@@ -13,9 +13,11 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     LLMJudge,
+    Mask,
     Mode,
     Maybe,
     PatternJudge,
+    PIILens,
     Policy,
     Rule,
     register_policy,
@@ -303,6 +305,28 @@ class TestChecks:
         warned = [m.msg for m in policy_checks(set()) if m.id.endswith(".W018")]
         assert any(repr(mixed) in msg and "'r'" in msg for msg in warned)
         assert not any(repr(reported) in msg or repr(alone) in msg for msg in warned)
+
+    def test_a_mask_that_waits_past_the_gate_warns(self):
+        # The rule waits for the finish lens, so the model reads the question unmasked.
+        from django_ai_sdk.oversight.checks import policy_checks
+
+        asked = PIILens(name="asked", stages=[Stage.GATE], kinds=["email"])
+        said = PIILens(name="said", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"])
+        either = L("asked").is_true | L("said").is_true
+        waits = policy(
+            "fc-mask-waits", [asked, said], [Rule("m", when=either, then=Mask(), mode=ENFORCE)]
+        )
+        split = policy(
+            "fc-mask-split",
+            [asked, said],
+            [
+                Rule("m", when=L("asked").is_true, then=Mask(), mode=ENFORCE),
+                Rule("n", when=L("said").is_true, then=Mask(), mode=ENFORCE),
+            ],
+        )
+        warned = [m.msg for m in policy_checks(set()) if m.id.endswith(".W019")]
+        assert any(repr(waits) in msg and "'m'" in msg for msg in warned)
+        assert not any(repr(split) in msg for msg in warned)
 
     def test_a_policy_name_declared_twice_is_an_error(self, registry_snapshot: Any):
         class First(Policy):
