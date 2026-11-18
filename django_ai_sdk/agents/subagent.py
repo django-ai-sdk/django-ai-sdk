@@ -25,6 +25,7 @@ from django_ai_sdk.utils import resolve_setting
 
 from .tool_agent import (
     SKIPPED_META_KEY,
+    STREAMED_META_KEY,
     ToolAgent,
     default_hooks,
 )
@@ -221,6 +222,8 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
     """Chunks for tool results the run produced without streaming them."""
     chunks = []
     for message in result.get("messages") or []:
+        if message.meta.get(STREAMED_META_KEY):
+            continue
         for tool_result in message.tool_call_results or []:
             origin_id = tool_result.origin.id or ""
             if origin_id in seen:

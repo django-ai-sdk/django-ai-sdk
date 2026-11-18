@@ -23,6 +23,8 @@ TRUNCATED_META_KEY = "django_ai_sdk.truncated"
 # On a stub result for a call oversight blocked (True) or skipped with it (False).
 # The value stays as messages already stored carry it.
 BLOCKED_META_KEY = "django_ai_sdk.refused"
+# On a stub the turn's stream already sent, so no one sends it again.
+STREAMED_META_KEY = "django_ai_sdk.streamed"
 # On a tool result oversight has checked for masking.
 MASKED_META_KEY = "django_ai_sdk.masked"
 

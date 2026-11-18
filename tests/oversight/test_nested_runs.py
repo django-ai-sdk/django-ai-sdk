@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 from django.test import override_settings
 from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
+from haystack.dataclasses import ToolCall as HaystackToolCall
 from haystack.tools import Tool
 
 from django_ai_sdk.agents import Agent
@@ -21,8 +23,10 @@ from tests.oversight.helpers import (
     INJECTION,
     LenientPolicy,
     RunPolicy,
+    Storage,
     agent_with,
     call,
+    chat,
     delegation,
     make_agent,
 )
@@ -261,6 +265,31 @@ class TestSubagents:
             )
         assert streamed
         assert all("jan@example.com" not in str(result) for result in streamed)
+
+    @pytest.mark.parametrize("policy", ["test-masking", "test-guard"], ids=["child", "joined"])
+    async def test_a_refused_call_keeps_no_arguments_in_the_coordinators_thread(self, policy):
+        ran: list[str] = []
+        send = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="send", arguments={"text": SECRET}, id="s1")]
+        )
+
+        class Coordinator(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "coord"
+            agents = [secret_subagent(ran, send, "done")]  # noqa: RUF012
+
+        tools = await Coordinator().get_agent_tools()
+        delegate = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name=tools[0].name, arguments={"task": "go"}, id="d1")]
+        )
+        storage = Storage()
+        # The subagent's policy refuses the call, in its own turn or the coordinator's.
+        parts = await chat(make_agent([delegate, "Done."], storage, tools=tools, policy=policy), "go")
+        assert ran == []
+        assert SECRET not in json.dumps([m.tool_calls for m in storage.stored], default=str)
+        outputs = [p["toolCallId"] for p in parts if p.get("type") == "tool-output-available"]
+        assert outputs.count("s1") == 1
 
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []

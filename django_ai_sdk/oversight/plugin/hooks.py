@@ -31,6 +31,7 @@ from django_ai_sdk.adapters.run import ATTACHMENT_CONTEXT_META_KEY, get_user_tex
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
+    STREAMED_META_KEY,
     answer_calls_with,
     pending_tool_calls,
     replace_messages,
@@ -279,8 +280,9 @@ class JudgeToolCallHook(OversightHook):
                 block_messages[index] = reason
         if not block_messages:
             return
-        stubs = _block_tool_step(state, messages, block_messages)
-        if guard.on_tool_results is not None:
+        streamed = guard.on_tool_results is not None
+        stubs = _block_tool_step(state, messages, block_messages, streamed=streamed)
+        if streamed:
             await guard.on_tool_results(stubs)
 
 
@@ -318,7 +320,11 @@ def _agent_name(state: State) -> str:
 
 
 def _block_tool_step(
-    state: State, messages: list[HaystackChatMessage], block_messages: dict[int, str]
+    state: State,
+    messages: list[HaystackChatMessage],
+    block_messages: dict[int, str],
+    *,
+    streamed: bool = False,
 ) -> list[HaystackChatMessage]:
     return answer_calls_with(
         state,
@@ -328,7 +334,7 @@ def _block_tool_step(
                 {"refused": block_messages[index]}
                 if index in block_messages
                 else {"skipped": str(SKIPPED_CALL_MESSAGE)},
-                {BLOCKED_META_KEY: index in block_messages},
+                {BLOCKED_META_KEY: index in block_messages, STREAMED_META_KEY: streamed},
             )
             for index in range(len(messages[-1].tool_calls))
         ],
