@@ -77,10 +77,9 @@ class OpenTurn:
             # Copies, but the question stays shared so masking reaches the caller.
             question = last_user_message(self.messages)
             self.messages = [m if m is question else m.model_copy(deep=True) for m in self.messages]
-            # The question last: every other message, a reply after it too, is history.
+            # Every other message, a reply after the question too, is history.
             history = [m for m in self.messages if m is not question]
-            asked = question or ChatMessage(role="user", content="")
-            checked = await guard.gate_history([*history, asked])
+            checked = await guard.gate_history(history, question)
             if checked.blocked:
                 raise _blocked(guard, Stage.GATE, checked.message)
         gate = await guard.gate()

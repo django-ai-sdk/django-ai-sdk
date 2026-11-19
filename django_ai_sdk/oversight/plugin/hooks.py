@@ -181,9 +181,8 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
         for i, m in enumerate(messages)
         if i != asked and m.role in (ChatRole.USER, ChatRole.ASSISTANT) and said_text(m)
     ]
-    # Always last, even when empty: gate_history takes the last message for the question.
-    judged = [*(as_judged(messages[i]) for i in earlier), question]
-    checked = await guard.gate_history(judged, history=not vouched)
+    judged = [as_judged(messages[i]) for i in earlier]
+    checked = await guard.gate_history(judged, question, history=not vouched)
     if checked.blocked:
         return checked
     gate = await guard.gate()
@@ -191,7 +190,7 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
         return gate
     if gate.changed:
         question.content = gate.text
-    for index, copy in zip([*earlier, asked], judged, strict=True):
+    for index, copy in zip([*earlier, asked], [*judged, question], strict=True):
         text = copy.content + "".join(a.context for a in copy.attachments)
         if index is not None and text != said_text(messages[index]):
             messages[index] = masked_message(messages[index], text)

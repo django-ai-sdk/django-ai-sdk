@@ -241,10 +241,10 @@ class TurnGuard:
         self.blocked = True
         self.note_error(error)
 
-    def set_history(self, messages: list[ChatMessage]) -> None:
+    def set_history(self, earlier: list[ChatMessage]) -> None:
         self.context.history = [
             HistoryItem(role=m.role, content=m.content or "")
-            for m in messages[:-1]
+            for m in earlier
             if m.role in {"user", "assistant"} and m.content
         ][-HISTORY_TURNS:]
 
@@ -438,7 +438,7 @@ class TurnGuard:
             agent_name=str(getattr(agent, "name", "") or type(agent).__name__),
             input=input,
         )
-        guard.set_history(messages)
+        guard.set_history(messages[:-1])
         guard.agent_fingerprint = fingerprint(agent)
         return guard
 
@@ -476,10 +476,17 @@ class TurnGuard:
         return result
 
     async def gate_history(
-        self, messages: list[ChatMessage], *, history: bool = True
+        self,
+        earlier: list[ChatMessage],
+        question: ChatMessage | None = None,
+        *,
+        history: bool = True,
     ) -> StageResult:
-        """Judge history the server did not store itself. Call before `gate()`."""
-        return await stages.judge_history(self, messages, history=history)
+        """Judge history the server did not store itself. Call before `gate()`.
+
+        `question` brings only its attachments: `gate()` judges what it says.
+        """
+        return await stages.judge_history(self, earlier, question, history=history)
 
     async def tool_call(self, call: ToolCall) -> str | None:
         """Judge one tool call. Returns the block message, or None."""

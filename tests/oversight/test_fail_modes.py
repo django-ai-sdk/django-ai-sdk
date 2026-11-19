@@ -178,7 +178,7 @@ class TestFailModeAtEachStage:
             ],
         )
         messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
-        checked = await (await start(history_rule)).gate_history(messages)
+        checked = await (await start(history_rule)).gate_history(messages[:-1], messages[-1])
         assert checked.blocked and checked.message == str(TOOL_UNAVAILABLE_MESSAGE)
         tool_rule = policy(
             "fx-tool-restrict-failed",
@@ -440,7 +440,7 @@ class TestBrokenHandlers:
         with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": mode}):
             guard = await start("test-guard", "now")
             with patch.object(TurnMasks, "mask_other_text", raising):
-                result = await guard.gate_history(history)
+                result = await guard.gate_history(history[:-1], history[-1])
         assert "history check failed" in guard.error
         if mode == "closed":
             assert result.blocked and result.message == str(Block.DEFAULT_MESSAGE)
