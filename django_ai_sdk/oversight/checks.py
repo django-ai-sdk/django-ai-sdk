@@ -485,7 +485,11 @@ def deadline_errors(name: str, resolved: Any) -> list[Any]:
 def policy_errors(name: str, resolved: Any) -> list[str]:
     """What the checks would flag in one built policy; authored policies are held to it on save."""
     found = [m for m in lens_checks(name, resolved) if m.is_serious()]
-    found += [*stream_mode_checks(name, resolved), *deadline_errors(name, resolved)]
+    found += [
+        *waiting_rule_checks(name, resolved),
+        *stream_mode_checks(name, resolved),
+        *deadline_errors(name, resolved),
+    ]
     return [m.msg for m in found]
 
 

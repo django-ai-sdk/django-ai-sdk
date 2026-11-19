@@ -244,6 +244,17 @@ class TestWhatADefinitionMayNotDo:
         refused = await self.refused(lenses=lenses, options={"stream_mode": "live"})
         assert "streams it live" in refused
 
+    async def test_mask_the_question_on_a_rule_that_waits_past_the_gate(self):
+        # W019, which the system check never sees either: the model would read it unmasked.
+        lenses = [
+            {"preset": "pii", "name": "mail", "kinds": ["email"]},
+            {"preset": "pii", "name": "mail_out", "kinds": ["email"], "subject": "output"},
+        ]
+        both = {"all": [{"lens": name, "op": "is_true"} for name in ("mail", "mail_out")]}
+        rule = {"name": "mask_mail", "when": both, "then": [{"kind": "mask"}], "mode": "enforce"}
+        refused = await self.refused(lenses=lenses, rules=[rule])
+        assert "the model reads the question unmasked" in refused
+
     async def test_grow_without_bound(self):
         lenses = [{**refunds()["lenses"][0], "name": f"l{i}"} for i in range(51)]
         assert "at most 50 lenses" in await self.refused(lenses=lenses, rules=[])
