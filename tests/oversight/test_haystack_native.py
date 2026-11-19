@@ -377,6 +377,20 @@ def test_a_sync_run_without_a_policy_runs():
     assert result["last_message"].text == "fine"
 
 
+async def test_a_run_without_a_policy_opts_out_where_a_turn_is_required_in_both_twins():
+    from django_ai_sdk.oversight.calls import requires_turn, watched
+
+    def agent() -> HaystackAgent:
+        return HaystackAgent(chat_generator=watched(Scripted(["fine"])))
+
+    asked = [ChatMessage.from_user("Who?")]
+    refusing = override_settings(AI_SDK_OVERSIGHT={"UNGUARDED_MODEL_CALLS": "refuse"})
+    with refusing, requires_turn("workflow:x:y"):
+        result = await run_with_oversight(agent(), asked, turn=TurnRequest(agent=object()))
+        twin = run_with_oversight_sync(agent(), asked, turn=TurnRequest(agent=object()))
+    assert result["last_message"].text == twin["last_message"].text == "fine"
+
+
 def test_the_hooks_save_and_load_with_the_agent():
     agent = HaystackAgent(chat_generator=MockChatGenerator(responses=["x"]), hooks=build_oversight_hooks())
     again = HaystackAgent.from_dict(agent.to_dict())

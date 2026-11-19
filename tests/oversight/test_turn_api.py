@@ -317,7 +317,11 @@ class TestSubagentsWhereATurnIsRequired:
         assert not await Turn.objects.aexists()
 
     async def test_a_subagent_joining_the_coordinators_turn_calls_its_model_in_it(self):
-        async with turn(make_agent([], None), channel="chat", input="x"):
+        async with turn(make_agent([], None), channel="chat", input="x") as t:
+            # Before the coordinator's gate ran, no policy saw anything yet.
+            with pytest.raises(UnguardedModelCall):
+                await self.ask(subagent("test-guard", "Done."))
+            await t.gate()
             assert await self.ask(subagent("test-guard", "Done.")) == "Done."
         row = await Turn.objects.aget()
         assert row.channel == "chat"

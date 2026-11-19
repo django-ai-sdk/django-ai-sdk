@@ -20,7 +20,7 @@ from django_ai_sdk.common import ChatMessage, last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
-from django_ai_sdk.oversight.plugin import open_turn
+from django_ai_sdk.oversight.plugin import open_turn, settled_outside_a_turn
 from django_ai_sdk.oversight.plugin.hooks import JOINED, withhold_unfit
 from django_ai_sdk.oversight.types import Stage
 
@@ -144,8 +144,7 @@ async def turn(
     )
     current = OpenTurn(guard if opened else None, messages=messages, input=input)
     if not opened:
-        # Joined the outer turn, or no policy: an opt-out on purpose.
-        with settled():
+        with settled_outside_a_turn():
             yield current
         return
     async with closing_turn(guard):
