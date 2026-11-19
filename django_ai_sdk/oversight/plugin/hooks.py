@@ -41,9 +41,10 @@ from django_ai_sdk.agents.tool_agent import (
 from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.plugin.request import REQUEST_KEY, TurnRequest
 from django_ai_sdk.oversight.rules import Block
-from django_ai_sdk.oversight.types import ToolCall
+from django_ai_sdk.oversight.types import Stage, ToolCall
 from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
@@ -53,7 +54,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.guard.stages import StageResult
 
 # An Agent saved with these hooks loads again.
 allow_deserialization_module(__name__)
@@ -133,11 +133,16 @@ class LimitToolChoiceHook(OversightHook):
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
+# The call id a joined run's question is masked under: the same question is judged once.
+JOINED = "joined"
+
+
 class GateQuestionHook(OversightHook):
     """Judge history and question, then mask them in place or block the run.
 
     A block ends the run before the first model call. `on_gated` runs only once
-    the question passed, so a caller stores only gated questions.
+    the question passed, so a caller stores only gated questions. A run that
+    joined an outer turn has its question judged there, like a tool result.
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
@@ -155,6 +160,8 @@ class GateQuestionHook(OversightHook):
                 guard.notices.pending.append(gate.notice)
             # Before any citations card shows them.
             await mask_sources(guard, current_registry.get())
+        elif (outer := current_guard()) is not None:
+            turn.gate_result = await mask_joined_question(state, outer)
         turn.first_produced_index = len(state.data.get("messages") or [])
         if turn.on_gated is not None:
             await turn.on_gated(turn)
@@ -190,6 +197,24 @@ async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> S
             messages[index] = masked_message(messages[index], text)
     state.set("messages", messages, handler_override=replace_values)
     return gate
+
+
+async def mask_joined_question(state: State, guard: TurnGuard) -> StageResult:
+    """Judge the question of a run that joined `guard`'s turn like a tool result.
+
+    Such a run has no gate of its own. The messages before its question are the
+    outer turn's, judged there. Returns what the caller's copy should read.
+    """
+    messages = list(state.data.get("messages") or [])
+    asked = question_index(messages)
+    text = said_text(messages[asked]) if asked is not None else ""
+    if asked is None or not text:
+        return StageResult(Stage.GATE, text=text)
+    masked = await guard.mask_result(JOINED, text)
+    if masked != text:
+        messages[asked] = masked_message(messages[asked], masked)
+        state.set("messages", messages, handler_override=replace_values)
+    return StageResult(Stage.GATE, text=masked, changed=masked != text)
 
 
 def question_index(messages: list[HaystackChatMessage]) -> int | None:

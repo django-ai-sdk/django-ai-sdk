@@ -19,9 +19,9 @@ from pydantic import BaseModel
 from django_ai_sdk.common import ChatMessage, last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
-from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
+from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
 from django_ai_sdk.oversight.plugin import open_turn
-from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
+from django_ai_sdk.oversight.plugin.hooks import JOINED, withhold_unfit
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -37,7 +37,8 @@ class OpenTurn:
     """The turn that `turn()` yields.
 
     When no turn opened (no policy, oversight off, or the run joined an outer
-    turn), `guard` is None and `gate()` and `finish()` return their input.
+    turn), `guard` is None and `gate()` and `finish()` return their input; the
+    outer turn judges a joined question like a tool result.
     Otherwise use `guard` to report what the run found (`set_sources`, `add_usage`).
     """
 
@@ -61,9 +62,17 @@ class OpenTurn:
         history and question to send. Raises `Blocked`.
         """
         guard = self.guard
-        if self._gated or guard is None:
+        if self._gated:
             return self.input
         self._gated = True
+        if guard is None:
+            if (outer := current_guard()) is not None and self.input:
+                # Joined: no gate of its own, so the outer turn judges it like a tool result.
+                masked = await outer.mask_result(JOINED, self.input)
+                if masked != self.input and (asked := last_user_message(self.messages)):
+                    asked.content = masked
+                self.input = masked
+            return self.input
         if self.messages:
             # Copies, but the question stays shared so masking reaches the caller.
             question = last_user_message(self.messages)

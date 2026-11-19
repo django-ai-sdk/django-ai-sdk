@@ -296,7 +296,7 @@ Under a policy, `run()`:
 
 ### Nested runs and subagents
 
-Each agent runs under its own policy. A run that starts inside another turn joins that turn when it resolves the same policy, or none: one request is one record. There is no second gate (the outer gate already judged the question); the nested run's tool calls are checked and recorded in the outer turn; and its output reaches the outer agent as a tool result, masked like any other, and the outer turn's finish judges the answer built from it.
+Each agent runs under its own policy. A run that starts inside another turn joins that turn when it resolves the same policy, or none: one request is one record. There is no second gate: the outer turn judges the nested run's question like a tool result, masked or withheld whole before its model reads it (a synchronous run cannot be judged: its tool calls are all blocked instead); the nested run's tool calls are checked and recorded in the outer turn; and its output reaches the outer agent as a tool result, masked like any other, and the outer turn's finish judges the answer built from it.
 
 A run under another policy (the nested agent's own, or an explicit `run(oversight=...)`) opens a child turn instead: its own gate, tool checks, finish and record, linked to the outer turn. Subagents follow the same rule. A delegation to a subagent whose policy is the parent's, or none, joins the parent's turn; one whose policy differs runs as a child turn under it, with the delegated task as its question. That subagent reads only the checked task, not the coordinator's conversation and tool results, which its policy never judged. When that policy blocks the task or withholds the subagent's answer, the coordinator reads the policy's message as the tool result.
 
