@@ -25,6 +25,7 @@ from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
 from django_ai_sdk.oversight.types import Stage, Subject, ToolCall
 from tests.oversight.helpers import (
     ENFORCE,
+    FnLens,
     Storage,
     broken,
     chat,
@@ -304,6 +305,35 @@ class TestToolResultMasking:
         turn = await closed_turn(guard)
         assert turn.outcome != "blocked"
         assert not await RuleMatch.objects.filter(turn=turn, rule="stop_fraud").aexists()
+
+    async def test_a_report_rule_records_what_it_would_do_to_a_result_and_leaves_it(self):
+        from django_ai_sdk.oversight import Block
+
+        def rules(lens: str) -> list[Rule]:
+            return [Rule("would_stop", when=L(lens).is_true, then=Block())]
+
+        found = PatternLens(name="leak", stages=[Stage.GATE], patterns=[r"wire it"])
+        guard = await start(policy("test-report-result", [found], rules("leak")))
+        await guard.gate()
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
+        turn = await closed_turn(guard)
+        row = await RuleMatch.objects.aget(turn=turn, rule="would_stop", stage="tool")
+        assert not row.acted and turn.outcome == "allowed"
+        # A lens only a report rule reads withholds nothing when it fails.
+        down = FnLens(name="down", stages=[Stage.GATE], fn=broken)
+        guard = await start(policy("test-report-result-down", [down], rules("down")))
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
+
+    async def test_a_failed_lens_only_a_report_block_and_an_alert_read_withholds_nothing(self):
+        from django_ai_sdk.oversight import Alert, Block
+
+        down = FnLens(name="down", stages=[Stage.GATE], fn=broken)
+        rules = [
+            Rule("would_stop", when=L("down").is_true, then=Block()),
+            Rule("tell", when=L("down").is_true, then=Alert("info"), mode=ENFORCE),
+        ]
+        guard = await start(policy("test-report-down-alert", [down], rules))
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
 
     async def test_a_lens_about_the_writer_does_not_judge_tool_results(self):
         from django_ai_sdk.oversight import Block, L, PatternLens, Policy, RestrictTools, Rule

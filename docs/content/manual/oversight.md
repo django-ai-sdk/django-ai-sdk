@@ -100,7 +100,7 @@ Every lens:
 | `sample` | `1.0` | Share of turns the reflect stage judges. Inline stages never sample. |
 | `enabled` | `True` | Off: the lens never runs. |
 | `needs_grounding` | `False` | Only asked when the turn has sources or tool results to judge against. |
-| `judges_tool_results` | `True` | Whether the question can be asked of a tool result. A gate lens that an enforced block or `restrict_tools` rule reads also judges every tool result; `False` keeps it to the question, for a lens about the person writing. A lens a `Mask` rule reads masks tool results either way. |
+| `judges_tool_results` | `True` | Whether the question can be asked of a tool result. A gate lens that a block or `restrict_tools` rule reads also judges every tool result (a rule in report mode records what it would have done to it); `False` keeps it to the question, for a lens about the person writing. A lens an enforced `Mask` rule reads masks tool results either way. |
 
 Each kind adds its own:
 

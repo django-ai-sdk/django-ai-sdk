@@ -160,7 +160,7 @@ async def judge_history(
 
     async def judge(text: str) -> StageResult:
         async with slots:
-            return await guard.masks.mask_other_text(lenses, text, Stage.GATE, blocks=True)
+            return await guard.masks.mask_other_text(lenses, text, Stage.GATE)
 
     try:
         judged = await asyncio.gather(*(judge(get()) for get, _ in items))
