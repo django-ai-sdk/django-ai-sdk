@@ -157,7 +157,7 @@ def turn_literals(guard: TurnGuard) -> dict[str, str]:
         Subject.QUESTION: guard.original_input or context.input,
         Subject.ANSWER: said_output,
         Subject.EXCHANGE: f"{context.input}\n\n{said_output}",
-        Subject.SOURCES: "\n\n".join(s.content for s in context.fresh_sources()),
+        Subject.SOURCES: context.text(Subject.SOURCES),
     }
     return found_literals(guard.answered, texts)
 
