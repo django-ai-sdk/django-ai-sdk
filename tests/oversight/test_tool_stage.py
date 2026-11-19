@@ -98,6 +98,80 @@ class TestTools:
         assert secret not in json.dumps(storage.stored[0].tool_calls)
         assert not any(p.get("type") == "tool-input-available" and p["input"] for p in parts)
 
+    async def test_a_blocked_calls_refusal_is_not_judged_as_a_tool_result(self):
+        from django_ai_sdk.oversight import Block
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        # The refusal names what it stopped, which a gate rule would block in a tool result.
+        name = policy(
+            "test-own-refusal",
+            [
+                FnLens(
+                    name="to_her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Jansen" in text,
+                ),
+                PatternLens(name="wire", stages=[Stage.GATE], patterns=[r"wire the money"]),
+            ],
+            [
+                Rule(
+                    "not_her",
+                    when=L("to_her").is_true,
+                    then=Block("Not run: it would wire the money."),
+                    mode=ENFORCE,
+                ),
+                Rule("no_wires", when=L("wire").is_true, then=Block(), mode=ENFORCE),
+            ],
+        )
+        tool, _ = lookup_tool()
+        asked = HaystackToolCall(tool_name="lookup", arguments={"name": "Jansen"}, id="c1")
+        replies = [HaystackChatMessage.from_assistant(tool_calls=[asked]), "Done."]
+        storage = Storage()
+        await chat(make_agent(replies, storage, tools=[tool], policy=name), "look")
+        [stored] = storage.stored[0].tool_calls
+        assert stored["result"]["result"] == {"refused": "Not run: it would wire the money."}
+        assert not await RuleMatch.objects.filter(rule="no_wires").aexists()
+
+    async def test_a_call_id_used_again_still_has_its_result_masked(self):
+        from django_ai_sdk.oversight import Block, Mask, PIILens
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        def lookup(name: str) -> HaystackChatMessage:
+            # Some OpenAI-compatible servers number calls per step: call_0 both times.
+            asked = HaystackToolCall(tool_name="lookup", arguments={"name": name}, id="call_0")
+            return HaystackChatMessage.from_assistant(tool_calls=[asked])
+
+        name = policy(
+            "test-call-id-again",
+            [
+                FnLens(
+                    name="her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                ),
+                PIILens(name="iban", stages=[Stage.GATE], kinds=["iban"]),
+            ],
+            [
+                Rule("not_her", when=L("her").is_true, then=Block("No."), mode=ENFORCE),
+                Rule("mask_iban", when=L("iban").is_true, then=Mask(), mode=ENFORCE),
+            ],
+        )
+        tool, _ = lookup_tool()
+        replies = [lookup("Mevrouw Jansen"), lookup("Jan"), "Done."]
+        storage = Storage()
+        parts = await chat(make_agent(replies, storage, tools=[tool], policy=name), "look")
+        stored = json.dumps([m.model_dump(mode="json") for m in storage.stored])
+        assert "NL91ABNA0417164300" not in json.dumps(parts) + stored
+        assert "[IBAN]" in stored
+
     async def test_the_gate_can_take_every_tool_away(self):
         agent = make_agent(["ok"], Storage())
         guard = await TurnGuard.start(agent, channel="test", input="something sneaky")

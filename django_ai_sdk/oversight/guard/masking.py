@@ -57,6 +57,9 @@ class TurnMasks:
         self.guard = guard
         # In-flight tool result masking, keyed by call id and text hash.
         self.results: dict[str, asyncio.Future[str]] = {}
+        # Calls oversight answered itself (blocked, or skipped next to a blocked one):
+        # their result is its own message, which no lens judges.
+        self.answered_here: set[str] = set()
         # Masked citation source text by source key.
         self.sources: dict[str, str] = {}
 
@@ -181,6 +184,8 @@ class TurnMasks:
 
     async def mask_result(self, call_id: str, text: str) -> str:
         """`mask_text` once per call id and text, so stream and tool hook get the same result."""
+        if call_id in self.answered_here:
+            return text
         if not call_id:
             return await self.mask_text(text)
         key = f"{call_id}:{hashlib.sha256(text.encode()).hexdigest()[:FINGERPRINT_CHARS]}"

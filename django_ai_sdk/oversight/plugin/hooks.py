@@ -272,6 +272,8 @@ class JudgeToolCallHook(OversightHook):
         if step is None:
             return
         guard, messages = step
+        # A model may use a call id again; only this step's own stubs go unjudged.
+        guard.masks.answered_here.difference_update(c.id for c in messages[-1].tool_calls)
         block_messages: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
             seen = _as_tool_call(call, state)
@@ -281,6 +283,8 @@ class JudgeToolCallHook(OversightHook):
                 block_messages[index] = reason
         if not block_messages:
             return
+        # The whole step is answered with stubs, which are oversight's own words.
+        guard.masks.answered_here.update(call.id for call in messages[-1].tool_calls if call.id)
         streamed = guard.on_tool_results is not None
         stubs = _block_tool_step(state, messages, block_messages, streamed=streamed)
         if streamed:
