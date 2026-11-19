@@ -24,6 +24,7 @@ from django_ai_sdk.oversight import (
     RestrictTools,
     Rule,
     Score,
+    SecretsLens,
     LensPack,
     RulePack,
     register_policy,
@@ -35,7 +36,7 @@ from django_ai_sdk.oversight.guard.judging import Answered, match_rules, answer_
 from django_ai_sdk.oversight.judges.base import Judge
 from django_ai_sdk.oversight.packs.security import SecurityPack
 from django_ai_sdk.oversight.registry import build_policy
-from django_ai_sdk.oversight.policy import validate_policy
+from django_ai_sdk.oversight.policy import ResolvedPolicy, validate_policy, validate_rule
 from django_ai_sdk.oversight.registry import get_invalid_policies
 from django_ai_sdk.oversight.registry import invalidate_policy
 from django_ai_sdk.oversight.types import (
@@ -281,10 +282,30 @@ class TestRuleEvaluation:
         # Restricting tools early would lose the mask at finish; blocking ends the turn.
         assert not at_gate(either, RestrictTools(["search"]), Mask())
         assert at_gate(either, Block(), Mask())
-        # At the tool stage a block only refuses the call, so the rule waits for finish.
-        rule.when, rule.then = L("secrets_tool_call").is_true | (L("groundedness") < 0.5), [Block()]
-        called = {"secrets_tool_call": ans(["key"])}
-        assert rule not in [m.rule for m in match_rules(resolved, called, Stage.TOOL, done=set())]
+
+    def test_a_rule_cannot_read_a_tool_call_lens_next_to_a_later_lens(self):
+        # The call's answer is gone by finish: the rule could never see both.
+        later = PIILens(name="later", subject=Subject.ANSWER)
+        call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
+        asked = PIILens(name="asked")
+        lenses = {lens.name: lens for lens in (later, call, asked)}
+        either = Rule("r", when=L("call").is_true | L("later").is_true, then=Block())
+        with pytest.raises(ImproperlyConfigured, match="give the tool call its own rule"):
+            validate_rule(either, lenses)
+        validate_rule(Rule("r", when=L("call").is_true & L("asked").is_true, then=Block()), lenses)
+
+    def test_a_tool_call_rule_decides_at_the_call(self):
+        # A gate lens that reflect asks again has no answer yet: the call is not let through.
+        call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
+        asked = PIILens(name="asked", stages=[Stage.GATE, Stage.REFLECT])
+        rule = Rule(
+            "r", when=L("call").is_true & ~L("asked").is_true, then=Block(), mode=Mode.ENFORCE
+        )
+        resolved = ResolvedPolicy(
+            name="p", lenses={"call": call, "asked": asked}, rules={"r": rule}
+        )
+        [match] = match_rules(resolved, {"call": ans(["key"])}, Stage.TOOL, done=set())
+        assert [a.kind for a in match.acted] == ["block"]
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build_policy("test-parent")

@@ -257,10 +257,11 @@ def match_rules(
 
     A rule waits until every lens it reads has had its chance, so gate and
     reflect lenses can share a rule, unless what has answered already decides
-    one that stops the turn at the gate or finish. A test on an `errored` lens is
-    unknown, never true. With `fail_closed`, a failed lens that leaves an enforced rule
-    undecided fires it with only its block, mask or tool restriction here: a failure
-    never alerts, queues or notifies.
+    one that stops the turn; a rule on a tool call decides at the call. A test on
+    an `errored` lens is unknown, never true, and the answer a failed lens kept
+    decides nothing. With `fail_closed`, a failed lens that leaves an enforced
+    rule undecided fires it with only its block, mask or tool restriction here:
+    a failure never alerts, queues or notifies.
     """
     answered = set(answers) | set(errored)
     # A failed lens may keep an unsure answer for the record; here it reads as failed.
@@ -288,14 +289,16 @@ def match_rules(
                 a.kind == "block" for a in acted
             ):
                 acted.append(Block(rule.message))
-        pending = {name for name in reads if _still_to_answer(policy, name, stage, answered)}
-        kinds = {a.kind for a in acted}
-        # A block at the gate or finish ends the turn, so its other actions do not matter;
-        # at the tool stage it only blocks the call. A tool restriction that also masks
-        # waits, or the mask would never see the answer.
-        stops = stage is not Stage.TOOL and (
-            "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
+        # A tool call's answer is gone after the call, so its rule decides at the call.
+        pending = (
+            set()
+            if stage is Stage.TOOL and reads_tool_call
+            else {name for name in reads if _still_to_answer(policy, name, stage, answered)}
         )
+        kinds = {a.kind for a in acted}
+        # A block ends the turn, so its other actions do not matter. A tool restriction
+        # that also masks waits, or the mask would never see the answer.
+        stops = "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
         if pending and not (stops and rule.when.matches(answers, {*errored, *pending}) is True):
             continue
         decided = rule.when.matches(answers, errored)
