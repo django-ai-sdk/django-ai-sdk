@@ -133,6 +133,35 @@ class TestConditions:
         assert L("pii").is_true.matches(answers)
         assert (~(L("topic") == "billing")).matches(answers)
 
+    def test_disputed_is_two_models_that_answered_differently(self):
+        def said(value, *before, model="b"):
+            return Answer(value=value, model=model, trail=list(before))
+
+        lean_no = Answer(value=False, confidence=0.3, model="a")
+        missed = Answer(value=False, confidence=0.5)  # a pattern miss names no model
+        down = Answer(error="timeout", model="a")
+        disputed = L("x").disputed
+        assert disputed.matches({"x": said(True, lean_no)})
+        assert not disputed.matches({"x": said(False, lean_no)})
+        assert not disputed.matches({"x": said(True, missed)})
+        assert not disputed.matches({"x": said(True, down)})
+        assert not disputed.matches({"x": said(True)})
+        assert not disputed.matches({})
+        # A person looks when in doubt; a stop needs the judges to agree.
+        doubt = {"x": said(False, Answer(value=True, confidence=0.2, model="a"))}
+        assert (L("x").is_true | disputed).matches(doubt)
+        assert not (L("x").is_true & ~disputed).matches({"x": said(True, lean_no)})
+        assert disputed.matches({}, {"x"}) is None
+        assert Condition(disputed.to_dict()).lenses("disputed") == {"x"}
+
+    def test_only_a_yes_no_or_a_label_can_be_disputed(self):
+        score = JudgeLens(name="tox", answer=Score, judges=["judge"])
+        topic = JudgeLens(name="topic", answer=Choice, labels=["hr", "other"], judges=["judge"])
+        lenses = {"tox": score, "topic": topic}
+        validate_rule(Rule("r", when=L("topic").disputed, then=Alert()), lenses)
+        with pytest.raises(ImproperlyConfigured, match="only a yes/no or a label"):
+            validate_rule(Rule("r", when=L("tox").disputed, then=Alert()), lenses)
+
     def test_a_missing_answer_matches_nothing_but_missing(self):
         answers = {"broken": ans(None, error="timeout")}
         assert not L("broken").is_true.matches(answers)

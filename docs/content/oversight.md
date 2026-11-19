@@ -574,7 +574,34 @@ It answers `Flag`, `Choice` and `Score` lenses, and judges an `Entities` lens wi
 
 ### How a lens decides
 
-A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `PatternJudge` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked.
+A judge lens asks its judges in order, quick to thorough:
+
+- The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) stands, and the judges after it are not asked.
+- A judge that is unsure hands over to the next one, which may overrule it. When none is sure enough, the last one that answered decides, and the answer stays unsure: a rule that should only act on a sure answer adds `.confident(x)`.
+- A judge that fails, or cannot run here, hands over too. A lens left without an answer that way has failed, and `FAIL_MODE` decides.
+- Every answer given on the way is kept in the result's `trail`.
+
+Confidence is each judge's own scale, so the lens only compares it with thresholds, never one judge's with another's:
+
+| Judge | Its confidence |
+| --- | --- |
+| `PatternJudge` | 1 for a hit; `miss_confidence` (0.5 by default) for a miss, so a miss asks the next judge. A `miss_confidence` at or above `min_confidence` ends the lens on a miss. |
+| A classifier (`TypeSafe`, `LocalClassifier`) | For a yes/no, how far the probability is from a coin flip: 0.75 is 87.5% yes or no. For a label, the label's probability. |
+| `LLMJudge` | What the model says of itself; 0.5 when it says nothing. |
+| Your own judge, a check | What you return; 1 when you return none. |
+
+So the order matters: list a judge after another only when you trust it more, since it overrules the earlier one's leaning. A model whose confidence is always high ends the chain every time it is asked, and passes every `.confident(x)` in a rule: put it last, or alone.
+
+Two judges you trust about equally can still share a lens. Then a rule decides what it means when they disagree. `L(name).disputed` is true when two models asked for the lens gave different answers, whichever of them stands:
+
+```python
+# Stop only when sure, and the judges agree.
+Rule("no_dose_advice", when=L("dose_advice").is_true & L("dose_advice").confident(0.7) & ~L("dose_advice").disputed, then=Block())
+# When in doubt, a person looks.
+Rule("safeguarding", when=L("safeguarding").is_true | L("safeguarding").disputed, then=Queue("care"))
+```
+
+A second opinion that must always be asked, not only when the first judge is unsure, is a second lens with its own judge, and a rule that reads both.
 
 ## Personal data and secrets
 

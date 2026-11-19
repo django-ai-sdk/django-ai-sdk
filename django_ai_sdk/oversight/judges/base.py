@@ -60,7 +60,15 @@ def is_unavailable(error: str) -> bool:
 
 
 class Judge(ABC):
-    """Answers lenses. Return None to abstain and let the next judge try."""
+    """Answers lenses. Return None to abstain and let the next judge try.
+
+    An answer's `confidence` says how sure this judge is, 0 to 1, on its own scale:
+    a classifier's is how far its probability is from a coin flip (0.75 is 87.5%
+    yes or no), a pattern's is 1 for a hit, a model's is what the model says. A
+    lens compares it with its `min_confidence` to decide whether to ask the next
+    judge, so report what you can stand behind: a made-up or always-high confidence
+    ends the chain every time. A judge that is a model names it in `model`.
+    """
 
     # Who receives turn content, e.g. "model gateway". Empty means nothing leaves the process.
     external: ClassVar[str] = ""
