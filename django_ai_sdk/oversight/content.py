@@ -205,7 +205,9 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
 
 @cache
 def _detectors() -> tuple[Any, ...]:
-    return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
+    # No `not_after`: a number that only its label kept unmasked is not kept on record.
+    numbers = PIILens(name="captured", kinds=list(PII_PATTERNS), not_after={})
+    return numbers, SecretsLens(name="captured")
 
 
 def stored_value(lens: Lens, answer: Answer) -> Any:

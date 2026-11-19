@@ -100,9 +100,10 @@ PII_VERIFY: dict[str, Verifier] = {"iban": iban_ok, "credit_card": luhn_ok, "bsn
 # What, right before a match, makes it something else: "invoice no. 202611188" is an invoice
 # number, though one in eleven such numbers passes the BSN 11-check. Only one of these labels
 # directly before the number counts, so "factuur 111222333" leaves a real BSN unmasked: that
-# is the trade for not masking every eleventh invoice or order number.
+# is the trade for not masking every eleventh invoice or order number. A label a personal
+# number goes by too ("kenmerk", "referentie") is no such label. The record masks it anyway.
 PII_NOT_AFTER: dict[str, str] = {
-    "bsn": r"(?i)\b(?:invoice|factuur|order|bestel|bestelling|referentie|reference|kenmerk)"
+    "bsn": r"(?i)\b(?:invoice|factuur|order|bestel|bestelling)"
     r"(?:nummer|nr|number)?(?:\s*(?:no|nr|number|nummer|#)\.?)?\s*[:#]?\s*$",
 }
 DEFAULT_PII_KINDS: tuple[str, ...] = ("email", "iban", "credit_card", "phone", "ip_address")

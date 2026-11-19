@@ -283,6 +283,10 @@ class TestPatternsInTheWild:
             ("referendum 123456782", "referendum [BSN]"),
             ("ticket 123456782", "ticket [BSN]"),
             ("invoice for client 123456782", "invoice for client [BSN]"),
+            # A personal number goes by these labels too.
+            ("Mijn BSN, kenmerk: 111222333", "Mijn BSN, kenmerk: [BSN]"),
+            ("referentie 111222333", "referentie [BSN]"),
+            ("reference no. 111222333", "reference no. [BSN]"),
         ],
     )
     async def test_only_a_label_right_before_a_number_makes_it_no_bsn(self, text, masked):
