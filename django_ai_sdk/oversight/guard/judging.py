@@ -263,8 +263,11 @@ def match_rules(
     never alerts, queues or notifies.
     """
     answered = set(answers) | set(errored)
-    # A failed lens may keep an unsure answer for the record; it decides nothing.
-    known = {name: answer for name, answer in answers.items() if name not in errored}
+    # A failed lens may keep an unsure answer for the record; here it reads as failed.
+    answers = {
+        name: answer.model_copy(update={"value": None}) if name in errored else answer
+        for name, answer in answers.items()
+    }
     matched: list[Matched] = []
     for rule in policy.active_rules():
         if rule.name in done:
@@ -295,9 +298,10 @@ def match_rules(
         )
         if pending and not (stops and rule.when.matches(answers, {*errored, *pending}) is True):
             continue
-        if rule.when.matches(answers, errored):
+        decided = rule.when.matches(answers, errored)
+        if decided:
             matched.append(Matched(rule, stage, acted))
-        elif fail_closed and rule.when.matches(known, errored) is None:
+        elif fail_closed and decided is None:
             kept = [a for a in acted if a.kind in FAIL_CLOSED_ACTIONS]
             if kept:
                 matched.append(Matched(rule, stage, kept, failed=True))
