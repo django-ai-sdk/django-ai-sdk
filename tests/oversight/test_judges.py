@@ -606,6 +606,15 @@ class TestTypeSafe:
             taken = await answer_lens(TakenFrom(), turn_context("q", "a", ["x"]), Stage.REFLECT)
             assert taken.error == NO_JUDGE
 
+    async def test_a_lens_typesafe_cannot_answer_fails_rather_than_passing(self):
+        from django_ai_sdk.oversight import Entities, TypeSafe
+        from django_ai_sdk.oversight.guard.judging import NO_JUDGE
+
+        names = JudgeLens(name="names", answer=Entities, question="Which names?", judges=[TypeSafe()])
+        with patch.object(TypeSafe, "missing", return_value=""):
+            assert not TypeSafe().answers(names)
+            assert (await answer_lens(names, turn_context("Jan"), Stage.GATE)).error == NO_JUDGE
+
     async def test_a_failed_request_is_unavailable_and_logs_its_type_never_its_body(self):
         from unittest.mock import MagicMock
 

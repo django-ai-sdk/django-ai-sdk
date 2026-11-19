@@ -94,6 +94,10 @@ class Judge(ABC):
         """Why this judge can't run here (e.g. an unset key), or "" when it can."""
         return ""
 
+    def answers(self, lens: Lens) -> bool:
+        """Whether this judge can answer `lens` at all, e.g. its answer type."""
+        return True
+
     def describe(self) -> dict[str, Any]:
         return {"name": self.display_name, "external": self.external, "class": type(self).__name__}
 

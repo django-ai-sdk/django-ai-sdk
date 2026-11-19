@@ -23,7 +23,7 @@ from django_ai_sdk.oversight.conf import (
 )
 from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
 from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
-from django_ai_sdk.oversight.judges.base import Judge, Maybe, alias_defined, build_judge
+from django_ai_sdk.oversight.judges.base import Judge, alias_defined, build_judge
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.notifiers import configured_notifiers
 from django_ai_sdk.oversight.registry import (
@@ -382,9 +382,9 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
             for alias in lens.judges
             if isinstance(alias, str) and not alias_defined(alias)
         )
-        if lens.enabled and all(judge.missing() for judge in built_judges(lens)):
+        if lens.enabled and not any(_can_answer(judge, lens) for judge in built_judges(lens)):
             dead.add(lens.name)
-            if all(isinstance(spec, Maybe) for spec in lens.judges):
+            if not lens.usable_judges():
                 optional.add(lens.name)
     for rule in resolved.rules.values():
         blind = sorted(rule.lenses() & dead)
@@ -407,6 +407,13 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
                 )
             )
     return messages
+
+
+def _can_answer(judge: Any, lens: Any) -> bool:
+    try:
+        return not judge.missing() and judge.answers(lens)
+    except Exception:
+        return False
 
 
 def built_judges(lens: Any) -> list[Any]:

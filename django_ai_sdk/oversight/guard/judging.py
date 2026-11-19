@@ -100,9 +100,10 @@ async def answer_lens(
 ) -> Answer | None:
     """Ask a lens's steps in order until one is sure.
 
-    A lens none of whose judges can run here answers NO_JUDGE, an error, so
-    FAIL_MODE decides; it is not skipped. Only reflect samples. `progress`
-    collects answers as they arrive, so a caller that cancels still has them.
+    A lens none of whose judges can run here, or answer its kind of question,
+    answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped. Only
+    reflect samples. `progress` collects answers as they arrive, so a caller that
+    cancels still has them.
     """
     if not lens.applies(context):
         return None
@@ -116,15 +117,16 @@ async def answer_lens(
     if not steps:
         return None
     answer = await _first_sure(steps, lens, context, progress if progress is not None else [])
-    if answer is None and all(map(_cannot_run, steps)):
+    if answer is None and all(_cannot_answer(step, lens) for step in steps):
         return Answer(error=NO_JUDGE)
     return answer
 
 
-def _cannot_run(step: Any) -> bool:
-    """A step that fails to build is not "cannot run": it answers an error instead."""
+def _cannot_answer(step: Any, lens: Lens) -> bool:
+    """A step that fails to build is not "cannot answer": it answers an error instead."""
     try:
-        return bool(build_judge(step).missing())
+        judge = build_judge(step)
+        return bool(judge.missing()) or not judge.answers(lens)
     except Exception:
         return False
 
