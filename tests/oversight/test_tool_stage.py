@@ -98,6 +98,46 @@ class TestTools:
         assert secret not in json.dumps(storage.stored[0].tool_calls)
         assert not any(p.get("type") == "tool-input-available" and p["input"] for p in parts)
 
+    async def test_a_live_stream_shows_a_calls_arguments_only_once_it_ran(self):
+        from django_ai_sdk.oversight import Block
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        def lookup(name: str, call_id: str) -> HaystackChatMessage:
+            asked = HaystackToolCall(tool_name="lookup", arguments={"name": name}, id=call_id)
+            return HaystackChatMessage.from_assistant(tool_calls=[asked])
+
+        name = policy(
+            "test-live-arguments",
+            [
+                FnLens(
+                    name="names_her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                )
+            ],
+            [Rule("not_her", when=L("names_her").is_true, then=Block("No."), mode=ENFORCE)],
+        )
+        tool, _ = lookup_tool()
+        replies = [lookup("Mevrouw Jansen", "c1"), lookup("Jan", "c2"), "Done."]
+        parts = await chat(make_agent(replies, Storage(), tools=[tool], policy=name), "look")
+        # Nothing holds this answer, yet the blocked call's arguments never reach the client.
+        assert "Mevrouw" not in json.dumps(parts)
+        shown = [p for p in parts if p.get("toolCallId") == "c2" and "available" in p["type"]]
+        assert [(p["type"], p.get("input")) for p in shown] == [
+            ("tool-input-available", {}),
+            ("tool-input-available", {"name": "Jan"}),
+            ("tool-output-available", None),
+        ]
+        # A policy whose tool call rules only report holds nothing back.
+        report = policy("test-live-arguments-report", [], [])
+        parts = await chat(make_agent(replies[1:], Storage(), tools=[tool], policy=report), "look")
+        shown = [p.get("input") for p in parts if p.get("type") == "tool-input-available"]
+        assert shown == [{"name": "Jan"}]
+
     async def test_a_blocked_calls_refusal_is_not_judged_as_a_tool_result(self):
         from django_ai_sdk.oversight import Block
         from haystack.dataclasses import ChatMessage as HaystackChatMessage
@@ -171,6 +211,43 @@ class TestTools:
         stored = json.dumps([m.model_dump(mode="json") for m in storage.stored])
         assert "NL91ABNA0417164300" not in json.dumps(parts) + stored
         assert "[IBAN]" in stored
+
+    async def test_the_openai_stream_carries_the_arguments_of_a_call_that_ran(self):
+        from django_ai_sdk.oversight import Block
+        from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        name = policy(
+            "test-openai-arguments",
+            [
+                FnLens(
+                    name="her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                )
+            ],
+            [Rule("not_her", when=L("her").is_true, then=Block("No."), mode=ENFORCE)],
+        )
+        tool, _ = lookup_tool()
+        asked = HaystackToolCall(tool_name="lookup", arguments={"name": "Jan"}, id="c2")
+        replies = [HaystackChatMessage.from_assistant(tool_calls=[asked]), "Done."]
+        agent = make_agent(replies, Storage(), tools=[tool], policy=name)
+        agent.protocol_handler = OpenAIProtocolHandler()
+        response = await agent.as_view([{"role": "user", "content": "look"}])
+        body = b"".join([chunk async for chunk in response.streaming_content]).decode()
+        calls = [
+            call
+            for line in body.splitlines()
+            if line.startswith("data: {")
+            for choice in json.loads(line.removeprefix("data: ")).get("choices", [])
+            for call in choice["delta"].get("tool_calls") or []
+        ]
+        # Held back while the call was judged, then sent: the stream ends with the real ones.
+        assert [c["function"]["arguments"] for c in calls] == ['{"name": "Jan"}']
 
     async def test_the_gate_can_take_every_tool_away(self):
         agent = make_agent(["ok"], Storage())

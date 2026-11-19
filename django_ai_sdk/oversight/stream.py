@@ -159,6 +159,8 @@ class StreamTurn:
         # Stored on the message so a reload shows them, even after an error or disconnect.
         self.sent: list[dict[str, Any]] = []
         self.held: list[StreamEvent] = []
+        # A call's arguments by its id, kept back until the tool stage has judged the call.
+        self.unjudged: dict[str, ToolInputCompleteEvent] = {}
         # Their arguments are neither stored nor released.
         self.blocked_call_ids: set[str] = set()
 
@@ -243,8 +245,27 @@ class StreamTurn:
                 self.held.append(event)
                 progress = _held_progress(event)
                 return [progress] if progress is not None else []
+            return self._once_judged(event)
         # Held text is sent after the check. Held reasoning is never shown.
         return [] if self.hold else [event]
+
+    def _once_judged(self, event: StreamEvent) -> list[StreamEvent]:
+        """Keep a call's arguments back until its result shows the tool stage let it run.
+
+        The model streams them before that stage judges the call, and a blocked
+        call's may be what the block is about. Only under a policy that may block one.
+        """
+        policy = self.guard.policy
+        if policy is None or not policy.blocks_tool_calls():
+            return [event]
+        if isinstance(event, ToolInputCompleteEvent):
+            self.unjudged[event.tool_call_id] = event
+            return [event.model_copy(update={"tool_input": {}})]
+        if isinstance(event, ToolOutputEvent):
+            asked = self.unjudged.pop(event.tool_call_id, None)
+            if asked is not None and asked.tool_call_id not in self.blocked_call_ids:
+                return [asked, event]
+        return [event]
 
     async def mask_tool_result(self, result: ToolCallResult) -> ToolCallResult:
         """Once, so the card, storage and model all see the same text."""

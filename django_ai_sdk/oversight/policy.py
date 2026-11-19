@@ -264,6 +264,16 @@ class ResolvedPolicy:
     def holds_answer(self) -> bool:
         return self.stream_mode == "auto" and bool(self.changes_answer_at_finish())
 
+    def blocks_tool_calls(self) -> bool:
+        """Whether an enforced rule may block a tool call for what the call holds."""
+        calls = {lens.name for lens in self.active_lenses(Stage.TOOL, Subject.TOOL_CALL)}
+        return any(
+            rule.mode is Mode.ENFORCE
+            and rule.lenses() & calls
+            and any(action.kind in {"block", "mask", "restrict_tools"} for action in rule.then)
+            for rule in self.rules.values()
+        )
+
     def active_lenses(self, stage: Stage, subject: Subject | None = None) -> list[Lens]:
         return [
             lens
