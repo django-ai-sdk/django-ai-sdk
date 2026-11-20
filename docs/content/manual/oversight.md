@@ -427,6 +427,6 @@ A notifier's `send(event)` may raise: the error is logged and the turn goes on.
 
 `W001`, `W007` and `W014` are checked only while oversight is enabled; `W001`, `W007`, `E013` and `W014` only by `manage.py check --deploy`, and `W007` only with `--database`.
 
-The ids missing from this table (`E003`, `E008`, `W002`, `W006`, `W009`, `W010` and `W012`) are reserved: earlier builds raised them, and an id is never reused for another meaning.
+The ids missing from this table (`E003`, `E008`, `W002`, `W003`, `W004`, `W006`, `W009`, `W010`, `W012`, `W013` and `W016`) are reserved: earlier builds raised them, and an id is never reused for another meaning.
 
 In every app, the twelfth error id is the same check: its settings dict has an unknown key, or a value of the wrong kind.

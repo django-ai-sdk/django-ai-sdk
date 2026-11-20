@@ -88,9 +88,9 @@ PII_PATTERNS: dict[str, str] = {
     "bsn": rf"(?<!\d)(?:\d{{9}}|\d{{4}}{_SEP}\d{{2}}{_SEP}\d{{3}}|\d{{3}}{_SEP}\d{{3}}{_SEP}\d{{3}})(?!\d)",
     # International format, with a country code after + or 00.
     "phone": r"(?<![\w+])(?:\+|00)\d{1,3}[\s-]?(?:\(0\)[\s-]?)?\d(?:[\s-]?\d){6,11}\b",
-    # Dutch national format, like 06-12345678 or 020 123 4567.
-    # Ten digits starting with 0, in any grouping (06-12345678, 06 12 34 56 78, 06/12345678,
-    # (06) 12345678, 020 123 4567), but not a date and a time (03-11-2026 14:00).
+    # Dutch national format: ten digits starting with 0, in any grouping (06-12345678,
+    # 06 12 34 56 78, 06/12345678, (06) 12345678, 020 123 4567), but not a date and a
+    # time (03-11-2026 14:00).
     "phone_nl": rf"(?<![\w+])(?!\d\d([-./])\d\d\1\d{{4}}\b)"
     rf"(?:\(0\d{{1,3}}\)\s?(?:{_SEP}?\d){{6,8}}|0(?:{_SEP}?\d){{9}})(?!\d)",
     "ip_address": r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b",

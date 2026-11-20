@@ -14,7 +14,7 @@ A run inside a turn of the same policy (or none) joins it; another policy opens
 a child turn linked to the outer one. A run that names no SDK agent joins the
 turn it runs in, or runs under DEFAULT_POLICY outside one; a side call opts out
 with `TurnRequest(oversight=False)`. A sync run cannot open a turn, so one that
-needs its own must not run. The SDK runs every Haystack Agent through here.
+needs its own raises. The SDK runs every Haystack Agent through here.
 """
 
 from __future__ import annotations
