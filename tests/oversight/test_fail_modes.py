@@ -23,7 +23,7 @@ from django_ai_sdk.oversight import (
     register_policy,
 )
 from django_ai_sdk.oversight import Judge, LLMJudge
-from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
+from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch
 from django_ai_sdk.oversight.registry import build_policy
 from django_ai_sdk.oversight.types import Answer, Stage, Subject, ToolCall
 
@@ -220,6 +220,34 @@ class TestFailModeAtEachStage:
         with opened():
             assert not (await (await start(name)).gate()).blocked
 
+    async def test_a_failed_lens_does_not_overturn_what_answered(self):
+        """One judge said no to a rule that needs both: a second that is down changes nothing."""
+        name = policy(
+            "fx-and-decided",
+            [gate_flag(broken), gate_flag(lambda text, context: False, "other")],
+            [Rule("r", when=L("g").is_true & L("other").is_true, then=Block(), mode=ENFORCE)],
+        )
+        assert not (await gate(name)).blocked
+
+    async def test_a_failure_blocks_but_never_alerts_or_queues(self):
+        name = policy(
+            "fx-failed-quiet",
+            [gate_flag(broken)],
+            [
+                Rule(
+                    "r",
+                    when=L("g").is_true,
+                    then=[Block(), Alert("critical"), Queue("q")],
+                    mode=ENFORCE,
+                )
+            ],
+        )
+        guard = await start(name)
+        assert (await guard.gate()).blocked
+        turn = await closed_turn(guard)
+        assert turn.severity == "high"
+        assert not await ReviewItem.objects.filter(turn=turn).aexists()
+
     async def test_a_policy_may_opt_out_with_fail_mode_open(self):
         name = policy(
             "fx-opt-out",
@@ -251,6 +279,16 @@ class TestFailModeAtEachStage:
         )
         assert (await (await start(name)).gate()).blocked
 
+    async def test_a_rule_on_missing_fires_for_a_failed_lens(self):
+        alert = [Rule("judge_down", when=L("g").missing, then=Alert("high"), mode=ENFORCE)]
+        guard = await start(policy("fx-missing-alert", [gate_flag(broken)], alert))
+        await guard.gate()
+        assert [m.rule.name for m in guard.matched] == ["judge_down"]
+        # Also where a failure itself stops nothing.
+        block = [Rule("r", when=L("g").missing, then=Block(), mode=ENFORCE)]
+        name = policy("fx-missing-open", [gate_flag(broken)], block, fail_mode="open")
+        assert (await gate(name)).blocked
+
     async def test_conditions_are_three_valued(self):
         failed = Answer(error="RuntimeError")
         answers = {"a": failed, "b": Answer(value=True)}
@@ -260,7 +298,8 @@ class TestFailModeAtEachStage:
         assert (L("a").is_true | L("b").is_true).matches(answers, {"a"})
         assert not (L("a").is_false & L("b").is_true).matches(answers, {"a"})
         assert L("a").missing.matches(answers, {"a"})
-        # An unsure answer kept after a later failure is usable: compared as usual.
+        # A condition compares an unsure answer kept after a later failure as usual; a rule
+        # never gets to: `match_rules` reads a failed lens's kept answer as failed.
         assert L("a").is_true.matches({"a": Answer(value=True, confidence=0.4)}, {"a"})
 
     async def test_a_gate_failure_counts_at_finish(self):
@@ -348,6 +387,36 @@ class TestUnsureChainsFailClosed:
         turn = await closed_turn(guard)
         row = await LensAnswer.objects.aget(turn=turn, lens="risky")
         assert (row.value, row.trail[-1]["error"]) == (False, "RuntimeError")
+
+    async def test_an_unsure_yes_then_an_error_blocks_but_never_alerts_or_queues(self):
+        name = policy(
+            "fx-unsure-yes-then-down",
+            [
+                JudgeLens(
+                    name="risky",
+                    stages=[Stage.GATE],
+                    judges=[
+                        Said(lambda text, v: Answer(value=True, confidence=0.5), "unsure"),
+                        Said(broken, "down"),
+                    ],
+                )
+            ],
+            [
+                Rule(
+                    "r",
+                    when=L("risky").is_true,
+                    then=[Block(), Alert("critical"), Queue("q")],
+                    mode=ENFORCE,
+                )
+            ],
+        )
+        with override_settings(AI_SDK_OVERSIGHT={"FAIL_MODE": "open"}):
+            assert not (await (await start(name)).gate()).blocked
+        guard = await start(name)
+        assert (await guard.gate()).blocked
+        turn = await closed_turn(guard)
+        assert turn.severity == "high"
+        assert not await ReviewItem.objects.filter(turn=turn).aexists()
 
 
 def raising(*args, **kwargs):

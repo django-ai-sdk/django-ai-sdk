@@ -292,6 +292,7 @@ async def judge_reflect_stage(
     for item in answered:
         context.answers[item.lens.name] = item.answer
     failed = {name for name, answer in context.answers.items() if answer.error}
+    failed |= {item.lens.name for item in answered if item.errored}
     matched = match_rules(
         policy,
         context.answers,
