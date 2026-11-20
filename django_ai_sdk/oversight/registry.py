@@ -104,6 +104,10 @@ def policy_name(policy: type[Policy] | str) -> str:
     elif known is not None and known is not policy and _declaration(known) == _declaration(policy):
         # Same declaration imported again. The copy in use wins.
         register_policy(policy)
+    elif known is not None and known.origin != policy.origin == "code":
+        # Code takes its name back from a policy authored under it before it was registered.
+        unregister_policy(policy.name)
+        register_policy(policy)
     return policy.name
 
 

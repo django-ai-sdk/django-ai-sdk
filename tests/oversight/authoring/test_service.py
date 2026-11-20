@@ -443,3 +443,22 @@ class TestWritesRacingOnPostgres:
             row = AuthoredPolicy.objects.get(name="refunds")
             assert (row.label, row.active) == (label, False)
             row.delete()
+
+
+@pytest.mark.usefixtures("no_reflect_queue")
+@pytest.mark.django_db(transaction=True)
+async def test_a_code_policy_named_by_its_class_takes_its_name_back(registry_snapshot):
+    """It registers only once an agent names it, so a policy may be authored under its name first."""
+    from django_ai_sdk.oversight import Block, L, PatternLens, Policy, Rule
+    from django_ai_sdk.oversight.registry import policy_name
+
+    class Care(Policy):  # chosen with run(oversight=Care), never registered
+        name = "care"
+        lenses = [PatternLens(name="pay", keywords=["salary"])]  # noqa: RUF012
+        rules = [Rule("block_pay", when=L("pay").is_true, then=Block(), mode="enforce")]  # noqa: RUF012
+
+    await save("care")
+    assert get_policy_class("care") is not Care
+    assert policy_name(Care) == "care"
+    assert get_policy_class("care") is Care
+    assert (await gate("care", "what about my salary?")).blocked
