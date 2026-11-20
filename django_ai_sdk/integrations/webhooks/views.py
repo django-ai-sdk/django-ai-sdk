@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
+from django.core.cache import cache
 from django.http import HttpResponse, HttpResponseNotFound
 from django.views.decorators.csrf import csrf_exempt
 
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.integrations.webhooks.base import WebhookIntegration
+from django_ai_sdk.integrations.webhooks.signals import event_received
 from django_ai_sdk.integrations.webhooks.tasks import handle_inbound
 from django_ai_sdk.utils import resolve_setting
 
 if TYPE_CHECKING:
     from django.http import HttpRequest
+
+    from django_ai_sdk.integrations.webhooks.base import InboundEvent
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +64,12 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         )
         return HttpResponse(status=200)
 
+    if await _over_rate_limit(name, parsed):
+        logger.info(
+            "Ignoring a %r event from %r: over the rate limit", name, parsed.external_user_id
+        )
+        return HttpResponse(status=200)
+
     # Platform limits are far too high for one agent turn. Log the cut, since the
     # person in the channel cannot see it.
     max_text = resolve_setting("AI_SDK_WEBHOOK_MAX_TEXT", 4000)
@@ -70,8 +81,22 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
 
     # Every delivery is queued; the worker drops repeats, so a crash before the
     # queue write leaves nothing claimed and the platform's retry gets through.
+    await event_received.asend(sender=type(integration), event=parsed)
     await handle_inbound.aenqueue(parsed.model_dump())
     return integration.ack(parsed)
+
+
+async def _over_rate_limit(name: str, event: InboundEvent) -> bool:
+    """More than AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE events from one sender this minute."""
+    per_minute = int(resolve_setting("AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE", 0) or 0)
+    if per_minute <= 0:
+        return False
+    sender = event.external_user_id or "unknown"
+    key = f"ai_sdk:webhook:rl:{name}:{sender}:{int(time.time() // 60)}"
+    # The async cache calls, since DatabaseCache may not run on the event loop.
+    if await cache.aadd(key, 1, timeout=120):
+        return False
+    return await cache.aincr(key) > per_minute
 
 
 __all__ = ["receive"]

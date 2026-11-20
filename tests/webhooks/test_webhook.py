@@ -251,6 +251,64 @@ class TestTextLimit:
         assert enqueue.await_args.args[0]["text"] == "x" * 10
 
 
+class TestRateLimit:
+    """One sender cannot run up the agent: past the limit, events are acknowledged and dropped."""
+
+    @pytest.mark.django_db
+    @override_settings(
+        AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE=2,
+        CACHES={
+            "default": {
+                "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+                "LOCATION": "webhook_rate_cache",
+            }
+        },
+    )
+    def test_a_sender_over_the_limit_is_dropped(self, rf, enqueue):
+        # DatabaseCache, as in production: a sync cache call on the event loop would raise.
+        from asgiref.sync import async_to_sync
+        from django.core.management import call_command
+
+        call_command("createcachetable", verbosity=0)
+        register(DemoWebhookIntegration())
+        codes = [
+            async_to_sync(receive)(_post(rf, event_id=f"Ev{n}"), "demo").status_code
+            for n in range(3)
+        ]
+        assert codes == [200, 200, 200]
+        assert enqueue.await_count == 2
+
+    async def test_other_senders_are_not_held_back(self, rf, enqueue):
+        register(DemoWebhookIntegration())
+        with override_settings(AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE=1):
+            await receive(_post(rf, event_id="Ev1", sender="U1"), "demo")
+            await receive(_post(rf, event_id="Ev2", sender="U2"), "demo")
+        assert enqueue.await_count == 2
+
+
+class TestEventTriggers:
+    """Every delivery is reported as "<name>.message", keyed by its id."""
+
+    async def test_a_delivery_starts_the_workflows_waiting_for_it(self, rf, enqueue):
+        register(DemoWebhookIntegration())
+        start = AsyncMock(return_value=[])
+        with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
+            await receive(_post(rf, event_id="Ev7", text="new invoice"), "demo")
+        start.assert_awaited_once_with(
+            "demo.message",
+            {"text": "new invoice", "conversation_id": "C1"},
+            idempotency_key="demo:Ev7",
+        )
+
+    async def test_a_failing_trigger_still_answers(self, rf, enqueue):
+        register(DemoWebhookIntegration())
+        start = AsyncMock(side_effect=RuntimeError("queue down"))
+        with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
+            response = await receive(_post(rf), "demo")
+        assert response.status_code == 200
+        assert enqueue.await_count == 1
+
+
 class TestDeduplication:
     """A redelivered event is answered once. The worker claims it, not the view."""
 

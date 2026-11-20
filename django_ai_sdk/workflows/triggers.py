@@ -7,8 +7,9 @@ A workflow declares its triggers (`schemas.CronTrigger`, `schemas.EventTrigger`)
   and `workflows.durable.fire_cron` opens the run. An operator pauses and resumes a schedule at
   runtime; a deploy keeps that choice. AI_SDK_WORKFLOWS['SCHEDULES_ENABLED'] off makes
   every occurrence start nothing, without touching the schedules.
-- Event: the host calls `start_for_event(event, payload, idempotency_key=...)`,
-  such as when a message comes in. Each enabled trigger on that event opens a run.
+- Event: every webhook delivery is "<integration>.message" (`start_for_webhook`);
+  the host reports others with `start_for_event(event, payload, idempotency_key=...)`.
+  Each enabled trigger on that event opens a run.
 
 Either way the run's id comes from what fired it (the occurrence, or the
 idempotency key), so firing twice opens one run.
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
+    from django_ai_sdk.integrations.webhooks.base import InboundEvent
     from django_ai_sdk.workflows.models import Workflow, WorkflowRun
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
@@ -268,6 +270,24 @@ async def start_for_event(
 start_for_event_sync = async_to_sync(start_for_event)
 
 
+async def start_for_webhook(sender: Any, event: InboundEvent, **kwargs: Any) -> None:
+    """Report a webhook delivery as "<integration>.message". Never fails the webhook.
+
+    Connected to `event_received`. The event id is the idempotency key, so a
+    redelivery starts nothing new.
+    """
+    if not event.event_id:
+        return
+    try:
+        await start_for_event(
+            f"{event.integration}.message",
+            {"text": event.text, "conversation_id": event.conversation_id},
+            idempotency_key=f"{event.integration}:{event.event_id}",
+        )
+    except Exception:
+        logger.exception("Could not start triggers for %s %s", event.integration, event.event_id)
+
+
 async def _declared() -> list[tuple[str, WorkflowDefinition, Workflow | None]]:
     from asgiref.sync import sync_to_async
 
@@ -305,5 +325,6 @@ __all__ = [
     "start_cron",
     "start_for_event",
     "start_for_event_sync",
+    "start_for_webhook",
     "sync_schedules",
 ]

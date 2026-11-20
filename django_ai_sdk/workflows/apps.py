@@ -39,6 +39,11 @@ class WorkflowsConfig(AppConfig):
             )
         autodiscover_modules("workflows")
 
+        from django_ai_sdk.integrations.webhooks.signals import event_received
+        from django_ai_sdk.workflows.triggers import start_for_webhook
+
+        event_received.connect(start_for_webhook, dispatch_uid="ai_sdk_workflow_event_triggers")
+
         from django_ai_sdk.workflows.checks import check_workflows
 
         # A rejected declaration fails no request, so only this check reports it.
