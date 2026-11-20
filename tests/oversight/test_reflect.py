@@ -176,3 +176,36 @@ class TestReflect:
         )
         [shown] = VercelProtocolHandler().from_chat_messages([message.to_chat_message()])
         assert {"type": "data-oversight", "data": notice} in shown["parts"]
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_a_lens_that_failed_after_an_unsure_answer_decides_nothing_at_reflect_either():
+    from django_ai_sdk.oversight import Alert, Judge, JudgeLens
+    from django_ai_sdk.oversight.reflection import judge_reflect_stage
+    from django_ai_sdk.oversight.registry import build_policy
+
+    from django_ai_sdk.oversight.types import TurnContext
+
+    from tests.oversight.helpers import ENFORCE, broken, policy
+
+    class Said(Judge):
+        def __init__(self, fn: Any, name: str) -> None:
+            self.fn, self.name = fn, name
+
+        async def answer(self, lens: Any, context: Any) -> Answer:
+            return self.fn(context.text(lens.subject), context)
+
+    unsure = Said(lambda text, v: Answer(value=True, confidence=0.5), "unsure")
+    lens = JudgeLens(
+        name="risky",
+        subject=Subject.ANSWER,
+        stages=[Stage.REFLECT],
+        judges=[unsure, Said(broken, "down")],
+    )
+    rule = Rule("r", when=L("risky").is_true, then=Alert("critical"), mode=ENFORCE)
+    name = policy("test-reflect-kept", [lens], [rule])
+    context = TurnContext(turn_id="t", input="q", output="a")
+    answered, matched, _ = await judge_reflect_stage(
+        build_policy(name), context, set(), set(), outcome="allowed"
+    )
+    assert answered[0].failed and matched == []
