@@ -87,14 +87,15 @@ def capture_content(
         }
     assert keep is not None
     full = capture is Capture.FULL
+    # What the model said, also when it was withheld: a person reviewing the turn reads it.
+    said = keep.text(guard.original_output or context.output)
+    shown = keep.text(context.output)
     return {
         **base,
         "input": guard.original_input if full else keep.text(context.input),
-        "output": (guard.original_output or context.output) if full else keep.text(context.output),
+        "output": said,
         "shown_input": context.input if full and context.input != guard.original_input else None,
-        "shown_output": context.output
-        if full and guard.original_output and context.output != guard.original_output
-        else None,
+        "shown_output": shown if shown != said else None,
         "history": keep([h.model_dump() for h in context.history]),
         "sources": keep([s.model_dump() for s in context.sources]),
         "tool_calls": keep([c.model_dump(mode="json") for c in context.tool_calls]),
