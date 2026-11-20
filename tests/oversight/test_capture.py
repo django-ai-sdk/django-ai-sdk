@@ -330,6 +330,11 @@ class TestTheRecordsValue:
         for capture in ("metadata", "none"):
             assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
 
+    def test_the_record_masks_a_number_whatever_label_precedes_it(self):
+        # The model may read an invoice number that passes the BSN check; the record keeps none.
+        keep = capture_masker("masked")
+        assert keep.text("factuurnummer: 111222333") == "factuurnummer: [BSN]"
+
     def test_a_found_name_is_masked_before_the_detectors_cut_it_apart(self):
         keep = capture_masker("masked", {f"Jan Jansen <{EMAIL}>": "person"})
         assert keep.text(f"Mail Jan Jansen <{EMAIL}> today.") == "Mail [PERSON] today."

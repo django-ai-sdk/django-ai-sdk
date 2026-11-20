@@ -190,6 +190,9 @@ class TurnGuard:
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
     restrict: list[str] | None = None
+    # A call a rule blocked, by name and arguments, with its message. The same call again
+    # gets it at once; a corrected call (a visit note without the dose change) is judged anew.
+    refused_calls: dict[str, str] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     created_at: Any = None
     error: str = ""
@@ -431,6 +434,7 @@ class TurnGuard:
         )
         guard.context = TurnContext(
             turn_id=guard.id,
+            thread_id=guard.thread_id,
             channel=channel,
             agent_id=agent_key(agent),
             agent_name=str(getattr(agent, "name", "") or type(agent).__name__),

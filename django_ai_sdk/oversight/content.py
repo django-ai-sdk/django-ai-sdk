@@ -157,7 +157,7 @@ def turn_literals(guard: TurnGuard) -> dict[str, str]:
         Subject.QUESTION: guard.original_input or context.input,
         Subject.ANSWER: said_output,
         Subject.EXCHANGE: f"{context.input}\n\n{said_output}",
-        Subject.SOURCES: "\n\n".join(s.content for s in context.fresh_sources()),
+        Subject.SOURCES: context.text(Subject.SOURCES),
     }
     return found_literals(guard.answered, texts)
 
@@ -205,7 +205,9 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
 
 @cache
 def _detectors() -> tuple[Any, ...]:
-    return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
+    # No `not_after`: a number that only its label kept unmasked is not kept on record.
+    numbers = PIILens(name="captured", kinds=list(PII_PATTERNS), not_after={})
+    return numbers, SecretsLens(name="captured")
 
 
 def stored_value(lens: Lens, answer: Answer) -> Any:
@@ -303,6 +305,7 @@ def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext
     content = content or {}
     return TurnContext(
         turn_id=str(turn.id),
+        thread_id=turn.thread_id,
         channel=turn.channel,
         agent_id=turn.agent_id,
         agent_name=turn.agent_name,

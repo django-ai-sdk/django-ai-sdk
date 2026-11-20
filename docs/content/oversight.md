@@ -580,8 +580,8 @@ A judge lens asks its judges in order. The first answer whose confidence reaches
 
 A `PIILens` finds personal data by kind, with checksums where a kind has one: a number shaped like an IBAN that fails mod-97 is not reported.
 
-- **Default kinds**, the same in every country: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format, `+31 6 ...` or `0031 ...`), `ip_address` (IPv4).
-- **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`).
+- **Default kinds**, the same in every country: `email` (also spelled out, as `jan [at] example [dot] nl` or `jan apenstaartje example punt nl`), `iban` (mod-97), `credit_card` (Luhn), `phone` (international format, `+31 6 ...` or `0031 ...`), `ip_address` (IPv4).
+- **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`). A number right after an invoice or order label (`invoice no. 202611188`, `factuurnummer:`) is not a BSN: one in eleven such numbers passes the 11-check. Only the label itself counts, so `factuur 111222333` leaves a real BSN unmasked for the model; that is the trade. A label a personal number goes by too (`kenmerk`, `referentie`) does not count, and the record masks the number whatever precedes it. `phone_nl` takes any grouping (`06-41-27-88-35`, `(06) 41278835`) but not a date and a time (`03-11-2026 14:00`).
 
 ```python
 from django_ai_sdk.oversight import DEFAULT_PII_KINDS, PIILens

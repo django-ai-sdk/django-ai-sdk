@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -213,12 +214,20 @@ def _history_items(
     return items
 
 
+def refusal_key(call: ToolCall) -> str:
+    """The call by name and arguments: the same call again gets the same refusal."""
+    return f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
+
+
 async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
     if not guard.active:
         return None
     if guard.policy_unloaded:
         return str(Block.DEFAULT_MESSAGE)
     try:
+        key = refusal_key(call)
+        if key in guard.refused_calls:
+            return guard.refused_calls[key]
         if not guard.allows_tool(call.name):
             return str(TOOL_UNAVAILABLE_MESSAGE)
         lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
@@ -253,6 +262,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         block = first_block_message(matched)
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
+            guard.refused_calls[key] = block
             return block
         if not guard.allows_tool(call.name):
             restricting = next(

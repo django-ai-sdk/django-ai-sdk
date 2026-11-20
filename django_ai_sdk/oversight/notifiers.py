@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.oversight.conf import build_configured, setting
-from django_ai_sdk.oversight.rules import Notify
+from django_ai_sdk.oversight.rules import Notify, Queue
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -33,18 +33,51 @@ def event_id(turn_id: Any, rule: str, stage: str) -> str:
     return str(uuid.uuid5(EVENT_NAMESPACE, f"{turn_id}:{rule}:{stage}"))
 
 
+def not_yet_raised(turn_id: Any, thread_id: str, matched: Iterable[Matched]) -> list[Matched]:
+    """`matched` without rules whose every review is still open on another turn of the thread.
+
+    Someone is already on it, so the rule is not sent to notifiers again; its review
+    still lists this turn.
+    """
+    from django_ai_sdk.oversight.models import ReviewItem
+
+    matched = list(matched)
+    queued = {
+        match.rule.name: {(a.queue, match.rule.name) for a in match.acted if isinstance(a, Queue)}
+        for match in matched
+    }
+    reviews = set().union(*queued.values())
+    if not thread_id or not reviews:
+        return matched
+    still_open = set(
+        ReviewItem.objects.filter(
+            turn__thread_id=thread_id,
+            status=ReviewItem.Status.OPEN,
+            rule__in={rule for _, rule in reviews},
+        )
+        .exclude(turn_id=turn_id)
+        .values_list("queue", "rule")
+    )
+    return [m for m in matched if not (queued[m.rule.name] and queued[m.rule.name] <= still_open)]
+
+
 def notify_events(
     turn_id: Any,
     matched: Iterable[Matched],
     *,
+    thread_id: str,
     agent: str,
     channel: str,
     stage: str = "",
     outcome: str | None = None,
 ) -> list[tuple[dict[str, Any], list[str]]]:
-    """(the "oversight.match" event, notifier names) for each Notify that acted."""
+    """(the "oversight.match" event, notifier names) for each Notify that acted.
+
+    A rule whose review is still open in the thread is not sent again.
+    """
+    notifying = [m for m in matched if any(isinstance(a, Notify) for a in m.acted)]
     events = []
-    for match in matched:
+    for match in not_yet_raised(turn_id, thread_id, notifying):
         for action in match.acted:
             if not isinstance(action, Notify):
                 continue

@@ -40,6 +40,7 @@ from django_ai_sdk.oversight.judges.base import (
 from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.patterns import (
     DEFAULT_PII_KINDS,
+    PII_NOT_AFTER,
     PII_PATTERNS,
     PII_VERIFY,
     REFUSAL_PATTERNS,
@@ -284,6 +285,9 @@ class Lens:
     enabled: bool = True
     # Only ask when there are sources or tool results (this turn or earlier) to judge against.
     needs_grounding: bool = False
+    # Whether the question can be asked of what a tool returned. False for a question about
+    # the person writing, which a tool's text can't answer.
+    judges_tool_results: bool = True
 
     # Answer options, set only when the answer type reads them.
     yes: str
@@ -383,7 +387,8 @@ class PatternLens(Lens):
 
     `patterns` maps a label to regexes (a plain list labels hits with the lens's
     name), `keywords` a label to whole words, `verify` a label to a check such as
-    a checksum.
+    a checksum, `not_after` a label to a regex for the text right before a match
+    that makes it something else.
     """
 
     kind = "pattern"
@@ -391,6 +396,7 @@ class PatternLens(Lens):
     patterns: PatternTable = {}  # noqa: RUF012
     keywords: PatternTable = {}  # noqa: RUF012
     verify: Mapping[str, Verifier] = {}  # noqa: RUF012
+    not_after: Mapping[str, str] = {}  # noqa: RUF012
     flags: int = re.IGNORECASE
 
     @cached_property
@@ -399,6 +405,7 @@ class PatternLens(Lens):
             self.pattern_table(),
             keywords=self.keywords,
             verify=self.verify,
+            not_after=self.not_after,
             flags=self.flags,
             miss_confidence=1.0,
         )
@@ -631,6 +638,7 @@ class PIILens(PatternLens):
     name = "pii"
     kinds: list[str] = list(DEFAULT_PII_KINDS)  # noqa: RUF012
     verify = PII_VERIFY
+    not_after = PII_NOT_AFTER
     flags = 0
 
     def pattern_table(self) -> PatternTable:
