@@ -177,7 +177,10 @@ def _tool_chunks_only(
     Haystack streams a tool result before the after_tool hooks mask it, so a
     forwarded result is masked here by the subagent's own guard (current while
     its run streams): the coordinator's policy may not hide what this one does.
-    A sync run only ever joins the coordinator's turn, whose stream masks it.
+    For the same reason a call is forwarded without its arguments, which the
+    adapter takes from its result once it ran: this one's tool stage may refuse
+    the call for what they hold. A sync run only ever joins the coordinator's
+    turn, whose stream masks it.
     """
     if callback is None:
         return None
@@ -190,7 +193,14 @@ def _tool_chunks_only(
         from django_ai_sdk.oversight.plugin import mask_streamed_result
 
         async def filtered(chunk: StreamingChunk) -> None:
-            if not (chunk.tool_calls or chunk.tool_call_result):
+            if chunk.tool_calls:
+                calls = [
+                    dataclasses.replace(c, arguments=None) for c in chunk.tool_calls if c.tool_name
+                ]
+                if not calls:
+                    return
+                chunk = dataclasses.replace(chunk, tool_calls=calls)
+            elif not chunk.tool_call_result:
                 return
             record(chunk)
             result = callback(_tag_subagent(await mask_streamed_result(chunk), name))

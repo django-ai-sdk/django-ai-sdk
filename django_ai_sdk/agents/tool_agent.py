@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import json
 from typing import Any
 
@@ -40,10 +41,16 @@ def answer_calls_with(
 ) -> list[ChatMessage]:
     """Answer the last message's tool calls with error stubs, so they never run.
 
-    `stubs` holds a (payload, meta) pair per call. Returns the stub messages.
+    `stubs` holds a (payload, meta) pair per call. Returns the stub messages. A
+    blocked call's stub keeps none of its arguments: the block may be about them.
     """
     answers = [
-        ChatMessage.from_tool(json.dumps(payload), origin=call, error=True, meta=meta)
+        ChatMessage.from_tool(
+            json.dumps(payload),
+            origin=dataclasses.replace(call, arguments={}) if meta.get(BLOCKED_META_KEY) else call,
+            error=True,
+            meta=meta,
+        )
         for call, (payload, meta) in zip(messages[-1].tool_calls, stubs, strict=True)
     ]
     state.set("messages", [*messages, *answers], handler_override=replace_values)

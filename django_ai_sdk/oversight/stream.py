@@ -170,8 +170,6 @@ class StreamTurn:
                 result = stub.tool_call_result
                 if stub.meta.get(BLOCKED_META_KEY):
                     self.blocked_call_ids.add(result.origin.id or "")
-                    origin = dataclasses.replace(result.origin, arguments={})
-                    result = ToolCallResult(result=result.result, origin=origin, error=result.error)
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
