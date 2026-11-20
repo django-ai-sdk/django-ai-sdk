@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from django_ai_sdk.common import last_user_message, last_user_text
+from django_ai_sdk.common import ChatMessage, last_user_message, last_user_text
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
-from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, guarding
-from django_ai_sdk.oversight.plugin import open_turn
-from django_ai_sdk.oversight.plugin.hooks import withhold_unfit
+from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
+from django_ai_sdk.oversight.plugin import open_turn, settled_outside_a_turn
+from django_ai_sdk.oversight.plugin.hooks import JOINED, withhold_unfit
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.common import ChatMessage
     from django_ai_sdk.oversight.policy import Policy
 
 
@@ -38,7 +37,8 @@ class OpenTurn:
     """The turn that `turn()` yields. Gate the question, then finish the answer.
 
     When no turn opened (no policy, oversight off, or the run joined an outer
-    turn), `guard` is None and `gate()` and `finish()` return their input.
+    turn), `guard` is None and `gate()` and `finish()` return their input; the
+    outer turn judges a joined question like a tool result.
     Otherwise use `guard` to report what the run found (`set_sources`, `add_usage`).
     """
 
@@ -62,14 +62,24 @@ class OpenTurn:
         history and question to send. Raises `Blocked`.
         """
         guard = self.guard
-        if self._gated or guard is None:
+        if self._gated:
             return self.input
         self._gated = True
+        if guard is None:
+            if (outer := current_guard()) is not None and self.input:
+                # Joined: no gate of its own, so the outer turn judges it like a tool result.
+                masked = await outer.mask_result(JOINED, self.input)
+                if masked != self.input and (asked := last_user_message(self.messages)):
+                    asked.content = masked
+                self.input = masked
+            return self.input
         if self.messages:
             # Copies, but the question stays shared so masking reaches the caller.
             question = last_user_message(self.messages)
             self.messages = [m if m is question else m.model_copy(deep=True) for m in self.messages]
-            checked = await guard.gate_history(self.messages)
+            # Every other message, a reply after the question too, is history.
+            history = [m for m in self.messages if m is not question]
+            checked = await guard.gate_history(history, question)
             if checked.blocked:
                 raise _blocked(guard, Stage.GATE, checked.message)
         gate = await guard.gate()
@@ -133,8 +143,7 @@ async def turn(
     )
     current = OpenTurn(guard if opened else None, messages=messages, input=input)
     if not opened:
-        # Joined the outer turn, or no policy: an opt-out on purpose.
-        with settled():
+        with settled_outside_a_turn():
             yield current
         return
     async with closing_turn(guard):

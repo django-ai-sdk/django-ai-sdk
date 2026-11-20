@@ -171,7 +171,7 @@ class TestRecordingFailures:
         ]
         with opened():
             guard = await start(name, "now")
-            checked = await guard.gate_history(messages)
+            checked = await guard.gate_history(messages[:-1], messages[-1])
         assert not checked.blocked and messages[0].content == "earlier a@b.nl"
         assert [o.lens.name for o in guard.answered if o.aside and o.errored] == ["pii"]
 
@@ -184,7 +184,7 @@ class TestRecordingFailures:
         with closed():
             guard = await start(name, "now")
             messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
-            await guard.gate_history(messages)
+            await guard.gate_history(messages[:-1], messages[-1])
         assert messages[0].content == str(UNCHECKED_TEXT)
 
     async def test_bypass_s1_a_child_turn_is_recorded_with_its_parent(self):

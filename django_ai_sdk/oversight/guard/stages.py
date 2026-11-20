@@ -120,7 +120,11 @@ def _block_question(guard: TurnGuard, result: StageResult, message: str) -> Stag
 
 
 async def judge_history(
-    guard: TurnGuard, messages: list[ChatMessage], *, history: bool = True
+    guard: TurnGuard,
+    earlier: list[ChatMessage],
+    question: ChatMessage | None = None,
+    *,
+    history: bool = True,
 ) -> StageResult:
     """Judge earlier messages and attachment context that come with the question.
 
@@ -139,11 +143,11 @@ async def judge_history(
     if not guard.active:
         return result
     # Set again below once judging has masked it.
-    guard.set_history(messages)
+    guard.set_history(earlier)
     if guard.policy_unloaded:
         return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
     lenses = guard.resolved.active_lenses(Stage.GATE, Subject.QUESTION)
-    items = _history_items(messages, history=history) if lenses else []
+    items = _history_items(earlier, question, history=history) if lenses else []
     if not items:
         return result
     unread, items = items[:-MAX_HISTORY_JUDGED], items[-MAX_HISTORY_JUDGED:]
@@ -177,7 +181,7 @@ async def judge_history(
         if one.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, one.restrict)
     recorded = guard.record_aside(Stage.GATE, [o for one in judged for o in one.answered], found)
-    guard.set_history(messages)
+    guard.set_history(earlier)
     if result.blocked:
         result.notice = guard.notices.stage_notice(Stage.GATE, recorded, True, result.message)
         # The gate will not run after a block, so write the turn ahead here.
@@ -186,7 +190,7 @@ async def judge_history(
 
 
 def _history_items(
-    messages: list[ChatMessage], *, history: bool
+    earlier: list[ChatMessage], question: ChatMessage | None, *, history: bool
 ) -> list[tuple[Callable[[], str], Callable[[str], None]]]:
     """(read, write back) pairs for each text to judge.
 
@@ -194,9 +198,9 @@ def _history_items(
     so a vouched history does not cover it.
     """
     items: list[tuple[Callable[[], str], Callable[[str], None]]] = []
-    for index, message in enumerate(messages):
-        earlier = index < len(messages) - 1
-        if history and earlier and message.role in {"user", "assistant"} and message.content:
+    for message in [*earlier, question] if question else earlier:
+        said = message.role in {"user", "assistant"} and message.content
+        if history and said and message is not question:
             items.append(
                 (
                     lambda m=message: m.content,

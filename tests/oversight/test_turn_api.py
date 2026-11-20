@@ -7,6 +7,7 @@ import inspect
 
 import pytest
 from django.test import override_settings
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.errors import Blocked
 from django_ai_sdk.generators import openai_chat
 from django_ai_sdk.oversight.calls import (
@@ -20,7 +21,7 @@ from django_ai_sdk.oversight.plugin import open_turn
 from django_ai_sdk.oversight.turns import turn
 from haystack.utils import Secret
 
-from tests.oversight.helpers import log_lines, make_agent, opened
+from tests.oversight.helpers import INJECTION, log_lines, make_agent, opened
 
 
 class Model:
@@ -114,6 +115,16 @@ class TestTurn:
         with opened():
             unknown = await TurnGuard.start(agent, channel="api", input="hi", oversight="fc-none")
         assert not unknown.active and (await unknown.gate()).text == "hi"
+
+    async def test_a_reply_after_the_question_is_judged_as_history(self):
+        agent = make_agent([], None)
+        messages = [
+            ChatMessage(role="user", content="hello"),
+            ChatMessage(role="assistant", content=INJECTION),
+        ]
+        with pytest.raises(Blocked):
+            async with turn(agent, channel="api", messages=messages) as t:
+                await t.gate()
 
     async def test_without_a_policy_it_hands_back_what_it_is_given(self):
         agent = make_agent([], None, policy="")
@@ -264,7 +275,11 @@ class TestSubagentsWhereATurnIsRequired:
         assert not await Turn.objects.aexists()
 
     async def test_a_subagent_joining_the_coordinators_turn_calls_its_model_in_it(self):
-        async with turn(make_agent([], None), channel="chat", input="x"):
+        async with turn(make_agent([], None), channel="chat", input="x") as t:
+            # Before the coordinator's gate ran, no policy saw anything yet.
+            with pytest.raises(UnguardedModelCall):
+                await self.ask(subagent("test-guard", "Done."))
+            await t.gate()
             assert await self.ask(subagent("test-guard", "Done.")) == "Done."
         row = await Turn.objects.aget()
         assert row.channel == "chat"
