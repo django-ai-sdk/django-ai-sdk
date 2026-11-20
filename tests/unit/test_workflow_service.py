@@ -77,6 +77,18 @@ class TestWorkflowServiceCRUD:
         updated = await WorkflowService.update(str(record.id), user=author, workflow=new_def)
         assert updated.definition["steps"][0]["name"] == "new"
 
+    async def test_whoever_changes_the_steps_is_who_its_runs_act_as(self, author):
+        from tests.factories.db import MANAGE_WORKFLOWS, UserFactory, agrant
+
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+        other = await agrant(await UserFactory.acreate(), MANAGE_WORKFLOWS)
+        renamed = await WorkflowService.update(str(record.id), user=other, name="Renamed")
+        assert renamed.created_by_id == author.pk  # a rename writes no steps
+        edited = await WorkflowService.update(
+            str(record.id), user=other, workflow=make_definition(step_name="mine")
+        )
+        assert edited.created_by_id == other.pk
+
     async def test_update_active_flag(self, author):
         definition = make_definition()
         record = await WorkflowService.create("WF", definition, user=author)

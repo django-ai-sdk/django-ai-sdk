@@ -476,6 +476,9 @@ class WorkflowService(PermissionsMixin):
         if workflow is not None:
             _validate_submitted(workflow)
             record.definition = workflow.model_dump()
+            # SECURITY: triggered runs act as the creator, so whoever writes the steps
+            # is who they act as; editing another's workflow cannot borrow their account.
+            record.created_by_id = user_pk(user)
         if name is not None:
             record.name = name
         if active is not None:

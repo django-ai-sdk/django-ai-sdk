@@ -19,6 +19,8 @@ from django_ai_sdk.oversight.guard import current_guard, unguarded
 from django_ai_sdk.oversight.models import Turn
 from django_ai_sdk.oversight.plugin import open_turn
 from django_ai_sdk.oversight.turns import turn
+from django_ai_sdk.workflows.runner import run_steps
+from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 from haystack.utils import Secret
 
 from tests.oversight.helpers import INJECTION, log_lines, make_agent, opened
@@ -229,6 +231,46 @@ class TestWatched:
         assert "tools" in inspect.signature(generator.run_async).parameters
         with refusing(), requires_turn("workflow:x:y"), pytest.raises(UnguardedModelCall):
             generator.run(messages=[])
+
+
+class Translate(Step):
+    name = "translate"
+
+    def __init__(self, model: Model, agent=None) -> None:
+        self.model = model
+        self.agent = agent
+
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
+        if self.agent is None:
+            return StepOutcome(output=(await self.model.run_async([]))["replies"][0])
+        async with self.turn(ctx, self.agent, input="Translate jan@example.com") as t:
+            await self.model.run_async([await t.gate()])
+            return StepOutcome(output=await t.finish("Vertaal jan@example.com"))
+
+
+@pytest.mark.django_db(transaction=True)
+class TestWorkflowSteps:
+    async def test_a_step_calling_a_model_outside_a_turn_is_refused(self):
+        model = watched(Model())
+        with refusing(), pytest.raises(UnguardedModelCall, match="workflow:docs:translate"):
+            await run_steps([Translate(model)], workflow="docs")
+        assert model.calls == 0
+
+    async def test_a_step_opens_its_own_turn_on_its_channel(self):
+        model = watched(Model())
+        with refusing():
+            outcomes = await run_steps([Translate(model, make_agent([], None))], workflow="docs")
+        assert outcomes["translate"].output == "Vertaal [EMAIL]"
+        row = await Turn.objects.aget()
+        assert (row.channel, row.outcome) == ("workflow:docs:translate", "masked")
+
+    async def test_a_step_may_name_a_policy_instead_of_an_agent(self):
+        model = watched(Model())
+        with refusing():
+            outcomes = await run_steps([Translate(model, "test-guard")], workflow="docs")
+        assert outcomes["translate"].output == "Vertaal [EMAIL]"
+        row = await Turn.objects.aget()
+        assert (row.policy, row.agent_name) == ("test-guard", "translate")
 
 
 def subagent(policy: str, reply: str) -> type:
