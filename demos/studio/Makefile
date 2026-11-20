@@ -1,7 +1,7 @@
 PHONY: reset run db test
 
 PORT ?= 8000
-UV := uv run --extra qdrant --extra mcp --extra files --group studio
+UV := uv run --extra qdrant --extra mcp --extra files --extra dbos --group studio
 
 reset:
 	rm -f db.sqlite3

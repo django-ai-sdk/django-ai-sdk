@@ -144,7 +144,7 @@ class TestWorkflowAccess:
         workflow_id = created_id(client, workflows)
 
         client.force_login(stranger)
-        with patch("django_ai_sdk.workflows.runs._enqueue"):
+        with patch("django_ai_sdk.workflows.runs.requeue"):
             response = post_json(client, f"{workflows}acl-wf/run/", {"inputs": {}})
 
         assert response.status_code == 202
@@ -165,7 +165,7 @@ class TestWorkflowAccess:
         client.force_login(users[0])
         created_id(client, workflows)
         with (
-            patch("django_ai_sdk.workflows.runs._enqueue") as enqueue,
+            patch("django_ai_sdk.workflows.runs.requeue") as enqueue,
             django_capture_on_commit_callbacks(execute=True),
         ):
             run_id = post_json(client, f"{workflows}acl-wf/run/", {"inputs": {}}).json()["run_id"]
@@ -186,7 +186,7 @@ class TestWorkflowAccess:
         owner, stranger, _ = users
         client.force_login(owner)
         created_id(client, workflows)
-        with patch("django_ai_sdk.workflows.runs._enqueue"):
+        with patch("django_ai_sdk.workflows.runs.requeue"):
             run_id = post_json(client, f"{workflows}acl-wf/run/", {"inputs": {}}).json()["run_id"]
         WorkflowRun.objects.filter(id=run_id).update(status=WorkflowRun.Status.FAILED)
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticUndefined
 
 if TYPE_CHECKING:
@@ -26,6 +27,10 @@ MAX_STEPS = 50
 MAX_LISTENERS = 20
 # The definition as stored JSON, in bytes.
 MAX_DEFINITION_BYTES = 256 * 1024
+# Cron and event triggers on one workflow.
+MAX_TRIGGERS = 10
+# A trigger's name: part of its schedule's name and of the runs it starts.
+TRIGGER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,49}$")
 
 _SCALARS = ("str", "int", "float", "bool")
 
@@ -42,6 +47,8 @@ _TYPE_OF_ANNOTATION: dict[Any, FieldType] = {py: name for name, py in PY_TYPES.i
 
 # The step type built in for agent calls. AI_SDK_WORKFLOWS['STEPS'] may not reuse it.
 AGENT_STEP = "agent"
+# The step type built in for a person's approval (`steps.ApprovalStep`). Also reserved.
+APPROVAL_STEP = "approval"
 
 
 class FieldDefinition(BaseModel):
@@ -151,7 +158,7 @@ class ListenerDefinition(BaseModel):
 class StepDefinition(BaseModel):
     """One step of a definition: an agent call, or a registered Step class."""
 
-    # AGENT_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
+    # AGENT_STEP, APPROVAL_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
     type: str = AGENT_STEP
     # The step's key: its outcome is recorded under it, and later steps require it.
     name: str
@@ -204,6 +211,53 @@ class StepDefinition(BaseModel):
         return self
 
 
+class _Trigger(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Unique within the workflow. Runs it starts record "<kind>:<name>" as their trigger.
+    name: str
+    # The account its runs act as, by USERNAME_FIELD. Only a workflow declared in code
+    # may name one; a stored workflow's runs act as the person who created it.
+    run_as: str = ""
+    # The run's inputs. "{word}" in a string is filled in: for a cron trigger from
+    # name, workflow, scheduled_at and last_run_at; for an event from its payload. A
+    # string that is just "{word}" takes the value as is, whatever its type.
+    inputs: dict[str, Any] = {}
+    # Off keeps it from starting runs. An operator can also pause a cron trigger.
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _check_the_name(self) -> _Trigger:
+        if not TRIGGER_NAME.match(self.name):
+            raise ValueError(
+                f"Trigger name {self.name!r}: lowercase letters, digits, - and _, at most 50."
+            )
+        return self
+
+
+class CronTrigger(_Trigger):
+    """Start a run on a schedule: a 5-field cron expression, read in `timezone`."""
+
+    kind: Literal["cron"] = "cron"
+    cron: str
+    # An IANA zone, so "0 9 * * mon-fri" stays 9:00 across daylight saving.
+    timezone: str = "UTC"
+
+
+class EventTrigger(_Trigger):
+    """Start a run when the host reports `event`, such as an inbound message.
+
+    The host calls `workflows.triggers.start_for_event(event, payload, idempotency_key=...)`;
+    a repeated key starts nothing new.
+    """
+
+    kind: Literal["event"] = "event"
+    event: str = Field(min_length=1, max_length=100)
+
+
+Trigger = Annotated[CronTrigger | EventTrigger, Field(discriminator="kind")]
+
+
 class WorkflowDefinition(BaseModel):
     # The shape of the stored JSON. Stored rows and run snapshots carry it, so a
     # future format revision can gate on it rather than guess.
@@ -214,11 +268,20 @@ class WorkflowDefinition(BaseModel):
     steps: list[StepDefinition]
     # Listeners that fire for the run and for every step in it.
     listeners: list[ListenerDefinition] = []
+    # What starts a run besides a person or code asking: a schedule, or an event.
+    triggers: list[Trigger] = []
 
     @model_validator(mode="after")
     def _check_the_size(self) -> WorkflowDefinition:
         if len(self.steps) > MAX_STEPS:
             raise ValueError(f"a workflow has at most {MAX_STEPS} steps, not {len(self.steps)}.")
+        if len(self.triggers) > MAX_TRIGGERS:
+            raise ValueError(
+                f"a workflow has at most {MAX_TRIGGERS} triggers, not {len(self.triggers)}."
+            )
+        names = [trigger.name for trigger in self.triggers]
+        if len(names) != len(set(names)):
+            raise ValueError(f"trigger names must be unique within a workflow: {names}.")
         listeners = len(self.listeners) + sum(len(step.listeners) for step in self.steps)
         if listeners > MAX_LISTENERS:
             raise ValueError(f"a workflow has at most {MAX_LISTENERS} listeners, not {listeners}.")

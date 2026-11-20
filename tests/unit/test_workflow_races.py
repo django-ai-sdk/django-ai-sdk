@@ -52,9 +52,13 @@ class TestRacesOnPostgres:
         from django_ai_sdk.workflows.services import WorkflowService
         from tests.factories.db import UserFactory
 
+        from django_ai_sdk.workflows.registry import register_workflow, reset_registry
+
         user = UserFactory.create()
         run_id = opened()
-        # Keyed like a registered workflow: resuming an ad-hoc run also takes MANAGE.
+        # A registered workflow's run: resuming an ad-hoc run also takes MANAGE, and a
+        # run of a workflow that is gone does not resume.
+        register_workflow(two_steps().model_copy(update={"name": "payroll"}))
         WorkflowRun.objects.filter(pk=run_id).update(
             status="failed", user=user, workflow_key="payroll"
         )
@@ -65,9 +69,12 @@ class TestRacesOnPostgres:
             except UserError as refused:
                 return refused
 
-        with patch(ENQUEUE) as enqueue:
-            results = race(resume, resume)
+        try:
+            with patch(ENQUEUE) as enqueue:
+                results = race(resume, resume)
+        finally:
+            reset_registry()
 
-        assert sum(isinstance(result, WorkflowRun) for result in results) == 1
+        assert sum(isinstance(result, WorkflowRun) for result in results) == 1, results
         assert enqueue.call_count == 1
         assert WorkflowRun.objects.get(pk=run_id).status == "pending"

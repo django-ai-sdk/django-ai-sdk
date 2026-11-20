@@ -1,26 +1,14 @@
-"""The workflow system checks: registry entries that cannot be used, and the task backend."""
+"""The workflow system checks: registry entries that cannot be used."""
 
 from __future__ import annotations
 
-from typing import Any
-
 from django.core import checks
 from django.test import override_settings
-from django_tasks.backends.base import BaseTaskBackend
-
 from django_ai_sdk.workflows.checks import check_workflows
 from tests.oversight.helpers import check_ids as ids
 
 STEP = "tests.mocks.workflow.FakeStep"
 LISTENER = "tests.mocks.workflow.RecordingListener"
-WORKER = {"default": {"BACKEND": f"{__name__}.WorkerBackend"}}
-
-
-class WorkerBackend(BaseTaskBackend):
-    """A backend with a worker somewhere else: tasks leave the request."""
-
-    def enqueue(self, task: Any, args: Any, kwargs: Any) -> Any:
-        raise NotImplementedError
 
 
 class TestTheRegistries:

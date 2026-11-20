@@ -46,6 +46,9 @@ class Workflow(models.Model):
             ),
         ]
 
+    if TYPE_CHECKING:
+        created_by_id: Any
+
     def __str__(self) -> str:
         return self.name
 
@@ -87,8 +90,8 @@ class WorkflowRun(models.Model):
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
-        # Set by `workflows_sweep` when the worker stopped sending heartbeats.
-        INTERRUPTED = "interrupted", "Interrupted"
+        # Stopped by a person (`WorkflowService.cancel`).
+        CANCELLED = "cancelled", "Cancelled"
 
     workflow = models.ForeignKey(
         Workflow,
@@ -105,11 +108,15 @@ class WorkflowRun(models.Model):
     # workflow's slug, the registered workflow's name, or "adhoc". Step turns run
     # on the channel "workflow:<workflow_key>:<step>".
     workflow_key = models.CharField(max_length=NAME_MAX_LENGTH, default=ADHOC, db_index=True)
+    # What started the run: "manual" (a person or code), "cron:<trigger>" or
+    # "event:<trigger>" (`workflows.triggers`).
+    trigger = models.CharField(max_length=120, default="manual", db_index=True)
 
     inputs = models.JSONField(default=dict, blank=True)
     outputs = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
-    task_id = models.CharField(max_length=64, null=True, blank=True)
+    # The DBOS workflow id of the current attempt (`workflows.durable.workflow_id`).
+    task_id = models.CharField(max_length=128, null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -117,11 +124,19 @@ class WorkflowRun(models.Model):
         on_delete=models.SET_NULL,
         related_name="workflow_runs",
     )
+    # The person who asked for the run, when one did: `user` for a manual run, the
+    # operator who fired a trigger by hand. Like `user`, they cannot approve it.
+    started_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
     # How many times a worker has claimed this run. A worker only writes while its
     # attempt is still the latest.
     attempt = models.PositiveIntegerField(default=0)
-    # Refreshed at the claim and at every step. `workflows_sweep` looks for running
-    # runs whose heartbeat is old.
+    # Refreshed at the claim and at every step: when the run last made progress.
     heartbeat_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -135,6 +150,7 @@ class WorkflowRun(models.Model):
         # Django adds the FK's `_id` attribute at class build time, which a static
         # checker reading this module does not see.
         user_id: Any
+        started_by_id: Any
         workflow_id: Any
 
     class Meta:
@@ -157,6 +173,8 @@ class StepRun(models.Model):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
         SKIPPED = "skipped", "Skipped"
+        # An approval step waiting for a person's decision.
+        WAITING = "waiting", "Waiting"
 
     run = models.ForeignKey(WorkflowRun, on_delete=models.CASCADE, related_name="steps")
 
@@ -169,6 +187,8 @@ class StepRun(models.Model):
     error = models.TextField(blank=True, default="")
     # One line on the outcome: why a step was skipped, or how it failed.
     detail = models.CharField(max_length=255, blank=True, default="")
+    # The oversight turn the step's model call opened, if it opened one.
+    turn_id = models.CharField(max_length=64, blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -179,6 +199,7 @@ class StepRun(models.Model):
         ordering = ["sequence"]
         verbose_name = "Step run"
         verbose_name_plural = "Step runs"
+        permissions = [("approve_steprun", "Can decide an approval step")]
 
     def __str__(self) -> str:
         return f"{self.run_id} step {self.sequence} ({self.step_name})"

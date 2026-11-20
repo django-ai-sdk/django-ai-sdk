@@ -381,7 +381,7 @@ run = await WorkflowService.run(workflow, inputs={"document": doc}, user=request
 record = await WorkflowService.create(name, workflow, user=request.user)
 await WorkflowService.update(workflow_id, user=request.user, name=..., workflow=..., active=...)
 
-# Start a registered or stored workflow by its key; resume a failed or interrupted run
+# Start a registered or stored workflow by its key; resume a failed or cancelled run
 run = await WorkflowService.start(record.slug, inputs={"document": doc}, user=request.user)
 await WorkflowService.resume(run_id, user=request.user)
 run = await WorkflowService.get_run(run_id, user=request.user)  # None when absent or not yours

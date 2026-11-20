@@ -123,6 +123,46 @@ def validate_definition(definition: WorkflowDefinition) -> None:
         _validate_listeners(step.listeners, where, listener_types)
 
     _validate_listeners(definition.listeners, label, listener_types)
+    _validate_triggers(definition, label)
+
+
+def _validate_triggers(definition: WorkflowDefinition, label: str) -> None:
+    """Every cron parses in its zone, and every input a trigger fills is declared."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    from django_ai_sdk.workflows.schemas import CronTrigger
+
+    declared = set(definition.input_fields)
+    for trigger in definition.triggers:
+        where = f"{label} trigger {trigger.name!r}"
+        if declared and (extra := sorted(set(trigger.inputs) - declared)):
+            raise ImproperlyConfigured(
+                f"{where} fills inputs {extra}, which input_fields does not declare. "
+                f"Declared: {sorted(declared)}."
+            )
+        if not isinstance(trigger, CronTrigger):
+            continue
+        # Five fields, so nothing fires more than once a minute.
+        if len(trigger.cron.split()) != 5 or not _cron_is_valid(trigger.cron):
+            raise ImproperlyConfigured(
+                f"{where} has cron {trigger.cron!r}, which is not a 5-field cron expression "
+                "(minute hour day-of-month month day-of-week)."
+            )
+        try:
+            ZoneInfo(trigger.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ImproperlyConfigured(
+                f"{where} has timezone {trigger.timezone!r}, which is not an IANA zone such "
+                "as 'Europe/Amsterdam'."
+            ) from exc
+
+
+def _cron_is_valid(expression: str) -> bool:
+    try:
+        from croniter import croniter
+    except ImportError:  # pragma: no cover - croniter comes with the dbos extra
+        return True
+    return bool(croniter.is_valid(expression))
 
 
 def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:

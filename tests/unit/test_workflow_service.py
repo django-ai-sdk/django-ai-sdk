@@ -233,7 +233,7 @@ class TestWorkflowServiceResume:
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(status=status, error="it broke")
         return run
 
-    @pytest.mark.parametrize("status", ["failed", "interrupted"])
+    @pytest.mark.parametrize("status", ["failed", "cancelled"])
     async def test_a_stopped_run_is_queued_again(self, author, status):
         run = await self._run(author, status)
 

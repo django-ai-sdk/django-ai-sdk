@@ -15,11 +15,14 @@ from ninja import Router
 from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
     StepRunOut,
+    WorkflowDecisionIn,
     WorkflowItem,
     WorkflowListenerItem,
     WorkflowRunDetailOut,
     WorkflowRunOut,
     WorkflowRunResponse,
+    WorkflowTriggerItem,
+    WorkflowTriggerPauseIn,
 )
 from django_ai_sdk.errors import NotFound
 from django_ai_sdk.utils import isoformat_or_none
@@ -50,6 +53,7 @@ def _run_out(run: Any, **extra: Any) -> dict[str, Any]:
         "workflow_key": run.workflow_key,
         "status": run.status,
         "attempt": run.attempt,
+        "trigger": run.trigger,
         "outputs": run.outputs,
         "error": run.error,
         "created_at": run.created_at.isoformat(),
@@ -63,6 +67,31 @@ def _run_out(run: Any, **extra: Any) -> dict[str, Any]:
 async def list_workflow_listeners(request: HttpRequest) -> Any:
     listeners = await WorkflowService.list_listeners(user=request.user)
     return [WorkflowListenerItem(**item) for item in listeners]
+
+
+@routes.get("/workflows/triggers/", response=list[WorkflowTriggerItem])
+async def list_workflow_triggers(request: HttpRequest) -> Any:
+    items: list[WorkflowTriggerItem] = []
+    for item in await WorkflowService.list_triggers(user=request.user):
+        last = item.pop("last_run")
+        items.append(
+            WorkflowTriggerItem(**item, last_run=WorkflowRunOut(**_run_out(last)) if last else None)
+        )
+    return items
+
+
+@routes.post("/workflows/triggers/{key}/{trigger}/pause/", response={204: None})
+async def pause_workflow_trigger(
+    request: HttpRequest, key: str, trigger: str, payload: WorkflowTriggerPauseIn
+) -> Any:
+    await WorkflowService.set_trigger_paused(key, trigger, paused=payload.paused, user=request.user)
+    return 204, None
+
+
+@routes.post("/workflows/triggers/{key}/{trigger}/fire/", response={202: None})
+async def fire_workflow_trigger(request: HttpRequest, key: str, trigger: str) -> Any:
+    await WorkflowService.fire_trigger(key, trigger, user=request.user)
+    return 202, None
 
 
 @routes.get("/workflows/", response=list[WorkflowItem])
@@ -108,6 +137,7 @@ async def _run_detail(request: HttpRequest, run_id: str, workflow_id: str | None
             status=s.status,
             error=s.error,
             detail=s.detail,
+            turn_id=s.turn_id,
             started_at=isoformat_or_none(s.started_at),
             completed_at=isoformat_or_none(s.completed_at),
         )
@@ -162,6 +192,23 @@ async def start_workflow(request: HttpRequest, key: str, payload: WorkflowStartR
 async def resume_workflow_run(request: HttpRequest, run_id: str) -> Any:
     run = await WorkflowService.resume(run_id, user=request.user)
     return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+
+
+@routes.post("/workflows/runs/{run_id}/cancel/", response=WorkflowRunResponse)
+async def cancel_workflow_run(request: HttpRequest, run_id: str) -> Any:
+    run = await WorkflowService.cancel(run_id, user=request.user)
+    return WorkflowRunResponse(run_id=str(run.id), status=run.status)
+
+
+@routes.post("/workflows/runs/{run_id}/steps/{step}/decision/", response=WorkflowRunResponse)
+async def decide_workflow_step(
+    request: HttpRequest, run_id: str, step: str, payload: WorkflowDecisionIn
+) -> Any:
+    """Approve or reject an approval step the run waits on. Not on a run that acts as you."""
+    run = await WorkflowService.decide(
+        run_id, step, approved=payload.approved, note=payload.note, user=request.user
+    )
+    return WorkflowRunResponse(run_id=str(run.id), status=run.status)
 
 
 def get_workflows_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:

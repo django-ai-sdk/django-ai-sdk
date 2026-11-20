@@ -6,7 +6,7 @@ from enum import StrEnum
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.errors import Blocked
@@ -41,6 +41,18 @@ class RunSuperseded(Exception):
     """
 
 
+class StepRecorded(Exception):
+    """The step's row already holds this attempt's outcome: the step does not run again.
+
+    `RunRecorder` raises it when a step finished and was recorded, but its worker died
+    before DBOS checkpointed it. The runner takes `outcome` as the step's.
+    """
+
+    def __init__(self, outcome: StepOutcome) -> None:
+        super().__init__(outcome.detail)
+        self.outcome = outcome
+
+
 class OnError(StrEnum):
     """What a step's failure does to the rest of the run."""
 
@@ -55,9 +67,12 @@ class StepOutcome:
     """What a step reports back, filed under the step's own name."""
 
     output: Any = None
-    status: Literal["completed", "failed", "skipped"] = "completed"
+    # "waiting" only while an approval step waits for a decision.
+    status: Literal["completed", "failed", "skipped", "waiting"] = "completed"
     # One line on the outcome, for whoever reads the record.
     detail: str = ""
+    # The oversight turn the step opened, if any. The runner fills it in.
+    turn_id: str = ""
 
 
 @dataclass
@@ -93,6 +108,13 @@ class Step:
 
     A step runs once every step it `requires` has completed, and its result is
     filed under `name`.
+
+    A step runs at least once, not exactly once. A worker that dies mid-step, or
+    before DBOS records the step as done, runs it again when the run is recovered,
+    and a resumed run runs again every step that did not complete. A step with a
+    side effect outside the run's own rows (a payment, a booking, a sent message)
+    must make it idempotent by `idempotency_key(ctx)`: pass it to the API as its
+    idempotency key, or store it with the effect and do nothing when it is there.
     """
 
     # The step's key in the run's record, and the name later steps require.
@@ -107,6 +129,9 @@ class Step:
     # The StepDefinition's `config`, checked by `validate_config` before it is
     # stored. Empty for a step written in code.
     config: Mapping[str, Any] = MappingProxyType({})
+
+    # True for a step that waits for a person (ApprovalStep). Only a durable run waits.
+    waits: bool = False
 
     @classmethod
     def validate_config(cls, config: Mapping[str, Any]) -> None:
@@ -128,7 +153,31 @@ class Step:
         return ""
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
-        """Do the work and report the outcome."""
+        """Do the work and report the outcome. It may run more than once (see the class)."""
+        raise NotImplementedError
+
+    def idempotency_key(self, ctx: WorkflowContext) -> str:
+        """ "<run id>:<step name>": the same every time this step of this run runs.
+
+        It stays the same across recovery and resume, so an effect done under it is
+        done once however often the step runs. Only a recorded run has one.
+        """
+        if not ctx.run_id or not self.name:
+            raise RuntimeError("Only a step of a recorded run has an idempotency key.")
+        return f"{ctx.run_id}:{self.name}"
+
+    # A waiting step (`waits = True`) implements these three instead of doing work in run().
+
+    def waiting_for(self) -> str:
+        """One line on what the step waits for, shown while it waits."""
+        return ""
+
+    def wait_seconds(self) -> float:
+        """How long the step waits for its decision before it fails."""
+        return 0.0
+
+    def decide(self, decision: Any) -> StepOutcome:
+        """The outcome for the decision that arrived, or for None when none came in time."""
         raise NotImplementedError
 
     def channel(self, ctx: WorkflowContext) -> str:
@@ -291,6 +340,66 @@ class AgentStep(Step):
         return StepOutcome(output=result)
 
 
+class ApprovalConfig(BaseModel):
+    """An approval step's `config`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # What the approver is asked, shown while the step waits.
+    prompt: str = Field(default="", max_length=255)
+    # How long the run waits for a decision before the step fails. A week by default.
+    timeout_seconds: int = Field(default=7 * 24 * 3600, ge=60, le=90 * 24 * 3600)
+
+
+class ApprovalStep(Step):
+    """Wait for a person to approve the run before the steps after it.
+
+    The run waits durably, across restarts, so it needs DBOS (`django_ai_sdk.durable`).
+    The decision comes from `WorkflowService.decide`, and nobody decides on a run they
+    started. Approved, the step completes with `{approved, by, note}`. Rejected, or
+    without a decision in time, it fails, and its `on_error` decides what follows.
+    """
+
+    waits = True
+
+    @classmethod
+    def validate_config(cls, config: Mapping[str, Any]) -> None:
+        try:
+            ApprovalConfig.model_validate(dict(config))
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @property
+    def settings(self) -> ApprovalConfig:
+        return ApprovalConfig.model_validate(dict(self.config))
+
+    def waiting_for(self) -> str:
+        return self.settings.prompt or "Waiting for approval"
+
+    def wait_seconds(self) -> float:
+        return float(self.settings.timeout_seconds)
+
+    async def run(self, ctx: WorkflowContext) -> StepOutcome:
+        # Reached only by a run that cannot wait: an in-process one.
+        return StepOutcome(
+            status="failed", detail="an approval step waits only in a durable run (DBOS)"
+        )
+
+    def decide(self, decision: Any) -> StepOutcome:
+        if not isinstance(decision, dict):
+            return StepOutcome(status="failed", detail="no decision came in time")
+        by = str(decision.get("by") or "")
+        output = {
+            "approved": bool(decision.get("approved")),
+            "by": by,
+            "note": str(decision.get("note") or ""),
+        }
+        if output["approved"]:
+            return StepOutcome(output=output, detail=f"approved by {by}"[:255])
+        note = f": {output['note']}" if output["note"] else ""
+        return StepOutcome(status="failed", output=output, detail=f"rejected by {by}{note}"[:255])
+
+
 def _as_message(item: Any) -> ChatMessage:
     """One history item as a ChatMessage, whatever it crossed the queue as."""
     if isinstance(item, ChatMessage):
@@ -315,10 +424,13 @@ def _as_text(value: Any) -> str:
 
 __all__ = [
     "AgentStep",
+    "ApprovalConfig",
+    "ApprovalStep",
     "OnError",
     "RunSuperseded",
     "Step",
     "StepOutcome",
+    "StepRecorded",
     "WorkflowContext",
     "WorkflowStopped",
 ]

@@ -8,7 +8,7 @@ from django_ai_sdk.workflows.listeners import RunListener, get_listener_registry
 from django_ai_sdk.workflows.models import WorkflowRun, StepRun
 from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.runs import RunRecorder
-from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, WorkflowContext
+from django_ai_sdk.workflows.steps import RunSuperseded, StepOutcome, StepRecorded, WorkflowContext
 from tests.mocks.workflow import FakeStep
 
 CTX = WorkflowContext()
@@ -169,23 +169,46 @@ class TestTheRecorderHoldsTheRun:
         assert row.status == StepRun.Status.RUNNING
 
     async def test_a_completed_step_is_never_reclaimed(self):
-        """Belt-and-braces: even if replay ever missed it, the row itself refuses."""
+        """A completed row is this attempt's outcome: the step does not run again."""
         run, recorder, (ocr,) = await self._recorder("ocr")
 
         await recorder.on_step_start(CTX, ocr)
         await recorder.on_step_end(CTX, ocr, StepOutcome(output="the text"))
 
-        with pytest.raises(RunSuperseded):
+        with pytest.raises(StepRecorded) as recorded:
             await recorder.on_step_start(CTX, ocr)
 
-    async def test_a_swept_run_stops_its_old_worker_before_it_writes(self):
+        assert recorded.value.outcome.output == "the text"
+        assert (await run.steps.aget(step_name="ocr")).status == StepRun.Status.COMPLETED
+
+    async def test_a_cancelled_run_stops_its_worker_before_it_starts_a_step(self):
         run, recorder, (ocr,) = await self._recorder("ocr")
         await WorkflowRun.objects.filter(pk=run.pk).aupdate(
-            status=WorkflowRun.Status.INTERRUPTED
+            status=WorkflowRun.Status.CANCELLED
         )
 
         with pytest.raises(RunSuperseded):
             await recorder.on_step_start(CTX, ocr)
+
+        assert await run.steps.acount() == 0
+
+    async def test_a_step_in_flight_when_its_run_was_cancelled_keeps_its_outcome(self):
+        run, recorder, (ocr,) = await self._recorder("ocr")
+        await recorder.on_step_start(CTX, ocr)
+        await WorkflowRun.objects.filter(pk=run.pk).aupdate(
+            status=WorkflowRun.Status.CANCELLED
+        )
+
+        with pytest.raises(RunSuperseded):
+            await recorder.on_step_end(CTX, ocr, StepOutcome(output="late"))
+
+        row = await run.steps.aget(step_name="ocr")
+        assert (row.status, row.output) == (StepRun.Status.COMPLETED, "late")
+
+    async def test_a_later_attempt_s_run_gets_nothing_from_an_earlier_one(self):
+        run, recorder, (ocr,) = await self._recorder("ocr")
+        await WorkflowRun.objects.filter(pk=run.pk).aupdate(attempt=2)
+
         with pytest.raises(RunSuperseded):
             await recorder.on_step_end(CTX, ocr, StepOutcome(output="late"))
 

@@ -19,7 +19,7 @@ def check_workflows(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     from django_ai_sdk.workflows.conf import load_classes, setting
     from django_ai_sdk.workflows.listeners import RunListener
     from django_ai_sdk.workflows.registry import get_invalid_workflows
-    from django_ai_sdk.workflows.schemas import AGENT_STEP
+    from django_ai_sdk.workflows.schemas import AGENT_STEP, APPROVAL_STEP
     from django_ai_sdk.workflows.steps import Step
 
     errors: list[Any] = [
@@ -46,11 +46,11 @@ def check_workflows(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     if settings:
         # The registries below read the same setting.
         return [*errors, *settings]
-    if AGENT_STEP in setting("STEPS"):
+    for reserved in sorted({AGENT_STEP, APPROVAL_STEP} & set(setting("STEPS"))):
         errors.append(
             Error(
-                f"AI_SDK_WORKFLOWS['STEPS'] has the key {AGENT_STEP!r}, which is reserved for "
-                "agent steps, so a definition can never reach that class.",
+                f"AI_SDK_WORKFLOWS['STEPS'] has the key {reserved!r}, which is reserved for "
+                "a built-in step type, so a definition can never reach that class.",
                 hint="Register the step under another key.",
                 id=f"{PREFIX}.E004",
             )
@@ -73,6 +73,11 @@ def check_workflows(app_configs: Any = None, **kwargs: Any) -> list[Any]:
 ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
     "STEPS": (lambda value: isinstance(value, dict), "a dict of step classes by key"),
     "LISTENERS": (lambda value: isinstance(value, dict), "a dict of listener classes by key"),
+    "SCHEDULES_ENABLED": (lambda value: isinstance(value, bool), "True or False"),
+    "STALE_AFTER_SECONDS": (
+        lambda value: isinstance(value, int) and not isinstance(value, bool) and value > 0,
+        "a positive number of seconds",
+    ),
 }
 
 
