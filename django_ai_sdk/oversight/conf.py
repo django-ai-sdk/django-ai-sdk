@@ -31,8 +31,7 @@ DEFAULTS: dict[str, Any] = {
     "DEADLINE_MS": {"gate": 1000, "tool": 1000, "finish": 2_000},
     # Longer questions are blocked at the gate: lenses would only read part of them.
     "MAX_INPUT_CHARS": 100_000,
-    # A tool result or source longer than a judge reads is judged in chunks it reads,
-    # at most this many; beyond that it is too long, as before.
+    # A tool result or source longer than a judge reads is judged in at most this many chunks.
     "MAX_OTHER_TEXT_CHUNKS": 10,
     "CLIENT_DETAIL": "actions",
     "FAIL_MODE": "closed",
@@ -41,7 +40,7 @@ DEFAULTS: dict[str, Any] = {
     "NOTIFIERS": [],
     # How long each process caches authored policies. 0 reads them every turn.
     "RUNTIME_CACHE_SECONDS": 10,
-    # A model call outside a required turn (see `oversight.calls`).
+    # What a model call outside a required turn does.
     "UNGUARDED_MODEL_CALLS": "refuse",
 }
 
