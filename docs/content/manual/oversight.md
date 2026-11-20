@@ -169,7 +169,7 @@ Rule(name, *, when=Condition, then=Action | [Action], mode=Mode.REPORT,
      message="", notice="", description="")
 ```
 
-Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= value`, `> < >= <=`, `.in_(values)`, `.contains(label)`, `.missing`, `.present`, `.confident(x)`, `.unsure(x)`, combined with `&`, `|` and `~`. Each serializes to JSON (`{"all": [...]}`, `{"any": [...]}`, `{"not": ...}`, `{"lens", "op", "value"}`). Every comparison on a lens without a usable answer is false; use `.missing` to test for that. A failed lens (its check or judge raised or timed out) is unknown, not false: a comparison on it is neither true nor false, so `~L("grounded").is_true` does not match just because "grounded" failed.
+Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= value`, `> < >= <=`, `.in_(values)`, `.contains(label)`, `.missing`, `.present`, `.confident(x)`, `.unsure(x)`, `.disputed` (two models asked for the lens answered differently; a yes/no or a label lens only), combined with `&`, `|` and `~`. Each serializes to JSON (`{"all": [...]}`, `{"any": [...]}`, `{"not": ...}`, `{"lens", "op", "value"}`). Every comparison on a lens without a usable answer is false; use `.missing` to test for that. A failed lens (its check or judge raised or timed out) is unknown, not false: a comparison on it is neither true nor false, so `~L("grounded").is_true` does not match just because "grounded" failed.
 
 A rule is evaluated once every lens it reads has had its chance, so it can combine a gate lens and a reflect lens. A rule fires once per turn. `message` replaces the action's message when the rule blocks.
 

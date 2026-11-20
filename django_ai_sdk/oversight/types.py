@@ -135,6 +135,13 @@ class Answer(BaseModel):
     def ok(self) -> bool:
         return not self.error and self.value is not None
 
+    @property
+    def disputed(self) -> bool:
+        """Whether a model asked earlier for this lens gave another answer than this one."""
+        return bool(self.model) and any(
+            a.ok and a.model and a.value != self.value for a in self.trail
+        )
+
 
 class Source(BaseModel):
     """One retrieved source, as the model saw it."""
