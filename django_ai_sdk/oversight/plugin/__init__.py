@@ -29,8 +29,15 @@ from django_ai_sdk.oversight.agents import (
     declared_policy,
     overrides_get_oversight,
 )
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.conf import is_enabled
-from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
+from django_ai_sdk.oversight.guard import (
+    TurnGuard,
+    closing_turn,
+    current_guard,
+    guarding,
+    note_opened,
+)
 from django_ai_sdk.oversight.guard.notices import UNCHECKED_TEXT, merge_restrict
 from django_ai_sdk.oversight.plugin.hooks import (
     GateQuestionHook,
@@ -94,6 +101,7 @@ async def open_turn(
         guard.actor_id = guard.actor_id or outer.actor_id
         if outer.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, outer.restrict)
+    note_opened(guard)
     return guard, True
 
 
@@ -180,11 +188,13 @@ async def run_with_oversight(
     agent = apply_oversight(agent)
     if turn.oversight is False:
         # Unguarded on purpose: it does not join the outer turn either.
-        with guarding(None):
+        with guarding(None), settled():
             return await agent.run_async(messages=messages, **kwargs)
     guard = turn.guard = await _open(turn, messages)
     if guard is None:
-        return await agent.run_async(messages=messages, **kwargs)
+        # No policy, or joined the outer turn: its model calls are accounted for.
+        with settled():
+            return await agent.run_async(messages=messages, **kwargs)
     async with closing_turn(guard, keep_open=turn.keep_open):
         with guarding(guard):
             return await agent.run_async(messages=messages, **kwargs)
@@ -195,9 +205,12 @@ def run_with_oversight_sync(
 ) -> dict[str, Any]:
     """Run with oversight from sync code, which cannot open a turn.
 
-    Inside a turn its tool calls are blocked (the guard is async only). Ask
-    `needs_own_turn_sync(turn)` first: a run that needs its own turn must not run.
+    Inside a turn its tool calls are blocked (the guard is async only). A run that
+    needs its own turn raises RuntimeError; ask `needs_own_turn_sync(turn)` first
+    to answer instead.
     """
+    if needs_own_turn_sync(turn):
+        raise RuntimeError("This run needs a turn of its own: use run_with_oversight.")
     return apply_oversight(agent).run(messages=messages, hook_context=turn.hook_context(), **kwargs)
 
 

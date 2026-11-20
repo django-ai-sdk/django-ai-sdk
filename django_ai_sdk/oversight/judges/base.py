@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.conf import build_configured, setting
 from django_ai_sdk.oversight.patterns import mask_secrets
 from django_ai_sdk.oversight.types import Answer, Subject
@@ -118,7 +119,9 @@ async def ask_judge(
         )
 
     try:
-        answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
+        # A judge's own model calls are oversight, not the turn's (`oversight.calls`).
+        with settled():
+            answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
     except TimeoutError:
         return failed("timeout")
     except asyncio.CancelledError:

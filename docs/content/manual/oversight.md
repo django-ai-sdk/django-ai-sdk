@@ -55,6 +55,7 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons kept in it, and reviewers' notes) and its metadata (the turn, its answers, matches and review items) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)). |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, class names, or `{"class": ..., **kwargs}`. As in `JUDGES`, a class name without a dot is one of `django_ai_sdk.oversight.notifiers` (`"LogNotifier"`); otherwise it is a dotted path. One that cannot be built is logged and left out. |
 | `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches [authored policies](/oversight-authoring/); `0` reads them every turn. |
+| `UNGUARDED_MODEL_CALLS` | `"refuse"` | A model called through the SDK's generators where a turn is required (every workflow step) but outside one: `refuse` raises `UnguardedModelCall` before the call, `warn` logs it once per place, `allow` lets it be. A step calls its model through `Agent.run()` or `self.turn()` (`django_ai_sdk.oversight.turns`). |
 
 Outside the dict:
 

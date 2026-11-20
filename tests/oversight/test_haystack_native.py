@@ -357,6 +357,9 @@ def test_a_sync_run_whose_policy_needs_a_turn_must_not_run():
     # Only an async run opens a turn, so a sync caller asks first.
     with override_settings(AI_SDK_OVERSIGHT=DEFAULT):
         assert needs_own_turn_sync(TurnRequest())
+        with pytest.raises(RuntimeError):
+            agent = HaystackAgent(chat_generator=Scripted(["fine"]))
+            run_with_oversight_sync(agent, [ChatMessage.from_user("Who?")], turn=TurnRequest())
     assert not needs_own_turn_sync(TurnRequest())
 
 
