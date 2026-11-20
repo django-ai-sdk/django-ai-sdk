@@ -88,7 +88,9 @@ def capture_content(
     assert keep is not None
     full = capture is Capture.FULL
     # What the model said, also when it was withheld: a person reviewing the turn reads it.
-    said = keep.text(guard.original_output or context.output)
+    # Masking hides only what a lens pointed at, so unless all was, keep what was shown.
+    located = full or _all_located(guard.answered)
+    said = keep.text(guard.original_output if located and guard.original_output else context.output)
     shown = keep.text(context.output)
     return {
         **base,
@@ -202,6 +204,16 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
             if 0 <= span.start < span.end <= len(text):
                 found.setdefault(text[span.start : span.end], span.label or item.lens.name)
     return found
+
+
+def _all_located(answered: Iterable[Answered]) -> bool:
+    """Whether every entities lens on the answer pointed at what it found, and none failed."""
+    return not any(
+        item.errored or (item.answer.ok and item.answer.value and not item.answer.spans)
+        for item in answered
+        if item.lens.answer.kind == "entities"
+        and item.lens.subject in {Subject.ANSWER, Subject.EXCHANGE}
+    )
 
 
 @cache

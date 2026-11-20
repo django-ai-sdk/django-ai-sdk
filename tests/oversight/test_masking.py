@@ -20,6 +20,7 @@ from django_ai_sdk.oversight import (
 from django_ai_sdk.oversight.models import RuleMatch
 from django_ai_sdk.oversight.types import (
     Answer,
+    Capture,
     Stage,
     Subject,
     TextSpan,
@@ -31,6 +32,7 @@ from tests.oversight.helpers import (
     broken,
     closed_turn,
     found_without_spans,
+    kept,
     masking_policy,
     policy,
     start,
@@ -70,6 +72,20 @@ class TestMasksThatCannotPoint:
         finished = await guard.finish("Ask Jan.")
         assert finished.blocked and finished.text == str(Block.DEFAULT_MESSAGE)
         assert (await closed_turn(guard)).outcome == "blocked"
+
+    @pytest.mark.parametrize("fn", [found_without_spans, broken])
+    async def test_masked_capture_keeps_only_the_shown_answer_it_could_not_mask(self, fn):
+        lens = FnLens(
+            name="names", answer=Entities, subject=Subject.ANSWER, stages=[Stage.FINISH], fn=fn
+        )
+        rule = Rule("mask_names", when=L("names").is_true, then=Mask(), mode=ENFORCE)
+        name = policy(f"test-unmaskable-{fn.__name__}", [lens], [rule], capture=Capture.MASKED)
+        guard = await start(name)
+        finished = await guard.finish("Call Jan Jansen at Dorpsstraat 5.")
+        assert finished.blocked
+        content = await kept(await closed_turn(guard))
+        assert content["output"] == str(Block.DEFAULT_MESSAGE)
+        assert content["shown_output"] is None
 
     async def test_a_mask_with_nothing_to_mask_is_not_recorded_as_masking(self):
         @register_policy
