@@ -7,9 +7,11 @@ from haystack_integrations.components.generators.huggingface_api import (
 )
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 from django_ai_sdk.utils import resolve_setting
 
 
+@watched_factory
 def huggingface_api_chat(**kwargs: Any) -> HuggingFaceAPIChatGenerator:
     """Hugging Face Inference API generator wired to Django settings.
 

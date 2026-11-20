@@ -8,6 +8,7 @@ from haystack.components.generators.chat import (
 )
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 from django_ai_sdk.utils import resolve_setting
 
 
@@ -20,6 +21,7 @@ def _deployment(kwargs: dict[str, Any]) -> str | None:
     )
 
 
+@watched_factory
 def azure_openai_chat(**kwargs: Any) -> AzureOpenAIChatGenerator:
     """Azure OpenAI Chat Completions generator wired to Django settings."""
     return AzureOpenAIChatGenerator(
@@ -35,6 +37,7 @@ def azure_openai_chat(**kwargs: Any) -> AzureOpenAIChatGenerator:
     )
 
 
+@watched_factory
 def azure_openai_responses_chat(**kwargs: Any) -> AzureOpenAIResponsesChatGenerator:
     """Azure OpenAI Responses API generator wired to Django settings."""
     return AzureOpenAIResponsesChatGenerator(

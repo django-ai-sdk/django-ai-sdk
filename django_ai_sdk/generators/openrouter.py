@@ -5,9 +5,11 @@ from typing import Any
 from haystack_integrations.components.generators.openrouter import OpenRouterChatGenerator
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 from django_ai_sdk.utils import resolve_setting
 
 
+@watched_factory
 def openrouter_chat(**kwargs: Any) -> OpenRouterChatGenerator:
     """OpenRouter chat generator wired to Django settings."""
     return OpenRouterChatGenerator(

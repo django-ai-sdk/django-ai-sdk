@@ -57,7 +57,7 @@ from django_ai_sdk.oversight.types import (
 from django_ai_sdk.utils import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
@@ -73,6 +73,9 @@ _unguarded: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _current: contextvars.ContextVar[TurnGuard | None] = contextvars.ContextVar(
     "django_ai_sdk_oversight_guard", default=None
 )
+_watched: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "django_ai_sdk_oversight_watched", default=None
+)
 
 
 def unguarded() -> contextlib.AbstractContextManager[None]:
@@ -84,15 +87,31 @@ def is_unguarded() -> bool:
     return _unguarded.get()
 
 
+@contextlib.contextmanager
+def watching_turns() -> Generator[list[str]]:
+    """Collect the ids of the turns opened inside the block, in order.
+
+    For a caller that records which turn its work ran in, such as a workflow step.
+    A run that joins an outer turn opens none, so it adds nothing.
+    """
+    opened: list[str] = []
+    with scoped(_watched, opened):
+        yield opened
+
+
+def note_opened(guard: TurnGuard) -> None:
+    """Tell `watching_turns()` that `guard` opened a turn of its own."""
+    if (opened := _watched.get()) is not None:
+        opened.append(guard.id)
+
+
 def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]:
     """Make `guard` current for tool hooks and get_tools(). Tasks inherit it."""
     return scoped(_current, guard if guard is not None and guard.active else None)
 
 
 @contextlib.asynccontextmanager
-async def closing_turn(
-    guard: TurnGuard, *, keep_open: bool = False, error: Callable[[], str] = str
-) -> AsyncGenerator[None]:
+async def closing_turn(guard: TurnGuard, *, keep_open: bool = False) -> AsyncGenerator[None]:
     """Close `guard` when the block ends, recording an exception as the run's error.
 
     A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
@@ -102,14 +121,14 @@ async def closing_turn(
         yield
     except BaseException as exc:
         if isinstance(exc, Blocked):
-            await guard.close(error=error())
+            await guard.close()
         elif isinstance(exc, GeneratorExit | asyncio.CancelledError):
             await guard.close(error="disconnected")
         else:
             await guard.close(error=type(exc).__name__)
         raise
     if not keep_open:
-        await guard.close(error=error())
+        await guard.close()
 
 
 def current_guard() -> TurnGuard | None:
@@ -181,6 +200,8 @@ class TurnGuard:
     # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     blocked: bool = False
+    # The gate ran, so a model call now counts as seen (`oversight.calls`).
+    gated: bool = False
     original_input: str = ""
     original_output: str = ""
     # A turn is finished once, inside its run or after it.
@@ -448,6 +469,7 @@ class TurnGuard:
     async def gate(self) -> StageResult:
         """Judge the question before the model sees it, then write the turn ahead."""
         result = await stages.judge_question(self)
+        self.gated = True
         await self.write_ahead()
         return result
 
