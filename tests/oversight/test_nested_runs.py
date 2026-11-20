@@ -267,7 +267,9 @@ class TestSubagents:
         assert streamed
         assert all("jan@example.com" not in str(result) for result in streamed)
 
-    @pytest.mark.parametrize("policy", ["test-masking", "test-guard"], ids=["child", "joined"])
+    @pytest.mark.parametrize(
+        "policy", ["test-masking", "test-guard", ""], ids=["child", "joined", "no-coordinator"]
+    )
     async def test_a_refused_call_keeps_no_arguments_in_the_coordinators_thread(self, policy):
         ran: list[str] = []
         send = HaystackChatMessage.from_assistant(
@@ -285,11 +287,16 @@ class TestSubagents:
             tool_calls=[HaystackToolCall(tool_name=tools[0].name, arguments={"task": "go"}, id="d1")]
         )
         storage = Storage()
-        # The subagent's policy refuses the call, in its own turn or the coordinator's.
+        # The subagent's policy refuses the call, in its own turn, the coordinator's, or with
+        # no coordinator policy at all.
         parts = await chat(make_agent([delegate, "Done."], storage, tools=tools, policy=policy), "go")
         assert ran == []
         assert SECRET not in json.dumps([m.tool_calls for m in storage.stored], default=str)
-        outputs = [p["toolCallId"] for p in parts if p.get("type") == "tool-output-available"]
+        # Nor does the stream show them before the subagent's tool stage refused the call.
+        assert SECRET not in json.dumps(parts)
+        # With no coordinator policy, the stub comes back as the run's own error result.
+        shown = "tool-output-available" if policy else "tool-output-error"
+        outputs = [p["toolCallId"] for p in parts if p.get("type") == shown]
         assert outputs.count("s1") == 1
 
     async def test_an_agent_run_inside_a_tool_sends_no_result_the_stream_never_announced(self):
