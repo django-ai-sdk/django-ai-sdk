@@ -291,7 +291,18 @@ The built-in step type `approval` waits for a person:
  "config": {"prompt": "Book this invoice?", "timeout_seconds": 86400}}
 ```
 
-The step is set `waiting` with the prompt as its `detail`, and the run waits durably (`DBOS.recv`) across restarts and deploys. A decision comes from `WorkflowService.decide` or `POST /workflows/runs/{id}/steps/{step}/decision/` (`{"approved": true, "note": "..."}`). It takes the `approve_steprun` permission and is refused on a run that acts as the approver or that they started (such as a trigger they fired by hand that runs as a bot). The first decision wins. Approved, the step completes with `{approved, by, note}`; rejected, or without a decision within `timeout_seconds` (default a week), it fails and its `on_error` decides what follows.
+The step is set `waiting` with the prompt as its `detail`, and the run waits durably (`DBOS.recv`) across restarts and deploys. A decision comes from `WorkflowService.decide` or `POST /workflows/runs/{id}/steps/{step}/decision/` (`{"approved": true, "note": "..."}`). It takes the `approve_steprun` permission and is refused on a run that acts as the approver or that they started (such as a trigger they fired by hand that runs as a bot). The first decision wins, and a decision that comes after the wait ran out raises `DecisionConflict` (`django_ai_sdk.workflows.services`; a `UserError` with code `conflict`, answered 409 by the SDK's views), as does one for a step already decided or cancelled. The timeout and a decision race on the same conditional update, so a decision that was accepted is never lost to the timeout. Approved, the step completes with `{approved, by, note}`; rejected, or without a decision within `timeout_seconds` (default a week), it fails and its `on_error` decides what follows.
+
+A step that acts on the approval reads it with `ctx.approval("approve")`, never with `ctx.step("approve")`. It returns the `{approved, by, note}` decision only when the step of that name is an `ApprovalStep` that a person approved, and None otherwise: anyone who may compose a definition could add another step named `approve` whose output is `{"approved": true}`.
+
+```python
+class PayStep(Step):
+    async def run(self, ctx):
+        if (decision := ctx.approval("approve")) is None:
+            return StepOutcome(output={"paid": False}, detail="Not approved.")
+        await pay(..., idempotency_key=self.idempotency_key(ctx))
+        return StepOutcome(output={"paid": True}, detail=f"Approved by {decision['by']}.")
+```
 
 ## Triggers
 

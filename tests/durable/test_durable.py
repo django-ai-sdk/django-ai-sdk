@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -15,7 +16,7 @@ from django_ai_sdk.permissions import PermissionDenied
 from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 from django_ai_sdk.workflows.registry import register_workflow, reset_registry, validate_definition
 from django_ai_sdk.workflows.runner import run_steps
-from django_ai_sdk.workflows.runs import queue_run
+from django_ai_sdk.workflows.runs import RunRecorder, queue_run
 from django_ai_sdk.workflows.schemas import (
     CronTrigger,
     EventTrigger,
@@ -335,12 +336,83 @@ class TestApproval:
         assert rows["gate"].detail == "rejected by approver@example.com: no"
         assert rows["b"].status == "skipped"
 
+    async def test_a_decision_taken_as_the_wait_runs_out_is_kept(self, dbos, monkeypatch):
+        # Long enough to decide in on a slow runner; the send below waits for it to run out.
+        monkeypatch.setattr(steps.QuickApprovalStep, "wait_seconds", lambda self: 5.0)
+        owner = await user("owner@example.com")
+        approver = await user("approver@example.com", is_superuser=True)
+        quick = StepDefinition(type="quick_approval", name="gate", requires=["a"])
+        run = await queue_run(
+            definition(echo("a"), quick, echo("b", requires=["gate"])), user=owner
+        )
+        await settled(run.pk, step_waiting="gate")
+        send, expire = runtime.send, RunRecorder.expire
+        expired = threading.Event()
+
+        async def noted(recorder, step):
+            try:
+                return await expire(recorder, step)
+            finally:
+                expired.set()
+
+        async def late(*args, **kwargs):
+            # Sent only once the step's wait has run out with the decision taken.
+            assert await asyncio.to_thread(expired.wait, 30)
+            await send(*args, **kwargs)
+
+        monkeypatch.setattr(RunRecorder, "expire", noted)
+        monkeypatch.setattr(runtime, "send", late)
+        await WorkflowService.decide(str(run.pk), "gate", approved=True, user=approver)
+        run = await settled(run.pk)
+
+        assert run.status == "completed"
+        assert run.outputs["gate"]["approved"] is True
+
+    async def test_a_decision_after_the_wait_ran_out_is_a_conflict(self, dbos):
+        from django_ai_sdk.workflows.services import DecisionConflict
+
+        owner = await user("owner@example.com")
+        approver = await user("approver@example.com", is_superuser=True)
+        quick = StepDefinition(type="quick_approval", name="gate", requires=["a"])
+        run = await settled((await queue_run(definition(echo("a"), quick), user=owner)).pk)
+        assert run.status == "failed"
+
+        with pytest.raises(DecisionConflict):
+            await WorkflowService.decide(str(run.pk), "gate", approved=True, user=approver)
+        gate = await StepRun.objects.aget(run=run, step_name="gate")
+        assert (gate.status, gate.detail) == ("failed", "no decision came in time")
+
     async def test_an_in_process_run_cannot_wait(self):
         step = ApprovalStep()
         step.name = "gate"
 
         with pytest.raises(WorkflowStopped, match="durable run"):
             await run_steps([step])
+
+    async def test_only_an_approval_step_that_was_approved_counts_as_an_approval(self):
+        from django_ai_sdk.workflows.steps import Step, StepOutcome
+
+        class Forged(Step):
+            name = "approve"
+
+            async def run(self, ctx):
+                return StepOutcome(output={"approved": True, "by": "nobody", "note": ""})
+
+        class Look(Step):
+            name = "look"
+
+            async def run(self, ctx):
+                return StepOutcome(output=ctx.approval("approve"))
+
+        outcomes = await run_steps([Forged(), Look()])
+        assert outcomes["approve"].output["approved"] is True
+        assert outcomes["look"].output is None
+
+        approval = ApprovalStep()
+        approval.name = "approve"
+        decision = {"approved": True, "by": "approver@example.com", "note": ""}
+        outcomes = await run_steps([approval, Look()], completed={"approve": decision})
+        assert outcomes["look"].output == decision
 
     def test_no_decision_in_time_fails_the_step(self):
         assert ApprovalStep().decide(None).status == "failed"

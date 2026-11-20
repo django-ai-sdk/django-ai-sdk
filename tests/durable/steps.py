@@ -8,7 +8,7 @@ import threading
 from django_tasks import task
 
 from django_ai_sdk.oversight.guard import note_opened
-from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
+from django_ai_sdk.workflows.steps import ApprovalStep, Step, StepOutcome, WorkflowContext
 
 # Step name -> how many times it ran, across the worker's threads.
 calls: dict[str, int] = {}
@@ -53,3 +53,10 @@ class HoldStep(Step):
         while not release.is_set():
             await asyncio.sleep(0.05)
         return StepOutcome(output="held")
+
+
+class QuickApprovalStep(ApprovalStep):
+    """An approval step that waits one second, so a test sees its wait run out."""
+
+    def wait_seconds(self) -> float:
+        return 1.0
