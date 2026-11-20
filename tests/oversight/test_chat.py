@@ -22,6 +22,7 @@ from django_ai_sdk.oversight import (
     Rule,
     register_policy,
 )
+from django_ai_sdk.oversight.content import context_from_turn
 from django_ai_sdk.oversight.guard import TurnGuard
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.types import Capture, Stage, Subject
@@ -174,6 +175,36 @@ class TestChat:
         # Masked once: the lenses' offsets index the unmasked text, not this one.
         assert content["input"] == "Is [EMAIL] right, or not?"
         assert content["output"] == "Ask [EMAIL], then reply."
+        assert content["shown_output"] is None
+
+    async def test_masked_capture_keeps_a_withheld_answer_masked(self):
+        @register_policy
+        class WithheldKept(Policy):
+            name = "test-withheld-kept"
+            capture = Capture.MASKED
+            lenses = [
+                PatternLens(
+                    name="danger",
+                    subject=Subject.ANSWER,
+                    stages=[Stage.FINISH],
+                    patterns=[r"\bself-destruct\b"],
+                )
+            ]
+            rules = [
+                Rule("stop_danger", when=L("danger").is_true, then=Block("Withheld."), mode=ENFORCE)
+            ]
+
+        said = "Mail jan@example.com, then self-destruct the server."
+        storage = Storage()
+        await chat(make_agent([said], storage, policy="test-withheld-kept"), "how?")
+        assert storage.stored[0].content == "Withheld."
+        content = await kept()
+        # Whoever reviews the block reads what was withheld, masked like the rest of the
+        # record: personal data, and what a pattern lens found.
+        assert content["output"] == "Mail [EMAIL], then [DANGER] the server."
+        assert content["shown_output"] == "Withheld."
+        # Reflect still judges what the person read.
+        assert context_from_turn(await Turn.objects.aget(), content).output == "Withheld."
 
     async def test_two_mask_rules_mask_one_text(self):
         text = "my key sk-proj-abcdefghijklmnopqrstuvwxyz12 and mail jan@example.com ok"
