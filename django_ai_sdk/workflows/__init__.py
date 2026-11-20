@@ -11,6 +11,8 @@ from django_ai_sdk.workflows.listeners import RunListener
 from django_ai_sdk.workflows.registry import register_workflow
 from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.schemas import (
+    CronTrigger,
+    EventTrigger,
     FieldDefinition,
     ListenerDefinition,
     StepDefinition,
@@ -18,6 +20,7 @@ from django_ai_sdk.workflows.schemas import (
 )
 from django_ai_sdk.workflows.steps import (
     AgentStep,
+    ApprovalStep,
     OnError,
     Step,
     StepOutcome,
@@ -27,6 +30,9 @@ from django_ai_sdk.workflows.steps import (
 
 __all__ = [
     "AgentStep",
+    "ApprovalStep",
+    "CronTrigger",
+    "EventTrigger",
     "FieldDefinition",
     "ListenerDefinition",
     "OnError",

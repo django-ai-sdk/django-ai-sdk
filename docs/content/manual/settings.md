@@ -154,11 +154,12 @@ changing it needs a restart. Assigning it in `settings.py` does nothing.
 
 ## Background Tasks
 
-Document processing (`memories/tasks.py`) and workflow runs (`workflows/tasks.py`)
-are enqueued with [django-tasks](https://pypi.org/project/django-tasks/), which the
-SDK depends on directly. It is **not** an `AI_SDK_*` setting: the backend is Django's
-`TASKS` setting, and which one you pick is a deployment decision the SDK does not
-make for you.
+Document processing (`memories/tasks.py`) and oversight's reflection and notifications
+(`oversight/tasks.py`) are enqueued with [django-tasks](https://pypi.org/project/django-tasks/),
+which the SDK depends on directly. It is **not** an `AI_SDK_*` setting: the backend is
+Django's `TASKS` setting, and which one you pick is a deployment decision the SDK does
+not make for you. Workflow runs are not django-tasks: they run on DBOS, in
+`./manage.py ai_sdk_worker` (see [Workflows](/manual/workflows/)).
 
 With no `TASKS` setting at all, django-tasks defaults to
 `django_tasks.backends.immediate.ImmediateBackend` - tasks run **inline, in the
@@ -166,7 +167,17 @@ calling request**. That works out of the box and needs no extra package, but it 
 a document upload processes synchronously while the user waits.
 
 For durable processing with a separate worker, install a backend that provides one.
-The database backend ships separately:
+With the workflows app installed, `DBOSTaskBackend` runs every task on the DBOS queues
+that `ai_sdk_worker` already polls, so no second worker is needed:
+
+```python
+TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
+```
+
+Declare each task's `queue_name` in `AI_SDK_DBOS["QUEUES"]`: the worker polls only
+those, and a task on any other queue is never picked up.
+
+Without the workflows app, the database backend ships separately:
 
 ```bash
 pip install django-tasks-db

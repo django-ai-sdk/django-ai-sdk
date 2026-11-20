@@ -568,7 +568,7 @@ def task_backend_checks() -> list[Any]:
         Warning(
             f"Oversight's reflect stage and notifications {problem}.",
             hint="Configure TASKS with a backend that has a worker, such as "
-            "django_tasks_db.DatabaseBackend with ./manage.py db_worker.",
+            "django_ai_sdk.durable.tasks.DBOSTaskBackend with ./manage.py ai_sdk_worker.",
             id=f"{PREFIX}.W014",
         )
     ]

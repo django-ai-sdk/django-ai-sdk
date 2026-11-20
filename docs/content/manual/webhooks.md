@@ -31,7 +31,7 @@ AI_SDK_INTEGRATIONS = {
 path("api/integrations/", include("django_ai_sdk.integrations.webhooks.urls")),
 ```
 
-The view verifies and queues; a `django_tasks` worker runs the agent and posts the reply, so run one (`manage.py db_worker` with `django_tasks_db`). Each integration is served at `api/integrations/<name>/webhook/`.
+The view verifies and queues; a `django_tasks` worker runs the agent and posts the reply, so run one (`manage.py ai_sdk_worker` with `DBOSTaskBackend`, or `manage.py db_worker` with `django_tasks_db`). Each integration is served at `api/integrations/<name>/webhook/`.
 
 ## How an event is handled
 

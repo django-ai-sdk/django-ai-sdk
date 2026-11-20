@@ -175,7 +175,7 @@ class _StepRunner:
 
         opened: list[str] = []
         try:
-            # Oversight: a step's model calls must come from a turn (`oversight.calls`).
+            # A step's model calls must come from a turn.
             with watching_turns() as opened, requires_turn(step.channel(ctx)):
                 outcome = await step.run(ctx)
         except Exception as exc:

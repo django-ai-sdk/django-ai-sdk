@@ -34,7 +34,7 @@ class WorkflowStopped(Exception):
 
 
 class RunSuperseded(Exception):
-    """This worker no longer holds the run. It was swept, resumed or claimed again.
+    """This worker no longer holds the run. It was cancelled, failed as stale, or resumed.
 
     `RunRecorder` raises it before writing, so a stale worker stops instead of
     overwriting the newer attempt.
@@ -217,7 +217,7 @@ class Step:
     ) -> AbstractAsyncContextManager[OpenTurn]:
         """Open a turn for a model this step calls directly, as the run's user.
 
-        Every model call in a step must happen inside a turn (`oversight.calls`). An
+        Every model call in a step must happen inside a turn. An
         AgentStep's `agent.run()` opens one itself. Use this for any other model
         call, under `agent`'s policy or a named policy::
 
@@ -226,7 +226,7 @@ class Step:
         """
         from django_ai_sdk.oversight.turns import turn
 
-        # Oversight: a policy given without an agent judges the turn as this step.
+        # A policy given without an agent judges the turn as this step.
         policy_only = isinstance(agent, str) or isinstance(agent, type) and _is_policy(agent)
         step_as_agent = SimpleNamespace(name=self.name or type(self).__name__, agent_id="")
         return turn(

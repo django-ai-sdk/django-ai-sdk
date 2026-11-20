@@ -16,7 +16,7 @@ INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.workflows", "django_ai_sd
 
 On start it reads every installed app's `workflows.py` (after the core app has set up the agents, so a step can name `MyAgent().agent_id`) and registers the [system checks](#system-checks). Without it the SDK has no workflow tables, checks or endpoints: the DRF router leaves `workflows/` out, and the Ninja `get_workflows_router()` is yours not to mount.
 
-The app owns its tables from a single migration, `django_ai_sdk_workflows.0001_initial`. A database from 0.1.x has the workflow tables in an older shape, created by the core app's own `0001`; drop `django_ai_sdk_workflows`, `django_ai_sdk_workflow_runs` and `django_ai_sdk_workflow_run_steps` (and their rows in `django_migrations` for `django_ai_sdk_workflows`) before you migrate. Stored workflows and run history do not carry over.
+Upgrading from 0.1.2a21 or earlier, `migrate` updates the tables in place (`django_ai_sdk_workflows.0004_dbos_runs`): stored workflows and run history carry over, and each old run gets its workflow's slug as `workflow_key`. A stored workflow whose slug was `adhoc` is renamed to `adhoc-<id>`, since `adhoc` now names runs of no stored workflow. A run the old runner left running has no DBOS workflow, so the worker's stale-run check fails it on its first pass; resume it to finish it on DBOS.
 
 ## The Definition
 
@@ -309,6 +309,8 @@ class PayStep(Step):
 A workflow declares what starts it besides a person or code asking:
 
 ```python
+from django_ai_sdk.workflows import CronTrigger, EventTrigger, FieldDefinition, WorkflowDefinition
+
 WorkflowDefinition(
     name="wiki-gardener",
     input_fields={"mode": FieldDefinition(enum=["hourly", "morning"])},
@@ -337,7 +339,7 @@ Workflows ship as a beta. What the engine does not do yet, in one list:
 - **Oversight does not wait.** An oversight rule that blocks a step's turn fails the step; a `Queue` rule files a review item, and the step carries on with the answer it got. To have a person decide before the run goes on, put an [approval step](#approval-steps) after it.
 - **One worker.** Workers do not share the load; a second one is a standby (see [Durable runs on DBOS](#durable-runs-on-dbos)).
 - **Step code changes replay.** A run recovered after a deploy replays its finished units by name. Changing which units a run goes through (a new step type's internals are fine; reordering the runner's units is not) calls for a new `AI_SDK_DBOS["VERSION"]`, and the old version's unfinished runs are left to finish or be resumed.
-- **Run data is plaintext and stays.** `inputs`, `outputs` and each `StepRun.output` are stored as plain JSON and kept until you delete the rows. Deleting a user nulls the run's `user` but keeps its inputs and outputs; deleting a thread does not reach them. Pass ids rather than content where you can, and prune old runs yourself.
+- **Run data is plaintext and stays.** `inputs`, `outputs` and each `StepRun.output` are stored as plain JSON and kept until you delete the rows. Deleting a user nulls the run's `user` but keeps its inputs and outputs; deleting a thread does not reach them. DBOS keeps its own copy in its system tables (schema `dbos`): each run's arguments and every checkpointed step's result. Pass ids rather than content where you can, and prune old runs yourself, both copies: delete the rows, and their DBOS workflows with `runtime.client().delete_workflows(ids)`, where a run's ids are its own id and `"<run id>:<n>"` for each resume.
 - **Payload ids are not checked.** A document id or any other key in `inputs` is passed to the steps as given; a step that loads a row by it must check that `ctx.user` may read that row.
 - **A run executes the definition captured when it was queued.** Editing a stored workflow changes later runs, not one already queued or one that is resumed. Deactivating or deleting it, or removing a registered one from code, stops its runs from being resumed. The step types and listeners it names are looked up in the worker, so they must be registered there too.
 - **Declared schemas are structural.** No value constraints (`min_length`, `ge`, …) and no validators: check those in a step.
