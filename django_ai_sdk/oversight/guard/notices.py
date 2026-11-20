@@ -152,6 +152,7 @@ class TurnNotices:
         return notify_events(
             self.guard.id,
             matched,
+            thread_id=self.guard.thread_id,
             agent=self.guard.context.agent_name,
             channel=self.guard.channel,
             outcome=str(self.guard.outcome),

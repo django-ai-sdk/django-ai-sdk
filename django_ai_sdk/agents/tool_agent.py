@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from typing import Any
 
@@ -47,6 +48,34 @@ def answer_calls_with(
     return answers
 
 
+def decode_tool_result(value: Any) -> Any:
+    """A tool's result as it returned it: Haystack writes a dict as JSON, older results as reprs."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except ValueError:
+        pass
+    try:
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
+
+
+def returned_error(value: Any) -> bool:
+    """Whether a decoded result is the {"error": ...} a tool returns to report a safe error."""
+    return isinstance(value, dict) and bool(value.get("error"))
+
+
+def tool_failed(result: ToolCallResult) -> bool:
+    """A call failed when it raised or returned {"error": ...}."""
+    return bool(result.error) or returned_error(decode_tool_result(result.result))
+
+
+def tool_calls_made(state: State) -> int:
+    return sum((state.data.get("tool_call_counts") or {}).values())
+
+
 def tool_results(
     messages: list[ChatMessage], unmarked: str
 ) -> list[tuple[int, ChatMessage, ToolCallResult]]:
@@ -80,14 +109,30 @@ class ToolCallBudgetHook:
         )
 
     def run(self, state: State) -> None:
-        counts = state.data.get("tool_call_counts") or {}
-        if sum(counts.values()) < self.max_tool_calls:
+        if tool_calls_made(state) < self.max_tool_calls:
             return
         messages = pending_tool_calls(state)
         if messages is None:
             return
         stub = ({"skipped": self.message}, {SKIPPED_META_KEY: True})
         answer_calls_with(state, messages, [stub] * len(messages[-1].tool_calls))
+
+
+class ToolCallBudgetSpentHook:
+    """Once the tool budget is spent, the next model step gets no tools, so it answers.
+
+    Without it a model that keeps calling tools has each call skipped until the run's
+    step limit ends it, and the turn closes with no answer.
+    """
+
+    allowed_hook_points = ["before_llm"]
+
+    def __init__(self, max_tool_calls: int) -> None:
+        self.max_tool_calls = max_tool_calls
+
+    def run(self, state: State) -> None:
+        if tool_calls_made(state) >= self.max_tool_calls and (tools := state.data.get("tools")):
+            tools[:] = []  # in place: the model and the ToolInvoker share this list
 
 
 class LogToolCallsHook:
@@ -229,13 +274,15 @@ def _tool_hooks(
     hooks = {point: list(items) for point, items in (base or {}).items()}
     replaced: tuple[type, ...] = ()
     if max_tool_calls is not None:
-        replaced += (ToolCallBudgetHook,)
+        replaced += (ToolCallBudgetHook, ToolCallBudgetSpentHook)
     if max_output_chars is not None:
         replaced += (ToolOutputLimitHook,)
     before = [h for h in hooks.get("before_tool", []) if not isinstance(h, replaced)]
     after = [h for h in hooks.get("after_tool", []) if not isinstance(h, replaced)]
+    before_llm = [h for h in hooks.get("before_llm", []) if not isinstance(h, replaced)]
     if max_tool_calls is not None:
         before.append(ToolCallBudgetHook(max_tool_calls))
+        before_llm.append(ToolCallBudgetSpentHook(max_tool_calls))
     if (
         not any(isinstance(h, ToolOutputLimitHook) for h in after)
         and (limit := tool_output_limit(max_output_chars)) is not None
@@ -243,6 +290,8 @@ def _tool_hooks(
         after.append(ToolOutputLimitHook(limit))
     hooks["before_tool"] = before
     hooks["after_tool"] = after
+    if before_llm:
+        hooks["before_llm"] = before_llm
     on_exit = hooks.setdefault("on_exit", [])
     if not any(isinstance(h, RequireToolsHook) for h in on_exit):
         on_exit.append(RequireToolsHook(required_tools))

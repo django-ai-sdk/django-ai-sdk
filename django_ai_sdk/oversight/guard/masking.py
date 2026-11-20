@@ -281,7 +281,11 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
 
 
 def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
-    """`gate_masking_lenses` plus gate lenses an enforced block or restrict_tools rule reads."""
+    """`gate_masking_lenses` plus gate lenses an enforced block or restrict_tools rule reads.
+
+    A lens that doesn't judge tool results is left out of the second group only, so
+    `judges_tool_results` never turns masking off.
+    """
     masking = gate_masking_lenses(policy)
     names = {
         name
@@ -293,7 +297,7 @@ def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
     return [
         lens
         for lens in policy.active_lenses(Stage.GATE, Subject.QUESTION)
-        if lens in masking or lens.name in names
+        if lens in masking or (lens.name in names and lens.judges_tool_results)
     ]
 
 
