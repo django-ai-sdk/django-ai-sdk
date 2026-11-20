@@ -30,6 +30,7 @@ from django_ai_sdk.adapters.citations.registry import current_registry
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
+    STREAMED_META_KEY,
     answer_calls_with,
     pending_tool_calls,
     replace_messages,
@@ -93,7 +94,7 @@ class StopClosedTurnHook(OversightHook):
 
 # On the system message that tells the model which tools oversight took away.
 TOOLS_REMOVED_META_KEY = "django_ai_sdk.oversight.tools_removed"
-TOOLS_REMOVED_NOTE = gettext_lazy(
+TOOLS_REMOVED_MESSAGE = gettext_lazy(
     "These tools are not available for this message: {names}. Answer without them, and "
     "don't say you used them."
 )
@@ -118,7 +119,7 @@ class LimitToolChoiceHook(OversightHook):
         if removed and removed not in told and "messages" in state.schema:
             # The system prompt may still describe them; told nothing, a model says it used them.
             note = HaystackChatMessage.from_system(
-                str(TOOLS_REMOVED_NOTE).format(names=", ".join(removed)),
+                str(TOOLS_REMOVED_MESSAGE).format(names=", ".join(removed)),
                 meta={TOOLS_REMOVED_META_KEY: removed},
             )
             state.set("messages", [note])
@@ -245,6 +246,8 @@ class JudgeToolCallHook(OversightHook):
         if step is None:
             return
         guard, messages = step
+        # A model may use a call id again; only this step's own stubs go unjudged.
+        guard.masks.answered_here.difference_update(c.id for c in messages[-1].tool_calls)
         block_messages: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
             seen = _as_tool_call(call, state)
@@ -254,8 +257,11 @@ class JudgeToolCallHook(OversightHook):
                 block_messages[index] = reason
         if not block_messages:
             return
-        stubs = _block_tool_step(state, messages, block_messages)
-        if guard.on_tool_results is not None:
+        # The whole step is answered with stubs, which are oversight's own words.
+        guard.masks.answered_here.update(call.id for call in messages[-1].tool_calls if call.id)
+        streamed = guard.on_tool_results is not None
+        stubs = _block_tool_step(state, messages, block_messages, streamed=streamed)
+        if streamed:
             await guard.on_tool_results(stubs)
 
 
@@ -293,7 +299,11 @@ def _agent_name(state: State) -> str:
 
 
 def _block_tool_step(
-    state: State, messages: list[HaystackChatMessage], block_messages: dict[int, str]
+    state: State,
+    messages: list[HaystackChatMessage],
+    block_messages: dict[int, str],
+    *,
+    streamed: bool = False,
 ) -> list[HaystackChatMessage]:
     return answer_calls_with(
         state,
@@ -303,7 +313,7 @@ def _block_tool_step(
                 {"refused": block_messages[index]}
                 if index in block_messages
                 else {"skipped": str(SKIPPED_CALL_MESSAGE)},
-                {BLOCKED_META_KEY: index in block_messages},
+                {BLOCKED_META_KEY: index in block_messages, STREAMED_META_KEY: streamed},
             )
             for index in range(len(messages[-1].tool_calls))
         ],

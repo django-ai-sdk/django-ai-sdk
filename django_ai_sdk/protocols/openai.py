@@ -150,18 +150,24 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "tool_input_complete":
                         tool_input = cast("ToolInputCompleteEvent", event)
+                        # TODO: move into a utils, there should be a single way for
+                        # formatting tool input arguments
+                        args = (
+                            json.dumps(tool_input.tool_input)
+                            if isinstance(tool_input.tool_input, dict)
+                            else str(tool_input.tool_input)
+                        )
                         # Add arguments to current tool call
                         if state.current_tool_call:
-                            # TODO: move into a utils, there should be a single way for
-                            # formatting tool input arguments
-                            args = (
-                                json.dumps(tool_input.tool_input)
-                                if isinstance(tool_input.tool_input, dict)
-                                else str(tool_input.tool_input)
-                            )
                             state.current_tool_call["function"]["arguments"] = args
                             state.tool_calls_buffer.append(state.current_tool_call)
                             state.current_tool_call = None
+                        else:
+                            # Oversight sends a call's arguments again once the call was let
+                            # through, or a held answer passed: the later ones stand.
+                            for call in state.tool_calls_buffer:
+                                if call["id"] == tool_input.tool_call_id:
+                                    call["function"]["arguments"] = args
 
                     case "tool_output":
                         # Tool output happens after the assistant message
