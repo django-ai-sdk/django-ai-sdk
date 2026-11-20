@@ -109,6 +109,17 @@ class TestHistoryAtTheGate:
         row = await RuleMatch.objects.aget(turn=turn, rule="injection_in_question")
         assert row.acted
 
+    async def test_a_report_rule_records_what_it_would_do_to_history(self):
+        guard = await start("test-guard", "and now?")
+        messages = [
+            ChatMessage(role="user", content="what about my salary?"),
+            ChatMessage(role="user", content="and now?"),
+        ]
+        assert not (await guard.gate_history(messages)).blocked
+        turn = await closed_turn(guard)
+        row = await RuleMatch.objects.aget(turn=turn, rule="would_block_hr")
+        assert not row.acted and turn.outcome == "allowed"
+
     async def test_history_never_alerts_queues_or_takes_over_the_gate_rules(self):
         guard = await start("test-guard", "My IBAN? a@b.nl")
         messages = [

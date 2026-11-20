@@ -190,9 +190,8 @@ class TurnGuard:
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
     restrict: list[str] | None = None
-    # A call a rule blocked, by name and arguments, with its message. The same call again
-    # gets it at once; a corrected call (a visit note without the dose change) is judged anew.
-    refused_calls: dict[str, str] = field(default_factory=dict)
+    # Block messages by call (name and arguments): the same call again is blocked at once.
+    blocked_calls: dict[str, str] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     created_at: Any = None
     error: str = ""

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from django_ai_sdk.oversight.agents import FINGERPRINT_CHARS
 from django_ai_sdk.oversight.conf import deadline_ms, setting
 from django_ai_sdk.oversight.guard.judging import (
+    FAIL_CLOSED_ACTIONS,
     Answered,
     Matched,
     answer_lenses,
@@ -56,6 +57,9 @@ class TurnMasks:
         self.guard = guard
         # In-flight tool result masking, keyed by call id and text hash.
         self.results: dict[str, asyncio.Future[str]] = {}
+        # Calls oversight answered itself (blocked, or skipped next to a blocked one):
+        # their result is its own message, which no lens judges.
+        self.answered_here: set[str] = set()
         # Masked citation source text by source key.
         self.sources: dict[str, str] = {}
 
@@ -73,22 +77,15 @@ class TurnMasks:
             match.acted = [Block(match.rule.message) if a is mask else a for a in match.acted]
         return [group for _, group in groups]
 
-    async def mask_other_text(
-        self,
-        lenses: list[Lens],
-        text: str,
-        stage: Stage,
-        *,
-        blocks: bool = False,
-        withhold_unchecked: bool = False,
-    ) -> StageResult:
+    async def mask_other_text(self, lenses: list[Lens], text: str, stage: Stage) -> StageResult:
         """Judge `text` like the gate judges the question, and mask it.
 
-        Text a mask cannot locate is replaced whole with UNCHECKED_TEXT. Only
-        protective actions are kept (with `blocks`, also Block and RestrictTools),
-        so other text never triggers alerts or notifications. With
-        `withhold_unchecked`, a lens that fails fires no rule: under a closed
-        policy the text is withheld whole instead.
+        Text a mask cannot locate is replaced whole with UNCHECKED_TEXT. Only a
+        rule's mask, block and tool restriction are kept, so other text never
+        triggers alerts or notifications; a rule in report mode is kept for what
+        it would have done. At the tool stage a lens that fails fires no rule:
+        under a closed policy the result is withheld whole instead, when an
+        enforced rule reads the lens.
         """
         guard = self.guard
         judged = StageResult(stage, text=text)
@@ -97,6 +94,12 @@ class TurnMasks:
         context = guard.context.model_copy(update={"input": text, "answers": {}})
         views = await judge_other_text(lenses, context, deadline_ms(stage))
         judged.answered = list({id(o): o for view in views for o in view}.values())
+        enforced = {
+            name
+            for rule in guard.resolved.rules.values()
+            if rule.mode is Mode.ENFORCE and any(a.kind in FAIL_CLOSED_ACTIONS for a in rule.then)
+            for name in rule.lenses()
+        }
         errored = False
         unpointed = False
         groups: list[MaskGroup] = []
@@ -105,14 +108,14 @@ class TurnMasks:
         # finding in one chunk is never outweighed by another.
         for answered in views:
             failed = errored_lenses(answered)
-            errored = errored or bool(failed)
+            errored = errored or bool(failed & enforced)
             found = match_rules(
                 guard.resolved,
                 {o.lens.name: o.answer for o in answered},
                 Stage.GATE,
                 done=set(),
                 errored=failed,
-                fail_closed=guard.fails_closed and not withhold_unchecked,
+                fail_closed=guard.fails_closed and stage is not Stage.TOOL,
             )
             located, missed = collect_masks(
                 found,
@@ -129,12 +132,12 @@ class TurnMasks:
                     kinds = {a.kind for a in first.acted}
                     first.acted += [a for a in match.acted if a.kind not in kinds]
                     first.failed = first.failed and match.failed
+
+        def protective(actions: list[Action]) -> list[Action]:
+            return [a for a in actions if a.kind in FAIL_CLOSED_ACTIONS]
+
         for match in by_rule.values():
-            acting: list[Action] = [
-                a
-                for a in match.acted
-                if isinstance(a, Mask) or (blocks and isinstance(a, Block | RestrictTools))
-            ]
+            acting = protective(match.acted)
             for action in acting:
                 if isinstance(action, Block):
                     if not judged.blocked:
@@ -143,9 +146,9 @@ class TurnMasks:
                     if not action.names and not judged.blocked:
                         judged.block(removed_tool_message(match))
                     judged.restrict = merge_restrict(judged.restrict, action.names)
-            if acting:
+            if acting or (match.rule.mode is Mode.REPORT and protective(match.rule.then)):
                 judged.matched.append(Matched(match.rule, match.stage, acting, failed=match.failed))
-        withheld = withhold_unchecked and errored and guard.fails_closed and not judged.blocked
+        withheld = stage is Stage.TOOL and errored and guard.fails_closed and not judged.blocked
         if unpointed or withheld:
             judged.text = str(UNCHECKED_TEXT)
         elif groups:
@@ -167,14 +170,12 @@ class TurnMasks:
                 return text
             # What a tool or source returned and a lens could not judge (too long, down)
             # is no finding about the turn: the result is withheld instead.
-            judged = await self.mask_other_text(
-                lenses, text, Stage.TOOL, blocks=True, withhold_unchecked=True
-            )
+            judged = await self.mask_other_text(lenses, text, Stage.TOOL)
             if judged.restrict is not None:
                 guard.restrict = merge_restrict(guard.restrict, judged.restrict)
             if judged.blocked:
                 judged.text = str(BLOCKED_TEXT)
-            if judged.text != text or any(o.errored for o in judged.answered):
+            if judged.matched or any(o.errored for o in judged.answered):
                 guard.record_aside(Stage.TOOL, judged.answered, judged.matched)
             return judged.text
         except Exception:
@@ -183,6 +184,8 @@ class TurnMasks:
 
     async def mask_result(self, call_id: str, text: str) -> str:
         """`mask_text` once per call id and text, so stream and tool hook get the same result."""
+        if call_id in self.answered_here:
+            return text
         if not call_id:
             return await self.mask_text(text)
         key = f"{call_id}:{hashlib.sha256(text.encode()).hexdigest()[:FINGERPRINT_CHARS]}"
@@ -281,17 +284,17 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
 
 
 def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
-    """`gate_masking_lenses` plus gate lenses an enforced block or restrict_tools rule reads.
+    """`gate_masking_lenses` plus gate lenses a mask, block or restrict_tools rule reads.
 
-    A lens that doesn't judge tool results is left out of the second group only, so
-    `judges_tool_results` never turns masking off.
+    A rule in report mode counts, or it would never record what it would have done
+    to a tool result. A lens that doesn't judge tool results is left out of the
+    second group only, so `judges_tool_results` never turns masking off.
     """
     masking = gate_masking_lenses(policy)
     names = {
         name
-        for rule in policy.rules.values()
-        if rule.mode is Mode.ENFORCE
-        and any(a.kind in {"block", "restrict_tools"} for a in rule.then)
+        for rule in policy.active_rules()
+        if any(a.kind in FAIL_CLOSED_ACTIONS for a in rule.then)
         for name in rule.lenses()
     }
     return [

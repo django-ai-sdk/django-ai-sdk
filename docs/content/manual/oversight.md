@@ -100,7 +100,7 @@ Every lens:
 | `sample` | `1.0` | Share of turns the reflect stage judges. Inline stages never sample. |
 | `enabled` | `True` | Off: the lens never runs. |
 | `needs_grounding` | `False` | Only asked when the turn has sources or tool results to judge against. |
-| `judges_tool_results` | `True` | Whether the question can be asked of a tool result. A gate lens that an enforced block or `restrict_tools` rule reads also judges every tool result; `False` keeps it to the question, for a lens about the person writing. A lens a `Mask` rule reads masks tool results either way. |
+| `judges_tool_results` | `True` | Whether the question can be asked of a tool result. A gate lens that a block or `restrict_tools` rule reads also judges every tool result (a rule in report mode records what it would have done to it); `False` keeps it to the question, for a lens about the person writing. A lens an enforced `Mask` rule reads masks tool results either way. |
 
 Each kind adds its own:
 
@@ -173,7 +173,7 @@ Conditions are built from `L(lens)`: `.is_true`, `.is_false`, `== value`, `!= va
 
 A rule is evaluated once every lens it reads has had its chance, so it can combine a gate lens and a reflect lens. A rule fires once per turn. `message` replaces the action's message when the rule blocks.
 
-The answer is judged whole, at finish: nothing judges it while it streams. A tool call rule is judged on every call, so a blocked call stays blocked when the model retries it; the record keeps it once. `RestrictTools` at the tool stage blocks the calls it names (all, when it names none), and those tools stay away for the rest of the turn.
+The answer is judged whole, at finish: nothing judges it while it streams. A tool call rule is judged on every call, so a blocked call stays blocked when the model retries it; the record keeps it once. A rule that also reads a later lens waits for it, and by then no longer sees the tool call: give the tool call its own rule. `RestrictTools` at the tool stage blocks the calls it names (all, when it names none), and those tools stay away for the rest of the turn.
 
 | Action | Enforced at | Outcome |
 | --- | --- | --- |
