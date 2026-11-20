@@ -248,6 +248,19 @@ class TestCascade:
         answer = await self.answer(unsure, judge)
         assert (answer.value, answer.answerer) == (True, "judge")
         assert [a.answerer for a in answer.trail] == ["cheap"]
+        # Neither names a model, so there is no dispute to speak of.
+        assert not answer.disputed
+
+    async def test_two_models_that_disagree_leave_the_answer_disputed(self):
+        first = Says(lambda lens, v: Answer(value=False, confidence=0.4, model="a"), name="a")
+        second = Says(lambda lens, v: Answer(value=True, confidence=0.9, model="b"), name="b")
+        assert (await self.answer(first, second)).disputed
+        agrees = Says(lambda lens, v: Answer(value=False, confidence=0.9, model="b"), name="b")
+        assert not (await self.answer(first, agrees)).disputed
+        # Nobody sure: the last answer stands, and the dispute is still on it.
+        unsure = Says(lambda lens, v: Answer(value=True, confidence=0.1, model="b"), name="b")
+        last = await self.answer(first, unsure)
+        assert (last.value, last.confidence, last.disputed) == (True, 0.1, True)
 
     async def test_it_falls_back_to_the_last_usable_answer(self):
         unsure = Says(lambda lens, v: Answer(value=False, confidence=0.4), name="cheap")

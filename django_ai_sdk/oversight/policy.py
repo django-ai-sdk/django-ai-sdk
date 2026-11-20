@@ -199,6 +199,13 @@ def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
             "after the tool stage, when a call's answer is gone: give the tool call its own "
             "rule, or read what the turn's tools did in a check lens on the exchange."
         )
+    for name in sorted(rule.when.lenses("disputed")):
+        lens = lenses.get(name)
+        if lens is not None and lens.answer.kind not in {"flag", "choice"}:
+            raise ImproperlyConfigured(
+                f"Rule {rule.name!r} tests whether {lens.answer.kind} lens {name!r} is disputed, "
+                "but only a yes/no or a label can be: two scores or lists rarely match."
+            )
     for action in rule.then:
         if not isinstance(action, Mask):
             continue

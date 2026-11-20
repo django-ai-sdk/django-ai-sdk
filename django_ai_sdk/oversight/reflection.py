@@ -77,6 +77,15 @@ def answers_from(answer_rows: list[Any], lenses: Mapping[str, Lens]) -> dict[str
             confidence=row.confidence if row.confidence is not None else 1.0,
             answerer=row.answerer,
             model=row.model,
+            # What the other judges said, so a rule can still test `disputed`.
+            trail=[
+                Answer(
+                    value=step.get("value"),
+                    model=step.get("model") or "",
+                    error=step.get("error") or "",
+                )
+                for step in row.trail or []
+            ],
         )
     return answers
 

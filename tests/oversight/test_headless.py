@@ -155,13 +155,17 @@ class TestHeadless:
                 error="",
                 confidence=1.0,
                 answerer="x",
-                model="",
+                model="b",
+                trail=[],
                 created_at=at + timedelta(seconds=later),
             )
 
         # The gate said no about the question; masking later judged a client record yes.
         rows = [row("gate", False, 0), row("tool", True, 1)]
         assert answers_from(rows, {"worry": worry})["worry"].value is False
+        # What another model said first comes along, so a reflect rule can test `disputed`.
+        rows[0].trail = [{"answerer": "a", "model": "a", "value": True, "confidence": 0.3, "error": ""}]
+        assert answers_from(rows, {"worry": worry})["worry"].disputed
 
     async def test_an_open_review_is_not_sent_again_in_its_thread(self):
         from django_ai_sdk.oversight import Notify, Queue

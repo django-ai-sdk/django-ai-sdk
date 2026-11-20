@@ -134,7 +134,7 @@ def _cannot_answer(step: Any, lens: Lens) -> bool:
 async def _first_sure(
     steps: list[Any], lens: Lens, context: TurnContext, asked: list[Answer]
 ) -> Answer | None:
-    """Return the first sure answer, else the last usable one (judges go quick to thorough).
+    """Return the first sure answer, else the last usable one, as `JudgeLens` promises.
 
     Confidence scales differ per judge, so they are never compared.
     """
