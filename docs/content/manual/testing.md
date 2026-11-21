@@ -76,6 +76,14 @@ database, and `tests.testapp` with an email-only `User` (no `username` field, li
 host projects). It never imports from `demos/`. Tests that depend on a specific
 permission class set it themselves (see `tests/mocks/permissions.py`).
 
+Set `DATABASE_URL` to run the suite on PostgreSQL instead. The tests that race
+connections against each other (claims, locks) run only there and skip on SQLite:
+
+```bash
+DATABASE_URL=postgres://postgres:pg@127.0.0.1:5432/postgres \
+    uv run --with "psycopg[binary]" pytest tests
+```
+
 ## Test Structure
 
 ```

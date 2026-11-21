@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from ninja import Router
 from pydantic import Field
 
-from django_ai_sdk.errors import error_response
+from django_ai_sdk.errors import NotFound, error_response
 from django_ai_sdk.views.schemas import ErrorResponse
 
 if TYPE_CHECKING:
@@ -30,7 +30,15 @@ Limit = Annotated[int, Field(ge=1, le=MAX_PAGE_SIZE)]
 Offset = Annotated[int, Field(ge=0)]
 
 # Documented on every operation; raised by services, answered by the handlers below.
-ERRORS = {400: ErrorResponse, 403: ErrorResponse, 404: ErrorResponse, 500: ErrorResponse}
+# 409 is the shared "changed by someone else" conflict.
+ERRORS = {code: ErrorResponse for code in (400, 403, 404, 409, 500)}
+
+
+def found(value: Any, what: str) -> Any:
+    """Return `value`, or answer 404 "<what> not found" when a service returned None."""
+    if value is None:
+        raise NotFound(f"{what} not found")
+    return value
 
 
 class ApiRouter:
@@ -40,8 +48,11 @@ class ApiRouter:
     (``get``, ``post``, ...) so every build starts from the full set.
     """
 
-    def __init__(self) -> None:
-        self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = []
+    def __init__(self, *tables: ApiRouter) -> None:
+        """Start empty, or with the endpoints of `tables`."""
+        self._ops: list[tuple[str, str, FunctionType, dict[str, Any]]] = [
+            op for table in tables for op in table._ops
+        ]
 
     def _add(self, method: str, path: str, **opts: Any) -> Callable[[FunctionType], FunctionType]:
         def register(func: FunctionType) -> FunctionType:
@@ -65,7 +76,16 @@ class ApiRouter:
     def delete(self, path: str, **opts: Any) -> Callable[[FunctionType], FunctionType]:
         return self._add("DELETE", path, **opts)
 
-    def build(self, *, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:
+    def build(
+        self, *, exclude: Collection[str] = (), default_auth: Any = None, **router_kwargs: Any
+    ) -> Router:
+        """Build a new Router without the endpoints in `exclude`.
+
+        `default_auth` applies when the caller passes no `auth=`. Routers that guard
+        sensitive data set it, so mounting one never leaves it open.
+        """
+        if default_auth is not None:
+            router_kwargs.setdefault("auth", default_auth)
         unknown = set(exclude) - {func.__name__ for _, _, func, _ in self._ops}
         if unknown:
             raise ValueError(f"Unknown endpoints in exclude: {sorted(unknown)}")
@@ -76,9 +96,11 @@ class ApiRouter:
             opts = dict(opts)
             response = opts.pop("response", None)
             if response is None:
-                response = ERRORS
+                response = {}
             elif not isinstance(response, dict):
-                response = {200: response, **ERRORS}
+                response = {200: response}
+            # Every route documents ERRORS; a route's own codes win.
+            response = {**response, **{c: s for c, s in ERRORS.items() if c not in response}}
             operation_id = opts.pop("operation_id", func.__name__)
             router.add_api_operation(
                 path, [method], func, response=response, operation_id=operation_id, **opts

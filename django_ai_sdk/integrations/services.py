@@ -138,4 +138,4 @@ connect_integration = async_to_sync(IntegrationService.connect)
 disconnect_integration = async_to_sync(IntegrationService.disconnect)
 reconnect_integration = async_to_sync(IntegrationService.reconnect)
 
-__all__ = ["IntegrationService", "IntegrationNotConnectable"]
+__all__ = ["IntegrationNotConnectable", "IntegrationService"]

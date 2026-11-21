@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import uuid
 from abc import ABC
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -13,13 +12,16 @@ from django_ai_sdk.adapters.citations import (
     SourceRegistry,
     SourcesFormatter,
 )
-from django_ai_sdk.adapters.citations.grounding import get_citation_agent
 from django_ai_sdk.agents.attachments import InlineFileCapability
 from django_ai_sdk.agents.mixins import AgentInfoMixin
 from django_ai_sdk.agents.registry import registry
-from django_ai_sdk.common import ChatMessage, Prompt, prompt
+from django_ai_sdk.common import (
+    ChatMessage,
+    Prompt,
+    as_chat_messages,
+    prompt,
+)
 from django_ai_sdk.conversation.utils import (
-    generate_thread_title,
     get_title_sanity_limit,
 )
 from django_ai_sdk.errors import AiSdkError, ErrorCode, NotFound
@@ -36,26 +38,27 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.prompts import build_title_generation_prompt
 from django_ai_sdk.protocols.vercel import VercelProtocolHandler
 from django_ai_sdk.rags import queryset_to_rag_documents
-from django_ai_sdk.responses import stream_response
 from django_ai_sdk.storage.memory import MemoryStorageAdapter
 from django_ai_sdk.storage.schemas import ThreadDetail
 from django_ai_sdk.storage.services import ThreadService
+from django_ai_sdk.tracing import bind as bind_trace
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
     from django_ai_sdk.adapters.citations import NumberedSource
-    from django_ai_sdk.adapters.interfaces import Streamable
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.artifacts.tool_artifacts import ToolArtifact
     from django_ai_sdk.common import Prompt
     from django_ai_sdk.files.pipeline import FilePipeline
+    from django_ai_sdk.oversight.policy import Policy
     from django_ai_sdk.rags.schemas import RagDocument
     from django_ai_sdk.storage.base import BaseStorageAdapter
+    from django_ai_sdk.storage.schemas import ThreadInfo
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -249,6 +252,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Suggestion generator class for follow-up questions.
     suggestion_generator: type[SuggestionGenerator] | None = None
 
+    # The policy for every turn, in chat and run(): a Policy subclass or a name.
+    # None uses AI_SDK_OVERSIGHT["DEFAULT_POLICY"]. False turns oversight off.
+    oversight: type[Policy] | str | Literal[False] | None = None
+
     # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
     # Assign the factory itself, never call it: get_llm() builds it with this
     # agent's model.
@@ -270,6 +277,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         llm = cls.__dict__.get("llm")
         if callable(llm) and not isinstance(llm, staticmethod):
             cls.llm = staticmethod(llm)  # ty: ignore[invalid-assignment]
+        from django_ai_sdk.oversight.agents import validate_oversight
+
+        validate_oversight(cls)
         # Don't register the base Agent class itself, or classes that
         # manage their own registration (e.g. RuntimeAgent).
         if cls.__name__ != "Agent" and not getattr(cls, "_skip_auto_register", False):
@@ -495,6 +505,24 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         """
         return []
 
+    async def get_oversight(
+        self,
+        *,
+        channel: str = "default",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+        **kwargs: Any,
+    ) -> type[Policy] | str | Literal[False] | None:
+        """Return the policy for this turn. Defaults to `oversight`.
+
+        Override to pick a policy per instance, user or channel ("chat", "api",
+        "subagent", "workflow:<workflow>:<step>", "dry_run", an app's own, or
+        "default"; never None). It may query the database. Keep `**kwargs`.
+
+        If this raises, or names a policy that cannot load, the turn is blocked unless
+        AI_SDK_OVERSIGHT["FAIL_MODE"] is "open".
+        """
+        return self.oversight
+
     async def get_tools(
         self,
         thread_id: str = "",
@@ -529,7 +557,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         # info about uploaded files
         result.extend(self.get_attachment_tools(thread_id))
-
         return result
 
     async def get_agent_tools(
@@ -582,7 +609,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             built = await build_subagent(subagent_cls, thread_id=thread_id, user=user)
             if built is None:
                 continue
-            sub_agent, agent_id = built
+            sub_agent, subagent = built
+            agent_id = subagent.agent_id
 
             name = subagent_tool_name(subagent_cls)
             if name in used_names:
@@ -595,8 +623,14 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
             tools.append(
                 ComponentTool(
+                    # A delegation opens a child turn under the subagent's policy,
+                    # or joins the coordinator's turn when the policy is the same.
                     component=SubagentStreamFilter(
-                        sub_agent, name=subagent_cls.name or name, agent_id=agent_id
+                        sub_agent,
+                        name=subagent_cls.name or name,
+                        subagent=subagent,
+                        thread_id=thread_id,
+                        user=user,
                     ),
                     name=name,
                     description=(
@@ -799,17 +833,20 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     async def run(
         self,
-        messages: list[ChatMessage],
+        messages: Sequence[ChatMessage | Mapping[str, Any]],
         system_prompt: str | Prompt | None = None,
         response_format: type[T] | None = _UNSET,
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
         tools: bool = False,
+        *,
+        channel: str | None = None,
+        oversight: type[Policy] | str | Literal[False] | None = None,
     ) -> T | str | None:
-        """Run LLM calls directly from adapter.
+        """Run the agent to completion, as one turn under its oversight policy.
 
         Args:
-            messages: Conversation messages
+            messages: ChatMessages, or dicts like `{"role": "user", "content": "..."}`.
             system_prompt: Optional system prompt override
             response_format: Optional Pydantic model for structured output. Pass None
                 explicitly to disable structured output even if the agent has a
@@ -824,57 +861,74 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 extraction, ...) does not pay that cost unless it explicitly asks
                 for it. Ignored when response_format is set — tools and structured
                 output together are not supported yet (see Run.run).
+            channel: Where the turn came from, a name the app picks, e.g. "cron". The
+                turn is recorded under it and `get_oversight()` receives it. None
+                records "default".
+            oversight: A policy for this call only (a Policy subclass or a name).
+                False runs without oversight. None applies `get_oversight()`.
+                Only for trusted code; the HTTP endpoints never pass it.
+
+        If a rule masks the question, the last user message in the caller's list
+        is masked in place, so the caller stores the masked copy. The checks are
+        Haystack hooks on the run, so an override of `run()` that calls its own
+        model is not checked.
 
         Returns:
             Response string, or parsed Pydantic model if response_format is set
+
+        Raises:
+            Blocked: The policy blocked the question or withheld the answer.
+                `Blocked.message` holds the text to show the user.
         """
+
+        from django_ai_sdk.adapters.run import Run
+        from django_ai_sdk.agents.tool_agent import default_hooks
+        from django_ai_sdk.oversight.history import history_for, thread_storage
+        from django_ai_sdk.oversight.plugin import TurnRequest, mask_stored_question
+
         resolved = self.response_format if response_format is self._UNSET else response_format
-        adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
         rendered_prompt = system_prompt if system_prompt is not None else self.get_system_prompt()
+        given = as_chat_messages(messages)
 
-        # Only the SDK's own plain Run is ours to add a tool loop to. A custom
-        # get_run_adapter() override returns something else on purpose — it is
-        # left alone, calling its own .run() unchanged, rather than having a
-        # tool loop forced onto it.
-        from django_ai_sdk.adapters.base import Run
+        async def admit(request: TurnRequest) -> None:
+            mask_stored_question(given, request)
 
-        if tools and resolved is None and isinstance(adapter, Run):
-            return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
-
-        return await adapter.run(
-            messages=messages,
-            system_prompt=rendered_prompt,
-            response_format=resolved,
-        )
-
-    async def _run_own_tools(
-        self,
-        adapter: Any,
-        messages: list[ChatMessage],
-        system_prompt: str,
-        thread_id: str | None,
-        user: AbstractBaseUser | AnonymousUser | None,
-    ) -> str | None:
-        """Run this agent's own tools to completion, headless (no streaming).
-
-        Governed by this agent's own `max_agent_steps`/`max_tool_calls`/hooks —
-        the same assembly `build_subagent` uses for a streamed delegation — so a
-        headless one-shot run and a streamed subagent are never governed
-        differently.
-        """
-        from django_ai_sdk.agents.tool_agent import ToolAgent, default_hooks
-
-        haystack_agent = ToolAgent.build_agent(
-            getattr(adapter, "generator", None) or self.get_llm(),
-            await self.get_tools(thread_id=thread_id or "", user=user),
-            system_prompt,
-            max_agent_steps=self.max_agent_steps,
-            hooks=default_hooks(self),
-        )
-        haystack_messages = adapter.get_messages(messages)
-        result = await haystack_agent.run_async(messages=haystack_messages)
-        replies = result.get("messages", [])
-        return replies[-1].text if replies else None
+        # Bind the thread so headless runs are traced to it.
+        with bind_trace(thread_id=thread_id):
+            adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
+            if not isinstance(adapter, Run):
+                raise TypeError(
+                    f"{type(self).__name__}.get_run_adapter() must return a Run, "
+                    f"not {type(adapter).__name__}."
+                )
+            sent, vouched = await history_for(
+                self,
+                await thread_storage(self, thread_id),
+                given,
+                channel=channel,
+                user=user,
+                oversight=oversight,
+            )
+            with_tools = tools and resolved is None
+            return await adapter.run(
+                sent,
+                rendered_prompt,
+                response_format=resolved,
+                tools=await self.get_tools(thread_id=thread_id or "", user=user)
+                if with_tools
+                else None,
+                max_agent_steps=self.max_agent_steps if with_tools else None,
+                hooks=default_hooks(self),
+                request=TurnRequest(
+                    agent=self,
+                    channel=channel,
+                    user=user,
+                    thread_id=thread_id,
+                    oversight=oversight,
+                    history_vouched=vouched,
+                    on_gated=admit,
+                ),
+            )
 
     async def get_run_adapter(
         self,
@@ -883,9 +937,11 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     ) -> Any:
         """Return a Run adapter for non-streaming tasks (title generation, etc.).
 
-        Must be implemented by subclasses that use Agent.run() or title generation.
+        Defaults to a Run around `get_llm()`. Override for another generator.
         """
-        raise NotImplementedError(f"{self.__class__.__name__} must implement get_run_adapter().")
+        from django_ai_sdk.adapters.base import Run
+
+        return Run(generator=self.get_llm())
 
     #: Flat list of integration names (`["linear"]`) — every tool that integration
     #: exposes reaches this agent. Names are registry keys, i.e. the `name` on
@@ -986,11 +1042,27 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     ) -> Any:
         """Return the adapter used for streaming chat.
 
-        Must be implemented by subclasses used in chat. A worker-only agent
-        (hidden = True, called only via run()) can leave this unimplemented.
+        Defaults to a Stream over a ToolAgent with `get_llm()`, the agent's tools
+        and its limits. Override for another pipeline.
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement get_pipeline_adapter()."
+        from django_ai_sdk.adapters.base import Stream
+        from django_ai_sdk.agents.tool_agent import ToolAgent, ToolAgentConfig, default_hooks
+
+        generator = self.get_llm()
+        tool_agent = ToolAgent(
+            config=ToolAgentConfig(
+                model=self.get_model(),
+                system_prompt=self.get_system_prompt(),
+                tools=await self.get_tools(thread_id=thread_id or "", user=user),
+                max_agent_steps=self.max_agent_steps,
+                hooks=default_hooks(self),
+            ),
+            generator=generator,
+        )
+        return Stream(
+            pipeline=tool_agent.pipeline(),
+            generator=generator,
+            storage_adapter=await self.get_storage_adapter(thread_id),
         )
 
     async def history(
@@ -1094,7 +1166,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         await check_permissions(user, Operation.CHAT, get_agent_permissions(self), agent=self)
 
-        # Before anything is stored: a refused chat must leave no trace in the thread.
+        # Before anything is stored: a blocked chat must leave no trace in the thread.
         thread = await ThreadService.get_thread(thread_id, user=user) if thread_id else None
         if thread:
             await check_object_permissions(
@@ -1108,93 +1180,33 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             f"protocol messages to {len(messages)} chat messages"
         )
 
-        # Apply max_history limiting if configured
-        if self.max_history and len(messages) > self.max_history:
-            messages = messages[-self.max_history :]
-            logger.debug(
-                f"Applied max_history={self.max_history}, kept {len(messages)} most recent messages"
-            )
-
-        # Attachments are client-supplied: validate them against the thread's
-        # files before they are stored or reach the model.
-        if any(m.attachments for m in messages):
-            if thread:
-                from django_ai_sdk.memories.services import MemoryService
-
-                await MemoryService.resolve_attachments(
-                    str(thread.id),
-                    messages,
-                    user=user,
-                    agent=self,
-                    inline_images=self.has_vision(),
-                )
-            else:
-                for message in messages:
-                    message.attachments = []
-
-        # Get storage adapter for thread
         storage_adapter = await self.get_storage_adapter(thread_id)
 
-        # Store only the last user message (the new one just sent)
-        # Many protocols send full conversation history, but we only want to store new messages
-        if storage_adapter and thread_id:
-            user_messages = []
+        # Validate client attachments before the turn opens, so the gate judges
+        # exactly what the model will read.
+        await self._resolve_attachments(messages, thread, user, inline_images=self.has_vision())
+
+        from django_ai_sdk.agents.chat import chat_turn
+
+        return await chat_turn(self, messages, thread, thread_id, storage_adapter, user)
+
+    async def _resolve_attachments(
+        self,
+        messages: list[ChatMessage],
+        thread: ThreadInfo | None,
+        user: AbstractBaseUser | AnonymousUser | None,
+        *,
+        inline_images: bool,
+    ) -> None:
+        """Check attachments against the thread's files. Drop them all without a thread."""
+        if not any(m.attachments for m in messages):
+            return
+        if thread is None:
             for message in messages:
-                if message.role == "user":
-                    user_messages.append(message)
+                message.attachments = []
+            return
+        from django_ai_sdk.memories.services import MemoryService
 
-            if user_messages:
-                # Get the most recent user message
-                last_user_message = user_messages[-1]
-                logger.debug(
-                    f"Storing last user message: {len(last_user_message.content)} characters"
-                )
-                # FIXME: we need a better way on how to create a id for the user messages
-                last_user_message.id = str(uuid.uuid4())
-                await storage_adapter.store_chat_message(last_user_message)
-            else:
-                logger.debug("No user messages found to store")
-
-        if self.title_generation and thread and not thread.title:
-            # A failed title must not fail the reply.
-            try:
-                title = await generate_thread_title(
-                    agent=self, messages=messages, thread_id=thread.id, user=user
-                )
-                if title:
-                    await ThreadService.update_thread(thread.id, title=title, user=user)
-            except Exception:
-                logger.exception("Thread title generation failed")
-
-        async def build_adapter() -> Streamable:
-            # Built inside the stream, so a failure (e.g. RAG warmup) reaches the client.
-            adapter = await self.get_pipeline_adapter(thread_id=thread_id, user=user)
-            suggestion_generator = self.get_suggestion_generator()
-            if suggestion_generator:
-                adapter.suggestion_generator = suggestion_generator
-            if required_tools := self.get_run_required_tools(messages):
-                adapter.hook_context = {"required_tools": required_tools}
-            # Artifacts are stored on the thread: none without one.
-            if thread_id:
-                adapter.thread_id = thread_id
-                adapter.user = user
-                # Shown after each mapped tool's result, for any tool of the run.
-                adapter.tool_artifacts = self.tool_artifacts
-
-                # Seed the citation registry with sources from current thread
-                registry = getattr(adapter, "citation_registry", None)
-                if registry is not None:
-                    await registry.seed_from_thread(thread_id)
-                    registry.seed(await self.get_citation_sources(thread_id, user))
-                    adapter.citation_agent = get_citation_agent(self)
-            logger.debug(f"Pipeline adapter created: {type(adapter).__name__}")
-            return adapter
-
-        logger.debug("Initiating stream response")
-        return await stream_response(
-            build_adapter,
-            messages,
-            self.protocol_handler,
-            storage_adapter=storage_adapter,
-            warmup=self.warmup_progress(thread_id, user),
+        await MemoryService.resolve_attachments(
+            str(thread.id), messages, user=user, agent=self, inline_images=inline_images
         )

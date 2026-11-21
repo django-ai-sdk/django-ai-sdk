@@ -10,6 +10,7 @@ from haystack.tracing.utils import coerce_tag_value
 
 from django_ai_sdk.agents.subagent import SUBAGENT_ID_TAG, SUBAGENT_NAME_TAG
 from django_ai_sdk.logger import logger
+from django_ai_sdk.pricing import token_counts
 from django_ai_sdk.tracing import context
 from django_ai_sdk.tracing.models import Trace
 from django_ai_sdk.utils import resolve_setting
@@ -98,17 +99,13 @@ class TelemetrySpan(Span):
         usage = meta.get("usage") or value.get("token_usage") or {}
         if not isinstance(usage, dict):
             return
-        # The Responses API names them input/output tokens, Chat Completions
-        # prompt/completion; both fill the same columns.
-        for field, aliases in (
-            ("prompt_tokens", ("prompt_tokens", "input_tokens")),
-            ("completion_tokens", ("completion_tokens", "output_tokens")),
-            ("total_tokens", ("total_tokens",)),
-        ):
-            for alias in aliases:
-                if isinstance(count := usage.get(alias), int):
-                    setattr(self._trace, field, count)
-                    break
+        prompt, completion = token_counts(usage)
+        if prompt is not None:
+            self._trace.prompt_tokens = prompt
+        if completion is not None:
+            self._trace.completion_tokens = completion
+        if isinstance(total := usage.get("total_tokens"), int):
+            self._trace.total_tokens = total
 
     def _end(self) -> None:
         self._trace.ended_at = timezone.now()

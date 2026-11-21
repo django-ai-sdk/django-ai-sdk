@@ -1,0 +1,322 @@
+"""Ask a stage's lenses within a deadline, then find the rules that match."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.judges.base import (
+    ask_judge,
+    build_judge,
+    is_unavailable,
+    sampled,
+)
+from django_ai_sdk.oversight.judges.classifier import batched
+from django_ai_sdk.oversight.rules import Block
+from django_ai_sdk.oversight.types import (
+    INLINE_STAGES,
+    Answer,
+    Mode,
+    Outcome,
+    Stage,
+    Subject,
+    rank,
+    worst_outcome,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+    from collections.abc import Set as AbstractSet
+
+    from django_ai_sdk.oversight.guard import TurnGuard
+    from django_ai_sdk.oversight.lenses import Lens
+    from django_ai_sdk.oversight.policy import ResolvedPolicy
+    from django_ai_sdk.oversight.rules import Action, Rule
+    from django_ai_sdk.oversight.types import TurnContext
+
+logger = get_logger(__name__)
+
+STAGE_ORDER = tuple(Stage)
+
+
+@dataclass
+class Answered:
+    lens: Lens
+    stage: Stage
+    answer: Answer
+    # Error or deadline after only unsure answers: failed for FAIL_MODE, answer kept for the record.
+    failed: bool = False
+    # About other text (earlier message, tool result): never places masks in question or answer.
+    aside: bool = False
+
+    @property
+    def errored(self) -> bool:
+        return self.failed or bool(self.answer.error)
+
+    @property
+    def needs_retry(self) -> bool:
+        return should_retry(self.answer.error, [step.error for step in self.answer.trail])
+
+    @property
+    def about_turn(self) -> bool:
+        """The turn's own answer (not aside, not a tool call); only these feed rules and labels."""
+        return not self.aside and self.lens.subject is not Subject.TOOL_CALL
+
+
+NO_JUDGE = "no judge can run here"
+
+# Only protective actions may fire for a failed lens under FAIL_MODE "closed".
+FAIL_CLOSED_ACTIONS = frozenset({"block", "mask", "restrict_tools"})
+
+
+@dataclass
+class Matched:
+    """A rule that matched at a stage, and which of its actions were carried out."""
+
+    rule: Rule
+    stage: Stage
+    # Empty unless the rule is enforced.
+    acted: list[Action] = field(default_factory=list)
+    # Counts toward the outcome but does not stop the rule judging the turn itself.
+    aside: bool = False
+    # Matched only because a lens failed closed: the person sees the generic block message.
+    failed: bool = False
+
+    def outcome(self, *, report: bool = False) -> Outcome:
+        """With `report`, the outcome as if the rule were enforced."""
+        actions = self.rule.then if report else self.acted
+        return worst_outcome(*(a.outcome for a in actions))
+
+
+async def answer_lens(
+    lens: Lens,
+    context: TurnContext,
+    stage: Stage,
+    *,
+    sample: bool = True,
+    progress: list[Answer] | None = None,
+) -> Answer | None:
+    """Ask a lens's steps in order until one is sure.
+
+    A lens none of whose judges can run here answers NO_JUDGE, an error, so
+    FAIL_MODE decides; it is not skipped. Only reflect samples. `progress`
+    collects answers as they arrive, so a caller that cancels still has them.
+    """
+    if not lens.applies(context):
+        return None
+    if (
+        sample
+        and stage not in INLINE_STAGES
+        and not sampled(f"{context.turn_id}:{lens.name}", lens.sample)
+    ):
+        return None
+    steps = lens.steps()
+    if not steps:
+        return None
+    answer = await _first_sure(steps, lens, context, progress if progress is not None else [])
+    if answer is None and all(map(_cannot_run, steps)):
+        return Answer(error=NO_JUDGE)
+    return answer
+
+
+def _cannot_run(step: Any) -> bool:
+    """A step that fails to build is not "cannot run": it answers an error instead."""
+    try:
+        return bool(build_judge(step).missing())
+    except Exception:
+        return False
+
+
+async def _first_sure(
+    steps: list[Any], lens: Lens, context: TurnContext, asked: list[Answer]
+) -> Answer | None:
+    """Return the first sure answer, else the last usable one (judges go quick to thorough).
+
+    Confidence scales differ per judge, so they are never compared.
+    """
+    for step in steps:
+        result = await ask_judge(step, lens, context)
+        if result is None:
+            continue
+        if lens.is_final(result):
+            result.trail = list(asked)
+            asked.append(result)
+            return result
+        asked.append(result)
+    if not any(a.ok for a in asked):
+        return asked[-1] if asked else None
+    return _last_usable(asked)
+
+
+def _ended_unsure(lens: Lens, answer: Answer | None, asked: list[Answer]) -> bool:
+    if answer is None or not answer.ok or lens.is_final(answer):
+        return False
+    last = asked[-1] if asked else None
+    return last is not None and bool(last.error)
+
+
+def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
+    """True when reflect should ask a lens again after the deadline or an outage.
+
+    Only the last trail error counts: a usable answer kept at the deadline or
+    while a later judge was down carries that error there.
+    """
+    last_error = trail_errors[-1] if trail_errors else ""
+    return any(e == "deadline" or is_unavailable(e) for e in (error, last_error))
+
+
+async def answer_lenses(
+    lenses: list[Lens],
+    context: TurnContext,
+    stage: Stage,
+    *,
+    deadline_ms: float | None = None,
+    sample: bool = True,
+) -> list[Answered]:
+    """Answer `lenses` concurrently. Lenses still running at the deadline answer "deadline".
+
+    A lens cut off after an unsure answer keeps it (failed, "deadline" last in its
+    trail) so reflect still asks the slower judges. No judge outlives its stage.
+    """
+    if not lenses:
+        return []
+    tasks: dict[asyncio.Future, tuple[Lens, list[Answer]]] = {}
+    # Tasks copy the batch context when created, so it can close before they run.
+    with batched(deadline_ms):
+        for lens in lenses:
+            progress: list[Answer] = []
+            task = asyncio.ensure_future(
+                answer_lens(lens, context, stage, sample=sample, progress=progress)
+            )
+            tasks[task] = (lens, progress)
+    try:
+        done, pending = await asyncio.wait(
+            tasks, timeout=deadline_ms / 1000 if deadline_ms else None
+        )
+    except asyncio.CancelledError:
+        await cancel_all(tasks)
+        raise
+    await cancel_all(pending)
+    answered: list[Answered] = []
+    for task in pending:
+        lens, progress = tasks[task]
+        answer = _last_usable(progress, Answer(error="deadline"))
+        # Check against the trail, which now ends with "deadline".
+        failed = _ended_unsure(lens, answer, answer.trail)
+        answered.append(Answered(lens, stage, answer, failed=failed))
+    for task in done:
+        lens, progress = tasks[task]
+        try:
+            answer = task.result()
+        except Exception as exc:
+            logger.opt(exception=exc).warning("Lens {} failed", lens.name)
+            answer = Answer(error=type(exc).__name__)
+        if answer is not None:
+            failed = _ended_unsure(lens, answer, progress)
+            answered.append(Answered(lens, stage, answer, failed=failed))
+    order = {lens.name: index for index, lens in enumerate(lenses)}
+    return sorted(answered, key=lambda o: order[o.lens.name])
+
+
+async def cancel_all(tasks: Iterable[asyncio.Future]) -> None:
+    running = [task for task in tasks if not task.done()]
+    for task in running:
+        task.cancel()
+    if running:
+        await asyncio.gather(*running, return_exceptions=True)
+
+
+def _last_usable(asked: list[Answer], *extra: Answer) -> Answer:
+    """The last usable answer with the rest and `extra` as trail; else `extra[0]`."""
+    kept = next((a for a in reversed(asked) if a.ok), None)
+    if kept is None:
+        return extra[0]
+    return kept.model_copy(update={"trail": [*(a for a in asked if a is not kept), *extra]})
+
+
+def _still_to_answer(policy: ResolvedPolicy, name: str, stage: Stage, answered: set[str]) -> bool:
+    lens = policy.lenses.get(name)
+    if lens is None or not lens.enabled or name in answered:
+        return False
+    here = rank(STAGE_ORDER, stage)
+    return any(rank(STAGE_ORDER, s) > here for s in lens.stages)
+
+
+def match_rules(
+    policy: ResolvedPolicy,
+    answers: dict[str, Answer],
+    stage: Stage,
+    *,
+    done: set[str],
+    errored: AbstractSet[str] = frozenset(),
+    fail_closed: bool = False,
+) -> list[Matched]:
+    """Return rules that match now and have not matched earlier in this turn.
+
+    A rule waits until every lens it reads has had its chance, so gate and
+    reflect lenses can share a rule, unless what has answered already decides
+    one that stops the turn here. A test on an `errored` lens is unknown, never
+    true. With `fail_closed`, a failed lens fires an enforced rule only
+    when it would block, mask or restrict tools here; alerts never fire on failure.
+    """
+    answered = set(answers) | set(errored)
+    matched: list[Matched] = []
+    for rule in policy.active_rules():
+        if rule.name in done:
+            continue
+        reads = rule.lenses()
+        acted = (
+            [a for a in rule.ordered_actions() if stage in a.effective]
+            if rule.mode is Mode.ENFORCE
+            else []
+        )
+        reads_tool_call = any(
+            (lens := policy.lenses.get(name)) is not None and lens.subject is Subject.TOOL_CALL
+            for name in reads
+        )
+        if rule.mode is Mode.ENFORCE and stage is Stage.TOOL and reads_tool_call:
+            # A tool call cannot be partly masked, so a mask rule blocks the call.
+            if any(a.kind == "mask" for a in rule.then) and not any(
+                a.kind == "block" for a in acted
+            ):
+                acted.append(Block(rule.message))
+        pending = {name for name in reads if _still_to_answer(policy, name, stage, answered)}
+        kinds = {a.kind for a in acted}
+        # A block ends the turn, so its other actions do not matter. A tool restriction
+        # that also masks waits, or the mask would never see the answer.
+        stops = "block" in kinds or ("restrict_tools" in kinds and "mask" not in kinds)
+        if pending and not (stops and rule.when.matches(answers, {*errored, *pending}) is True):
+            continue
+        failed = (
+            fail_closed
+            and bool(reads & set(errored))
+            and any(a.kind in FAIL_CLOSED_ACTIONS for a in acted)
+        )
+        if rule.when.matches(answers, errored):
+            matched.append(Matched(rule, stage, acted))
+        elif failed:
+            matched.append(Matched(rule, stage, acted, failed=True))
+    return matched
+
+
+def errored_lenses(answered: list[Answered]) -> set[str]:
+    return {o.lens.name for o in answered if o.errored}
+
+
+async def judge_stage(
+    guard: TurnGuard, stage: Stage, *, subjects: set[Subject], deadline: float | None
+) -> list[Matched]:
+    """Ask the stage's lenses on `subjects`, keep answers on `guard`, return new matches."""
+    lenses = [lens for lens in guard.resolved.active_lenses(stage) if lens.subject in subjects]
+    answered = await answer_lenses(lenses, guard.context, stage, deadline_ms=deadline)
+    guard.keep_answers(answered)
+    return match_rules(
+        guard.resolved,
+        guard.context.answers,
+        stage,
+        done={m.rule.name for m in guard.matched if not m.aside},
+        errored=guard.errored_lenses(),
+        fail_closed=guard.fails_closed,
+    )

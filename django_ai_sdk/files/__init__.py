@@ -33,7 +33,6 @@ __all__ = [
     "ImageCaptionProcessor",
     "JSONFileProcessor",
     "JSONTransform",
-    "parse_data",
     "PipelineResult",
     "PptxFileProcessor",
     "TextFileProcessor",
@@ -41,4 +40,5 @@ __all__ = [
     "UploadSettings",
     "XlsxFileProcessor",
     "get_upload_settings",
+    "parse_data",
 ]

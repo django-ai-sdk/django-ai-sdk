@@ -48,6 +48,9 @@ class WorkflowExecutor:
         # Resuming: the row's persisted inputs sit underneath, the caller's overlay them.
         persisted = dict(workflow_run.inputs) if workflow_run and workflow_run.inputs else {}
         supplied = {**persisted, **(inputs or {})}
+        # A definition a client submitted (no stored workflow) names itself: its
+        # turns run on "workflow:adhoc:<step>", never on a name it chose.
+        adhoc = workflow_run is not None and workflow_run.workflow_id is None
 
         workflow_run = await self._aopen(workflow, supplied, user, workflow_run)
 
@@ -63,7 +66,7 @@ class WorkflowExecutor:
                 principal=user,
                 actions=actions,
                 completed=await _already_completed(workflow_run),
-                workflow=workflow.name,
+                workflow="" if adhoc else workflow.name,
                 run_id=str(workflow_run.id),
             )
             outputs = _published(outcomes)

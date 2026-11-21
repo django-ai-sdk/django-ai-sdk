@@ -9,16 +9,6 @@ VALID = {"name": "acl-wf", "steps": [{"name": "result", "agent_id": "a"}]}
 NO_STEPS = {"name": "empty-wf", "steps": []}
 
 
-@pytest.fixture
-def users(django_user_model):
-    """An owner, a stranger, and staff."""
-    return (
-        django_user_model.objects.create(email="owner@example.com"),
-        django_user_model.objects.create(email="stranger@example.com"),
-        django_user_model.objects.create(email="staff@example.com", is_staff=True),
-    )
-
-
 def post_json(client, url, body):
     return client.post(url, data=json.dumps(body), content_type="application/json")
 

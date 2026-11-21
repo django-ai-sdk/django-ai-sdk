@@ -48,7 +48,7 @@ class TestUpdateRuntimeAgentFields:
 async def test_a_db_agent_runs_under_the_same_limits_as_a_code_agent(settings):
     from unittest.mock import AsyncMock, patch
 
-    from django_ai_sdk.agents import runtime
+    from django_ai_sdk.agents import runtime, tool_agent
     from django_ai_sdk.agents.models import AgentSettings
     from django_ai_sdk.agents.tool_agent import ToolCallBudgetHook
 
@@ -58,7 +58,7 @@ async def test_a_db_agent_runs_under_the_same_limits_as_a_code_agent(settings):
 
     with (
         patch.object(runtime.RuntimeAgent, "get_tools", AsyncMock(return_value=[])),
-        patch.object(runtime, "ToolAgent", wraps=runtime.ToolAgent) as built,
+        patch.object(tool_agent, "ToolAgent", wraps=tool_agent.ToolAgent) as built,
     ):
         await agent.get_pipeline_adapter(thread_id=None)
 

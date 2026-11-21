@@ -1,9 +1,12 @@
-PHONY: setup setup-all format test test-demos typecheck tag build publish release docs-graphs docs-build docs-serve
+PHONY: setup setup-all format test test-demos typecheck check-migrations tag build publish release docs-graphs docs-build docs-serve
 
 DEMO_EXTRAS := --extra qdrant --extra mcp --extra files --group studio
-TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf
-# example: make test UV_RUN_ARGS='--with "django==5.2.*"'
+# Leaves out local: its onnxruntime stack is heavy, and the tests fake the model.
+TEST_EXTRAS := $(DEMO_EXTRAS) --extra chroma --extra providers --extra ninja --extra drf --extra typesafe
+# example: make test UV_RUN_ARGS='--with "django==5.2.*"' TEST_PATHS=tests/oversight
 UV_RUN_ARGS ?=
+TEST_PATHS ?= tests
+PYTEST_ARGS ?=
 
 setup:
 	uv sync $(DEMO_EXTRAS)
@@ -24,13 +27,16 @@ format:
 	uv run ruff format .
 
 test:
-	uv run $(TEST_EXTRAS) $(UV_RUN_ARGS) pytest tests -v
+	uv run $(TEST_EXTRAS) $(UV_RUN_ARGS) pytest $(TEST_PATHS) -v $(PYTEST_ARGS)
 
 test-demos:
 	for d in demos/*/; do [ -f $$d/manage.py ] || continue; (cd $$d && make test) || exit 1; done
 
 typecheck:
 	uv run $(TEST_EXTRAS) ty check
+
+check-migrations:
+	uv run $(TEST_EXTRAS) django-admin makemigrations --check --dry-run --settings=tests.settings --pythonpath=.
 
 tag:
 	@read -p "Tag (e.g. v0.1.0rc1): " TAG; \

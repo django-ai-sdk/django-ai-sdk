@@ -167,7 +167,7 @@ class TestFailure:
 
         outcomes = await run_steps(steps)
 
-        assert outcomes["match"].detail == "extract produced nothing"
+        assert outcomes["match"].detail == "extract failed"
 
     async def test_a_step_that_produced_none_still_counts_as_run(self):
         """Completion, not a truthy value: None is an answer."""
@@ -221,7 +221,7 @@ class TestSkipping:
         outcomes = await run_steps(steps, actions=[action])
 
         assert outcomes["extract"].detail == "not an invoice"
-        assert outcomes["match"].detail == "extract produced nothing"
+        assert outcomes["match"].detail == "extract was skipped"
         assert ("step_start", "extract", None) not in action.events
 
     async def test_skip_when_may_read_the_run_state(self):

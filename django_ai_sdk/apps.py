@@ -32,7 +32,10 @@ class DjangoAISDKConfig(AppConfig):
         # After setup(), so a step can name its agent as `MyAgent().agent_id`.
         autodiscover_modules("workflows")
 
+        from django_ai_sdk.checks import check_oversight_installed
         from django_ai_sdk.workflows.checks import check_workflows
 
         # A rejected declaration fails no request, so nothing else would surface it.
         register_check(check_workflows)
+        # Nor does a policy nothing enforces: the oversight app is not installed.
+        register_check(check_oversight_installed)

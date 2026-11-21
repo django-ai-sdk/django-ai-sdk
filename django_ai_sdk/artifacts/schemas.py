@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextvars import ContextVar
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 from uuid import uuid4
@@ -18,6 +19,13 @@ if TYPE_CHECKING:
 
 def _to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+# Ids of artifacts written during the current answer. The chat stream sets this
+# so it can delete them if oversight withholds the answer.
+turn_artifacts: ContextVar[list[str] | None] = ContextVar(
+    "django_ai_sdk_turn_artifacts", default=None
+)
 
 
 class ArtifactType(StrEnum):
@@ -111,9 +119,13 @@ class ArtifactSchema(ArtifactModel):
 
         async def submit(**kwargs: Any) -> str:
             try:
-                return json.dumps(await cls.store(kwargs, thread_id, user))
+                payload = await cls.store(kwargs, thread_id, user)
             except (ValidationError, ValueError) as e:
                 return json.dumps({"error": str(e)})
+            # Track the row so a withheld answer can delete it.
+            if (written := turn_artifacts.get()) is not None:
+                written.append(str(payload["artifact_id"]))
+            return json.dumps(payload)
 
         hint = f" {cls.system_prompt_hint}" if cls.system_prompt_hint else ""
         return Tool(

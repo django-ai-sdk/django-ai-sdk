@@ -8,7 +8,7 @@ from typing import Any
 from django.http import HttpRequest
 from ninja import Router
 
-from django_ai_sdk.contrib.ninja.routing import ERRORS, ApiRouter, Limit, Offset
+from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
     WorkflowActionItem,
     WorkflowItem,
@@ -53,7 +53,7 @@ def _run_out(run: Any, **extra: Any) -> dict[str, Any]:
     }
 
 
-@routes.post("/workflows/run/", response={202: WorkflowRunResponse, **ERRORS})
+@routes.post("/workflows/run/", response={202: WorkflowRunResponse})
 async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
     run = await WorkflowService.run(payload.workflow, inputs=payload.inputs, user=request.user)
     return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
@@ -74,7 +74,7 @@ async def list_workflows(
     return [_item(r) for r in records]
 
 
-@routes.post("/workflows/", response={201: WorkflowItem, **ERRORS})
+@routes.post("/workflows/", response={201: WorkflowItem})
 async def create_workflow(request: HttpRequest, payload: WorkflowCreateRequest) -> Any:
     record = await WorkflowService.create(payload.name, payload.workflow, user=request.user)
     return 201, _item(record)
@@ -107,6 +107,7 @@ async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) 
             output=s.output if isinstance(s.output, dict) else None,
             status=s.status,
             error=s.error,
+            detail=s.detail,
             started_at=_iso(s.started_at),
             completed_at=_iso(s.completed_at),
         )
@@ -134,13 +135,13 @@ async def update_workflow(
     return _item(record)
 
 
-@routes.delete("/workflows/{workflow_id}/", response={204: None, **ERRORS})
+@routes.delete("/workflows/{workflow_id}/", response={204: None})
 async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
     await WorkflowService.delete(workflow_id, user=request.user)
     return 204, None
 
 
-@routes.post("/workflows/{workflow_id}/run/", response={202: WorkflowRunResponse, **ERRORS})
+@routes.post("/workflows/{workflow_id}/run/", response={202: WorkflowRunResponse})
 async def run_workflow_by_id(
     request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
 ) -> Any:

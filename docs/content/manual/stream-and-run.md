@@ -83,34 +83,28 @@ that needs tool access but has nobody watching a live response.
 answer = await agent.run(messages, tools=True)
 ```
 
-`Agent.run()` takes the headless path only when three conditions all hold:
+`Agent.run()` takes the headless path only when both conditions hold:
 
 ```python
 resolved = self.response_format if response_format is self._UNSET else response_format
-adapter = await self.get_run_adapter(thread_id=thread_id, user=user)
-
-if tools and resolved is None and isinstance(adapter, Run):
-    return await self._run_own_tools(adapter, messages, rendered_prompt, thread_id, user)
-
-return await adapter.run(messages=messages, system_prompt=rendered_prompt, response_format=resolved)
+with_tools = tools and resolved is None
 ```
 
 - **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
 - **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
-- **`isinstance(adapter, Run)`** — only the SDK's own plain `Run` is ours to add a tool loop to. A `get_run_adapter()` override that returns something else made that choice on purpose and is left alone, calling its own `.run()` unchanged.
 
-`Agent._run_own_tools()` then builds the loop:
+`get_run_adapter()` must return a `Run`: oversight runs as hooks on its Haystack Agent, so anything else would go unchecked and raises `TypeError`. `Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
 ```python
-haystack_agent = ToolAgent.build_agent(
-    getattr(adapter, "generator", None) or self.get_llm(),
-    await self.get_tools(thread_id=thread_id or "", user=user),
-    system_prompt,
-    max_agent_steps=self.max_agent_steps,
+return await adapter.run(
+    sent,
+    rendered_prompt,
+    response_format=resolved,
+    tools=await self.get_tools(thread_id=thread_id or "", user=user) if with_tools else None,
+    max_agent_steps=self.max_agent_steps if with_tools else None,
     hooks=default_hooks(self),
+    request=TurnRequest(agent=self, channel=channel, user=user, thread_id=thread_id, ...),
 )
-result = await haystack_agent.run_async(messages=adapter.get_messages(messages))
-return result["messages"][-1].text if result.get("messages") else None
 ```
 
 This is **the same assembly** `build_subagent()` uses to turn a subagent into
@@ -121,8 +115,8 @@ not a generic constant. A class with `max_agent_steps = 4` gets 4 steps
 whether it's delegated to live or run headless by itself; one function,
 `default_hooks()`, is the single place that assembly exists.
 
-The return is just the last message's text — no digest, no sources-consulted
-list, no synthesis-pass recovery if the loop got cut short. That machinery
+The return is just the last message's text — no digest, no synthesis-pass
+recovery if the loop got cut short. That machinery
 (`subagent_response()`) exists specifically for the coordinator/subagent
 handoff, where a lost result means a lost answer to the user mid-conversation.
 A headless run has no ongoing conversation to lose context from — the caller
@@ -134,6 +128,20 @@ not in the demo project. The mechanism is tested and correct, but there's no
 example to copy from; a workflow step that needs tool access is the obvious
 first real caller.
 {{< /callout >}}
+
+Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
+turn, and oversight runs inside the Haystack Agent as hooks
+(`django_ai_sdk.oversight.plugin`), which `run_with_oversight` adds on every run. The
+`TurnRequest` says whose turn it is. `run_with_oversight` opens its
+turn, the gate judges the history and the question before the
+first model call (`GateQuestionHook`), every tool call is checked before it runs
+(`JudgeToolCallHook`), every result is masked before the model reads it
+(`MaskToolResultHook`), and finish judges what the loop wrote before the
+answer is returned (`JudgeAnswerHook`). A refusal raises
+`django_ai_sdk.errors.Blocked`.
+
+What oversight does not guard (`stream_response()` from your own view, an adapter
+other than `Stream`) is listed under [Limitations](/oversight/#limitations).
 
 ## Stream
 

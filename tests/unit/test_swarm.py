@@ -14,9 +14,11 @@ from django_ai_sdk.agents import (
 )
 from django_ai_sdk.agents.subagent import (
     FINAL_PROMPT,
+    FinalResponseHook,
     SUBAGENT_META_KEY,
     SubagentStreamFilter,
     _tool_chunks_only,
+    _with_final_response,
     build_subagent,
     subagent_response,
     subagent_tool_name,
@@ -33,6 +35,7 @@ from haystack.dataclasses import StreamingChunk as HaystackStreamingChunk
 from haystack.tools import Tool
 
 MOCK_MODEL = "gpt-4o-mini"
+
 
 
 def _weather_tool() -> Tool:
@@ -142,7 +145,9 @@ class TestToolAgentBuild:
         gen = MockChatGenerator(responses=["hi"])
         config = ToolAgentConfig(model=MOCK_MODEL, system_prompt="s", tools=[])
         pipeline = ToolAgent(config=config, generator=gen).pipeline()
-        assert not pipeline.get_component("agent").hooks.get("before_tool")
+        before = pipeline.get_component("agent").hooks.get("before_tool") or []
+        # Oversight adds its own when the agent runs.
+        assert before == []
 
     def test_custom_hooks_are_merged_with_budget_hook(self):
         gen = MockChatGenerator(responses=["hi"])
@@ -260,10 +265,10 @@ class TestSubagentBuilders:
         ):
             built = await build_subagent(SubAgent, thread_id="t1", user=None)
         assert built is not None
-        agent, agent_id = built
+        agent, subagent = built
         assert agent.required_variables == ["task"]
         assert "{{task}}" in agent.user_prompt
-        assert agent_id == SubAgent().agent_id
+        assert subagent.agent_id == SubAgent().agent_id
 
     @pytest.mark.asyncio
     async def test_build_subagent_defaults_budgets(self):
@@ -384,9 +389,11 @@ class TestSubagentStreaming:
     def test_tool_chunks_only_returns_none_for_no_callback(self):
         assert _tool_chunks_only(None) is None
 
+    @pytest.mark.usefixtures("installs_as_is")
     @pytest.mark.asyncio
     async def test_stream_filter_forwards_task_and_filters_callback(self):
         inner = AsyncMock()
+        inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
         )
@@ -413,9 +420,11 @@ class TestSubagentStreaming:
         assert len(received) == 1
         assert received[0].tool_calls[0].tool_name == "search_web"
 
+    @pytest.mark.usefixtures("installs_as_is")
     @pytest.mark.asyncio
     async def test_stream_filter_leaves_out_pending_calls_and_system_prompt(self):
         inner = AsyncMock()
+        inner.hooks, inner.tools = {}, []
         inner.run_async = AsyncMock(
             return_value={"messages": [], "last_message": ChatMessage.from_assistant("report")}
         )
@@ -855,10 +864,8 @@ class TestSwarmEndToEnd:
         assert result["tool_call_counts"]["boat_expert"] == 1
         delegated = [m for m in result["messages"] if m.tool_call_results]
         assert delegated, "coordinator should have received the subagent output"
-        # The report, plus the source list the handoff always appends.
-        handed_back = delegated[0].tool_call_results[0].result
-        assert handed_back.startswith("Aye! Keel lore.")
-        assert "boat_expert(task='Explain keels')" in handed_back
+        # The subagent's own report, as it wrote it.
+        assert delegated[0].tool_call_results[0].result == "Aye! Keel lore."
 
     @pytest.mark.asyncio
     async def test_coordinator_streams_subagent_tool_calls(self):
@@ -949,8 +956,7 @@ class TestSwarmEndToEnd:
             tool_calls=[ToolCall(tool_name="noop", arguments={"x": 1}, id="c1")]
         )
         fallback = subagent_response([tool_only])
-        assert isinstance(fallback, str) and fallback
-        assert "Sources consulted" in fallback
+        assert "could not be completed" in fallback
 
 
 def _stream_with_handoffs(*handoff_tools: str) -> Stream:
@@ -1208,16 +1214,10 @@ class TestSubagentReport:
         # The budget stub is not gathered material.
         assert "Tool budget reached" not in output
 
-    def test_successful_run_returns_report_plus_sources(self):
+    def test_successful_run_returns_just_the_report(self):
+        # The report names its own sources; no digest when there is one.
         output = subagent_response(_research_messages(report="Bordeaux: 220,000 evacuated."))
-
-        assert output.startswith("Bordeaux: 220,000 evacuated.")
-        assert "Sources consulted:" in output
-        assert "search_web(query='bordeaux')" in output
-        assert "fetch_page(url='https://ap.example')" in output
-        # No digest when there is a real report.
-        assert "cut short" not in output
-        assert "France and Spain battle wildfires" not in output
+        assert output == "Bordeaux: 220,000 evacuated."
 
     def test_digest_budget_is_shared_across_results(self, settings):
         settings.AI_SDK_SUBAGENT_DIGEST_LIMIT = 20
@@ -1278,49 +1278,84 @@ class TestToolCallBudgetHook:
 
 
 class TestSubagentSynthesis:
-    def _filter(self, result, generator):
-        agent = MagicMock()
-        agent.run.return_value = result
-        agent.chat_generator = generator
-        return SubagentStreamFilter(agent, name="Research Planner")
+    """FinalResponseHook asks for a response when the loop ended without one."""
+
+    def _state(self, messages):
+        from haystack.components.agents.state.state import State
+
+        state = State(schema={"messages": {"type": list[ChatMessage]}})
+        state.set("messages", messages)
+        return state
 
     def test_synthesis_runs_when_no_report_was_written(self):
         generator = MagicMock()
         generator.run.return_value = {
             "replies": [ChatMessage.from_assistant("Bordeaux: 220,000 evacuated.")]
         }
-        result = {"messages": _research_messages(skipped=True)}
+        state = self._state(_research_messages(skipped=True))
 
-        out = self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(state)
 
-        assert out["last_message"].text == "Bordeaux: 220,000 evacuated."
+        out = state.data["messages"]
+        assert out[-1].text == "Bordeaux: 220,000 evacuated."
         # Called with the gathered conversation and no tools.
         sent = generator.run.call_args.kwargs["messages"]
         assert "tools" not in generator.run.call_args.kwargs
         assert sent[-1].text == FINAL_PROMPT
-        assert subagent_response(out["messages"]).startswith("Bordeaux: 220,000 evacuated.")
+        assert subagent_response(out).startswith("Bordeaux: 220,000 evacuated.")
+
+    def test_synthesis_tokens_count_with_the_run(self):
+        from haystack.components.agents.state.state import State
+
+        generator = MagicMock()
+        usage = {"prompt_tokens": 7, "completion_tokens": 3}
+        generator.run.return_value = {
+            "replies": [ChatMessage.from_assistant("Bordeaux.", meta={"usage": usage})]
+        }
+        state = State(schema={"messages": {"type": list[ChatMessage]}, "token_usage": {"type": dict}})
+        state.set("messages", _research_messages(skipped=True))
+        state.set("token_usage", {"prompt_tokens": 10, "completion_tokens": 5})
+
+        FinalResponseHook(generator).run(state)
+
+        assert state.data["token_usage"] == {"prompt_tokens": 17, "completion_tokens": 8}
 
     def test_synthesis_is_skipped_when_a_report_exists(self):
         generator = MagicMock()
-        result = {"messages": _research_messages(report="All good.")}
 
-        self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(self._state(_research_messages(report="All good.")))
 
         generator.run.assert_not_called()
 
     def test_failed_synthesis_falls_through_to_the_digest(self):
         generator = MagicMock()
         generator.run.side_effect = RuntimeError("provider down")
-        result = {"messages": _research_messages(skipped=True)}
+        state = self._state(_research_messages(skipped=True))
 
-        out = self._filter(result, generator).run(messages=[], task="research")
+        FinalResponseHook(generator).run(state)
 
         # The run still returns, and the work is still recoverable.
-        digest = subagent_response(out["messages"])
+        digest = subagent_response(state.data["messages"])
         assert "France and Spain battle wildfires" in digest
+
+    def test_build_subagent_runs_it_before_oversight_finishes(self):
+        # Otherwise finish judges the digest of a run cut short, and no response is ever written.
+        from django_ai_sdk.agents.tool_agent import default_hooks
+        from haystack.components.agents import Agent as HaystackAgent
+
+        from django_ai_sdk.oversight.plugin import merge_oversight_hooks
+        from django_ai_sdk.oversight.plugin.hooks import JudgeAnswerHook, RecordUsageHook
+
+        built = HaystackAgent(
+            chat_generator=MockChatGenerator(responses=["x"]),
+            hooks=_with_final_response(default_hooks(MagicMock()), MagicMock()),
+        )
+        after = merge_oversight_hooks(built.hooks)["after_run"]
+        assert [type(h) for h in after][-3:] == [FinalResponseHook, RecordUsageHook, JudgeAnswerHook]
 
 
 class TestUnstreamedResults:
+    @pytest.mark.usefixtures("installs_as_is")
     def test_hook_written_result_is_streamed_once(self):
         generator = MagicMock()
         generator.run.return_value = {"replies": [ChatMessage.from_assistant("done")]}
@@ -1339,6 +1374,7 @@ class TestUnstreamedResults:
         assert ids == ["c1", "c2", "c3"]
         assert all(c.meta[SUBAGENT_META_KEY] == "Research Planner" for c in received)
 
+    @pytest.mark.usefixtures("installs_as_is")
     def test_already_streamed_result_is_not_duplicated(self):
         from haystack.dataclasses import ToolCallResult
 

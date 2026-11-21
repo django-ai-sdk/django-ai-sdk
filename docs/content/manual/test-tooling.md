@@ -79,7 +79,20 @@ with thread_permissions("apps.agents.permissions.DemoThreadPermission"):
 
 ### Mocking the model generator
 
-Never construct a real generator - not `openai_responses_chat()`, not the Haystack class behind it. Use a stub object with the shape `Stream`/`Run` expect:
+Never construct a real generator - not `openai_responses_chat()`, not the Haystack class behind it. In your own project's tests, `django_ai_sdk.testing.FakeLLM` is a generator factory that answers with canned replies, in order (the last one repeats; with none it echoes). It goes wherever an `llm` goes, on an agent or on an `LLMJudge`, and `calls` keeps the messages of every call:
+
+```python
+from unittest.mock import patch
+
+from django_ai_sdk.testing import FakeLLM
+
+fake = FakeLLM("On its way.")
+with patch.object(SupportAgent, "llm", fake):
+    answer = await SupportAgent().run(messages)
+assert len(fake.calls) == 1
+```
+
+For the shape `Stream`/`Run` expect, a stub object also works:
 
 ```python
 class FakeGenerator:

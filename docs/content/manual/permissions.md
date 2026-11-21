@@ -24,6 +24,7 @@ PermissionDomain.MEMORY   # "memory"
 | `memory` | `MemoryDefaultPermission` |
 | `integrations` | `IntegrationDefaultPermission` |
 | `workflow` | `WorkflowDefaultPermission` |
+| `oversight` | `django_ai_sdk.oversight.permissions.OversightDefaultPermission` |
 
 Override a domain globally via `AI_SDK_PERMISSIONS`:
 
@@ -54,6 +55,8 @@ LIST_THREAD_MEMORIES, LINK_MEMORY, UNLINK_MEMORY
 USE_INTEGRATION, MANAGE_INTEGRATION
 # Workflows
 VIEW_WORKFLOW, RUN_WORKFLOW, MANAGE_WORKFLOW
+# Oversight
+VIEW_OVERSIGHT_METRICS, VIEW_OVERSIGHT_CONTENT, REVIEW_OVERSIGHT
 # Misc
 CHAT, REINDEX
 ```
@@ -71,12 +74,13 @@ CHAT, REINDEX
 
 ### Tiered default permissions
 
-Four built-ins expose `READ` / `WRITE` / `MANAGE` operation tiers:
+The domains' default classes. The first four expose `READ` / `WRITE` / `MANAGE` operation tiers:
 
 - **`ThreadDefaultPermission`**: authenticated users get full access to their own threads; anonymous users get none.
 - **`MemoryDefaultPermission`**: `can_manage` members get everything; `can_manage=False` members get read + write entries; public read-only is gated by `is_public`; anonymous is always blocked.
 - **`AgentDefaultPermission`**: `can_manage` members manage the agent; other members view and use it; `is_public` grants read and use to anyone; anonymous is otherwise blocked for agent operations and passes through everything else. Chat, thread and file operations have no object to check, so they are gated on the agent passed as the `agent` keyword.
 - **`WorkflowDefaultPermission`**: any authenticated user may author a workflow and run an active one; a stored definition is managed only by its `created_by`; a run is read only by the principal it ran as, since its outputs are that person's content. Staff manage and read every one of both. It implements `get_queryset_perms`, so list endpoints are scoped in the database rather than filtered afterwards — see [Workflows](/manual/workflows/#who-may-do-what).
+- **`OversightDefaultPermission`** (`django_ai_sdk.oversight.permissions`): one Django model permission per operation, never `is_staff`, narrowed by the `scope_turns` and `scope_reviews` hooks; the operations and their permissions are in [Oversight](/manual/oversight/#review-api).
 
 `MemoryService.get_object_permissions_map()` and `agent_permissions()` auto-discover these `READ`/`WRITE`/`MANAGE` tiers and return an `ObjectPermissions` (`can_read` / `can_write` / `can_manage`) for the frontend.
 

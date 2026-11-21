@@ -35,6 +35,7 @@ def _stream(tool_artifacts: dict, thread_id: str | None = "t") -> Stream:
     stream = Stream.__new__(Stream)
     stream.citation_registry = None
     stream._persisted_tool_ids, stream._persisted_tool_output_ids = set(), set()
+    stream._artifact_ids = []
     stream._handoff_tools = {}
     stream.tool_artifacts, stream.thread_id, stream.user = tool_artifacts, thread_id, None
     return stream
@@ -145,7 +146,7 @@ async def test_stream_gets_the_agents_tool_artifacts():
             pipeline = ToolAgent(config, generator=generator).pipeline()
             return Stream(pipeline=pipeline, generator=generator)
 
-    with patch("django_ai_sdk.agents.base.stream_response", new=AsyncMock()) as respond:
+    with patch("django_ai_sdk.agents.chat.stream_response", new=AsyncMock()) as respond:
         await FileAgent().as_view([], thread_id="t")
         adapter = await respond.await_args.args[0]()
 

@@ -1,13 +1,35 @@
 """The non-streaming `Run` adapter, used by WorkflowExecutor and title generation."""
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from haystack import component
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
 from pydantic import BaseModel
 
 from django_ai_sdk.adapters.base import Run
 from django_ai_sdk.common import ChatMessage
+
+
+@component
+class Scripted:
+    """A chat generator that answers `reply` and counts its calls. Run runs it as a Haystack Agent."""
+
+    def __init__(self, reply: str | HaystackChatMessage) -> None:
+        self.reply = reply if isinstance(reply, HaystackChatMessage) else HaystackChatMessage.from_assistant(reply)
+        self.calls = 0
+
+    @component.output_types(replies=list[HaystackChatMessage])
+    def run(self, messages: list[HaystackChatMessage], generation_kwargs: dict[str, Any] | None = None) -> dict:
+        self.calls += 1
+        return {"replies": [self.reply]}
+
+    @component.output_types(replies=list[HaystackChatMessage])
+    async def run_async(
+        self, messages: list[HaystackChatMessage], generation_kwargs: dict[str, Any] | None = None
+    ) -> dict:
+        return self.run(messages, generation_kwargs)
 
 
 def user_message(text="Hello"):
@@ -16,21 +38,19 @@ def user_message(text="Hello"):
 
 class TestWithoutTools:
     async def test_a_bare_completion_is_unchanged(self):
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="hi there")]})
+        generator = Scripted("hi there")
 
         run = Run(generator=generator)
         result = await run.run([user_message()])
 
         assert result == "hi there"
-        generator.run_async.assert_awaited_once()
+        assert generator.calls == 1
 
     async def test_structured_output_is_unchanged(self):
         class Out(BaseModel):
             value: str
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
+        generator = Scripted('{"value": "x"}')
 
         run = Run(generator=generator)
         result = await run.run([user_message()], response_format=Out)
@@ -43,8 +63,7 @@ class TestWithoutTools:
 
         # E.g. the token limit spent on reasoning: a reply without text.
         reply = HaystackChatMessage.from_assistant(None, meta={"finish_reason": "length"})
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [reply]})
+        generator = Scripted(reply)
 
         assert await Run(generator=generator).run([user_message()], response_format=Out) is None
 
@@ -64,8 +83,7 @@ class TestAgentRunToolsDefault:
         await config.asave()
         agent = RuntimeAgent(config)
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text="A Title")]})
+        generator = Scripted("A Title")
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,
@@ -76,10 +94,11 @@ class TestAgentRunToolsDefault:
         assert result == "A Title"
         tools.assert_not_awaited()
 
-    async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(self):
-        """Agent.run(tools=True) must not build a shadow agent: the loop goes
-        through ToolAgent.build_agent, the same path build_subagent uses for a
-        streamed delegation - governed, not an ungoverned bare Agent."""
+    async def test_tools_true_resolves_and_runs_them_via_the_real_agent_builder(
+        self, installs_as_is
+    ):
+        """Agent.run(tools=True) is governed like a streamed delegation: the
+        loop gets the agent's own steps and default_hooks, as build_subagent does."""
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -95,12 +114,13 @@ class TestAgentRunToolsDefault:
             return_value={"messages": [HaystackChatMessage.from_assistant("done")]}
         )
         tool = MagicMock()
+        fake_agent.tools = [tool]
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[tool])) as tools,
             patch.object(RuntimeAgent, "get_llm", return_value=generator),
             patch(
-                "django_ai_sdk.agents.tool_agent.HaystackAgent", return_value=fake_agent
+                "django_ai_sdk.adapters.run.Agent", return_value=fake_agent
             ) as agent_cls,
         ):
             result = await agent.run([user_message("do it")], response_format=None, tools=True)
@@ -108,6 +128,8 @@ class TestAgentRunToolsDefault:
         assert result == "done"
         tools.assert_awaited_once()
         assert agent_cls.call_args.kwargs["tools"] == [tool]
+        # run_with_oversight installs oversight on the agent it built (see test_haystack_native).
+        installs_as_is.assert_called_once_with(fake_agent)
         # Governed by RuntimeAgent's own (default) max_agent_steps=6, not a
         # generic constant.
         assert agent_cls.call_args.kwargs["max_agent_steps"] == 6
@@ -119,6 +141,7 @@ class TestAgentRunToolsDefault:
         assert len(budget) == 1
         assert budget[0].max_tool_calls == 6
 
+    @pytest.mark.usefixtures("installs_as_is")
     async def test_a_non_default_max_agent_steps_is_honored(self):
         """The exact regression: a subagent with a deliberately tight budget
         (e.g. ResearchPlannerAgent's max_agent_steps=4) must keep that budget
@@ -147,7 +170,7 @@ class TestAgentRunToolsDefault:
         with (
             patch.object(TightAgent, "get_tools", AsyncMock(return_value=[MagicMock()])),
             patch(
-                "django_ai_sdk.agents.tool_agent.HaystackAgent", return_value=fake_agent
+                "django_ai_sdk.adapters.run.Agent", return_value=fake_agent
             ) as agent_cls,
         ):
             await agent.run([user_message("hi")], response_format=None, tools=True)
@@ -176,13 +199,12 @@ class TestStructuredCallsDoNotResolveTools:
         await config.asave()
         agent = RuntimeAgent(config)
 
-        generator = MagicMock()
-        generator.run_async = AsyncMock(return_value={"replies": [MagicMock(text='{"value": "x"}')]})
+        generator = Scripted('{"value": "x"}')
 
         with (
             patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])) as tools,
             patch.object(RuntimeAgent, "get_llm", return_value=generator),
-            patch("django_ai_sdk.adapters.base.logger") as log,
+            patch("django_ai_sdk.adapters.run.logger") as log,
         ):
             result = await agent.run([user_message()], response_format=Out, tools=True)
 
@@ -190,8 +212,8 @@ class TestStructuredCallsDoNotResolveTools:
         tools.assert_not_awaited()
         log.warning.assert_not_called()
 
-    async def test_an_adapter_without_a_tools_attribute_is_left_alone(self):
-        # get_run_adapter is an override point; an adapter is not required to carry tools.
+    async def test_an_adapter_that_is_no_run_is_refused(self):
+        # Oversight runs as hooks on the Run's Haystack Agent: anything else would go unchecked.
         from uuid import uuid4
 
         from django_ai_sdk.agents.models import AgentSettings
@@ -206,6 +228,35 @@ class TestStructuredCallsDoNotResolveTools:
 
         with (
             patch.object(RuntimeAgent, "get_run_adapter", AsyncMock(return_value=bare)),
-            patch.object(RuntimeAgent, "get_tools", AsyncMock(return_value=[MagicMock()])),
+            pytest.raises(TypeError, match="must return a Run"),
         ):
-            assert await agent.run([user_message()], response_format=None, tools=True) == "fine"
+            await agent.run([user_message()])
+        bare.run.assert_not_called()
+
+
+class TestDefaultRunAdapter:
+    async def test_an_agent_runs_on_its_own_generator_without_overriding_get_run_adapter(self):
+        from haystack.components.generators.chat import MockChatGenerator
+
+        from django_ai_sdk.agents.base import Agent
+        from django_ai_sdk.permissions import AllowAll
+
+        generator = MockChatGenerator(responses=[HaystackChatMessage.from_assistant("Hi.")])
+        made = []
+
+        def factory(**kwargs):
+            made.append(kwargs)
+            return generator
+
+        class Plain(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "plain"
+            model = "some-model"
+            oversight = False
+            llm = staticmethod(factory)
+
+        adapter = await Plain().get_run_adapter()
+        assert isinstance(adapter, Run) and adapter.generator is generator
+        assert made == [{"model": "some-model"}]
+        assert await Plain().run([user_message()]) == "Hi."

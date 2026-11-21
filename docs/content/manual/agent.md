@@ -40,6 +40,7 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 | `max_history` | `None` | Cap on messages sent to the model |
 | `response_format` | `None` | Pydantic model for structured `run()` output |
 | `title_generation` | `True` | Auto-generate thread titles |
+| `oversight` | `None` | Oversight policy: a `Policy` subclass, a name, `None` (`DEFAULT_POLICY`) or `False`; see [Oversight](../oversight/#agents-and-runs) |
 | `permissions` | `None` | Permission classes gating operations; `None` or `[]` uses the `agent` domain default |
 | `warmup_on_init` | `False` | Warm up RAG on instantiation |
 | `hidden` / `abstract` | `False` | Registry behavior flags |
@@ -48,7 +49,7 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 
 ## Adapter Hooks
 
-The SDK calls two abstract hooks; you implement them:
+The SDK calls two adapter hooks. `get_pipeline_adapter` defaults to a `Stream` over a `ToolAgent` of the agent's generator, tools and prompt; `get_run_adapter` defaults to `Run(generator=self.get_llm())` and must return a `Run`:
 
 | Hook | Returns | Used by |
 | --- | --- | --- |
@@ -73,7 +74,7 @@ async def get_pipeline_adapter(self, thread_id=None, user=None):
     )
 ```
 
-A worker-only agent (`hidden = True`, never in chat) can leave `get_pipeline_adapter()` unimplemented.
+The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get_llm()`, the agent's tools and its limits. Override it for another pipeline.
 
 ## Storage Resolution
 
@@ -99,10 +100,10 @@ Declaring `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent in
 - `get_agent_tools(thread_id, user)` builds them, per class in `self.agents`:
   1. **Cycle guard, declaration-level.** Skip `subagent_cls is self.__class__` (no self-delegation) and any class path already seen this call.
   2. **Permission check.** `AgentService.has_perms(user, Operation.VIEW_AGENT, agent=subagent_cls)` — skip on `PermissionDenied` rather than failing the whole tool list.
-  3. **Build it.** `build_subagent(subagent_cls, thread_id, user)` → `(HaystackAgent, agent_id)`, or `None` for a cyclic graph (see below).
+  3. **Build it.** `build_subagent(subagent_cls, thread_id, user)` → `(HaystackAgent, Agent)` (the SDK agent, whose policy guards the delegation), or `None` for a cyclic graph (see below).
   4. **Name the tool.** `subagent_tool_name(subagent_cls)` slugifies the display name. A collision appends a short suffix derived from the colliding class's `agent_id` (`research_planner_7f3a2c`) — guaranteed not to collide again, unlike an incrementing counter; the same pattern `get_rag_tools()` already uses for a memory-tool-name collision.
   5. **Wrap it** as a `ComponentTool` scoped to a single `task` string parameter — delegation, not remote tool invocation.
-- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](../stream-and-run/#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself.
+- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](../stream-and-run/#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one, and oversight's finish joins after it when the subagent runs (`run_with_oversight` adds the hooks), so finish judges the written response.
 - The subagent's response becomes the tool output via `outputs_to_string` — see [Handoff output](#handoff-output) for what that contains and how a cut-short run is recovered. The coordinator remains the single source of streamed *text*, but the subagent's tool calls/results stream to the client via `stream_subagent_tools` (default on) and are persisted into the conversation history — `SubagentStreamFilter` forwards only tool chunks, in the order they happen.
 - The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
 
@@ -114,13 +115,12 @@ run out of budget or steps *after* doing the work: reading only the last message
 would hand back a "you have reached the maximum of N tool calls" notice and throw
 every result away.
 
-`subagent_response()` (`django_ai_sdk/agents/subagent.py`) returns, in order:
+`subagent_response()` (`django_ai_sdk/agents/subagent.py`) returns one of:
 
-1. **The response** — the subagent's final written answer.
-2. **Sources consulted** — one `tool(args)` line per call it made, names and
-   arguments only, never bodies. Always appended, so the coordinator can cite
-   even when the response forgot to.
-3. **A digest** — only when there is no response: the gathered tool results
+1. **The response** — the subagent's final written answer, which names its own
+   sources.
+2. **A digest** — only when there is no response: each call it made with the
+   gathered result,
    themselves, under `"The run was cut short before a response was
    finished."` so the coordinator presents them as partial rather than as a
    finished answer. Capped by `AI_SDK_SUBAGENT_DIGEST_LIMIT` (default `6000`
@@ -231,8 +231,11 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 
 1. Checks `CHAT` permissions
 2. Converts protocol messages via `self.protocol_handler.to_chat_messages()`
-3. Stores the newest user message when a thread is active
-4. Builds the pipeline adapter and returns a `StreamingHttpResponse`
+3. Resolves attachments against the thread's files (none without a thread), then opens the oversight turn (channel `chat`) when a policy applies: under a policy that masks the question, a stored thread's history replaces the client's copy; a client copy that is the thread as stored stands; any other history is judged (`gate_history`). The gate then judges the question and may refuse it (nothing is stored) or mask it. Anything that fails before the stream takes the turn still closes it
+4. Stores the newest user message when a thread is active
+5. Builds the pipeline adapter and returns a `StreamingHttpResponse`
+
+`run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel=None, oversight=<the agent's own>)` is one turn under the agent's policy too, recorded on `channel` (a name you pick; `None` records `default`), and raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`; an override of `run()` is handed `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn; it returns `oversight` by default. The turn opens inside `super().run()`: an override that calls it is checked, one that calls its own model instead is not. Run such a model call through `run_with_oversight()`.
 
 ```python
 response = await agent.as_view(payload.messages, thread_id=..., user=request.user)

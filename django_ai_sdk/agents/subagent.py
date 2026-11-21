@@ -7,7 +7,10 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from django.utils.text import slugify
+from django.utils.translation import gettext_lazy
 from haystack import component
+from haystack.components.agents.state.state import replace_values
+from haystack.components.agents.utils import _record_llm_usage
 from haystack.dataclasses import (
     ChatMessage,
     ChatRole,
@@ -30,10 +33,21 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
     from haystack.components.agents import Agent as HaystackAgent
+    from haystack.components.agents.state.state import State
 
     from django_ai_sdk.agents.base import Agent
+    from django_ai_sdk.oversight.plugin import TurnRequest
 
 logger = get_logger(__name__)
+
+# Told to the coordinator when a sync delegation needs its own turn, which a
+# sync run cannot open.
+UNGUARDABLE = gettext_lazy(
+    "This task cannot be delegated here: it could not be checked. Answer without it."
+)
+
+# The channel of a delegation run outside any turn.
+SUBAGENT_CHANNEL = "subagent"
 
 # meta key naming the subagent
 SUBAGENT_META_KEY = "django_ai_sdk.subagent"
@@ -88,14 +102,6 @@ def _tool_line(tool_call: Any) -> str:
     return f"{tool_call.tool_name}({args})"
 
 
-def _sources(messages: list[ChatMessage]) -> str:
-    """List what the subagent actually called, so the coordinator can cite it."""
-    lines = [_tool_line(call) for message in messages for call in (message.tool_calls or [])]
-    if not lines:
-        return ""
-    return "Sources consulted:\n" + "\n".join(f"- {line}" for line in lines)
-
-
 def _digest(messages: list[ChatMessage]) -> str:
     """The gathered material itself, for when no response was ever written."""
 
@@ -130,14 +136,26 @@ def _digest(messages: list[ChatMessage]) -> str:
 
 
 def subagent_response(messages: list[ChatMessage] | None) -> str:
-    """Build the tool output the coordinator receives for a delegation."""
+    """Build the tool output the coordinator receives for a delegation.
+
+    The subagent's written response, or else what its tools found. The response
+    names its own sources, and the digest lists each call with its result.
+    """
     messages = messages or []
-    parts = [_final_response(messages) or _digest(messages), _sources(messages)]
-    response = "\n\n".join(part for part in parts if part)
-    return response or (
-        "The sub-task could not be completed and produced no usable findings. "
-        "Tell the user the work is unfinished."
+    return (
+        _final_response(messages)
+        or _digest(messages)
+        or (
+            "The sub-task could not be completed and produced no usable findings. "
+            "Tell the user the work is unfinished."
+        )
     )
+
+
+def _answered(text: str) -> dict[str, Any]:
+    """Build a delegation result that holds only `text`."""
+    reply = ChatMessage.from_assistant(text)
+    return {"messages": [reply], "last_message": reply}
 
 
 def _tag_subagent(chunk: StreamingChunk, name: str) -> StreamingChunk:
@@ -154,6 +172,11 @@ def _tool_chunks_only(
 ) -> StreamingCallbackT | None:
     """Return a callback forwarding only tool chunks, tagged with ``name``.
     ``seen`` collects the ids of forwarded tool results.
+
+    Haystack streams a tool result before the after_tool hooks mask it, so a
+    forwarded result is masked here by the subagent's own guard (current while
+    its run streams): the coordinator's policy may not hide what this one does.
+    A sync run only ever joins the coordinator's turn, whose stream masks it.
     """
     if callback is None:
         return None
@@ -163,12 +186,13 @@ def _tool_chunks_only(
             seen.add(chunk.tool_call_result.origin.id or "")
 
     if async_sink:
+        from django_ai_sdk.oversight.plugin import mask_streamed_result
 
         async def filtered(chunk: StreamingChunk) -> None:
             if not (chunk.tool_calls or chunk.tool_call_result):
                 return
             record(chunk)
-            result = callback(_tag_subagent(chunk, name))
+            result = callback(_tag_subagent(await mask_streamed_result(chunk), name))
             if inspect.isawaitable(result):
                 await result
 
@@ -206,14 +230,102 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
     return chunks
 
 
+class FinalResponseHook:
+    """Ask for a written response when the loop ended without one, as after_run.
+
+    One tool-less call, so the outcome does not depend on there being a spare step
+    left after the tool budget fired. It runs before oversight finishes the run, so
+    the coordinator reads a checked response.
+    """
+
+    allowed_hook_points = ["after_run"]
+
+    def __init__(self, generator: Any) -> None:
+        self.generator = generator
+
+    def _pending(self, state: State) -> list[ChatMessage] | None:
+        messages = list(state.data.get("messages") or [])
+        last = messages[-1] if messages else None
+        return None if _is_usable_final_response(last) else messages
+
+    def _accept(
+        self, state: State, messages: list[ChatMessage], replies: list[ChatMessage]
+    ) -> None:
+        # The call is part of the run, so its tokens count with the run's own.
+        _record_llm_usage(state=state, llm_messages=replies)
+        if replies and _is_usable_final_response(replies[0]):
+            state.set("messages", [*messages, replies[0]], handler_override=replace_values)
+
+    def run(self, state: State) -> None:
+        if (messages := self._pending(state)) is None:
+            return
+        try:
+            replies = self.generator.run(messages=[*messages, ChatMessage.from_user(FINAL_PROMPT)])
+            self._accept(state, messages, replies.get("replies") or [])
+        except Exception as exc:  # noqa: BLE001 — digest still carries the work
+            logger.warning("Subagent could not synthesize a final response: {}", exc)
+
+    async def run_async(self, state: State) -> None:
+        if (messages := self._pending(state)) is None:
+            return
+        try:
+            replies = await self.generator.run_async(
+                messages=[*messages, ChatMessage.from_user(FINAL_PROMPT)]
+            )
+            self._accept(state, messages, replies.get("replies") or [])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Subagent could not reach a final response: {}", exc)
+
+
+def _with_final_response(hooks: dict[str, list[Any]], generator: Any) -> dict[str, list[Any]]:
+    """`hooks` with a FinalResponseHook. Oversight's finish joins after it, at run time."""
+    return {**hooks, "after_run": [*hooks.get("after_run", []), FinalResponseHook(generator)]}
+
+
 @component
 class SubagentStreamFilter:
-    """Wrap a subagent Agent so only its tool calls and results reach the stream."""
+    """Wrap a subagent Agent so only its tool calls and results reach the stream.
 
-    def __init__(self, agent: Any, name: str = "", agent_id: str = "") -> None:
+    With `subagent`, each delegation runs under that agent's policy, checked before
+    the coordinator reads it; on a block the coordinator reads the policy's message.
+    """
+
+    def __init__(
+        self,
+        agent: Any,
+        name: str = "",
+        *,
+        subagent: Agent | None = None,
+        thread_id: str = "",
+        user: AbstractBaseUser | AnonymousUser | None = None,
+    ) -> None:
         self._agent = agent
         self.name = name
-        self.agent_id = agent_id
+        self.agent_id = subagent.agent_id if subagent is not None else ""
+        self._subagent = subagent
+        self._thread_id = thread_id
+        self._user = user
+
+    def receipt_keys(self) -> dict[str, tuple[str, ...]]:
+        """The receipt keys of this subagent's tools, and of its own subagents', by name."""
+        from django_ai_sdk.receipts import receipt_keys
+
+        return receipt_keys(getattr(self._agent, "tools", None))
+
+    def _build_turn(self) -> TurnRequest:
+        """The delegation's turn, under the subagent's policy, in the coordinator's channel."""
+        from django_ai_sdk.oversight.guard import current_guard
+        from django_ai_sdk.oversight.plugin import TurnRequest
+
+        outer = current_guard()
+        return TurnRequest(
+            agent=self._subagent,
+            channel=outer.channel if outer is not None else SUBAGENT_CHANNEL,
+            user=self._user,
+            thread_id=self._thread_id or None,
+            # The coordinator reads this, so finish judges it.
+            read_answer=subagent_response,
+        )
 
     def _span(self) -> Any:
         """Open a named span so the subagent's own loop is a readable subtree."""
@@ -221,22 +333,6 @@ class SubagentStreamFilter:
             "django_ai_sdk.subagent.run",
             tags={SUBAGENT_NAME_TAG: self.name, SUBAGENT_ID_TAG: self.agent_id},
         )
-
-    def _needs_response(self, result: dict[str, Any]) -> bool:
-        """Whether the loop ended without the subagent writing its answer."""
-        messages = result.get("messages") or []
-        last = messages[-1] if messages else result.get("last_message")
-        return not _is_usable_final_response(last)
-
-    def _get_messages(self, result: dict[str, Any]) -> list[ChatMessage]:
-        return [*(result.get("messages") or []), ChatMessage.from_user(FINAL_PROMPT)]
-
-    def _accept_response(self, result: dict[str, Any], replies: list[ChatMessage]) -> None:
-        """Fold a reply in so downstream sees a normal finished run."""
-        if not replies or not _is_usable_final_response(replies[0]):
-            return
-        result["messages"] = [*(result.get("messages") or []), replies[0]]
-        result["last_message"] = replies[0]
 
     @component.output_types(messages=list[ChatMessage], last_message=ChatMessage)
     def run(
@@ -246,28 +342,23 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        from django_ai_sdk.oversight.plugin import needs_own_turn_sync, run_with_oversight_sync
+
+        turn = self._build_turn()
+        if needs_own_turn_sync(turn):
+            return _answered(str(UNGUARDABLE))
         seen: set[str] = set()
         with self._span():
-            result = self._agent.run(
-                messages=_handoff_context(messages),
+            result = run_with_oversight_sync(
+                self._agent,
+                _handoff_context(messages),
+                turn=turn,
                 streaming_callback=_tool_chunks_only(
                     streaming_callback, name=self.name, async_sink=False, seen=seen
                 ),
                 task=task,
                 **kwargs,
             )
-            if self._needs_response(result):
-                # One tool-less call, so the outcome does not depend on there
-                # being a spare step left after the tool budget fired.
-                try:
-                    replies = self._agent.chat_generator.run(messages=self._get_messages(result))
-                    self._accept_response(result, replies.get("replies") or [])
-                except Exception as exc:  # noqa: BLE001 — digest still carries the work
-                    logger.warning(
-                        "Subagent {!r} could not synthesize a final response: {}",
-                        self.name,
-                        exc,
-                    )
         self._flush(result, seen, streaming_callback)
         return result
 
@@ -291,26 +382,21 @@ class SubagentStreamFilter:
         task: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        from django_ai_sdk.oversight.plugin import needs_own_turn, run_with_oversight
+
+        turn = self._build_turn()
+        # A child turn judges only the task, so the subagent reads only the task,
+        # not the coordinator's conversation and tool results.
         seen: set[str] = set()
         with self._span():
-            result = await self._agent.run_async(
-                messages=_handoff_context(messages),
+            result = await run_with_oversight(
+                self._agent,
+                _handoff_context([] if await needs_own_turn(turn) else messages),
+                turn=turn,
                 streaming_callback=_tool_chunks_only(streaming_callback, name=self.name, seen=seen),
                 task=task,
                 **kwargs,
             )
-            if self._needs_response(result):
-                try:
-                    replies = await self._agent.chat_generator.run_async(
-                        messages=self._get_messages(result)
-                    )
-                    self._accept_response(result, replies.get("replies") or [])
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "Subagent {!r} could not reach a final response: {}",
-                        self.name,
-                        exc,
-                    )
         await self._aflush(result, seen, streaming_callback)
         return result
 
@@ -333,8 +419,11 @@ async def build_subagent(
     subagent_cls: type[Agent],
     thread_id: str = "",
     user: AbstractBaseUser | AnonymousUser | None = None,
-) -> tuple[HaystackAgent, str] | None:
-    """Build a bare Haystack Agent from an SDK Agent subclass."""
+) -> tuple[HaystackAgent, Agent] | None:
+    """Build a bare Haystack Agent from an SDK Agent subclass, and return both.
+
+    The SDK agent's policy guards the delegation. None for a cyclic graph.
+    """
     path = f"{subagent_cls.__module__}.{subagent_cls.__qualname__}"
     chain = _build_chain.get()
     if path in chain:
@@ -348,8 +437,9 @@ async def build_subagent(
     try:
         subagent = subagent_cls()
         tools = await subagent.get_tools(thread_id=thread_id, user=user)
+        llm = subagent.get_llm()
         agent = ToolAgent.build_agent(
-            subagent.get_llm(),
+            llm,
             tools,
             subagent.get_system_prompt(),
             user_prompt=prompt("""\
@@ -361,9 +451,9 @@ async def build_subagent(
             """),
             required_variables=["task"],
             max_agent_steps=subagent.max_agent_steps,
-            hooks=default_hooks(subagent),
+            hooks=_with_final_response(default_hooks(subagent), llm),
             stream_subagent_tools=True,
         )
-        return agent, subagent.agent_id
+        return agent, subagent
     finally:
         _build_chain.reset(token)

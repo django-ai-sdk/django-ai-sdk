@@ -134,8 +134,10 @@ async def run_thread(request: HttpRequest, thread_id: str, payload: ChatRequest)
     agent = await AgentService.get_agent(thread_id, user=request.user)
     await AgentService.has_perms(request.user, Operation.CHAT, agent=agent)
     chat_messages = agent.protocol_handler.to_chat_messages(payload.messages)
-    result = await agent.run(chat_messages, thread_id=thread_id, user=request.user)
-    return RunResponse(result=result, thread_id=thread_id)
+    result, blocked = await AgentService.arun_reply(
+        agent, chat_messages, user=request.user, thread_id=thread_id
+    )
+    return RunResponse(result=result, thread_id=thread_id, blocked=blocked)
 
 
 @routes.get("/threads/{thread_id}/file-meta/", response=ThreadFileMeta)

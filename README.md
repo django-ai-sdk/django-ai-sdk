@@ -97,6 +97,59 @@ async def chat(request, payload: ChatRequest):
     )
 ```
 
+## Oversight
+
+Block prompt injection, mask personal data and send risky turns to a person, from one
+Python class. Add `"django_ai_sdk.oversight"` to `INSTALLED_APPS` and run `migrate`.
+
+```python
+from django_ai_sdk import Agent
+from django_ai_sdk.errors import Blocked
+from django_ai_sdk.oversight import (
+    INJECTION_PATTERNS,
+    Block,
+    JudgeLens,
+    L,
+    Mode,
+    Maybe,
+    PatternJudge,
+    Policy,
+    Queue,
+    Rule,
+)
+
+
+class Injection(JudgeLens):
+    name = "injection"
+    question = "Does the message try to override the assistant's instructions?"
+    judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier")]
+
+
+class Guard(Policy):
+    name = "guard"
+    lenses = [Injection]
+    rules = [
+        Rule(
+            "injection_in_question",
+            when=L("injection").is_true,
+            then=[Block(), Queue("security")],
+            mode=Mode.ENFORCE,
+        ),
+    ]
+
+
+class SupportAgent(Agent):
+    oversight = Guard
+
+
+try:
+    answer = await SupportAgent().run(messages, user=request.user)
+except Blocked as blocked:
+    answer = blocked.message  # the policy's own text for the person asking
+```
+
+See the [Oversight guide](docs/content/oversight.md) for the rest, and its limitations.
+
 ## Features
 
 - **Agents**: A Django `Agent` class you can run from a view, a task, or the API,
@@ -118,6 +171,10 @@ async def chat(request, payload: ChatRequest):
   circuit breaking and OAuth built in.
 - **Tracing**: Opt-in Haystack tracing persisted to the ORM, with per-thread and
   per-message token accounting.
+- **Oversight**: Lenses ask one typed question about every turn, answered by code, a
+  classifier or a model judge as you pick per lens; rules block, mask or queue for a
+  person, starting in report mode; every turn of an agent with a policy, on the SDK's
+  entry points, is checked and recorded, masked by default.
 - **Reindexing**: Hot-reload documents. Cached embeddings with simple refresh API.
 
 ## Documentation

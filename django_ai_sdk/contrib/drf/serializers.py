@@ -482,6 +482,7 @@ class WorkflowRunStepSerializer(serializers.ModelSerializer):
             "output",
             "status",
             "error",
+            "detail",
             "started_at",
             "completed_at",
         ]

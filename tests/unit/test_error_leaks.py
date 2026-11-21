@@ -126,3 +126,27 @@ def test_a_reloaded_unregistered_code_is_unknown():
         "retryable": True,
         "ref": "r1",
     }
+
+
+def test_an_oversight_refusal_shows_its_reason_but_a_tool_error_does_not():
+    from django_ai_sdk.protocols.vercel import tool_error_text
+
+    refused = {"result": {"refused": "Needs a second person."}, "origin": {}, "error": True}
+    skipped = {"result": '{"skipped": "Not run."}', "origin": {}, "error": True}
+    crashed = {"result": SECRET, "origin": {}, "error": True}
+    lookalike = {"result": {"refused": SECRET, "path": "/var"}, "origin": {}, "error": True}
+
+    assert tool_error_text(refused) == "Needs a second person."
+    assert tool_error_text(skipped) == "Not run."
+    assert tool_error_text(crashed) == "tool_failed"
+    assert tool_error_text(lookalike) == "tool_failed"
+
+    message = ChatMessage(
+        role="assistant",
+        id="m1",
+        tool_calls=[{"id": "t1", "name": "approve", "arguments": {}, "result": refused}],
+    )
+    [replayed] = VercelProtocolHandler().from_chat_messages([message])
+    [part] = [p for p in replayed["parts"] if p["type"].startswith("tool-")]
+    assert part["errorText"] == "Needs a second person."
+    assert replayed["tool_calls"][0]["result"] == {"error": "Needs a second person."}

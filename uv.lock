@@ -993,9 +993,12 @@ all = [
     { name = "firecrawl-anydoc" },
     { name = "haystack-ai" },
     { name = "huggingface-api-haystack" },
+    { name = "huggingface-hub" },
     { name = "mcp-haystack" },
     { name = "mistral-haystack" },
+    { name = "numpy" },
     { name = "ollama-haystack" },
+    { name = "onnxruntime" },
     { name = "openpyxl" },
     { name = "openrouter-haystack" },
     { name = "pdf-inspector" },
@@ -1004,6 +1007,7 @@ all = [
     { name = "python-docx" },
     { name = "python-pptx" },
     { name = "qdrant-haystack" },
+    { name = "tokenizers" },
     { name = "transformers-haystack" },
 ]
 anthropic = [
@@ -1035,6 +1039,12 @@ haystack = [
 ]
 huggingface = [
     { name = "huggingface-api-haystack" },
+]
+local = [
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "tokenizers" },
 ]
 mcp = [
     { name = "authlib" },
@@ -1072,6 +1082,9 @@ rag = [
 ]
 transformers = [
     { name = "transformers-haystack" },
+]
+typesafe = [
+    { name = "typesafe-sdk" },
 ]
 
 [package.dev-dependencies]
@@ -1115,7 +1128,7 @@ requires-dist = [
     { name = "django-ai-sdk", extras = ["chroma", "qdrant"], marker = "extra == 'rag'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'chroma'" },
     { name = "django-ai-sdk", extras = ["embeddings"], marker = "extra == 'qdrant'" },
-    { name = "django-ai-sdk", extras = ["files", "haystack", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
+    { name = "django-ai-sdk", extras = ["files", "haystack", "local", "mcp", "providers", "rag", "transformers"], marker = "extra == 'all'" },
     { name = "django-ai-sdk", extras = ["haystack"], marker = "extra == 'embeddings'" },
     { name = "django-ninja", marker = "extra == 'ninja'", specifier = ">=1.7.1" },
     { name = "django-tasks", specifier = ">=0.12.0" },
@@ -1125,10 +1138,13 @@ requires-dist = [
     { name = "haystack-ai", specifier = ">=3.4.0" },
     { name = "haystack-ai", marker = "extra == 'haystack'", specifier = ">=3.4.0" },
     { name = "huggingface-api-haystack", marker = "extra == 'huggingface'", specifier = ">=3.1.0" },
+    { name = "huggingface-hub", marker = "extra == 'local'", specifier = ">=0.23" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mcp-haystack", marker = "extra == 'mcp'", specifier = ">=2.1.0" },
     { name = "mistral-haystack", marker = "extra == 'mistral'", specifier = ">=3.0.0" },
+    { name = "numpy", marker = "extra == 'local'", specifier = ">=1.26" },
     { name = "ollama-haystack", marker = "extra == 'ollama'", specifier = ">=7.0.2" },
+    { name = "onnxruntime", marker = "extra == 'local'", specifier = ">=1.18" },
     { name = "openpyxl", marker = "extra == 'files'", specifier = ">=3.1.5" },
     { name = "openrouter-haystack", marker = "extra == 'openrouter'", specifier = ">=2.0.0" },
     { name = "pdf-inspector", marker = "extra == 'files'", specifier = ">=1.25.2" },
@@ -1140,9 +1156,11 @@ requires-dist = [
     { name = "python-pptx", marker = "extra == 'files'", specifier = ">=1.0.2" },
     { name = "qdrant-haystack", marker = "extra == 'qdrant'", specifier = ">=13.0.0" },
     { name = "tenacity", specifier = ">=9.2.1" },
+    { name = "tokenizers", marker = "extra == 'local'", specifier = ">=0.19" },
     { name = "transformers-haystack", marker = "extra == 'transformers'", specifier = ">=2.0.0" },
+    { name = "typesafe-sdk", marker = "extra == 'typesafe'", specifier = ">=0.5.7" },
 ]
-provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers"]
+provides-extras = ["all", "providers", "rag", "haystack", "mcp", "ninja", "drf", "files", "embeddings", "chroma", "qdrant", "anthropic", "huggingface", "mistral", "ollama", "openrouter", "transformers", "typesafe", "local"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4714,6 +4732,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/3f/6f/a28f44bcd56bebed42b028a2894c79853e2f5e6b5279e633cb3f287a05e7/types_pyyaml-6.0.12.20260724.tar.gz", hash = "sha256:3c1ce1bb73cd5ec02e90390c2b1f00e810d241d8825fd73ff359696839271b6b", size = 17893, upload-time = "2026-07-24T04:58:43.453Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/42/0337fefc615e20ee55d1c8f71b774a9b2b734a04669139c20753b27a2a3a/types_pyyaml-6.0.12.20260724-py3-none-any.whl", hash = "sha256:d57db930a4b2efbc57cf430ec8882765d246929432fa253092f383902329a453", size = 20312, upload-time = "2026-07-24T04:58:42.486Z" },
+]
+
+[[package]]
+name = "typesafe-sdk"
+version = "0.7.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
+    { name = "packaging" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "tenacity" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/26/4d/383aa14f4cfe5fb41023ea1cab52d7f79cc31ab200ee7314317cf89db744/typesafe_sdk-0.7.5.tar.gz", hash = "sha256:1eeeb0dc80a7161d84896db42a5016dc0a7c8872fa16540b70163e5357b6d398", size = 34152, upload-time = "2026-10-14T21:21:42.837Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/f6/bee4c3b49570c2d312057c9e37c1446cf37eb1b86bf5872f7a797e803326/typesafe_sdk-0.7.5-py3-none-any.whl", hash = "sha256:967a8b61494d536abb55ee3f3a2b10e81685cb6baad6ccdcab588bdc6c9b86d2", size = 49948, upload-time = "2026-10-14T21:21:41.337Z" },
 ]
 
 [[package]]
