@@ -37,7 +37,6 @@ from haystack.tools import Tool
 MOCK_MODEL = "gpt-4o-mini"
 
 
-
 def _weather_tool() -> Tool:
     def get_weather(city: str) -> str:
         return f"{city}: sunny"
@@ -194,6 +193,22 @@ class TestToolCallBudgetHook:
         )
         result = agent.run(messages=[ChatMessage.from_user("weather?")])
         assert result["tool_call_counts"]["get_weather"] == 1
+
+    def test_a_spent_budget_takes_the_tools_from_the_next_step(self):
+        from haystack.components.agents.state.state import State
+
+        from django_ai_sdk.agents.tool_agent import ToolCallBudgetSpentHook, _tool_hooks
+
+        state = State(schema={})
+        state.data["tools"] = [_weather_tool()]
+        state.data["tool_call_counts"] = {"get_weather": 1}
+        ToolCallBudgetSpentHook(max_tool_calls=2).run(state)
+        assert len(state.data["tools"]) == 1
+        state.data["tool_call_counts"] = {"get_weather": 2}
+        ToolCallBudgetSpentHook(max_tool_calls=2).run(state)
+        assert state.data["tools"] == []
+        hooks = _tool_hooks(None, max_tool_calls=2, max_output_chars=None, required_tools=None)
+        assert [type(h).__name__ for h in hooks["before_llm"]] == ["ToolCallBudgetSpentHook"]
 
     def test_no_cap_when_under_budget(self):
         tool = _weather_tool()
@@ -725,6 +740,36 @@ class TestSubagentStreaming:
         await stream.get_pipeline_result(_completed_task({"messages": [message]}), stream_writer)
         names = [t["name"] for t in stream_writer.message.tool_calls]
         assert names == ["boat_expert"]
+
+    async def test_get_pipeline_result_skips_delegations_replayed_from_history(self):
+        from django_ai_sdk.adapters.base import _SENTINEL, Stream
+        from django_ai_sdk.common import ChatMessage as StoredMessage
+        from django_ai_sdk.common import StreamWriter
+        from haystack import Pipeline
+
+        queue: asyncio.Queue = asyncio.Queue()
+        queue.put_nowait(_SENTINEL)
+        stream = Stream(pipeline=Pipeline(), generator=AsyncMock())
+        stream_writer = StreamWriter(message_id="m2", storage_callback=None)
+        async for _ in stream.get_events(queue, stream_writer):
+            pass
+        earlier = StoredMessage(
+            role="assistant",
+            content="Asked the expert.",
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "boat_expert",
+                    "handoff": "Boat",
+                    "arguments": {"task": "x"},
+                    "result": {"result": "keel lore", "error": False},
+                }
+            ],
+        )
+        # The run hands the whole conversation back, history included.
+        replayed = stream.replay_handoff(earlier)
+        await stream.get_pipeline_result(_completed_task({"messages": replayed}), stream_writer)
+        assert stream_writer.message.tool_calls == []
 
     def test_sync_run_accepts_sync_streaming_callback(self):
         inner = ToolAgent.build_agent(
@@ -1312,7 +1357,9 @@ class TestSubagentSynthesis:
         generator.run.return_value = {
             "replies": [ChatMessage.from_assistant("Bordeaux.", meta={"usage": usage})]
         }
-        state = State(schema={"messages": {"type": list[ChatMessage]}, "token_usage": {"type": dict}})
+        state = State(
+            schema={"messages": {"type": list[ChatMessage]}, "token_usage": {"type": dict}}
+        )
         state.set("messages", _research_messages(skipped=True))
         state.set("token_usage", {"prompt_tokens": 10, "completion_tokens": 5})
 
@@ -1351,7 +1398,11 @@ class TestSubagentSynthesis:
             hooks=_with_final_response(default_hooks(MagicMock()), MagicMock()),
         )
         after = merge_oversight_hooks(built.hooks)["after_run"]
-        assert [type(h) for h in after][-3:] == [FinalResponseHook, RecordUsageHook, JudgeAnswerHook]
+        assert [type(h) for h in after][-3:] == [
+            FinalResponseHook,
+            RecordUsageHook,
+            JudgeAnswerHook,
+        ]
 
 
 class TestUnstreamedResults:

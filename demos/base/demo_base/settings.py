@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "django_ai_sdk",
     "django_ai_sdk.tracing",
     "django_ai_sdk.workflows",
+    "django_ai_sdk.durable",
     "django_ai_sdk.integrations.mcp",
     "django_ai_sdk.integrations.weather",
 ]

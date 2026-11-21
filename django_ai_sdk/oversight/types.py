@@ -20,7 +20,7 @@ class Subject(StrEnum):
     ANSWER = "output"
     # The question and the answer together.
     EXCHANGE = "exchange"
-    # Retrieved sources, read together with the question.
+    # Retrieved sources and tool results, read together with the question.
     SOURCES = "sources"
     # One tool call's name and arguments, before it runs.
     TOOL_CALL = "tool_call"
@@ -135,6 +135,13 @@ class Answer(BaseModel):
     def ok(self) -> bool:
         return not self.error and self.value is not None
 
+    @property
+    def disputed(self) -> bool:
+        """Whether a model asked earlier for this lens gave another answer than this one."""
+        return bool(self.model) and any(
+            a.ok and a.model and a.value != self.value for a in self.trail
+        )
+
 
 class Source(BaseModel):
     """One retrieved source, as the model saw it."""
@@ -173,6 +180,8 @@ class TurnContext(BaseModel):
     """Everything a lens may read when it runs."""
 
     turn_id: str = ""
+    # The conversation, so a check in code can look up what its earlier turns did.
+    thread_id: str = ""
     channel: str = ""
     agent_id: str = ""
     agent_name: str = ""
@@ -195,7 +204,7 @@ class TurnContext(BaseModel):
             call = self.tool_call
             return f"{call.name} {_compact(call.arguments)}" if call else ""
         if subject is Subject.SOURCES:
-            return "\n\n".join(s.content for s in self.fresh_sources())
+            return "\n\n".join(s.content for s in self.grounding())
         return f"{self.input}\n\n{self.output}"
 
     def fresh_sources(self) -> list[Source]:

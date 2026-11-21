@@ -179,13 +179,33 @@ def validate_policy(cls: type[Policy]) -> None:
 
 
 def validate_rule(rule: Rule, lenses: Mapping[str, Lens]) -> None:
-    """Raise when `rule` does nothing, or a Mask reads a lens that cannot mask.
+    """Raise when `rule` does nothing, can never see all its lenses, or masks what cannot be.
 
     Only an entities lens on the question or answer says where to mask. Lenses
     missing from `lenses` (inherited ones) are checked when the policy resolves.
     """
     if not rule.then:
         raise ImproperlyConfigured(f"Rule {rule.name!r} does nothing: give it `then`.")
+    read = [lenses[name] for name in sorted(rule.lenses()) if name in lenses]
+    calls = [lens.name for lens in read if lens.subject is Subject.TOOL_CALL]
+    later = [
+        lens.name
+        for lens in read
+        if lens.subject is not Subject.TOOL_CALL and Stage.GATE not in lens.stages
+    ]
+    if calls and later:
+        raise ImproperlyConfigured(
+            f"Rule {rule.name!r} reads tool call lenses {calls} next to {later}, judged "
+            "after the tool stage, when a call's answer is gone: give the tool call its own "
+            "rule, or read what the turn's tools did in a check lens on the exchange."
+        )
+    for name in sorted(rule.when.lenses("disputed")):
+        lens = lenses.get(name)
+        if lens is not None and lens.answer.kind not in {"flag", "choice"}:
+            raise ImproperlyConfigured(
+                f"Rule {rule.name!r} tests whether {lens.answer.kind} lens {name!r} is disputed, "
+                "but only a yes/no or a label can be: two scores or lists rarely match."
+            )
     for action in rule.then:
         if not isinstance(action, Mask):
             continue
@@ -250,6 +270,16 @@ class ResolvedPolicy:
 
     def holds_answer(self) -> bool:
         return self.stream_mode == "auto" and bool(self.changes_answer_at_finish())
+
+    def blocks_tool_calls(self) -> bool:
+        """Whether an enforced rule may block a tool call for what the call holds."""
+        calls = {lens.name for lens in self.active_lenses(Stage.TOOL, Subject.TOOL_CALL)}
+        return any(
+            rule.mode is Mode.ENFORCE
+            and rule.lenses() & calls
+            and any(action.kind in {"block", "mask", "restrict_tools"} for action in rule.then)
+            for rule in self.rules.values()
+        )
 
     def active_lenses(self, stage: Stage, subject: Subject | None = None) -> list[Lens]:
         return [

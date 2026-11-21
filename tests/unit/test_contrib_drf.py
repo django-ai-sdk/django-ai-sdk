@@ -1,22 +1,12 @@
-"""The contrib DRF viewsets through real URLs (tests/urls.py mounts them at /drf/)."""
+"""The contrib DRF viewsets through real URLs (tests/urls.py mounts them at /drf/).
 
-import json
+The workflow endpoints are tested on both mounts, in test_contrib_ninja and
+test_workflow_http.
+"""
 
 import pytest
 
-WORKFLOWS = "/drf/workflows/"
-VALID = {"name": "acl-wf", "steps": [{"name": "result", "agent_id": "a"}]}
-NO_STEPS = {"name": "empty-wf", "steps": []}
-
-
-def post_json(client, url, body):
-    return client.post(url, data=json.dumps(body), content_type="application/json")
-
-
-def created_id(client, name="acl-wf"):
-    response = post_json(client, WORKFLOWS, {"name": name, "workflow": VALID})
-    assert response.status_code == 201, response.content
-    return response.json()["id"]
+JSON = "application/json"
 
 
 @pytest.mark.django_db
@@ -33,7 +23,9 @@ class TestThreads:
 
     def test_a_thread_is_created_listed_and_deleted(self, client, users, mock_agents_registry):
         client.force_login(users[0])
-        created = post_json(client, "/drf/threads/", {"messages": [], "agent_id": "test-agent"})
+        created = client.post(
+            "/drf/threads/", {"messages": [], "agent_id": "test-agent"}, content_type=JSON
+        )
         assert created.status_code == 201, created.content
         thread_id = created.json()["thread_id"]
 
@@ -58,7 +50,7 @@ class TestThreads:
 
     def test_chat_is_mounted_next_to_the_viewsets(self, client, users):
         client.force_login(users[0])
-        response = post_json(client, "/drf/threads/nope/chat/", {"messages": []})
+        response = client.post("/drf/threads/nope/chat/", {"messages": []}, content_type=JSON)
         assert response.status_code == 404
 
 
@@ -74,7 +66,7 @@ class TestFileParts:
         part = {"type": "file", "url": "data:image/png;base64,AA", "mediaType": "image/png"}
         body = {"messages": [{"role": "user", "parts": [{"type": "text", "text": "hi"}, part]}]}
 
-        response = post_json(client, "/drf/agents/test-agent/run/", body)
+        response = client.post("/drf/agents/test-agent/run/", body, content_type=JSON)
 
         assert response.status_code == 200, response.content
         (messages,) = agent.protocol_handler.to_chat_messages.call_args.args
@@ -102,49 +94,6 @@ class TestAgents:
         client.force_login(users[0])
         assert client.get("/drf/runtime-agents/bases/").status_code == 200
         assert client.get("/drf/runtime-agents/tools/").status_code == 200
-
-
-@pytest.mark.django_db
-class TestWorkflowAccess:
-    def test_an_author_creates_and_reads_back_their_own(self, client, users):
-        client.force_login(users[0])
-        workflow_id = created_id(client)
-
-        assert client.get(f"{WORKFLOWS}{workflow_id}/").status_code == 200
-        assert [w["id"] for w in client.get(WORKFLOWS).json()] == [workflow_id]
-
-    def test_a_stranger_finds_someone_elses_workflow_absent(self, client, users):
-        owner, stranger, _ = users
-        client.force_login(owner)
-        workflow_id = created_id(client)
-
-        client.force_login(stranger)
-
-        # 404 and not 403 on every door, because a 403 would confirm the id exists.
-        assert client.get(f"{WORKFLOWS}{workflow_id}/").status_code == 404
-        assert client.delete(f"{WORKFLOWS}{workflow_id}/").status_code == 404
-        assert client.get(WORKFLOWS).json() == []
-
-    def test_staff_read_every_workflow(self, client, users):
-        owner, _, staff = users
-        client.force_login(owner)
-        workflow_id = created_id(client)
-
-        client.force_login(staff)
-
-        assert client.get(f"{WORKFLOWS}{workflow_id}/").status_code == 200
-
-    def test_a_definition_with_no_steps_is_a_bad_request(self, client, users):
-        client.force_login(users[0])
-
-        response = post_json(client, WORKFLOWS, {"name": "empty", "workflow": NO_STEPS})
-
-        assert response.status_code == 400
-        assert response.json()["code"] == "invalid_request"
-
-    def test_the_registered_actions_are_listed(self, client, users):
-        client.force_login(users[0])
-        assert client.get(f"{WORKFLOWS}actions/").json() == []
 
 
 class TestErrorHandler:
@@ -175,6 +124,7 @@ def _pairs():
     from django_ai_sdk.storage.schemas import ThreadInfo
     from django_ai_sdk.tracing.schemas import TokenUsage, TraceOut
     from django_ai_sdk.views import schemas as v
+    from django_ai_sdk.workflows import schemas as w
 
     return [
         # Responses: the services' own models.
@@ -206,10 +156,9 @@ def _pairs():
         (s.AddGroupSerializer, v.AddMemoryGroupIn),
         (s.RuntimeAgentCreateSerializer, v.AgentSettingsCreateIn),
         (s.RuntimeAgentUpdateSerializer, v.AgentSettingsUpdateIn),
-        (s.WorkflowCreateSerializer, v.WorkflowCreateRequest),
-        (s.WorkflowUpdateSerializer, v.WorkflowUpdateRequest),
-        (s.WorkflowRunRequestSerializer, v.WorkflowRunRequest),
-        (s.WorkflowRunByIdSerializer, v.WorkflowRunByIdRequest),
+        (s.WorkflowCreateSerializer, w.WorkflowCreateRequest),
+        (s.WorkflowUpdateSerializer, w.WorkflowUpdateRequest),
+        (s.WorkflowStartSerializer, w.WorkflowStartRequest),
     ]
 
 

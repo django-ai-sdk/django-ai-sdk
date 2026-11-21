@@ -74,6 +74,8 @@ class Operation(StrEnum):
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
+    # Decide an approval step: let a waiting run go on, or stop it.
+    APPROVE_WORKFLOW = "approve_workflow"
     # Oversight records without content: turn fields, rule matches, counts.
     VIEW_OVERSIGHT_METRICS = "view_oversight_metrics"
     # Turn content: question, answer, sources, reasons, notes and who asked.
@@ -448,12 +450,16 @@ class IntegrationDefaultPermission(BasePermission):
 
 
 class WorkflowDefaultPermission(BasePermission):
-    """Any authenticated user may view, run, and author workflows.
+    """Any authenticated user may run a workflow. Authoring needs a model permission.
 
-    A stored definition is managed by whoever created it, and running someone
-    else's active definition is not managing it. A run is read by whoever it ran
-    as: its outputs are that principal's content. Staff manage and read every one
-    of both.
+    - Viewing and running a stored workflow: any authenticated user.
+    - Managing (create, edit, delete and list stored definitions, and running a
+      definition that is neither stored nor registered): the `MANAGE_PERMISSION` model
+      permission. A holder manages every stored definition.
+    - A run is read by the user it ran as, or by a holder of `VIEW_RUNS_PERMISSION`. Only
+      the user it ran as resumes or cancels it. `is_staff` grants nothing here.
+    - Deciding an approval step: the `APPROVE_PERMISSION` model permission, and never on
+      a run the approver acts as or started, so nobody approves their own run.
 
     Ownership lives here rather than in `WorkflowService`, so a deployment that
     overrides the `workflow` domain replaces the whole rule and not half of it.
@@ -463,10 +469,18 @@ class WorkflowDefaultPermission(BasePermission):
     WRITE: frozenset[Operation] = frozenset({Operation.RUN_WORKFLOW})
     MANAGE: frozenset[Operation] = frozenset({Operation.MANAGE_WORKFLOW})
 
+    MANAGE_PERMISSION = "django_ai_sdk_workflows.change_workflow"
+    VIEW_RUNS_PERMISSION = "django_ai_sdk_workflows.view_workflowrun"
+    APPROVE_PERMISSION = "django_ai_sdk_workflows.approve_steprun"
+
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
-        return operation in self.READ | self.WRITE | self.MANAGE
+        if operation in self.MANAGE:
+            return await _ahas_perm(user, self.MANAGE_PERMISSION)
+        if operation is Operation.APPROVE_WORKFLOW:
+            return await _ahas_perm(user, self.APPROVE_PERMISSION)
+        return operation in self.READ | self.WRITE
 
     async def has_object_permission(
         self,
@@ -475,18 +489,24 @@ class WorkflowDefaultPermission(BasePermission):
         obj: Any,
         **kwargs: Any,
     ) -> bool:
-        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+        from django_ai_sdk.workflows.models import Workflow, WorkflowRun
 
         if user is None or not bool(user.is_authenticated):
             return False
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-            return True
-        if isinstance(obj, WorkflowSettings):
+        if isinstance(obj, Workflow):
             if operation in self.MANAGE:
-                return _owned_by(obj.created_by_id, user)
-            return True
+                return await _ahas_perm(user, self.MANAGE_PERMISSION)
+            return operation in self.READ | self.WRITE
         if isinstance(obj, WorkflowRun):
-            return _owned_by(obj.user_id, user)
+            if operation is Operation.APPROVE_WORKFLOW:
+                # SECURITY: four eyes. Nobody decides on a run that acts as them, or that
+                # they started as another account (a trigger fired by hand).
+                own = _owned_by(obj.user_id, user) or _owned_by(obj.started_by_id, user)
+                return not own and await _ahas_perm(user, self.APPROVE_PERMISSION)
+            if _owned_by(obj.user_id, user):
+                return True
+            # Viewers may read a run but not resume it, since resuming acts as its user.
+            return operation in self.READ and await _ahas_perm(user, self.VIEW_RUNS_PERMISSION)
         return False
 
     def get_queryset_perms(
@@ -495,18 +515,34 @@ class WorkflowDefaultPermission(BasePermission):
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet:
-        """Scope a list to what `user` owns, by the same rule as the object check."""
-        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+        """Scope a list by the same rule as the object check.
+
+        Checking model permissions may query the database, so async callers should
+        wrap this in `sync_to_async`.
+        """
+        from django_ai_sdk.workflows.models import Workflow, WorkflowRun
 
         if user is None or not bool(user.is_authenticated):
             return queryset.none()
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        if queryset.model is Workflow:
+            if operation in self.MANAGE and not _has_perm(user, self.MANAGE_PERMISSION):
+                return queryset.none()
             return queryset
-        if queryset.model is WorkflowSettings:
-            return queryset.filter(created_by_id=user.pk)
         if queryset.model is WorkflowRun:
+            if operation in self.READ and _has_perm(user, self.VIEW_RUNS_PERMISSION):
+                return queryset
             return queryset.filter(user_id=user.pk)
         return queryset
+
+
+def _has_perm(user: UserType, perm: str) -> bool:
+    has_perm = getattr(user, "has_perm", None)
+    return has_perm is not None and bool(has_perm(perm))
+
+
+async def _ahas_perm(user: UserType, perm: str) -> bool:
+    ahas_perm = getattr(user, "ahas_perm", None)
+    return ahas_perm is not None and bool(await ahas_perm(perm))
 
 
 def user_pk(user: UserType) -> Any:
@@ -664,7 +700,7 @@ def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
     """`agent.permissions` if non-empty, else the AGENT domain default.
 
     An empty list falls back rather than disabling every check, matching
-    get_integration_permissions and get_automation_permissions. An agent that really
+    get_integration_permissions. An agent that really
     wants no gating says so with [AllowAll].
     """
     perms = getattr(agent, "permissions", None) if agent is not None else None

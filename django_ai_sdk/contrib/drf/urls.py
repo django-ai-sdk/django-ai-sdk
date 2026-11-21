@@ -8,6 +8,7 @@ leave this module out; each viewset is importable from ``django_ai_sdk.contrib.d
 
 from __future__ import annotations
 
+from django.apps import apps
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
@@ -28,7 +29,8 @@ router.register("messages", MessageViewSet, basename="ai-sdk-message")
 router.register("agents", AgentViewSet, basename="ai-sdk-agent")
 router.register("runtime-agents", RuntimeAgentViewSet, basename="ai-sdk-runtime-agent")
 router.register("memories", MemoryViewSet, basename="ai-sdk-memory")
-router.register("workflows", WorkflowViewSet, basename="ai-sdk-workflow")
+if apps.is_installed("django_ai_sdk.workflows"):
+    router.register("workflows", WorkflowViewSet, basename="ai-sdk-workflow")
 router.register("integrations", IntegrationViewSet, basename="ai-sdk-integration")
 
 urlpatterns = [

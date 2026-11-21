@@ -5,9 +5,11 @@ from typing import Any
 from haystack.components.generators.chat import OpenAIChatGenerator, OpenAIResponsesChatGenerator
 
 from django_ai_sdk.generators.base import build_kwargs, resolve_secret
+from django_ai_sdk.oversight.calls import watched_factory
 from django_ai_sdk.utils import resolve_setting
 
 
+@watched_factory
 def openai_chat(**kwargs: Any) -> OpenAIChatGenerator:
     """OpenAI Chat Completions generator wired to Django settings."""
     return OpenAIChatGenerator(
@@ -21,6 +23,7 @@ def openai_chat(**kwargs: Any) -> OpenAIChatGenerator:
     )
 
 
+@watched_factory
 def openai_responses_chat(**kwargs: Any) -> OpenAIResponsesChatGenerator:
     """OpenAI Responses API generator wired to Django settings."""
     return OpenAIResponsesChatGenerator(

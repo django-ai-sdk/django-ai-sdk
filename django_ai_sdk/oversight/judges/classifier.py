@@ -190,6 +190,11 @@ class Classifier(Judge):
         described = {k: v for k, v in self.describe().items() if k != "name"}
         return f"{type(self).__qualname__}:{json.dumps(described, sort_keys=True, default=str)}"
 
+    def answers(self, lens: Lens) -> bool:
+        assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
+        per_source = lens.answer.kind == "entities" and lens.per_source
+        return per_source or self.question(lens) is not None
+
     async def answer(self, lens: Lens, context: TurnContext) -> Answer | None:
         assert isinstance(lens, JudgeLens)  # Only judge lenses have judges.
         if lens.answer.kind == "entities" and lens.per_source:

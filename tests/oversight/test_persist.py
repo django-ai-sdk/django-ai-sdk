@@ -171,7 +171,7 @@ class TestRecordingFailures:
         ]
         with opened():
             guard = await start(name, "now")
-            checked = await guard.gate_history(messages)
+            checked = await guard.gate_history(messages[:-1], messages[-1])
         assert not checked.blocked and messages[0].content == "earlier a@b.nl"
         assert [o.lens.name for o in guard.answered if o.aside and o.errored] == ["pii"]
 
@@ -184,7 +184,7 @@ class TestRecordingFailures:
         with closed():
             guard = await start(name, "now")
             messages = [ChatMessage(role="user", content="earlier"), ChatMessage(role="user")]
-            await guard.gate_history(messages)
+            await guard.gate_history(messages[:-1], messages[-1])
         assert messages[0].content == str(UNCHECKED_TEXT)
 
     async def test_bypass_s1_a_child_turn_is_recorded_with_its_parent(self):
@@ -194,6 +194,15 @@ class TestRecordingFailures:
         turn = await closed_turn(child)
         assert str(turn.parent_turn_id) == outer.id
         assert (await closed_turn(outer)).parent_turn_id is None
+
+    async def test_a_stored_turn_is_read_back_with_its_thread(self):
+        from asgiref.sync import sync_to_async
+
+        from django_ai_sdk.oversight.content import context_from_turn, load_content
+
+        turn = await closed_turn(await start("test-guard", "hello", thread_id="t-7"))
+        content = await sync_to_async(load_content)(turn)
+        assert context_from_turn(turn, content).thread_id == "t-7"
 
     async def test_bypass_s3_nul_characters_never_reach_the_database(self):
         with override_settings(AI_SDK_OVERSIGHT={"CAPTURE": "full"}):

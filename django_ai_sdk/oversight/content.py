@@ -87,14 +87,15 @@ def capture_content(
         }
     assert keep is not None
     full = capture is Capture.FULL
+    # What the model said, also when it was withheld: a person reviewing the turn reads it.
+    said = keep.text(guard.original_output or context.output)
+    shown = keep.text(context.output)
     return {
         **base,
         "input": guard.original_input if full else keep.text(context.input),
-        "output": (guard.original_output or context.output) if full else keep.text(context.output),
+        "output": said,
         "shown_input": context.input if full and context.input != guard.original_input else None,
-        "shown_output": context.output
-        if full and guard.original_output and context.output != guard.original_output
-        else None,
+        "shown_output": shown if shown != said else None,
         "history": keep([h.model_dump() for h in context.history]),
         "sources": keep([s.model_dump() for s in context.sources]),
         "tool_calls": keep([c.model_dump(mode="json") for c in context.tool_calls]),
@@ -157,7 +158,7 @@ def turn_literals(guard: TurnGuard) -> dict[str, str]:
         Subject.QUESTION: guard.original_input or context.input,
         Subject.ANSWER: said_output,
         Subject.EXCHANGE: f"{context.input}\n\n{said_output}",
-        Subject.SOURCES: "\n\n".join(s.content for s in context.fresh_sources()),
+        Subject.SOURCES: context.text(Subject.SOURCES),
     }
     return found_literals(guard.answered, texts)
 
@@ -205,7 +206,9 @@ def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -
 
 @cache
 def _detectors() -> tuple[Any, ...]:
-    return PIILens(name="captured", kinds=list(PII_PATTERNS)), SecretsLens(name="captured")
+    # No `not_after`: a number that only its label kept unmasked is not kept on record.
+    numbers = PIILens(name="captured", kinds=list(PII_PATTERNS), not_after={})
+    return numbers, SecretsLens(name="captured")
 
 
 def stored_value(lens: Lens, answer: Answer) -> Any:
@@ -265,8 +268,9 @@ def forget_thread(thread_id: Any) -> None:
 def forget_turns(turns: QuerySet[Turn]) -> None:
     """Delete the turns' content and reviewers' notes; the turns stay. Run in a transaction.
 
-    Locking first means a turn closing now either finds itself `content_forgotten`
-    or has stored its content already, which is deleted here.
+    Locking first means a turn closing now, or later after it was swept as interrupted,
+    either finds itself `content_forgotten` or has stored its content already, which is
+    deleted here.
     """
     from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
 
@@ -277,9 +281,10 @@ def forget_turns(turns: QuerySet[Turn]) -> None:
     # SET_NULL clears the turns' content link.
     TurnContent.objects.filter(pk__in=[c for _, c, _ in locked if c is not None]).delete()
     ReviewItem.objects.filter(turn_id__in=ids).exclude(note="").update(note="")
-    open_ids = [pk for pk, _, status in locked if status == Turn.Status.OPEN]
-    if open_ids:
-        Turn.objects.filter(pk__in=open_ids).update(content_forgotten=True)
+    # An interrupted turn may still close: it stores nothing either.
+    unclosed = [pk for pk, _, status in locked if status != Turn.Status.CLOSED]
+    if unclosed:
+        Turn.objects.filter(pk__in=unclosed).update(content_forgotten=True)
 
 
 def forget_actor(actor_id: str) -> int:
@@ -303,6 +308,7 @@ def context_from_turn(turn: Turn, content: dict[str, Any] | None) -> TurnContext
     content = content or {}
     return TurnContext(
         turn_id=str(turn.id),
+        thread_id=turn.thread_id,
         channel=turn.channel,
         agent_id=turn.agent_id,
         agent_name=turn.agent_name,

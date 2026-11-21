@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.types import TurnContext
 
 PATTERNS_TIMEOUT = 2.0
+# How far before a match `not_after` reads.
+NOT_AFTER_CHARS = 40
 # Unsure, so a judge after it is asked.
 MISS_CONFIDENCE = 0.5
 
@@ -39,6 +41,7 @@ class PatternJudge(Judge):
         *,
         keywords: PatternTable = (),
         verify: Mapping[str, Verifier] | None = None,
+        not_after: Mapping[str, str] | None = None,
         flags: int = re.IGNORECASE,
         miss_confidence: float = MISS_CONFIDENCE,
         name: str = "",
@@ -52,6 +55,7 @@ class PatternJudge(Judge):
             if (words := [group] if isinstance(group, str) else list(group))
         ]
         self.verify = verify or {}
+        self.not_after = {label: re.compile(p, flags) for label, p in (not_after or {}).items()}
         self.miss_confidence = miss_confidence
 
     def labels(self) -> list[str]:
@@ -62,7 +66,10 @@ class PatternJudge(Judge):
         # Sorted and never overlapping, so only the neighbours can overlap.
         taken: list[tuple[int, int]] = []
         for label, pattern in self.patterns:
+            before = self.not_after.get(label)
             for start, end in valid_spans(pattern, self.verify.get(label), text):
+                if before and before.search(text[max(0, start - NOT_AFTER_CHARS) : start]):
+                    continue
                 at = bisect.bisect(taken, (start, end))
                 if (at and taken[at - 1][1] > start) or (at < len(taken) and taken[at][0] < end):
                     continue

@@ -4,8 +4,8 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.workflows.runner import run_steps
-from django_ai_sdk.workflows.steps import OnError, StepFailed, StepOutcome, WorkflowContext
-from tests.mocks.workflow import FakeStep, RecordingAction
+from django_ai_sdk.workflows.steps import OnError, WorkflowStopped, StepOutcome, WorkflowContext
+from tests.mocks.workflow import FakeStep, RecordingListener
 
 
 class TestOrdering:
@@ -96,7 +96,7 @@ class TestFailure:
         """`on_error=FAIL` applies whether a step raises or reports it."""
         steps = [FakeStep("ocr", outcome=StepOutcome(status="failed", detail="empty text"))]
 
-        with pytest.raises(StepFailed, match="empty text"):
+        with pytest.raises(WorkflowStopped, match="empty text"):
             await run_steps(steps)
 
     async def test_a_nested_runs_failure_obeys_this_steps_on_error(self):
@@ -104,7 +104,7 @@ class TestFailure:
         steps = [
             FakeStep(
                 "nested",
-                raises=StepFailed("inner step failed"),
+                raises=WorkflowStopped("inner step failed"),
                 on_error=OnError.CONTINUE,
             ),
             FakeStep("after"),
@@ -138,9 +138,9 @@ class TestFailure:
         assert outcomes["triage"].status == "completed"
         assert journal == ["ocr", "extract", "triage"]
 
-    async def test_a_action_sees_the_failure_a_handler_step_used_to_read(self):
-        """What `error_key` was for: reacting to a failure is an action's job now."""
-        action = RecordingAction()
+    async def test_a_listener_sees_the_failure_a_handler_step_used_to_read(self):
+        """What `error_key` was for: reacting to a failure is a listener's job now."""
+        listener = RecordingListener()
         steps = [
             FakeStep(
                 "extract",
@@ -150,9 +150,9 @@ class TestFailure:
             FakeStep("match", requires=("extract",)),
         ]
 
-        outcomes = await run_steps(steps, actions=[action])
+        outcomes = await run_steps(steps, listeners=[listener])
 
-        assert ("step_end", "extract", "failed") in action.events
+        assert ("step_end", "extract", "failed") in listener.events
         assert outcomes["match"].status == "skipped"
 
     async def test_a_skipped_step_names_the_step_it_waited_for(self):
@@ -195,7 +195,7 @@ class TestFailure:
 
     async def test_every_step_that_will_not_run_is_recorded(self):
         """Nothing is merely absent, so a reader can see the whole run."""
-        action = RecordingAction()
+        listener = RecordingListener()
         steps = [
             FakeStep("ocr", raises=RuntimeError("down")),
             FakeStep("triage", requires=("ocr",)),
@@ -203,30 +203,30 @@ class TestFailure:
         ]
 
         with pytest.raises(RuntimeError):
-            await run_steps(steps, actions=[action])
+            await run_steps(steps, listeners=[listener])
 
-        settled = {name: status for event, name, status in action.events if event == "step_end"}
+        settled = {name: status for event, name, status in listener.events if event == "step_end"}
         assert settled == {"ocr": "failed", "triage": "skipped", "report": "skipped"}
 
 
 class TestSkipping:
     async def test_a_skipped_step_is_recorded_with_its_reason(self):
-        action = RecordingAction()
+        listener = RecordingListener()
         steps = [
             FakeStep("ocr"),
             FakeStep("extract", requires=("ocr",), skip_reason="not an invoice"),
             FakeStep("match", requires=("extract",)),
         ]
 
-        outcomes = await run_steps(steps, actions=[action])
+        outcomes = await run_steps(steps, listeners=[listener])
 
         assert outcomes["extract"].detail == "not an invoice"
         assert outcomes["match"].detail == "extract was skipped"
-        assert ("step_start", "extract", None) not in action.events
+        assert ("step_start", "extract", None) not in listener.events
 
-    async def test_skip_when_may_read_the_run_state(self):
+    async def test_skip_if_may_read_the_run_state(self):
         class Conditional(FakeStep):
-            async def skip_when(self, ctx: WorkflowContext) -> str:
+            async def skip_if(self, ctx: WorkflowContext) -> str:
                 return "" if ctx.input("kind") == "invoice" else "not an invoice"
 
         outcomes = await run_steps([Conditional("extract")], inputs={"kind": "letter"})
@@ -253,19 +253,19 @@ class TestResume:
 
     async def test_a_replayed_step_is_not_recorded_again(self):
         """Recording it would date a row to a run the step took no part in."""
-        action = RecordingAction()
+        listener = RecordingListener()
 
         await run_steps(
             [FakeStep("ocr"), FakeStep("triage", requires=("ocr",))],
-            actions=[action],
+            listeners=[listener],
             completed={"ocr": "stored text"},
         )
 
-        assert [name for _event, name, _status in action.events if name] == ["triage", "triage"]
+        assert [name for _event, name, _status in listener.events if name] == ["triage", "triage"]
 
     async def test_a_replayed_step_appears_in_the_runs_outputs(self):
         """Resume must not drop replayed output from the returned map."""
-        from django_ai_sdk.workflows.executor import _published
+        from django_ai_sdk.workflows.runs import _published
 
         outcomes = await run_steps(
             [
@@ -279,92 +279,121 @@ class TestResume:
         assert _published(outcomes) == {"ocr": "stored text", "triage": "SUM"}
 
 
-class TestActions:
+class TestListeners:
     async def test_they_are_optional(self):
         outcomes = await run_steps([FakeStep("ocr")])
 
         assert outcomes["ocr"].status == "completed"
 
-    async def test_two_runs_can_use_different_actions(self):
-        """No process-wide action: the record follows the call."""
-        first, second = RecordingAction(), RecordingAction()
+    async def test_two_runs_can_use_different_listeners(self):
+        """No process-wide listener: the record follows the call."""
+        first, second = RecordingListener(), RecordingListener()
 
-        await run_steps([FakeStep("ocr")], actions=[first])
-        await run_steps([FakeStep("triage")], actions=[second])
+        await run_steps([FakeStep("ocr")], listeners=[first])
+        await run_steps([FakeStep("triage")], listeners=[second])
 
         assert [name for _e, name, _s in first.events if name] == ["ocr", "ocr"]
         assert [name for _e, name, _s in second.events if name] == ["triage", "triage"]
 
-    async def test_a_workflow_action_fires_for_every_step(self):
-        action = RecordingAction()
+    async def test_a_workflow_listener_fires_for_every_step(self):
+        listener = RecordingListener()
 
-        await run_steps([FakeStep("ocr"), FakeStep("triage")], actions=[action])
+        await run_steps([FakeStep("ocr"), FakeStep("triage")], listeners=[listener])
 
-        assert [name for event, name, _s in action.events if event == "step_end"] == [
+        assert [name for event, name, _s in listener.events if event == "step_end"] == [
             "ocr",
             "triage",
         ]
 
-    async def test_a_step_action_fires_for_that_step_alone(self):
+    async def test_a_step_listener_fires_for_that_step_alone(self):
         """The difference the two attachment points buy."""
-        on_the_step = RecordingAction()
+        on_the_step = RecordingListener()
 
-        await run_steps([FakeStep("ocr", actions=(on_the_step,)), FakeStep("triage")])
+        await run_steps([FakeStep("ocr", listeners=(on_the_step,)), FakeStep("triage")])
 
         assert [name for _e, name, _s in on_the_step.events] == ["ocr", "ocr"]
 
-    async def test_a_step_action_is_told_nothing_about_the_run(self):
-        """Run-level callbacks belong to actions attached to the workflow."""
-        on_the_step = RecordingAction()
+    async def test_a_step_listener_is_told_nothing_about_the_run(self):
+        """Run-level callbacks belong to listeners attached to the workflow."""
+        on_the_step = RecordingListener()
 
-        await run_steps([FakeStep("ocr", actions=(on_the_step,))])
+        await run_steps([FakeStep("ocr", listeners=(on_the_step,))])
 
         assert [event for event, _n, _s in on_the_step.events] == ["step_start", "step_end"]
 
-    async def test_a_broken_action_does_not_fail_work_that_succeeded(self):
-        """An action watches the run; a notification nobody received is not a failure."""
-        from django_ai_sdk.workflows.actions import WorkflowAction
+    async def test_a_broken_listener_does_not_fail_work_that_succeeded(self):
+        """A listener watches the run; a notification nobody received is not a failure."""
+        from django_ai_sdk.workflows.listeners import RunListener
 
-        class Broken(WorkflowAction):
+        class Broken(RunListener):
             async def on_step_end(self, ctx, step, outcome):
                 raise RuntimeError("slack is down")
 
-        outcomes = await run_steps([FakeStep("ocr")], actions=[Broken()])
+        outcomes = await run_steps([FakeStep("ocr")], listeners=[Broken()])
 
         assert outcomes["ocr"].status == "completed"
 
-    async def test_a_broken_action_does_not_stop_the_actions_after_it(self):
-        from django_ai_sdk.workflows.actions import WorkflowAction
+    async def test_a_broken_listener_does_not_stop_the_listeners_after_it(self):
+        from django_ai_sdk.workflows.listeners import RunListener
 
-        class Broken(WorkflowAction):
+        class Broken(RunListener):
             async def on_step_end(self, ctx, step, outcome):
                 raise RuntimeError("slack is down")
 
-        after = RecordingAction()
+        after = RecordingListener()
 
-        await run_steps([FakeStep("ocr")], actions=[Broken(), after])
+        await run_steps([FakeStep("ocr")], listeners=[Broken(), after])
 
         assert ("step_end", "ocr", "completed") in after.events
 
-    async def test_a_action_refuses_a_duplicate_delivery_by_raising(self):
-        """The one exception: an action whose rows are also a claim has to reach the caller."""
-        from django_ai_sdk.workflows.actions import WorkflowAction
-        from django_ai_sdk.workflows.steps import StepAlreadyRunning
+    async def test_a_listener_cannot_stop_the_run_even_by_claiming_to_be_superseded(self):
+        from django_ai_sdk.workflows.listeners import RunListener
+        from django_ai_sdk.workflows.steps import RunSuperseded
 
-        class Claim(WorkflowAction):
+        class Claim(RunListener):
             async def on_step_start(self, ctx, step):
-                raise StepAlreadyRunning(step.name)
+                raise RunSuperseded(step.name)
 
-        with pytest.raises(StepAlreadyRunning):
-            await run_steps([FakeStep("ocr")], actions=[Claim()])
+        outcomes = await run_steps([FakeStep("ocr")], listeners=[Claim()])
 
-    async def test_a_crash_reaches_the_actions_before_it_propagates(self):
-        action = RecordingAction()
+        assert outcomes["ocr"].status == "completed"
+
+    async def test_the_recorders_error_stops_the_run_before_the_step(self):
+        """The recorder is the run's own record: a step must not run without its row."""
+        from django_ai_sdk.workflows.listeners import RunListener
+
+        class Recorder(RunListener):
+            async def on_step_start(self, ctx, step):
+                raise RuntimeError("database is down")
+
+        step = FakeStep("ocr")
+        with pytest.raises(RuntimeError, match="database is down"):
+            await run_steps([step], recorder=Recorder())
+
+        assert step.calls == 0
+
+    async def test_the_recorder_is_told_before_the_listeners(self):
+        order = []
+
+        class Told(RecordingListener):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            async def on_step_start(self, ctx, step):
+                order.append(self.name)
+
+        await run_steps([FakeStep("ocr")], listeners=[Told("listener")], recorder=Told("recorder"))
+
+        assert order == ["recorder", "listener"]
+
+    async def test_a_crash_reaches_the_listeners_before_it_propagates(self):
+        listener = RecordingListener()
 
         with pytest.raises(RuntimeError):
-            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], actions=[action])
+            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], listeners=[listener])
 
-        assert ("step_end", "ocr", "failed") in action.events
+        assert ("step_end", "ocr", "failed") in listener.events
 
 
 class TestNamesAreResolvable:
@@ -391,26 +420,26 @@ class TestNamesAreResolvable:
 
 
 class TestTheRunLevelBracket:
-    """A workflow action is told the run started, and how it ended."""
+    """A workflow listener is told the run started, and how it ended."""
 
     async def test_run_start_fires_before_the_first_step(self):
-        action = RecordingAction()
+        listener = RecordingListener()
 
-        await run_steps([FakeStep("ocr")], actions=[action])
+        await run_steps([FakeStep("ocr")], listeners=[listener])
 
-        assert action.events[0] == ("run_start", "", None)
+        assert listener.events[0] == ("run_start", "", None)
 
     async def test_run_end_carries_no_error_when_the_run_finished(self):
-        action = RecordingAction()
+        listener = RecordingListener()
 
-        await run_steps([FakeStep("ocr")], actions=[action])
+        await run_steps([FakeStep("ocr")], listeners=[listener])
 
-        assert action.events[-1] == ("run_end", "", None)
+        assert listener.events[-1] == ("run_end", "", None)
 
     async def test_run_end_carries_what_ended_the_run(self):
-        action = RecordingAction()
+        listener = RecordingListener()
 
         with pytest.raises(RuntimeError):
-            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], actions=[action])
+            await run_steps([FakeStep("ocr", raises=RuntimeError("boom"))], listeners=[listener])
 
-        assert action.events[-1] == ("run_end", "", "boom")
+        assert listener.events[-1] == ("run_end", "", "boom")

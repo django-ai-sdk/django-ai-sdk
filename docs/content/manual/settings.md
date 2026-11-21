@@ -80,19 +80,43 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOW_STEPS` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
-| `AI_SDK_WORKFLOW_ACTIONS` | `{}` | Actions a definition may hang off the workflow or off one step: `{"console_log": "apps.agents.actions.ConsoleLogAction"}`. Every action is the host's own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host’s own — the package ships none a definition can name. See [Workflows](/manual/workflows/). |
+| `AI_SDK_WORKFLOWS["SCHEDULES_ENABLED"]` | `True` | `False` makes every cron occurrence start nothing, such as on a staging copy of production; the schedules stay as they are. See [Triggers](/manual/workflows/#triggers). |
+| `AI_SDK_WORKFLOWS["STALE_AFTER_SECONDS"]` | `900` | How long a `running` run may go without progress before the worker checks it against DBOS, and fails it when its DBOS workflow no longer runs. See [Durable runs on DBOS](/manual/workflows/#durable-runs-on-dbos). |
 
 ## Oversight
 
 One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](/manual/oversight/#settings).
 
-`AI_SDK_OVERSIGHT` is checked on start: an unknown key or a value of the wrong kind is `ai_sdk.oversight.E012`, which names the key and what it accepts. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
+Every settings dict of the SDK (`AI_SDK_OVERSIGHT` and `AI_SDK_WORKFLOWS`) is checked on start: an unknown key or a value of the wrong kind is `<app>.E012`, which names the key and what it accepts. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | unset | Key for oversight's optional `TypeSafe` judge (a hosted commercial service; `django-ai-sdk[typesafe]`). Without it that judge abstains. |
 | `TYPESAFE_MODEL` | unset | A TypeSafe model to pin; unset leaves the choice to `typesafe-sdk`. |
+
+## Durable runs (DBOS)
+
+Workflows need the `django_ai_sdk.durable` app and the `dbos` extra. One dict, `AI_SDK_DBOS`, every key optional. See [Durable runs on DBOS](/manual/workflows/#durable-runs-on-dbos).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_DBOS["DATABASE_URL"]` | `""` | Where DBOS keeps its tables. Empty uses `DATABASES["default"]`: the same Postgres database with its connection `OPTIONS` (such as `sslmode`) and a socket `HOST`, or a file next to a SQLite one. |
+| `AI_SDK_DBOS["SCHEMA"]` | `"dbos"` | The Postgres schema for DBOS's tables. |
+| `AI_SDK_DBOS["APP_NAME"]` | `"django-ai-sdk"` | Who owns the workflows, queues and schedules in those tables. |
+| `AI_SDK_DBOS["VERSION"]` | `"1"` | Pinned, so a deploy recovers the runs the last one left. Change it only when step code changes in a way an unfinished run cannot replay: a worker runs only its own version's runs, and warns at start about the ones left under another. See [Durable runs on DBOS](/manual/workflows/#durable-runs-on-dbos). |
+| `AI_SDK_DBOS["USE_LISTEN_NOTIFY"]` | `True` | `False` behind a pooler in transaction mode (PgBouncer), which drops `LISTEN`. Web processes may use the pooler; the worker must reach Postgres directly, because it holds a session advisory lock that transaction pooling releases. |
+| `AI_SDK_DBOS["QUEUES"]` | `{"workflows": {}, "default": {"worker_concurrency": 8}}` | Queues by name, with DBOS `register_queue` options. A task's `queue_name` must be one of them. Leave `workflows` uncapped: a run waiting for an approval holds a slot for as long as it waits. |
+
+## Webhooks
+
+For an integration a platform pushes events into. Per-platform keys (`AGENT`, `RUN_AS`, `ALLOW_FROM`, ...) live in `AI_SDK_INTEGRATIONS[<name>]`; see [Webhooks](/manual/webhooks/).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `AI_SDK_WEBHOOK_TIMEOUT` | `120` | Seconds a webhook-triggered agent run may take before the channel gets a timeout reply instead. |
+| `AI_SDK_WEBHOOK_MAX_TEXT` | `4000` | Characters of the inbound question kept, so the prompt is bounded by the SDK rather than by whatever the platform accepts. |
 
 ## Streaming and Titles
 
