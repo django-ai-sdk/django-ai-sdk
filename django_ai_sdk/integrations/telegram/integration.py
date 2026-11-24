@@ -1,5 +1,3 @@
-"""Telegram as a webhook integration: an agent answers messages sent to a bot."""
-
 from __future__ import annotations
 
 import logging
@@ -26,7 +24,7 @@ MAX_MESSAGE_LENGTH = 4096
 
 SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token"
 
-# In a group the bot is addressed as @botname. Strip it so the agent reads the question.
+# In a group the bot is addressed as @botname.
 _MENTION = re.compile(r"^@\w+\s*")
 
 

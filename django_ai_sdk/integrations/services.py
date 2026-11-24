@@ -26,13 +26,7 @@ async def _safe_status_and_tools(
     integration: Integration,
     user: AbstractBaseUser | AnonymousUser | None,
 ) -> tuple[IntegrationStatus, list[str]]:
-    """One integration's (status, tool_names), isolated from the rest of a fan-out.
-
-    Shared by IntegrationService.list_for_user and
-    AgentService.get_integration_status. A slow or broken integration (a dead
-    server, a DB hiccup fetching an OAuth token) degrades to DEGRADED/[] instead of
-    failing whichever list it's part of.
-    """
+    """One integration's (status, tool_names); any failure becomes (DEGRADED, [])."""
     try:
         status = await integration.get_status(user)
         tool_names = await integration.get_tool_names(user)
@@ -54,12 +48,7 @@ class IntegrationService:
     async def list_for_user(
         cls, user: AbstractBaseUser | AnonymousUser | None
     ) -> list[IntegrationOut]:
-        """Every integration user may use, with real (not guessed) status.
-
-        Concurrent, not sequential: one cold or dead integration must not make the
-        whole settings page pay N times its timeout (each get_status()/
-        get_tool_names() call is individually bounded by its own ResilientCache).
-        """
+        """Every integration user may use, with live status, fetched concurrently."""
         integrations = await get_all_integrations()
 
         async def _row(name: str, integration: Integration) -> IntegrationOut | None:
@@ -95,10 +84,7 @@ class IntegrationService:
     ) -> dict[str, Any] | None:
         """Begin connecting name for user.
 
-        Returns None for an unknown integration, raises PermissionDenied when the
-        user isn't allowed to manage it, and lets IntegrationNotConnectable
-        propagate for a capability mismatch (e.g. connect() on a non-OAuth server).
-        Callers (the router) translate each into the matching HTTP status.
+        None if unknown; raises PermissionDenied or IntegrationNotConnectable.
         """
         integration = await cls.get(name)
         if integration is None:

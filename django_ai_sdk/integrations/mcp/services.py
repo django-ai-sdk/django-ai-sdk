@@ -27,13 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
-    """The MCP config for one registered integration, or None if it isn't one.
-
-    The OAuth endpoints below are reached by server *name* (from a URL), so they need
-    to resolve that back to a config. Going through the registry means a name that
-    belongs to a non-MCP integration simply reads as "not an OAuth server" rather than
-    exploding on a missing attribute.
-    """
+    """The MCP config for one registered integration, or None if it isn't one."""
     from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
     from django_ai_sdk.integrations.registry import get_integrations
 
@@ -41,17 +35,8 @@ async def _mcp_config(server_name: str) -> MCPIntegrationConfig | None:
     return integration.config if isinstance(integration, DynamicMCPIntegration) else None
 
 
-# ============================================================================
-# OAuth PKCE helpers (pure, no I/O)
-# ============================================================================
-
-
 def build_pkce_params() -> tuple[str, str, str]:
-    """Generate PKCE parameters: (verifier, challenge, state).
-
-    Verifier and challenge come from the mcp SDK's PKCEParameters; state is
-    generated here since the SDK's PKCE model doesn't cover it.
-    """
+    """Generate PKCE parameters: (verifier, challenge, state)."""
     pkce = PKCEParameters.generate()
     return pkce.code_verifier, pkce.code_challenge, secrets.token_urlsafe(32)
 
@@ -64,7 +49,6 @@ def build_auth_url(
     challenge: str,
     scope: str = "",
 ) -> str:
-    """Build the OAuth authorization URL."""
     auth_params = {
         "response_type": "code",
         "client_id": client_id,
@@ -79,27 +63,17 @@ def build_auth_url(
     return discovery.authorization_endpoint + "?" + urlencode(auth_params)
 
 
-# ============================================================================
-# OAuth I/O helpers
-# ============================================================================
-
-
 async def get_or_register_client(
     server_name: str, redirect_uri: str, discovery: OAuthDiscovery
 ) -> tuple[str, str]:
-    """Get or register the OAuth client, performing dynamic registration if needed.
-
-    Returns (client_id, client_secret).
-    """
+    """Return (client_id, client_secret), registering dynamically if needed."""
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
         raise NotFound(f"Server {server_name!r} not found or not OAuth type")
 
-    # Static credentials win when configured.
     if server.client_id:
         return server.client_id, server.client_secret.get_secret_value()
 
-    # Otherwise use dynamic registration (RFC 7591).
     oauth_client, created = await MCPOAuthClient.objects.aget_or_create(
         server_name=server_name,
         defaults={"redirect_uri": redirect_uri},
@@ -107,10 +81,7 @@ async def get_or_register_client(
     if not created and oauth_client.client_id:
         if oauth_client.redirect_uri == redirect_uri:
             return oauth_client.client_id, oauth_client.get_client_secret()
-        # The redirect_uri the IdP has on file for this client no longer matches
-        # what we'd send it (host/scheme/path change — e.g. a URLconf move or a
-        # new deployment domain). Re-registering is the only way to recover; the
-        # stale client_id would otherwise get "invalid redirect_uri" forever.
+        # The IdP would reject the stale redirect_uri forever; re-register.
         logger.info(
             "Redirect URI changed for %r (%r -> %r) — re-registering OAuth client",
             server_name,
@@ -162,12 +133,9 @@ async def exchange_token(
     client_id: str,
     client_secret: str = "",
 ) -> dict:
-    """Exchange an authorization code for an access token.
+    """Exchange an authorization code for a token.
 
-    Raises:
-        httpx.HTTPError (or httpx2.HTTPError, see loader.HTTP_ERRORS): token endpoint
-            transport/status error
-        ValueError: token endpoint returned an error or unparseable/incomplete response
+    Raises one of loader.HTTP_ERRORS on transport errors, ValueError on a bad response.
     """
     from django_ai_sdk.integrations.mcp.loader import build_oauth_client
 
@@ -189,7 +157,6 @@ async def exchange_token(
 
 
 async def store_token(user: UserType, server_name: str, token_response: dict) -> MCPOAuthToken:
-    """Store an OAuth token for a user."""
     if not user:
         raise ValueError("User required to store token")
 
@@ -201,14 +168,7 @@ async def store_token(user: UserType, server_name: str, token_response: dict) ->
 
 
 async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthToken:
-    """Refresh a user's stored OAuth access token.
-
-    A thin wrapper over the single refresh path in loader.refresh_oauth_token: it
-    just resolves the stored token and server config for this (user, server).
-
-    Raises:
-        ValueError: no token, server not configured/OAuth, or the refresh failed.
-    """
+    """Refresh a user's stored OAuth access token; raises ValueError on failure."""
     if not user:
         raise ValueError("User required")
 
@@ -230,13 +190,8 @@ async def refresh_access_token(server_name: str, *, user: UserType) -> MCPOAuthT
     return refreshed
 
 
-# ============================================================================
-# OAuth discovery
-# ============================================================================
-
-
 async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
-    """Get OAuth discovery for a server (static endpoints if configured, else RFC 9728)."""
+    """OAuth endpoints for a server: static if configured, else RFC 9728 discovery."""
     server = await _mcp_config(server_name)
     if not server or server.type != "oauth":
         raise NotFound(f"Server {server_name!r} not found or not OAuth type")
@@ -249,9 +204,5 @@ async def get_oauth_discovery(server_name: str) -> OAuthDiscovery:
 
     return await discover(server.oauth_discovery_url or server.url)
 
-
-# ============================================================================
-# Sync aliases for use in synchronous contexts
-# ============================================================================
 
 refresh_access_token_sync = async_to_sync(refresh_access_token)

@@ -1,8 +1,3 @@
-"""Base class for integrations that receive events, not only offer tools.
-
-It shares credentials, config and registry entry with the outbound side.
-"""
-
 from __future__ import annotations
 
 import json
@@ -26,7 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Seconds a reply to the platform may take. The run is already over by then.
 REPLY_TIMEOUT_SECONDS = 10
 
 # Dedup window for a platform that signs no timestamp: replays work once it ends.
@@ -34,10 +28,7 @@ UNSIGNED_DEDUP_TTL = 7 * 24 * 60 * 60
 
 
 class InboundEvent(BaseModel):
-    """One message from a platform, in the same shape for every platform.
-
-    Queued as a dict, so keep it to what `reply()` needs.
-    """
+    """One platform message; queued as a dict, so keep it to what `reply()` needs."""
 
     integration: str
     event_id: str
@@ -47,7 +38,7 @@ class InboundEvent(BaseModel):
     thread_ref: str = ""
     external_user_id: str = ""
     workspace_id: str = ""
-    # Per-event reply credential; travels with the event since reply() runs in the worker.
+    # Travels with the event since reply() runs in the worker.
     reply_token: str = ""
 
 
@@ -65,15 +56,10 @@ current_event: ContextVar[InboundEvent | None] = ContextVar("current_event", def
 
 
 class WebhookIntegration(Integration):
-    """An integration that receives platform events and answers with an agent.
+    """Receives platform events and answers with an agent; implement verify, parse, reply."""
 
-    Subclasses implement `verify`, `parse` and `reply`.
-    """
-
-    # Dotted path to the answering Agent. AI_SDK_INTEGRATIONS[name]["AGENT"] overrides it.
     agent: str = ""
 
-    # -- inbound --
     # Sync, in the request, within the platform's ack window (three seconds for Slack).
 
     @abstractmethod
@@ -82,13 +68,9 @@ class WebhookIntegration(Integration):
 
     @abstractmethod
     def parse(self, request: HttpRequest) -> InboundEvent | HttpResponse | None:
-        """Turn a verified request into an event to answer.
-
-        None acknowledges and ignores it; an HttpResponse answers a handshake directly.
-        """
+        """Turn a verified request into an event; None ignores, HttpResponse answers directly."""
 
     def _json(self, request: HttpRequest) -> dict[str, Any] | None:
-        """The request's JSON object, or None (logged) when the body is not one."""
         try:
             body = json.loads(request.body)
         except ValueError:
@@ -102,13 +84,8 @@ class WebhookIntegration(Integration):
         """Response sent once the event is queued, before the agent runs."""
         return HttpResponse(status=200)
 
-    # -- de-duplication --
-
-    #: Seconds a repeat event id is ignored: platforms redeliver and tasks are
-    #: at-least-once. Unsigned-timestamp platforms use UNSIGNED_DEDUP_TTL.
+    #: Platforms redeliver and tasks are at-least-once.
     dedup_ttl: int = 600
-
-    # -- outbound --
 
     @abstractmethod
     async def reply(self, event: InboundEvent, text: str) -> None:
@@ -117,7 +94,7 @@ class WebhookIntegration(Integration):
     async def _post_reply(
         self, url: str, *, json: dict[str, Any], headers: dict[str, str] | None = None
     ) -> httpx.Response | None:
-        """POST a reply; None (logged) when the platform is unreachable."""
+        """POST a reply; None when the platform is unreachable."""
         try:
             async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
                 return await client.post(url, json=json, headers=headers)
@@ -138,13 +115,9 @@ class WebhookIntegration(Integration):
             return scope
         return f"{scope}:{event.thread_ref}" if event.thread_ref else None
 
-    # -- access --
-
-    # Allow-list value that admits everyone, for when "anyone" is intended.
     ANY = "*"
 
     def allows(self, event: InboundEvent) -> bool:
-        """Check that the sender and workspace may reach the agent."""
         return self._admits("ALLOW_FROM", event.external_user_id) and self._admits(
             "ALLOW_WORKSPACES", event.workspace_id
         )
@@ -154,7 +127,6 @@ class WebhookIntegration(Integration):
         return bool(self._config().get("ALLOW_FROM"))
 
     def _missing_audience(self, senders: str) -> str | None:
-        """Why ALLOW_FROM must be set, or None when it is."""
         if self.has_audience():
             return None
         return (
@@ -181,8 +153,6 @@ class WebhookIntegration(Integration):
         # Accept ANY inside a list too, since env.list(..., default=["*"]) gives that.
         return self.ANY in allowed or value in allowed
 
-    # -- identity --
-
     async def aget_principal(self) -> AbstractBaseUser | None:
         """The RUN_AS user, or None to answer anonymously."""
         from django_ai_sdk.utils import aget_active_user
@@ -199,9 +169,7 @@ class WebhookIntegration(Integration):
             )
         return user
 
-    # -- configuration --
-
-    # A detail set by hand wins over the computed one, as on any Integration.
+    # A detail set by hand wins over the computed one.
     _detail: str | None = None
 
     @property
@@ -217,7 +185,6 @@ class WebhookIntegration(Integration):
         return None
 
     def _missing_secrets(self, *keys: str, hint: str) -> str | None:
-        """Name the unset `keys` and where to find them, or None when all are set."""
         missing = [key for key in keys if not self.secret(key)]
         if not missing:
             return None
@@ -234,7 +201,7 @@ class WebhookIntegration(Integration):
         )
 
     def agent_path(self) -> str:
-        """The agent's dotted path. The AGENT setting wins over the class attribute."""
+        """The AGENT setting, else the class attribute."""
         return self.secret("AGENT") or self.agent
 
     def resolve_agent(self) -> Agent | None:
@@ -264,8 +231,6 @@ class WebhookIntegration(Integration):
             )
             return None
         return registry.get(agent_id)
-
-    # -- Integration contract --
 
     async def get_tools(
         self,

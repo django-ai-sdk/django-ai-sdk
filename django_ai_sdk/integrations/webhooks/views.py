@@ -1,5 +1,3 @@
-"""The receive endpoint every webhook integration shares."""
-
 from __future__ import annotations
 
 import logging

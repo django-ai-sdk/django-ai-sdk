@@ -1,5 +1,3 @@
-"""Worker task that runs the agent and posts the answer back."""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +37,6 @@ _THREAD_NAMESPACE = uuid.UUID("6b1f3c2e-9a84-4d1f-b7e0-2c8a5d9f1e44")
 
 @task(queue_name="default")
 async def handle_inbound(payload: dict[str, Any]) -> None:
-    """Entry point for the worker."""
     await run_inbound(payload)
 
 
@@ -47,15 +44,14 @@ async def run_inbound(payload: dict[str, Any]) -> None:
     """Answer one inbound event. Always replies once an agent is found."""
     event = InboundEvent.model_validate(payload)
     integration = (await get_integrations([event.integration])).get(event.integration)
-    # Check again here. The integration may have been removed since the request.
+    # The integration may have been removed since the request.
     if not isinstance(integration, WebhookIntegration):
         logger.warning(
             "Dropping event for %r, which no longer receives webhooks", event.integration
         )
         return
 
-    # Claimed here so redeliveries and task reruns drop; kept on failure since tools
-    # may have acted. No id, no dedup, or all such events would share one key.
+    # Kept on failure since tools may have acted; no id means no dedup.
     key = f"ai_sdk:webhook:{event.integration}:{event.event_id}"
     if event.event_id and not await cache.aadd(key, 1, integration.dedup_ttl):
         logger.info("Dropping a repeat of %r event %s", event.integration, event.event_id)
@@ -84,8 +80,7 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         await integration.reply(event, ERROR_MESSAGE)
         return
 
-    # SECURITY: never trust the platform's sender id as a user. Runs act as RUN_AS,
-    # or anonymously (reaching no integration) without it.
+    # SECURITY: never trust the sender id as a user; runs act as RUN_AS or anonymously.
     principal = await integration.aget_principal()
 
     storage, thread_id, history = await _load_conversation(agent, integration, event, principal)
@@ -150,12 +145,10 @@ async def _load_conversation(
                 thread_id=thread_id,
             )
         except Exception:
-            # Two events can race to create it; storage may not be a database, so
-            # any error is checked by looking the thread up again.
+            # Two events can race to create it; storage may not be a database.
             if await storage_class.get_thread(thread_id) is None:
                 raise
         else:
-            # Link the agent's memories to the new thread, as the thread endpoints do.
             await MemoryService.link_memories(agent.__class__._agent_id, thread_id, user=principal)
 
     storage = storage_class(thread_id)
@@ -171,7 +164,6 @@ async def _persist_turn(
     user_message: ChatMessage,
     reply_text: str,
 ) -> None:
-    """Store the user message and the reply on the thread."""
     # No transaction (storage may not be a database); a half-written turn looks unanswered.
     try:
         if not user_message.id:

@@ -9,16 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class IntegrationAppConfig(AppConfig):
-    """Django wiring for one integration app. Subclasses set `name` and `integration`.
+    """Registers one integration app's `integration` (a dotted path) on ready()."""
 
-    default = False, so importing this base class into a subclass's apps.py doesn't
-    leave Django with two AppConfig candidates in that module. Set default = True on
-    the subclass to resolve it.
-    """
-
+    # False so importing this base into a subclass's apps.py leaves one default config.
     default = False
 
-    #: Dotted path to this app's Integration subclass.
     integration: str = ""
 
     def ready(self) -> None:

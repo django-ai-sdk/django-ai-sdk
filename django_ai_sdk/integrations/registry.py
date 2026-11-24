@@ -16,43 +16,24 @@ logger = logging.getLogger(__name__)
 
 _registry: dict[str, Integration] = {}
 
-#: Whether the orphaned-config warning below has already run. Once per process: the
-#: condition can't change without a restart, and this is on the read path.
 _checked_orphans = False
 
-#: Names already warned about an enabled MCPServerConfig row being shadowed by an
-#: installed app (see _db_integrations) -- once per process, same as _checked_orphans.
 _warned_shadowed: set[str] = set()
 
-#: Built DynamicMCPIntegration per DB row, keyed by name, kept until updated_at
-#: changes. A DB-declared server has no boot hook, so without this it would rebuild
-#: (and lose its ResilientCache/circuit-breaker state) on every call. Plain
-#: process-local dict, not Django's cache: it holds live objects that can't be
-#: serialized, unlike the rows list below.
+#: Live objects per DB row, kept until updated_at changes, so breaker state survives.
 _db_cache: dict[str, tuple[datetime, Integration]] = {}
 
-#: Cache key for the enabled MCPServerConfig rows list. Via Django's cache rather
-#: than a bespoke store so it can be TTL-bounded and, with a shared backend
-#: (Redis/Memcached), invalidated across worker processes too -- mcp.apps deletes
-#: this key on save/delete for that.
+#: In Django's cache so a shared backend invalidates across workers.
 _ROWS_CACHE_KEY = "django_ai_sdk:mcp_server_config:enabled_rows"
 
 
 def invalidate_db_rows_cache() -> None:
-    """Drop the cached enabled-rows list. Called from mcp.apps' post_save/
-    post_delete signal handlers so a change is visible without waiting for the TTL.
-    """
+    """Drop the cached enabled-rows list."""
     cache.delete(_ROWS_CACHE_KEY)
 
 
 def register(service: Integration) -> None:
-    """Register (or replace) an integration service under its name.
-
-    Warns when a *different* class already claims this name -- two installed apps
-    declaring the same integration, where the loser would otherwise just disappear
-    with no explanation. Re-registering the same class (ready() running twice) isn't
-    a collision and doesn't warn.
-    """
+    """Register (or replace) an integration; warns when a different class has the name."""
     if not service.name:
         raise ValueError(f"{type(service).__name__} must set a non-empty `name` to register")
     existing = _registry.get(service.name)
@@ -70,13 +51,7 @@ def register(service: Integration) -> None:
 
 
 def _warn_orphaned_config() -> None:
-    """Name AI_SDK_INTEGRATIONS entries whose app was never installed.
-
-    Configuring an integration and forgetting its INSTALLED_APPS entry is the easiest
-    mistake to make here, and until this warning it was completely silent: the config
-    was ignored and the integration simply didn't exist, which reads like a bug in the
-    SDK rather than a missing line in settings.py.
-    """
+    """Warn once about AI_SDK_INTEGRATIONS entries whose app was never installed."""
     global _checked_orphans
     if _checked_orphans:
         return
@@ -94,12 +69,7 @@ def _warn_orphaned_config() -> None:
 
 
 async def _db_integrations() -> dict[str, Integration]:
-    """Enabled MCPServerConfig rows not already provided by an installed app.
-
-    An installed app always wins on a name collision -- a DB row is for adding a
-    server with no code at all, not overriding one. Degrades to {} (never raises)
-    when the MCP toolkit app isn't installed or its table doesn't exist yet.
-    """
+    """Enabled MCPServerConfig rows; an installed app wins a name clash. Never raises."""
     from django.apps import apps as django_apps
 
     if not django_apps.is_installed("django_ai_sdk.integrations.mcp"):

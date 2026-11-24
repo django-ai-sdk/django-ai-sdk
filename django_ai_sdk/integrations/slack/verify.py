@@ -1,5 +1,3 @@
-"""Slack request signing, version v0."""
-
 from __future__ import annotations
 
 import hashlib

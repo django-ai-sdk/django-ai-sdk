@@ -25,8 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# A plain TTL memoize, not django_ai_sdk.integrations.base.ResilientCache — discovery
-# results don't fail in a way that needs per-key backoff/circuit-breaking, just expiry.
+# Plain TTL memo: discovery needs expiry, not a circuit breaker.
 _cache: dict[str, tuple[float, OAuthDiscovery]] = {}
 
 
@@ -43,25 +42,16 @@ def _allowed_issuer_domains() -> list[str] | None:
 
 
 def _is_unsafe_ip(ip_str: str) -> bool:
-    """Private, loopback, reserved, or link-local (which covers the 169.254.169.254
-    cloud metadata address) — anything internal-only."""
+    """Private, loopback, reserved or link-local (incl. cloud metadata); fails closed."""
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
-        return True  # unparsable — fail closed
+        return True
     return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
 
 
 async def _is_safe_url(url: str) -> bool:
-    """Validate URL is http(s) and resolves only to public IPs (SSRF protection).
-
-    Resolves the hostname via DNS rather than only checking literal IPs — a
-    hostname isn't safe just because it isn't itself an IP address; it can still
-    resolve to 127.0.0.1 or a cloud metadata address. This matters here because
-    callers use this to validate URLs sourced from an untrusted MCP server's own
-    response (e.g. its `authorization_servers` list) — a compromised server could
-    otherwise point discovery at internal infrastructure.
-    """
+    """SECURITY: http(s) only, and every DNS answer must be public (SSRF guard)."""
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -72,14 +62,13 @@ async def _is_safe_url(url: str) -> bool:
         try:
             addrs = await asyncio.get_running_loop().getaddrinfo(hostname, None)
         except OSError:
-            return False  # DNS resolution failed — fail closed
+            return False
         return not any(_is_unsafe_ip(str(addr[4][0])) for addr in addrs)
     except Exception:
         return False
 
 
 async def _is_valid_issuer(issuer: str) -> bool:
-    """Validate issuer is a proper URI per RFC 9728 (authorization_servers field)."""
     return await _is_safe_url(issuer)
 
 
@@ -97,31 +86,9 @@ async def discover(
     allowed_issuer_domains: list[str] | None = None,
     use_cache: bool = True,
 ) -> OAuthDiscovery:
-    """
-    Discover OAuth endpoints for an MCP server per RFC 9728.
+    """Discover OAuth endpoints for an MCP server per RFC 9728; cached in-process.
 
-    Flow:
-    1. POST initialize → expect 401 with WWW-Authenticate: Bearer resource_metadata=<url>
-    2. GET protected-resource metadata → authorization_servers list, validate resource
-    3. GET the authorization server's metadata (RFC 8414 / OIDC) → endpoints
-
-    Args:
-        mcp_url: The MCP server URL to discover OAuth for
-        expected_resource: Optional. If provided, validate the discovered resource is
-                           allowed for it (RFC 8707 hierarchical/origin match).
-        allowed_issuer_domains: Optional. List of allowed OAuth issuer domains (e.g.,
-                               ["accounts.notion.com"]). Defense-in-depth against
-                               compromised MCP servers.
-                               - None (default): No restriction, allow any issuer
-                               - [] (empty): Reject all issuers
-                               - ["domain"]: Only allow specified domains
-                               If not provided, uses AI_SDK_MCP_ALLOWED_ISSUER_DOMAINS.
-        use_cache: Whether to use cached results. Default True.
-
-    Results are cached in-process for AI_SDK_MCP_DISCOVERY_CACHE_TTL seconds (default 3600).
-
-    Raises:
-        ValueError: If discovery fails, resource validation fails, or a URL is unsafe.
+    allowed_issuer_domains: None allows any, [] none. Raises ValueError on any failure.
     """
     now = time.monotonic()
     if use_cache and mcp_url in _cache:
@@ -164,9 +131,7 @@ async def discover(
 
 
 async def _probe_www_auth(client: httpx.AsyncClient, mcp_url: str) -> str | None:
-    """POST initialize to elicit a 401 and pull the resource_metadata URL out of the
-    WWW-Authenticate header (RFC 9728). Returns None if there's no usable header —
-    the well-known fallbacks are then supplied by the SDK's URL builder."""
+    """resource_metadata URL from the 401 WWW-Authenticate header, or None."""
     try:
         response = await client.post(
             mcp_url,
@@ -184,7 +149,6 @@ async def _probe_www_auth(client: httpx.AsyncClient, mcp_url: str) -> str | None
 async def _fetch_protected_resource_metadata(
     client: httpx.AsyncClient, mcp_url: str
 ) -> ProtectedResourceMetadata:
-    """Try each RFC 9728 candidate URL until one returns valid PRM."""
     www_auth_url = await _probe_www_auth(client, mcp_url)
     for url in build_protected_resource_metadata_discovery_urls(www_auth_url, mcp_url):
         if not await _is_safe_url(url):
@@ -203,8 +167,6 @@ async def _fetch_protected_resource_metadata(
 async def _fetch_authorization_server_metadata(
     client: httpx.AsyncClient, auth_servers: list[str], mcp_url: str
 ) -> OAuthMetadata:
-    """Walk the advertised authorization servers, trying each server's RFC 8414 / OIDC
-    well-known URLs until one yields valid metadata."""
     failed_issuers: list[str] = []
     for server_url in auth_servers:
         for url in build_oauth_authorization_server_metadata_discovery_urls(server_url, mcp_url):
@@ -232,7 +194,6 @@ async def _fetch_authorization_server_metadata(
 async def _validate_issuers(
     auth_servers: list[str], allowed_issuer_domains: list[str] | None
 ) -> None:
-    """SSRF-check every advertised issuer, and enforce the domain allowlist if set."""
     domains_to_check = (
         allowed_issuer_domains if allowed_issuer_domains is not None else _allowed_issuer_domains()
     )
@@ -240,8 +201,7 @@ async def _validate_issuers(
         if not await _is_valid_issuer(issuer):
             raise ValueError(f"Invalid issuer format: {issuer}")
 
-        # None = no restriction, [] = allow none, [...] = allow specific. Each entry may
-        # be a bare hostname ("mcp.notion.com") or a full URL — normalize both to netloc.
+        # Entries may be bare hostnames or full URLs.
         if domains_to_check is not None:
             issuer_domain = urlparse(issuer).netloc
             normalized = {urlparse(d).netloc if "://" in d else d for d in domains_to_check}
@@ -255,5 +215,4 @@ async def _validate_issuers(
 
 
 def clear_cache() -> None:
-    """Clear the discovery cache — useful in tests."""
     _cache.clear()

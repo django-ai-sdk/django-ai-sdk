@@ -4,18 +4,7 @@ from django.apps import AppConfig
 
 
 class MCPConfig(AppConfig):
-    """The MCP toolkit app — ships the OAuth token/client models, their migrations,
-    and the OAuth redirect views.
-
-    It holds no integrations of its own. Concrete MCP integrations (notion, linear, ...)
-    are MCPIntegration subclasses, each its own app; they reuse this app's models.
-    This app must be in INSTALLED_APPS alongside any MCP-backed integration.
-
-    ready() does no network warmup, no registration -- tool lists populate lazily on
-    first use via ResilientCache. It does connect a signal so the registry's
-    enabled-rows cache (see registry.invalidate_db_rows_cache) drops the moment an
-    MCPServerConfig is saved or deleted, instead of waiting out its TTL.
-    """
+    """MCP OAuth models and views; required alongside any MCP-backed integration."""
 
     name = "django_ai_sdk.integrations.mcp"
     label = "django_ai_sdk_mcp"
@@ -30,9 +19,7 @@ class MCPConfig(AppConfig):
         def _invalidate(**kwargs: object) -> None:
             invalidate_db_rows_cache()
 
-        # weak=False: _invalidate is a local closure with nothing else holding a
-        # reference to it, so a weak (the default) receiver would be garbage
-        # collected the moment ready() returns and never fire.
+        # weak=False: nothing else holds this closure, so a weak receiver would be collected.
         post_save.connect(
             _invalidate,
             sender=MCPServerConfig,

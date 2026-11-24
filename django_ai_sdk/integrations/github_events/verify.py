@@ -1,5 +1,3 @@
-"""GitHub webhook signing, HMAC-SHA256 over the body."""
-
 from __future__ import annotations
 
 import hashlib

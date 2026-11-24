@@ -1,5 +1,3 @@
-"""GitHub as a webhook integration: an agent reviews pull requests."""
-
 from __future__ import annotations
 
 import hashlib
@@ -107,8 +105,7 @@ class GitHubEventsIntegration(WebhookIntegration):
         ]
         return InboundEvent(
             integration=self.name,
-            # Keyed on the signed body, not the unsigned delivery id, so a replay
-            # under a new delivery id is still a repeat.
+            # Signed body, not the unsigned delivery id, so a replay is still a repeat.
             event_id=hashlib.sha256(request.body).hexdigest(),
             text="\n\n".join(part for part in parts if part),
             conversation_id=repository,

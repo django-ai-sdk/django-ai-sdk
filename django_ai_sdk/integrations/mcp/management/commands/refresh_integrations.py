@@ -42,9 +42,7 @@ class Command(BaseCommand):
                 failed += 1
                 continue
 
-            # Warming is best-effort and reported separately: a dead server here is
-            # expected (that's what the circuit breaker is for) and must not make a
-            # scheduled run look like a credential failure, or exit non-zero.
+            # Best-effort: a dead server must not fail the run like a credential error.
             try:
                 status = await integration.get_status()
                 self.stdout.write(self.style.SUCCESS(f"✓ Refreshed {n!r} (status: {status})"))

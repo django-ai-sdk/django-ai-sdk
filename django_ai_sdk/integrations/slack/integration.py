@@ -1,5 +1,3 @@
-"""Slack as a webhook integration: an agent answers mentions and direct messages."""
-
 from __future__ import annotations
 
 import logging
@@ -25,7 +23,7 @@ POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 TIMESTAMP_HEADER = "X-Slack-Request-Timestamp"
 SIGNATURE_HEADER = "X-Slack-Signature"
 
-# Slack writes a mention as <@U123ABC>. Strip it so the agent reads only the question.
+# Slack writes a mention as <@U123ABC>.
 _MENTION = re.compile(r"<@[A-Z0-9]+>")
 
 
@@ -82,7 +80,6 @@ class SlackIntegration(WebhookIntegration):
             event_id=body.get("event_id", ""),
             text=text,
             conversation_id=event.get("channel", ""),
-            # Reply in the existing thread, or start one under the message.
             thread_ref=event.get("thread_ts") or event.get("ts", ""),
             external_user_id=event.get("user", ""),
             workspace_id=body.get("team_id", ""),
