@@ -66,7 +66,7 @@ def answers_from(answer_rows: list[Any], lenses: Mapping[str, Lens]) -> dict[str
     answers: dict[str, Answer] = {}
     for row in sorted(answer_rows, key=lambda row: row.created_at):
         lens = lenses.get(row.lens)
-        if lens is not None and row.stage not in {str(stage) for stage in lens.stages}:
+        if lens is not None and row.stage not in lens.stages:
             continue
         if row.error or row.value is None:
             if row.lens not in answers:

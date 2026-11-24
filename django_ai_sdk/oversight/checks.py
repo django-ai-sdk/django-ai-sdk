@@ -9,9 +9,9 @@ from django.core.checks import Error, Warning
 from django.db import DatabaseError
 from django.utils import timezone
 
+from django_ai_sdk.checks import dict_setting_errors
 from django_ai_sdk.oversight.agents import attribute_policy
 from django_ai_sdk.oversight.conf import (
-    DEFAULTS,
     FAIL_MODES,
     STREAM_MODES,
     UNGUARDED_MODES,
@@ -150,32 +150,7 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
 
 
 def settings_checks() -> list[Error]:
-    user_settings = configured()
-    if not isinstance(user_settings, dict):
-        return [
-            Error(
-                f"AI_SDK_OVERSIGHT must be a dict, not a {type(user_settings).__name__}.",
-                hint="Set a dict, or remove it.",
-                id=f"{PREFIX}.E012",
-            )
-        ]
-    errors = []
-    for key, value in user_settings.items():
-        if key not in ACCEPTS:
-            errors.append(
-                Error(
-                    f"AI_SDK_OVERSIGHT has an unknown key {key!r}.",
-                    hint=f"The keys are {', '.join(DEFAULTS)}.",
-                    id=f"{PREFIX}.E012",
-                )
-            )
-            continue
-        is_accepted, accepted = ACCEPTS[key]
-        if not is_accepted(value):
-            errors.append(
-                Error(f"AI_SDK_OVERSIGHT[{key!r}] must be {accepted}.", id=f"{PREFIX}.E012")
-            )
-    return errors
+    return dict_setting_errors("AI_SDK_OVERSIGHT", ACCEPTS, PREFIX)
 
 
 def policies_in_use() -> set[str]:

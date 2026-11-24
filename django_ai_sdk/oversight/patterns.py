@@ -64,9 +64,8 @@ _NOT_POSTCODE_LETTERS = (
 # dot or slash, or an invisible character.
 _SEP = r"[\s\-./\u200b\u200c\u200d\u2060\ufeff]"
 
-# An address spelled out to get past a filter: "jan [at] example [dot] nl", "jan (at) example.nl",
-# "jan apenstaartje example punt nl". A bare "at" and "dot" are left alone: they are prose too.
-# It starts where a run of name characters starts, and no run backtracks, so it stays linear.
+# Spelled-out addresses ("jan [at] example [dot] nl", "apenstaartje ... punt"); a bare
+# at/dot is prose. No run backtracks, so it stays linear.
 _AT = r"\s{0,3}(?:[\[({<]\s{0,3}(?i:at|@)\s{0,3}[\])}>]|\s(?i:apenstaartje)\s)\s{0,3}"
 _DOT = r"(?:\.|\s{0,3}(?:[\[({<]\s{0,3}(?i:dot|punt|\.)\s{0,3}[\])}>]|\s(?i:dot|punt)\s)\s{0,3})"
 _SPELLED_EMAIL = (
@@ -88,20 +87,15 @@ PII_PATTERNS: dict[str, str] = {
     "bsn": rf"(?<!\d)(?:\d{{9}}|\d{{4}}{_SEP}\d{{2}}{_SEP}\d{{3}}|\d{{3}}{_SEP}\d{{3}}{_SEP}\d{{3}})(?!\d)",
     # International format, with a country code after + or 00.
     "phone": r"(?<![\w+])(?:\+|00)\d{1,3}[\s-]?(?:\(0\)[\s-]?)?\d(?:[\s-]?\d){6,11}\b",
-    # Dutch national format: ten digits starting with 0, in any grouping (06-12345678,
-    # 06 12 34 56 78, 06/12345678, (06) 12345678, 020 123 4567), but not a date and a
-    # time (03-11-2026 14:00).
+    # Dutch: ten digits from 0, any grouping, but not a date plus time (03-11-2026 14:00).
     "phone_nl": rf"(?<![\w+])(?!\d\d([-./])\d\d\1\d{{4}}\b)"
     rf"(?:\(0\d{{1,3}}\)\s?(?:{_SEP}?\d){{6,8}}|0(?:{_SEP}?\d){{9}})(?!\d)",
     "ip_address": r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b",
     "postcode_nl": rf"\b[1-9]\d{{3}}\s?(?!(?:{'|'.join(_NOT_POSTCODE_LETTERS)})\b)[A-Z]{{2}}\b",
 }
 PII_VERIFY: dict[str, Verifier] = {"iban": iban_ok, "credit_card": luhn_ok, "bsn": bsn_ok}
-# What, right before a match, makes it something else: "invoice no. 202611188" is an invoice
-# number, though one in eleven such numbers passes the BSN 11-check. Only one of these labels
-# directly before the number counts, so "factuur 111222333" leaves a real BSN unmasked: that
-# is the trade for not masking every eleventh invoice or order number. A label a personal
-# number goes by too ("kenmerk", "referentie") is no such label. The record masks it anyway.
+# A label right before a match makes it something else: "invoice no. 202611188" is no BSN,
+# though one in eleven passes the 11-check. A BSN after such a label stays unmasked.
 PII_NOT_AFTER: dict[str, str] = {
     "bsn": r"(?i)\b(?:invoice|factuur|order|bestel|bestelling)"
     r"(?:nummer|nr|number)?(?:\s*(?:no|nr|number|nummer|#)\.?)?\s*[:#]?\s*$",

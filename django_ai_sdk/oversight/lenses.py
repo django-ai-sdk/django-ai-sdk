@@ -539,16 +539,13 @@ def _takes_context(validator: Callable[..., Any]) -> bool:
 class JudgeLens(Lens):
     """Answered by judges, asked in order, quick to thorough.
 
-    The first answer at or above `min_confidence` stands. A judge that is unsure
-    hands over to the next, which may overrule it: if none is sure, the last
-    answer stands, unsure. So list a judge after another only when you trust it
-    more. Two judges you trust alike still work, but then let the rule say what
-    their disagreement means (`L(name).disputed`).
+    The first answer at or above `min_confidence` stands; if none is sure, the last
+    answer stands, unsure. So list a judge after another only when you trust it more;
+    for judges trusted alike, let the rule handle `L(name).disputed`.
 
-    Confidence is each judge's own scale and is only compared with thresholds
-    (`min_confidence` here, `confident()` in a rule), never between judges. A
-    judge that fails or cannot run also hands over; a lens left without an
-    answer that way has failed, and FAIL_MODE decides.
+    Confidence is each judge's own scale, only compared with thresholds, never between
+    judges. A judge that fails also hands over; a lens left without an answer has
+    failed, and FAIL_MODE decides.
 
     `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"]
     (`Maybe` skips one when undefined), or {"class": ..., **kwargs} configs.

@@ -128,11 +128,7 @@ class ToolCallBudgetHook:
 
 
 class ToolCallBudgetSpentHook:
-    """Once the tool budget is spent, the next model step gets no tools, so it answers.
-
-    Without it a model that keeps calling tools has each call skipped until the run's
-    step limit ends it, and the turn closes with no answer.
-    """
+    """Once the tool budget is spent, the next model step gets no tools, so it answers."""
 
     allowed_hook_points = ["before_llm"]
 

@@ -12,14 +12,13 @@ block anyone. Conditions are Python over JSON nodes; a comparison on a lens with
 a usable answer is false (test with `L(name).missing`), and on a lens that failed
 this turn it is unknown, so `~L("grounded").is_true` does not match on a failure.
 
-A lens only says what its judges answered; how sure that must be is the rule's call:
+How sure a lens must be is the rule's call:
 
     L("dose_advice").is_true & L("dose_advice").confident(0.7)    # stop only when sure
     L("safeguarding").is_true | L("safeguarding").disputed        # a person looks when in doubt
 
-`confident` and `unsure` read the confidence of the judge whose answer stands, on
-that judge's own scale; `disputed` is true when two models asked for the lens gave
-different answers, whichever of them stands.
+`confident`/`unsure` read the standing judge's own scale; `disputed` means two models
+answered differently.
 """
 
 from __future__ import annotations
