@@ -1952,16 +1952,41 @@
       opacity: 1;
       color: #1f9d5c;
     }
+    .install-field {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.375rem 0.375rem 0.5rem;
+    }
+    .install-field code { padding: 0 0.25rem; white-space: nowrap; }
+    .install-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 0.375rem; background: #eae7de; }
+    .install-tabs button,
+    .install-copy {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.3rem;
+      color: #8a877e;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .install-tabs button { padding: 0.2rem 0.55rem; font-weight: 500; }
+    .install-tabs button[aria-selected="true"] { background: #fff; color: #14140f; }
+    .install-copy { margin-left: auto; width: 1.9rem; height: 1.9rem; font-size: 0.85rem; }
+    .install-copy:hover { background: #eae7de; color: #14140f; }
+    .install-copy.is-copied { color: #1f9d5c; }
 
     .icon-box { width: 2.5rem; height: 2.5rem; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; margin-bottom: 1rem; }
 
+    /* centred, but kept on the 8px grid from the section's left edge */
     .hero-rain {
       position: absolute;
       top: 0;
       left: 50%;
+      left: round(down, 50%, 8px);
       width: 8px;
       height: 8px;
-      margin-left: -4px;
       background: rgba(31, 157, 92, 0.2);
       box-shadow: -336px 56px 0 0 rgba(31, 157, 92, 0.076),
       -288px 40px 0 0 rgba(31, 157, 92, 0.138),
@@ -2117,146 +2142,297 @@
       z-index: 0;
     }
 
+    /* pixel cloud behind the mascot, on the same 8px grid as the rain and
+       the card staircases. The core stays on mobile; the outer ring (::before)
+       only shows from md up, so the cloud shrinks without scaling the cells. */
     .hero-pixels {
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 12px;
-      height: 12px;
-      margin: -6px 0 0 -6px;
-      background: rgba(31, 157, 92, 0.14);
-      box-shadow: 0px 0px 0 0 rgba(31, 157, 92, 0.153),
-      12px 72px 0 0 rgba(31, 157, 92, 0.075),
-      12px -12px 0 0 rgba(31, 157, 92, 0.158),
-      24px 0px 0 0 rgba(31, 157, 92, 0.16),
-      -36px -48px 0 0 rgba(31, 157, 92, 0.102),
-      -72px -48px 0 0 rgba(31, 157, 92, 0.055),
-      24px -72px 0 0 rgba(31, 157, 92, 0.065),
-      60px 84px 0 0 rgba(31, 157, 92, 0.065),
-      12px 12px 0 0 rgba(31, 157, 92, 0.17),
-      -12px -60px 0 0 rgba(31, 157, 92, 0.124),
-      -48px 48px 0 0 rgba(31, 157, 92, 0.08),
-      -60px -60px 0 0 rgba(31, 157, 92, 0.072),
-      0px -12px 0 0 rgba(31, 157, 92, 0.152),
-      0px 12px 0 0 rgba(31, 157, 92, 0.152),
-      24px 24px 0 0 rgba(31, 157, 92, 0.114),
-      -24px 36px 0 0 rgba(31, 157, 92, 0.101),
-      -12px 96px 0 0 rgba(31, 157, 92, 0.074),
-      -12px -12px 0 0 rgba(31, 157, 92, 0.167),
-      24px 36px 0 0 rgba(31, 157, 92, 0.125),
-      -36px -84px 0 0 rgba(31, 157, 92, 0.078),
-      -12px 36px 0 0 rgba(31, 157, 92, 0.101),
-      84px -36px 0 0 rgba(31, 157, 92, 0.064),
-      -24px -36px 0 0 rgba(31, 157, 92, 0.122),
-      -36px 12px 0 0 rgba(31, 157, 92, 0.102),
-      -36px -12px 0 0 rgba(31, 157, 92, 0.113),
-      36px -24px 0 0 rgba(31, 157, 92, 0.102),
-      60px 0px 0 0 rgba(31, 157, 92, 0.098),
-      12px 0px 0 0 rgba(31, 157, 92, 0.164),
-      12px -48px 0 0 rgba(31, 157, 92, 0.097),
-      -72px 72px 0 0 rgba(31, 157, 92, 0.071),
-      84px -12px 0 0 rgba(31, 157, 92, 0.055),
-      -12px -72px 0 0 rgba(31, 157, 92, 0.071),
-      -12px 72px 0 0 rgba(31, 157, 92, 0.058),
-      -48px 24px 0 0 rgba(31, 157, 92, 0.124),
-      24px -24px 0 0 rgba(31, 157, 92, 0.11),
-      36px 84px 0 0 rgba(31, 157, 92, 0.081),
-      -24px 72px 0 0 rgba(31, 157, 92, 0.073),
-      48px 72px 0 0 rgba(31, 157, 92, 0.071),
-      12px -60px 0 0 rgba(31, 157, 92, 0.095),
-      24px -36px 0 0 rgba(31, 157, 92, 0.097),
-      72px -72px 0 0 rgba(31, 157, 92, 0.058),
-      -12px 0px 0 0 rgba(31, 157, 92, 0.168),
-      -60px 12px 0 0 rgba(31, 157, 92, 0.103),
-      36px -36px 0 0 rgba(31, 157, 92, 0.101),
-      -72px -24px 0 0 rgba(31, 157, 92, 0.061),
-      -36px 96px 0 0 rgba(31, 157, 92, 0.074),
-      -36px 60px 0 0 rgba(31, 157, 92, 0.062),
-      -24px -24px 0 0 rgba(31, 157, 92, 0.122),
-      0px 72px 0 0 rgba(31, 157, 92, 0.061),
-      60px 72px 0 0 rgba(31, 157, 92, 0.072),
-      -84px 12px 0 0 rgba(31, 157, 92, 0.079),
-      -72px 12px 0 0 rgba(31, 157, 92, 0.075),
-      -36px 24px 0 0 rgba(31, 157, 92, 0.121),
-      0px 24px 0 0 rgba(31, 157, 92, 0.158),
-      0px 96px 0 0 rgba(31, 157, 92, 0.068),
-      36px -48px 0 0 rgba(31, 157, 92, 0.097),
-      84px 0px 0 0 rgba(31, 157, 92, 0.084),
-      24px 48px 0 0 rgba(31, 157, 92, 0.101),
-      -12px 84px 0 0 rgba(31, 157, 92, 0.069),
-      -84px 48px 0 0 rgba(31, 157, 92, 0.085),
-      60px -12px 0 0 rgba(31, 157, 92, 0.111),
-      -48px -24px 0 0 rgba(31, 157, 92, 0.121),
-      24px 12px 0 0 rgba(31, 157, 92, 0.113),
-      -12px -24px 0 0 rgba(31, 157, 92, 0.099),
-      -60px -36px 0 0 rgba(31, 157, 92, 0.068),
-      24px -12px 0 0 rgba(31, 157, 92, 0.116),
-      0px 48px 0 0 rgba(31, 157, 92, 0.115),
-      -96px 24px 0 0 rgba(31, 157, 92, 0.085),
-      72px -60px 0 0 rgba(31, 157, 92, 0.066),
-      -24px -60px 0 0 rgba(31, 157, 92, 0.125),
-      12px -36px 0 0 rgba(31, 157, 92, 0.115),
-      -60px -48px 0 0 rgba(31, 157, 92, 0.061),
-      -96px 12px 0 0 rgba(31, 157, 92, 0.08),
-      36px 24px 0 0 rgba(31, 157, 92, 0.103),
-      0px -60px 0 0 rgba(31, 157, 92, 0.108),
-      -84px -24px 0 0 rgba(31, 157, 92, 0.072),
-      -36px 84px 0 0 rgba(31, 157, 92, 0.079),
-      60px -72px 0 0 rgba(31, 157, 92, 0.061),
-      12px -84px 0 0 rgba(31, 157, 92, 0.067),
-      0px -36px 0 0 rgba(31, 157, 92, 0.123),
-      24px -84px 0 0 rgba(31, 157, 92, 0.079),
-      72px 60px 0 0 rgba(31, 157, 92, 0.081),
-      12px 84px 0 0 rgba(31, 157, 92, 0.069),
-      -24px 84px 0 0 rgba(31, 157, 92, 0.062),
-      -48px 84px 0 0 rgba(31, 157, 92, 0.084),
-      -84px 60px 0 0 rgba(31, 157, 92, 0.071),
-      36px -12px 0 0 rgba(31, 157, 92, 0.098),
-      -72px 36px 0 0 rgba(31, 157, 92, 0.064),
-      -48px -36px 0 0 rgba(31, 157, 92, 0.107),
-      -24px -12px 0 0 rgba(31, 157, 92, 0.116),
-      96px 0px 0 0 rgba(31, 157, 92, 0.071),
-      60px 36px 0 0 rgba(31, 157, 92, 0.065),
-      -12px -36px 0 0 rgba(31, 157, 92, 0.104),
-      -12px 48px 0 0 rgba(31, 157, 92, 0.112),
-      -24px -48px 0 0 rgba(31, 157, 92, 0.108),
-      12px 48px 0 0 rgba(31, 157, 92, 0.122),
-      12px -24px 0 0 rgba(31, 157, 92, 0.098),
-      -72px -12px 0 0 rgba(31, 157, 92, 0.065),
-      36px -72px 0 0 rgba(31, 157, 92, 0.075),
-      36px 0px 0 0 rgba(31, 157, 92, 0.109),
-      -60px 36px 0 0 rgba(31, 157, 92, 0.061),
-      -24px 12px 0 0 rgba(31, 157, 92, 0.124),
-      0px 84px 0 0 rgba(31, 157, 92, 0.069),
-      84px -24px 0 0 rgba(31, 157, 92, 0.073),
-      24px -48px 0 0 rgba(31, 157, 92, 0.122),
-      0px -48px 0 0 rgba(31, 157, 92, 0.103),
-      36px 12px 0 0 rgba(31, 157, 92, 0.103),
-      -24px 60px 0 0 rgba(31, 157, 92, 0.099),
-      -48px 36px 0 0 rgba(31, 157, 92, 0.107),
-      48px -36px 0 0 rgba(31, 157, 92, 0.116),
-      48px -60px 0 0 rgba(31, 157, 92, 0.066),
-      0px -84px 0 0 rgba(31, 157, 92, 0.084),
-      -60px -24px 0 0 rgba(31, 157, 92, 0.102),
-      48px 48px 0 0 rgba(31, 157, 92, 0.056),
-      72px 12px 0 0 rgba(31, 157, 92, 0.059),
-      -24px 24px 0 0 rgba(31, 157, 92, 0.105),
-      60px 12px 0 0 rgba(31, 157, 92, 0.125),
-      12px -72px 0 0 rgba(31, 157, 92, 0.078),
-      -24px -72px 0 0 rgba(31, 157, 92, 0.06),
-      60px 60px 0 0 rgba(31, 157, 92, 0.084),
-      48px -12px 0 0 rgba(31, 157, 92, 0.116),
-      -36px 36px 0 0 rgba(31, 157, 92, 0.105),
-      48px -72px 0 0 rgba(31, 157, 92, 0.058),
-      72px -12px 0 0 rgba(31, 157, 92, 0.08),
-      -12px -48px 0 0 rgba(31, 157, 92, 0.117),
-      24px -60px 0 0 rgba(31, 157, 92, 0.11),
-      24px 84px 0 0 rgba(31, 157, 92, 0.065),
-      60px -48px 0 0 rgba(31, 157, 92, 0.063),
-      96px 12px 0 0 rgba(31, 157, 92, 0.058),
-      0px -72px 0 0 rgba(31, 157, 92, 0.074);
+      width: 8px;
+      height: 8px;
+      margin: -4px 0 0 -4px;
+      background: rgba(31, 157, 92, 0.165);
+      box-shadow: -24px 8px 0 0 rgba(31, 157, 92, 0.146),
+      16px -32px 0 0 rgba(31, 157, 92, 0.138),
+      -16px -40px 0 0 rgba(31, 157, 92, 0.124),
+      -40px -40px 0 0 rgba(31, 157, 92, 0.129),
+      40px -8px 0 0 rgba(31, 157, 92, 0.147),
+      8px 40px 0 0 rgba(31, 157, 92, 0.128),
+      48px 8px 0 0 rgba(31, 157, 92, 0.121),
+      0px -48px 0 0 rgba(31, 157, 92, 0.132),
+      -40px -8px 0 0 rgba(31, 157, 92, 0.122),
+      -16px 40px 0 0 rgba(31, 157, 92, 0.139),
+      32px 40px 0 0 rgba(31, 157, 92, 0.116),
+      16px 8px 0 0 rgba(31, 157, 92, 0.157),
+      -56px 16px 0 0 rgba(31, 157, 92, 0.11),
+      56px 16px 0 0 rgba(31, 157, 92, 0.109),
+      -32px -32px 0 0 rgba(31, 157, 92, 0.141),
+      -32px -24px 0 0 rgba(31, 157, 92, 0.125),
+      40px 16px 0 0 rgba(31, 157, 92, 0.122),
+      8px 32px 0 0 rgba(31, 157, 92, 0.151),
+      32px -32px 0 0 rgba(31, 157, 92, 0.117),
+      -24px 16px 0 0 rgba(31, 157, 92, 0.133),
+      48px 32px 0 0 rgba(31, 157, 92, 0.114),
+      -24px -16px 0 0 rgba(31, 157, 92, 0.143),
+      16px -24px 0 0 rgba(31, 157, 92, 0.143),
+      0px -56px 0 0 rgba(31, 157, 92, 0.108),
+      -40px 24px 0 0 rgba(31, 157, 92, 0.14),
+      48px 16px 0 0 rgba(31, 157, 92, 0.13),
+      32px -16px 0 0 rgba(31, 157, 92, 0.129),
+      24px 0px 0 0 rgba(31, 157, 92, 0.134),
+      32px 8px 0 0 rgba(31, 157, 92, 0.131),
+      48px -24px 0 0 rgba(31, 157, 92, 0.134),
+      -24px 48px 0 0 rgba(31, 157, 92, 0.126),
+      8px 16px 0 0 rgba(31, 157, 92, 0.162),
+      -8px -16px 0 0 rgba(31, 157, 92, 0.159),
+      40px 32px 0 0 rgba(31, 157, 92, 0.133),
+      -8px 32px 0 0 rgba(31, 157, 92, 0.141),
+      8px 0px 0 0 rgba(31, 157, 92, 0.178),
+      -16px 0px 0 0 rgba(31, 157, 92, 0.142),
+      -16px -16px 0 0 rgba(31, 157, 92, 0.157),
+      16px 32px 0 0 rgba(31, 157, 92, 0.147),
+      0px -24px 0 0 rgba(31, 157, 92, 0.14),
+      32px 48px 0 0 rgba(31, 157, 92, 0.113),
+      24px -32px 0 0 rgba(31, 157, 92, 0.121),
+      0px 24px 0 0 rgba(31, 157, 92, 0.137),
+      0px -32px 0 0 rgba(31, 157, 92, 0.145),
+      40px -16px 0 0 rgba(31, 157, 92, 0.119),
+      -8px -8px 0 0 rgba(31, 157, 92, 0.152),
+      8px 8px 0 0 rgba(31, 157, 92, 0.167),
+      40px 0px 0 0 rgba(31, 157, 92, 0.119),
+      16px 48px 0 0 rgba(31, 157, 92, 0.132),
+      -16px -8px 0 0 rgba(31, 157, 92, 0.155),
+      -48px 16px 0 0 rgba(31, 157, 92, 0.139),
+      -16px 48px 0 0 rgba(31, 157, 92, 0.119),
+      -32px 24px 0 0 rgba(31, 157, 92, 0.13),
+      0px -40px 0 0 rgba(31, 157, 92, 0.127),
+      32px -8px 0 0 rgba(31, 157, 92, 0.126),
+      24px -24px 0 0 rgba(31, 157, 92, 0.135),
+      -24px 40px 0 0 rgba(31, 157, 92, 0.136),
+      -32px -8px 0 0 rgba(31, 157, 92, 0.146),
+      -16px -24px 0 0 rgba(31, 157, 92, 0.158),
+      -24px 24px 0 0 rgba(31, 157, 92, 0.133),
+      24px 8px 0 0 rgba(31, 157, 92, 0.143),
+      -40px 8px 0 0 rgba(31, 157, 92, 0.146),
+      16px -8px 0 0 rgba(31, 157, 92, 0.141),
+      -48px 8px 0 0 rgba(31, 157, 92, 0.119),
+      16px -16px 0 0 rgba(31, 157, 92, 0.141),
+      32px -40px 0 0 rgba(31, 157, 92, 0.138),
+      40px 8px 0 0 rgba(31, 157, 92, 0.12),
+      -8px 48px 0 0 rgba(31, 157, 92, 0.138),
+      -16px -48px 0 0 rgba(31, 157, 92, 0.114),
+      -40px 32px 0 0 rgba(31, 157, 92, 0.123),
+      16px 24px 0 0 rgba(31, 157, 92, 0.157),
+      -24px 32px 0 0 rgba(31, 157, 92, 0.134),
+      -8px 0px 0 0 rgba(31, 157, 92, 0.175),
+      -8px -40px 0 0 rgba(31, 157, 92, 0.144),
+      0px 56px 0 0 rgba(31, 157, 92, 0.109),
+      -8px -48px 0 0 rgba(31, 157, 92, 0.132),
+      8px -56px 0 0 rgba(31, 157, 92, 0.111),
+      -32px -48px 0 0 rgba(31, 157, 92, 0.107),
+      48px -16px 0 0 rgba(31, 157, 92, 0.127),
+      -8px 56px 0 0 rgba(31, 157, 92, 0.107),
+      -32px -40px 0 0 rgba(31, 157, 92, 0.121),
+      16px 40px 0 0 rgba(31, 157, 92, 0.121),
+      8px -8px 0 0 rgba(31, 157, 92, 0.164),
+      -56px -8px 0 0 rgba(31, 157, 92, 0.132),
+      32px 16px 0 0 rgba(31, 157, 92, 0.13),
+      -32px -16px 0 0 rgba(31, 157, 92, 0.124),
+      24px 40px 0 0 rgba(31, 157, 92, 0.128),
+      -8px 24px 0 0 rgba(31, 157, 92, 0.156),
+      -56px 8px 0 0 rgba(31, 157, 92, 0.112),
+      48px 24px 0 0 rgba(31, 157, 92, 0.132),
+      8px 56px 0 0 rgba(31, 157, 92, 0.125),
+      0px -16px 0 0 rgba(31, 157, 92, 0.152),
+      -24px -32px 0 0 rgba(31, 157, 92, 0.126),
+      -8px -56px 0 0 rgba(31, 157, 92, 0.132),
+      -32px 48px 0 0 rgba(31, 157, 92, 0.109),
+      -16px 56px 0 0 rgba(31, 157, 92, 0.13),
+      32px 0px 0 0 rgba(31, 157, 92, 0.137),
+      -16px -32px 0 0 rgba(31, 157, 92, 0.134),
+      40px 40px 0 0 rgba(31, 157, 92, 0.104),
+      -8px -24px 0 0 rgba(31, 157, 92, 0.147),
+      -32px 0px 0 0 rgba(31, 157, 92, 0.155),
+      24px 16px 0 0 rgba(31, 157, 92, 0.14),
+      -48px -32px 0 0 rgba(31, 157, 92, 0.118),
+      56px -8px 0 0 rgba(31, 157, 92, 0.112),
+      -40px 0px 0 0 rgba(31, 157, 92, 0.126),
+      8px -48px 0 0 rgba(31, 157, 92, 0.139),
+      0px 40px 0 0 rgba(31, 157, 92, 0.149),
+      24px 48px 0 0 rgba(31, 157, 92, 0.11),
+      -56px 0px 0 0 rgba(31, 157, 92, 0.127),
+      40px -40px 0 0 rgba(31, 157, 92, 0.104),
+      -16px 32px 0 0 rgba(31, 157, 92, 0.125),
+      -24px -24px 0 0 rgba(31, 157, 92, 0.142),
+      0px -8px 0 0 rgba(31, 157, 92, 0.157),
+      8px -24px 0 0 rgba(31, 157, 92, 0.133),
+      16px -40px 0 0 rgba(31, 157, 92, 0.124),
+      48px 0px 0 0 rgba(31, 157, 92, 0.14),
+      8px -40px 0 0 rgba(31, 157, 92, 0.132),
+      -40px 40px 0 0 rgba(31, 157, 92, 0.128),
+      -40px 16px 0 0 rgba(31, 157, 92, 0.141),
+      24px -8px 0 0 rgba(31, 157, 92, 0.144),
+      0px 32px 0 0 rgba(31, 157, 92, 0.138),
+      -48px 24px 0 0 rgba(31, 157, 92, 0.107),
+      -24px -40px 0 0 rgba(31, 157, 92, 0.117),
+      16px 0px 0 0 rgba(31, 157, 92, 0.146),
+      -48px -24px 0 0 rgba(31, 157, 92, 0.12),
+      16px 16px 0 0 rgba(31, 157, 92, 0.153),
+      -24px 0px 0 0 rgba(31, 157, 92, 0.14),
+      -24px -8px 0 0 rgba(31, 157, 92, 0.152),
+      -8px 8px 0 0 rgba(31, 157, 92, 0.158),
+      8px -32px 0 0 rgba(31, 157, 92, 0.125),
+      8px -16px 0 0 rgba(31, 157, 92, 0.145),
+      -32px 32px 0 0 rgba(31, 157, 92, 0.127);
       pointer-events: none;
       z-index: 0;
+    }
+    .hero-pixels::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 8px;
+      height: 8px;
+      box-shadow: -56px 64px 0 0 rgba(31, 157, 92, 0.1),
+      -96px 16px 0 0 rgba(31, 157, 92, 0.084),
+      -8px -72px 0 0 rgba(31, 157, 92, 0.105),
+      -24px -64px 0 0 rgba(31, 157, 92, 0.123),
+      -72px -8px 0 0 rgba(31, 157, 92, 0.111),
+      -48px -80px 0 0 rgba(31, 157, 92, 0.098),
+      80px -24px 0 0 rgba(31, 157, 92, 0.088),
+      88px 32px 0 0 rgba(31, 157, 92, 0.072),
+      -32px -56px 0 0 rgba(31, 157, 92, 0.111),
+      0px 72px 0 0 rgba(31, 157, 92, 0.103),
+      0px 96px 0 0 rgba(31, 157, 92, 0.098),
+      80px 40px 0 0 rgba(31, 157, 92, 0.077),
+      40px -72px 0 0 rgba(31, 157, 92, 0.1),
+      64px -16px 0 0 rgba(31, 157, 92, 0.111),
+      56px -64px 0 0 rgba(31, 157, 92, 0.092),
+      -40px 88px 0 0 rgba(31, 157, 92, 0.084),
+      40px -56px 0 0 rgba(31, 157, 92, 0.12),
+      48px 40px 0 0 rgba(31, 157, 92, 0.109),
+      24px -80px 0 0 rgba(31, 157, 92, 0.084),
+      8px -80px 0 0 rgba(31, 157, 92, 0.109),
+      -64px 48px 0 0 rgba(31, 157, 92, 0.11),
+      -88px 40px 0 0 rgba(31, 157, 92, 0.092),
+      56px -40px 0 0 rgba(31, 157, 92, 0.093),
+      40px 72px 0 0 rgba(31, 157, 92, 0.088),
+      -88px -56px 0 0 rgba(31, 157, 92, 0.078),
+      56px 32px 0 0 rgba(31, 157, 92, 0.124),
+      72px -8px 0 0 rgba(31, 157, 92, 0.105),
+      -8px 80px 0 0 rgba(31, 157, 92, 0.1),
+      32px 64px 0 0 rgba(31, 157, 92, 0.105),
+      -40px 48px 0 0 rgba(31, 157, 92, 0.115),
+      32px -72px 0 0 rgba(31, 157, 92, 0.091),
+      16px -64px 0 0 rgba(31, 157, 92, 0.1),
+      0px -64px 0 0 rgba(31, 157, 92, 0.105),
+      -24px 56px 0 0 rgba(31, 157, 92, 0.107),
+      16px -72px 0 0 rgba(31, 157, 92, 0.117),
+      -56px -40px 0 0 rgba(31, 157, 92, 0.118),
+      -8px 64px 0 0 rgba(31, 157, 92, 0.123),
+      56px 24px 0 0 rgba(31, 157, 92, 0.107),
+      -72px 72px 0 0 rgba(31, 157, 92, 0.07),
+      64px -24px 0 0 rgba(31, 157, 92, 0.105),
+      -64px 24px 0 0 rgba(31, 157, 92, 0.118),
+      -56px -64px 0 0 rgba(31, 157, 92, 0.106),
+      24px 72px 0 0 rgba(31, 157, 92, 0.096),
+      -56px -48px 0 0 rgba(31, 157, 92, 0.118),
+      56px -48px 0 0 rgba(31, 157, 92, 0.092),
+      40px -48px 0 0 rgba(31, 157, 92, 0.115),
+      -88px -16px 0 0 rgba(31, 157, 92, 0.086),
+      72px 40px 0 0 rgba(31, 157, 92, 0.109),
+      -80px 16px 0 0 rgba(31, 157, 92, 0.089),
+      72px 24px 0 0 rgba(31, 157, 92, 0.108),
+      -64px -24px 0 0 rgba(31, 157, 92, 0.097),
+      -24px 80px 0 0 rgba(31, 157, 92, 0.098),
+      -16px 72px 0 0 rgba(31, 157, 92, 0.093),
+      48px -48px 0 0 rgba(31, 157, 92, 0.098),
+      8px -64px 0 0 rgba(31, 157, 92, 0.115),
+      80px -8px 0 0 rgba(31, 157, 92, 0.09),
+      72px -48px 0 0 rgba(31, 157, 92, 0.1),
+      64px 0px 0 0 rgba(31, 157, 92, 0.122),
+      24px 64px 0 0 rgba(31, 157, 92, 0.108),
+      64px 56px 0 0 rgba(31, 157, 92, 0.082),
+      -48px 56px 0 0 rgba(31, 157, 92, 0.114),
+      -48px -40px 0 0 rgba(31, 157, 92, 0.119),
+      104px -16px 0 0 rgba(31, 157, 92, 0.068),
+      0px -72px 0 0 rgba(31, 157, 92, 0.091),
+      -16px 88px 0 0 rgba(31, 157, 92, 0.092),
+      -80px 64px 0 0 rgba(31, 157, 92, 0.072),
+      64px 64px 0 0 rgba(31, 157, 92, 0.093),
+      0px 80px 0 0 rgba(31, 157, 92, 0.09),
+      24px -64px 0 0 rgba(31, 157, 92, 0.107),
+      -56px 80px 0 0 rgba(31, 157, 92, 0.073),
+      8px 104px 0 0 rgba(31, 157, 92, 0.086),
+      -56px 32px 0 0 rgba(31, 157, 92, 0.104),
+      -32px -72px 0 0 rgba(31, 157, 92, 0.108),
+      -48px 80px 0 0 rgba(31, 157, 92, 0.083),
+      -80px 24px 0 0 rgba(31, 157, 92, 0.086),
+      0px -80px 0 0 rgba(31, 157, 92, 0.086),
+      80px 48px 0 0 rgba(31, 157, 92, 0.097),
+      72px 16px 0 0 rgba(31, 157, 92, 0.105),
+      0px -104px 0 0 rgba(31, 157, 92, 0.068),
+      56px -32px 0 0 rgba(31, 157, 92, 0.108),
+      -48px 40px 0 0 rgba(31, 157, 92, 0.129),
+      64px 16px 0 0 rgba(31, 157, 92, 0.098),
+      -64px 32px 0 0 rgba(31, 157, 92, 0.091),
+      -16px -64px 0 0 rgba(31, 157, 92, 0.124),
+      16px 72px 0 0 rgba(31, 157, 92, 0.115),
+      -48px 64px 0 0 rgba(31, 157, 92, 0.112),
+      -8px -80px 0 0 rgba(31, 157, 92, 0.084),
+      16px -80px 0 0 rgba(31, 157, 92, 0.089),
+      72px 0px 0 0 rgba(31, 157, 92, 0.092),
+      72px -40px 0 0 rgba(31, 157, 92, 0.09),
+      -96px -16px 0 0 rgba(31, 157, 92, 0.075),
+      8px -72px 0 0 rgba(31, 157, 92, 0.111),
+      -72px 24px 0 0 rgba(31, 157, 92, 0.087),
+      72px 8px 0 0 rgba(31, 157, 92, 0.111),
+      80px 8px 0 0 rgba(31, 157, 92, 0.095),
+      48px -40px 0 0 rgba(31, 157, 92, 0.114),
+      64px 24px 0 0 rgba(31, 157, 92, 0.105),
+      32px -104px 0 0 rgba(31, 157, 92, 0.083),
+      -32px -80px 0 0 rgba(31, 157, 92, 0.089),
+      -56px -24px 0 0 rgba(31, 157, 92, 0.13),
+      64px -40px 0 0 rgba(31, 157, 92, 0.099),
+      80px 24px 0 0 rgba(31, 157, 92, 0.097),
+      -64px 8px 0 0 rgba(31, 157, 92, 0.105),
+      56px 64px 0 0 rgba(31, 157, 92, 0.099),
+      -48px 48px 0 0 rgba(31, 157, 92, 0.096),
+      64px 40px 0 0 rgba(31, 157, 92, 0.106),
+      -56px -72px 0 0 rgba(31, 157, 92, 0.084),
+      72px 48px 0 0 rgba(31, 157, 92, 0.096),
+      0px -88px 0 0 rgba(31, 157, 92, 0.083),
+      -64px -8px 0 0 rgba(31, 157, 92, 0.115),
+      -32px 64px 0 0 rgba(31, 157, 92, 0.103),
+      72px -16px 0 0 rgba(31, 157, 92, 0.09),
+      40px -88px 0 0 rgba(31, 157, 92, 0.08),
+      64px 8px 0 0 rgba(31, 157, 92, 0.099),
+      80px 16px 0 0 rgba(31, 157, 92, 0.086),
+      88px 0px 0 0 rgba(31, 157, 92, 0.103),
+      80px -32px 0 0 rgba(31, 157, 92, 0.082),
+      16px -96px 0 0 rgba(31, 157, 92, 0.08),
+      -40px -48px 0 0 rgba(31, 157, 92, 0.1),
+      -16px -88px 0 0 rgba(31, 157, 92, 0.078),
+      -72px -32px 0 0 rgba(31, 157, 92, 0.109),
+      64px -72px 0 0 rgba(31, 157, 92, 0.088),
+      48px -56px 0 0 rgba(31, 157, 92, 0.117),
+      24px 56px 0 0 rgba(31, 157, 92, 0.118),
+      80px -64px 0 0 rgba(31, 157, 92, 0.077),
+      88px 24px 0 0 rgba(31, 157, 92, 0.098),
+      80px 0px 0 0 rgba(31, 157, 92, 0.111),
+      -64px 16px 0 0 rgba(31, 157, 92, 0.108),
+      -40px -56px 0 0 rgba(31, 157, 92, 0.114),
+      80px 32px 0 0 rgba(31, 157, 92, 0.085),
+      24px -96px 0 0 rgba(31, 157, 92, 0.081),
+      40px 88px 0 0 rgba(31, 157, 92, 0.098),
+      -72px 56px 0 0 rgba(31, 157, 92, 0.08),
+      -16px -80px 0 0 rgba(31, 157, 92, 0.088),
+      -64px -40px 0 0 rgba(31, 157, 92, 0.112),
+      -48px -64px 0 0 rgba(31, 157, 92, 0.108),
+      64px -48px 0 0 rgba(31, 157, 92, 0.089),
+      8px 64px 0 0 rgba(31, 157, 92, 0.103);
     }
 
     #mascot-wrap {
@@ -2281,7 +2457,7 @@
       #mascot { animation: none; }
     }
     @media (max-width: 767px) {
-      .hero-pixels { transform: scale(0.55); }
+      .hero-pixels::before { display: none; }
     }
   </style>
 </head>
@@ -2317,9 +2493,14 @@
           Ready in days.
         </p>
         <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
-          <code class="border border-border px-5 py-3 rounded-lg text-sm bg-subtle">
-            pip install django-ai-sdk
-          </code>
+          <div class="install-field border border-border rounded-lg text-sm bg-subtle">
+            <div class="install-tabs" role="tablist" aria-label="Installer">
+              <button type="button" role="tab" aria-selected="true" data-cmd="uv add django-ai-sdk">uv</button>
+              <button type="button" role="tab" aria-selected="false" data-cmd="pip install django-ai-sdk">pip</button>
+            </div>
+            <code id="install-cmd">uv add django-ai-sdk</code>
+            <button type="button" class="install-copy" aria-label="Copy install command"><i class="ph-bold ph-copy"></i></button>
+          </div>
           <a href="docs/" class="bg-text text-surface px-6 py-3 rounded-lg text-sm font-medium hover:bg-accent transition text-center">
             Go to docs →
           </a>
@@ -2354,9 +2535,9 @@
             <span class="code-pane-dot"></span><span class="code-pane-dot"></span><span class="code-pane-dot"></span>
             <span class="code-pane-name">Terminal</span>
           </div>
-          <pre class="overflow-x-auto"><code class="language-bash">pip install django-ai-sdk
+          <pre class="overflow-x-auto"><code class="language-bash">uv add django-ai-sdk
 # or
-uv add django-ai-sdk</code></pre>
+pip install django-ai-sdk</code></pre>
         </div>
         <div class="code-pane mt-3">
           <div class="code-pane-bar">
@@ -2622,6 +2803,28 @@ async def chat(request, payload: ChatRequest):
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/python.min.js"></script>
   <script>hljs.highlightAll();</script>
   <script>
+    (function () {
+      var cmd = document.getElementById('install-cmd');
+      var tabs = document.querySelectorAll('.install-tabs button');
+      tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t === tab)); });
+          cmd.textContent = tab.dataset.cmd;
+        });
+      });
+      var copy = document.querySelector('.install-copy');
+      copy.addEventListener('click', function () {
+        navigator.clipboard.writeText(cmd.textContent).then(function () {
+          copy.innerHTML = '<i class="ph-bold ph-check"></i>';
+          copy.classList.add('is-copied');
+          setTimeout(function () {
+            copy.innerHTML = '<i class="ph-bold ph-copy"></i>';
+            copy.classList.remove('is-copied');
+          }, 1200);
+        });
+      });
+    })();
+
     document.querySelectorAll('.code-pane pre').forEach(function (pre) {
       var btn = document.createElement('button');
       btn.className = 'copy-btn';
