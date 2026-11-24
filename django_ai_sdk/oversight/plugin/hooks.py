@@ -1,13 +1,5 @@
 """The oversight hooks a Haystack Agent runs. Each does nothing outside a turn.
 
-    before_run   GateQuestionHook     judge history and question; mask, or block the run
-    before_llm   StopClosedTurnHook   stop a run whose turn has closed
-    before_llm   LimitToolChoiceHook  offer only the tools the turn allows
-    before_tool  JudgeToolCallHook    block a tool call the policy says no to
-    after_tool   MaskToolResultHook   mask a tool result before the model reads it
-    after_run    RecordUsageHook      add model and token usage to the turn
-    after_run    JudgeAnswerHook      judge the answer: pass, mask or withhold it
-
 If any tool call in a step is blocked, the whole step is answered with stubs,
 because Haystack runs a step's calls all together or not at all.
 """
@@ -27,20 +19,24 @@ from haystack.dataclasses import ChatRole, TextContent
 from pydantic import ValidationError
 
 from django_ai_sdk.adapters.citations.registry import current_registry
+from django_ai_sdk.adapters.run import ATTACHMENT_CONTEXT_META_KEY
 from django_ai_sdk.agents.tool_agent import (
     BLOCKED_META_KEY,
     MASKED_META_KEY,
+    STREAMED_META_KEY,
     answer_calls_with,
     pending_tool_calls,
     replace_messages,
+    tool_failed,
     tool_results,
 )
-from django_ai_sdk.common import ChatMessage, last_user_message
+from django_ai_sdk.common import Attachment, ChatMessage
 from django_ai_sdk.oversight.guard import current_guard, outlived_turn
 from django_ai_sdk.oversight.guard.notices import TOOL_UNAVAILABLE_MESSAGE, UNCHECKED_TEXT
+from django_ai_sdk.oversight.guard.stages import StageResult
 from django_ai_sdk.oversight.plugin.request import REQUEST_KEY, TurnRequest
 from django_ai_sdk.oversight.rules import Block
-from django_ai_sdk.oversight.types import ToolCall
+from django_ai_sdk.oversight.types import Stage, ToolCall
 from django_ai_sdk.pricing import token_counts
 
 if TYPE_CHECKING:
@@ -50,7 +46,6 @@ if TYPE_CHECKING:
 
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.oversight.guard import TurnGuard
-    from django_ai_sdk.oversight.guard.stages import StageResult
 
 # An Agent saved with these hooks loads again.
 allow_deserialization_module(__name__)
@@ -90,6 +85,14 @@ class StopClosedTurnHook(OversightHook):
         self.run(state)
 
 
+# On the system message that tells the model which tools oversight took away.
+TOOLS_REMOVED_META_KEY = "django_ai_sdk.oversight.tools_removed"
+TOOLS_REMOVED_MESSAGE = gettext_lazy(
+    "These tools are not available for this message: {names}. Answer without them, and "
+    "don't say you used them."
+)
+
+
 class LimitToolChoiceHook(OversightHook):
     allowed_hook_points = ["before_llm"]  # noqa: RUF012
 
@@ -100,7 +103,19 @@ class LimitToolChoiceHook(OversightHook):
         # Haystack hands this same list to the model and the ToolInvoker for the
         # step, so filtering it in place takes the tools away.
         tools = state.data["tools"]
-        tools[:] = [tool for tool in tools if guard.allows_tool(tool.name)]
+        kept = [tool for tool in tools if guard.allows_tool(tool.name)]
+        removed = sorted({tool.name for tool in tools} - {tool.name for tool in kept})
+        tools[:] = kept
+        messages = state.data.get("messages") or []
+        told = [m.meta.get(TOOLS_REMOVED_META_KEY) for m in messages]
+        # Each step gets the full list again, so the model is told once per set removed.
+        if removed and removed not in told and "messages" in state.schema:
+            # The system prompt may still describe them; told nothing, a model says it used them.
+            note = HaystackChatMessage.from_system(
+                str(TOOLS_REMOVED_MESSAGE).format(names=", ".join(removed)),
+                meta={TOOLS_REMOVED_META_KEY: removed},
+            )
+            state.set("messages", [note])
 
     async def run_async(self, state: State) -> None:
         self.run(state)
@@ -110,11 +125,16 @@ class LimitToolChoiceHook(OversightHook):
 REPLACED_META_KEY = "django_ai_sdk.oversight.replaced"
 
 
+# The call id a joined run's question is masked under: the same question is judged once.
+JOINED = "joined"
+
+
 class GateQuestionHook(OversightHook):
     """Judge history and question, then mask them in place or block the run.
 
     A block ends the run before the first model call. `on_gated` runs only once
-    the question passed, so a caller stores only gated questions.
+    the question passed, so a caller stores only gated questions. A run that
+    joined an outer turn has its question judged there, like a tool result.
     """
 
     allowed_hook_points = ["before_run"]  # noqa: RUF012
@@ -132,6 +152,8 @@ class GateQuestionHook(OversightHook):
                 guard.notices.pending.append(gate.notice)
             # Before any citations card shows them.
             await mask_sources(guard, current_registry.get())
+        elif (outer := current_guard()) is not None:
+            turn.gate_result = await mask_joined_question(state, outer)
         turn.first_produced_index = len(state.data.get("messages") or [])
         if turn.on_gated is not None:
             await turn.on_gated(turn)
@@ -140,31 +162,73 @@ class GateQuestionHook(OversightHook):
 async def judge_run_input(state: State, guard: TurnGuard, *, vouched: bool) -> StageResult:
     """Judge history, then question, masking each in the run's messages."""
     messages = list(state.data.get("messages") or [])
+    asked = question_index(messages)
     # The question as rendered (e.g. a subagent's user_prompt); the turn opened before that.
-    question = next((m.text or "" for m in reversed(messages) if m.is_from(ChatRole.USER)), "")
-    guard.original_input = guard.context.input = question
-    said = [
+    question = ChatMessage(
+        role="user", content=said_text(messages[asked]) if asked is not None else ""
+    )
+    guard.original_input = guard.context.input = question.content
+    earlier = [
         i
         for i, m in enumerate(messages)
-        if m.role in (ChatRole.USER, ChatRole.ASSISTANT) and m.text
+        if i != asked and m.role in (ChatRole.USER, ChatRole.ASSISTANT) and said_text(m)
     ]
-    judged = [
-        ChatMessage(role=messages[i].role.value, content=messages[i].text or "") for i in said
-    ]
-    if judged:
-        checked = await guard.gate_history(judged, history=not vouched)
-        if checked.blocked:
-            return checked
+    judged = [as_judged(messages[i]) for i in earlier]
+    checked = await guard.gate_history(judged, question, history=not vouched)
+    if checked.blocked:
+        return checked
     gate = await guard.gate()
     if gate.blocked:
         return gate
-    if gate.changed and (question := last_user_message(judged)) is not None:
+    if gate.changed:
         question.content = gate.text
-    for index, copy in zip(said, judged, strict=True):
-        if copy.content != messages[index].text:
-            messages[index] = masked_message(messages[index], copy.content)
+    for index, copy in zip([*earlier, asked], [*judged, question], strict=True):
+        text = copy.content + "".join(a.context for a in copy.attachments)
+        if index is not None and text != said_text(messages[index]):
+            messages[index] = masked_message(messages[index], text)
     state.set("messages", messages, handler_override=replace_values)
     return gate
+
+
+async def mask_joined_question(state: State, guard: TurnGuard) -> StageResult:
+    """Judge the question of a run that joined `guard`'s turn like a tool result.
+
+    Such a run has no gate of its own. The messages before its question are the
+    outer turn's, judged there. Returns what the caller's copy should read.
+    """
+    messages = list(state.data.get("messages") or [])
+    asked = question_index(messages)
+    text = said_text(messages[asked]) if asked is not None else ""
+    if asked is None or not text:
+        return StageResult(Stage.GATE, text=text)
+    masked = await guard.mask_result(JOINED, text)
+    if masked != text:
+        messages[asked] = masked_message(messages[asked], masked)
+        state.set("messages", messages, handler_override=replace_values)
+    return StageResult(Stage.GATE, text=masked, changed=masked != text)
+
+
+def question_index(messages: list[HaystackChatMessage]) -> int | None:
+    """The last message a person sent. Every other text, a reply after it too, is history."""
+    return next(
+        (i for i in reversed(range(len(messages))) if messages[i].is_from(ChatRole.USER)), None
+    )
+
+
+def said_text(message: HaystackChatMessage) -> str:
+    """Every text part: the model reads them all."""
+    return "\n\n".join(message.texts)
+
+
+def as_judged(message: HaystackChatMessage) -> ChatMessage:
+    """A copy to judge, with any attachment context apart from what the person wrote."""
+    text = said_text(message)
+    role = "user" if message.is_from(ChatRole.USER) else "assistant"
+    at = message.meta.get(ATTACHMENT_CONTEXT_META_KEY)
+    if at is None:
+        return ChatMessage(role=role, content=text)
+    context = Attachment(document_id="", context=text[at:])
+    return ChatMessage(role=role, content=text[:at], attachments=[context])
 
 
 def masked_message(message: HaystackChatMessage, text: str) -> HaystackChatMessage:
@@ -224,6 +288,8 @@ class JudgeToolCallHook(OversightHook):
         if step is None:
             return
         guard, messages = step
+        # A model may use a call id again; only this step's own stubs go unjudged.
+        guard.masks.answered_here.difference_update(c.id for c in messages[-1].tool_calls)
         block_messages: dict[int, str] = {}
         for index, call in enumerate(messages[-1].tool_calls):
             seen = _as_tool_call(call, state)
@@ -233,8 +299,11 @@ class JudgeToolCallHook(OversightHook):
                 block_messages[index] = reason
         if not block_messages:
             return
-        stubs = _block_tool_step(state, messages, block_messages)
-        if guard.on_tool_results is not None:
+        # The whole step is answered with stubs, which are oversight's own words.
+        guard.masks.answered_here.update(call.id for call in messages[-1].tool_calls if call.id)
+        streamed = guard.on_tool_results is not None
+        stubs = _block_tool_step(state, messages, block_messages, streamed=streamed)
+        if streamed:
             await guard.on_tool_results(stubs)
 
 
@@ -272,7 +341,11 @@ def _agent_name(state: State) -> str:
 
 
 def _block_tool_step(
-    state: State, messages: list[HaystackChatMessage], block_messages: dict[int, str]
+    state: State,
+    messages: list[HaystackChatMessage],
+    block_messages: dict[int, str],
+    *,
+    streamed: bool = False,
 ) -> list[HaystackChatMessage]:
     return answer_calls_with(
         state,
@@ -282,7 +355,7 @@ def _block_tool_step(
                 {"refused": block_messages[index]}
                 if index in block_messages
                 else {"skipped": str(SKIPPED_CALL_MESSAGE)},
-                {BLOCKED_META_KEY: index in block_messages},
+                {BLOCKED_META_KEY: index in block_messages, STREAMED_META_KEY: streamed},
             )
             for index in range(len(messages[-1].tool_calls))
         ],
@@ -316,7 +389,7 @@ class MaskToolResultHook(OversightHook):
                     result=masked
                     if isinstance(masked, str)
                     else "\n".join(p.text for p in masked if isinstance(p, TextContent)),
-                    error=bool(result.error),
+                    error=tool_failed(result),
                     agent=_agent_name(state),
                 )
             )

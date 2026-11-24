@@ -4,8 +4,7 @@ from django_ai_sdk.integrations.mcp.loader import MCPIntegration
 
 
 class LinearIntegration(MCPIntegration):
-    """Reads AI_SDK_INTEGRATIONS["linear"]["TOKEN"]. A missing token doesn't crash
-    boot; the integration registers and reports itself as needing setup instead."""
+    """Linear MCP server with a shared token from AI_SDK_INTEGRATIONS["linear"]["TOKEN"]."""
 
     name = "linear"
     label = "Linear"

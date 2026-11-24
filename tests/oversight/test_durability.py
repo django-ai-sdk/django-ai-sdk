@@ -213,7 +213,7 @@ class TestWriteAhead:
             ChatMessage(role="assistant", content="No."),
             ChatMessage(role="user", content="hello"),
         ]
-        assert (await guard.gate_history(messages)).blocked
+        assert (await guard.gate_history(messages[:-1], messages[-1])).blocked
         turn = await Turn.objects.aget(id=guard.id)
         assert (turn.status, turn.outcome) == ("open", "blocked")
 

@@ -248,6 +248,19 @@ class TestCascade:
         answer = await self.answer(unsure, judge)
         assert (answer.value, answer.answerer) == (True, "judge")
         assert [a.answerer for a in answer.trail] == ["cheap"]
+        # Neither names a model, so there is no dispute to speak of.
+        assert not answer.disputed
+
+    async def test_two_models_that_disagree_leave_the_answer_disputed(self):
+        first = Says(lambda lens, v: Answer(value=False, confidence=0.4, model="a"), name="a")
+        second = Says(lambda lens, v: Answer(value=True, confidence=0.9, model="b"), name="b")
+        assert (await self.answer(first, second)).disputed
+        agrees = Says(lambda lens, v: Answer(value=False, confidence=0.9, model="b"), name="b")
+        assert not (await self.answer(first, agrees)).disputed
+        # Nobody sure: the last answer stands, and the dispute is still on it.
+        unsure = Says(lambda lens, v: Answer(value=True, confidence=0.1, model="b"), name="b")
+        last = await self.answer(first, unsure)
+        assert (last.value, last.confidence, last.disputed) == (True, 0.1, True)
 
     async def test_it_falls_back_to_the_last_usable_answer(self):
         unsure = Says(lambda lens, v: Answer(value=False, confidence=0.4), name="cheap")
@@ -592,6 +605,15 @@ class TestTypeSafe:
             assert (await answer_lens(flag, turn_context("x"), Stage.GATE)).error == NO_JUDGE
             taken = await answer_lens(TakenFrom(), turn_context("q", "a", ["x"]), Stage.REFLECT)
             assert taken.error == NO_JUDGE
+
+    async def test_a_lens_typesafe_cannot_answer_fails_rather_than_passing(self):
+        from django_ai_sdk.oversight import Entities, TypeSafe
+        from django_ai_sdk.oversight.guard.judging import NO_JUDGE
+
+        names = JudgeLens(name="names", answer=Entities, question="Which names?", judges=[TypeSafe()])
+        with patch.object(TypeSafe, "missing", return_value=""):
+            assert not TypeSafe().answers(names)
+            assert (await answer_lens(names, turn_context("Jan"), Stage.GATE)).error == NO_JUDGE
 
     async def test_a_failed_request_is_unavailable_and_logs_its_type_never_its_body(self):
         from unittest.mock import MagicMock

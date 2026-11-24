@@ -14,28 +14,17 @@ class DjangoAISDKConfig(AppConfig):
         import django_ai_sdk.storage.db  # noqa: F401
         import django_ai_sdk.storage.memory  # noqa: F401
 
-        # Autodiscovers every installed app's `agents` module, so defining an
-        # Agent subclass there is enough on its own — no per-app ready() hook,
-        # no settings entry.
-        #
-        # Integrations get no equivalent autodiscovery: an agent is a thing you
-        # *define*, an integration is a thing you *enable*, and INSTALLED_APPS is the
-        # explicit switch for that — you can ship an integration app and leave it
-        # uninstalled. Autodiscovering integrations would mean two paths writing one
-        # registry at different points in startup, which is what this package replaced.
+        # Defining an Agent in an app's `agents` module is enough. Integrations are not
+        # autodiscovered: INSTALLED_APPS is the explicit switch that enables one.
         autodiscover_modules("agents")
 
         from django_ai_sdk.agents.registry import registry
 
         registry.setup()
 
-        # After setup(), so a step can name its agent as `MyAgent().agent_id`.
-        autodiscover_modules("workflows")
+        from django_ai_sdk.checks import check_oversight_installed, check_webhook_dedup_cache
 
-        from django_ai_sdk.checks import check_oversight_installed
-        from django_ai_sdk.workflows.checks import check_workflows
-
-        # A rejected declaration fails no request, so nothing else would surface it.
-        register_check(check_workflows)
-        # Nor does a policy nothing enforces: the oversight app is not installed.
+        # Warn about policies that nothing enforces because the oversight app is
+        # missing. The workflows app registers its own checks.
         register_check(check_oversight_installed)
+        register_check(check_webhook_dedup_cache)

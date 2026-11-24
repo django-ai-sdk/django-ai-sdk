@@ -13,9 +13,11 @@ from django_ai_sdk.oversight import (
     JudgeLens,
     L,
     LLMJudge,
+    Mask,
     Mode,
     Maybe,
     PatternJudge,
+    PIILens,
     Policy,
     Rule,
     register_policy,
@@ -257,6 +259,39 @@ class TestChecks:
         assert level(Maybe("fc-nobody")) == [("W008", WARNING)]
         assert level("fc-nobody") == [("E007", ERROR)]
 
+    def test_an_optional_judge_that_is_defined_but_cannot_run_is_an_error(self):
+        from django_ai_sdk.oversight import TypeSafe
+        from django_ai_sdk.oversight.checks import lens_checks
+        from django_ai_sdk.oversight.registry import build_policy
+
+        # Undefined, the lens is off by choice (W008). Defined without its key, the lens is
+        # asked and fails on every turn, so the rule blocks: that is not a warning.
+        name = policy(
+            "fc-maybe-defined",
+            [JudgeLens(name="risky", question="Risky?", judges=[Maybe("classifier")])],
+            [Rule("r", when=L("risky").is_true, then=Block(), mode=ENFORCE)],
+        )
+        with (
+            override_settings(AI_SDK_OVERSIGHT={"JUDGES": {"classifier": TypeSafe()}}),
+            patch.object(TypeSafe, "missing", return_value="no key"),
+        ):
+            found = lens_checks(name, build_policy(name))
+        assert [m.id.rsplit(".", 1)[1] for m in found] == ["E007"]
+
+    def test_an_enforced_rule_on_a_lens_its_judges_cannot_answer(self):
+        from django_ai_sdk.oversight import Entities, TypeSafe
+        from django_ai_sdk.oversight.checks import lens_checks
+        from django_ai_sdk.oversight.registry import build_policy
+
+        name = policy(
+            "fc-entities-classifier",
+            [JudgeLens(name="names", answer=Entities, question="Which?", judges=[TypeSafe()])],
+            [Rule("r", when=L("names").is_true, then=Block(), mode=ENFORCE)],
+        )
+        with patch.object(TypeSafe, "missing", return_value=""):
+            found = lens_checks(name, build_policy(name))
+        assert [m.id.rsplit(".", 1)[1] for m in found] == ["E007"]
+
     def test_a_notify_that_reaches_no_one_is_flagged(self):
         from django_ai_sdk.oversight.rules import Notify
         from django_ai_sdk.oversight.checks import policy_checks
@@ -303,6 +338,28 @@ class TestChecks:
         warned = [m.msg for m in policy_checks(set()) if m.id.endswith(".W018")]
         assert any(repr(mixed) in msg and "'r'" in msg for msg in warned)
         assert not any(repr(reported) in msg or repr(alone) in msg for msg in warned)
+
+    def test_a_mask_that_waits_past_the_gate_warns(self):
+        # The rule waits for the finish lens, so the model reads the question unmasked.
+        from django_ai_sdk.oversight.checks import policy_checks
+
+        asked = PIILens(name="asked", stages=[Stage.GATE], kinds=["email"])
+        said = PIILens(name="said", subject=Subject.ANSWER, stages=[Stage.FINISH], kinds=["email"])
+        either = L("asked").is_true | L("said").is_true
+        waits = policy(
+            "fc-mask-waits", [asked, said], [Rule("m", when=either, then=Mask(), mode=ENFORCE)]
+        )
+        split = policy(
+            "fc-mask-split",
+            [asked, said],
+            [
+                Rule("m", when=L("asked").is_true, then=Mask(), mode=ENFORCE),
+                Rule("n", when=L("said").is_true, then=Mask(), mode=ENFORCE),
+            ],
+        )
+        warned = [m.msg for m in policy_checks(set()) if m.id.endswith(".W019")]
+        assert any(repr(waits) in msg and "'m'" in msg for msg in warned)
+        assert not any(repr(split) in msg for msg in warned)
 
     def test_a_policy_name_declared_twice_is_an_error(self, registry_snapshot: Any):
         class First(Policy):

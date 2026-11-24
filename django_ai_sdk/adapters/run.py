@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# On a user message: where its attachment context starts, 0 when it can't be told apart.
+ATTACHMENT_CONTEXT_META_KEY = "django_ai_sdk.attachment_context_at"
+
 
 def get_user_text(message: ChatMessage) -> str:
     """User text followed by the context line of each attachment."""
@@ -35,20 +38,22 @@ def user_content(message: ChatMessage, text: str) -> str | None:
 def get_user_message(message: ChatMessage) -> HaystackChatMessage:
     """Haystack user message, multimodal when images were inlined for a vision model."""
     text = get_user_text(message)
+    # The gate judges attachment context apart: a stored thread never vouches for it.
+    meta = {ATTACHMENT_CONTEXT_META_KEY: len(message.content)} if text != message.content else None
     images = [
         ImageContent(base64_image=a.data, mime_type=a.media_type)
         for a in message.attachments
         if a.data
     ]
     if not images:
-        return HaystackChatMessage.from_user(text)
-    return HaystackChatMessage.from_user(content_parts=[text, *images] if text else images)
+        return HaystackChatMessage.from_user(text, meta=meta)
+    return HaystackChatMessage.from_user(
+        meta=meta, content_parts=[text, *images] if text else images
+    )
 
 
 class Run:
-    """
-    Runnable Haystack adapter.
-    """
+    """Runnable Haystack adapter."""
 
     model: str | None = None
     instructions: str | None = None
@@ -113,9 +118,7 @@ class Run:
     ) -> T | str | None:
         """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
 
-        `request` names the turn (see `oversight.plugin`); `run_with_oversight` runs
-        it under oversight. Raises `Blocked` when the turn's gate blocked
-        the question or its finish withheld the answer.
+        Raises `Blocked` when the gate blocked the question or finish withheld the answer.
         """
         from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
 

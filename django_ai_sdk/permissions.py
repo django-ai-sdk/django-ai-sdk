@@ -74,6 +74,8 @@ class Operation(StrEnum):
     VIEW_WORKFLOW = "view_workflow"
     RUN_WORKFLOW = "run_workflow"
     MANAGE_WORKFLOW = "manage_workflow"
+    # Decide an approval step: let a waiting run go on, or stop it.
+    APPROVE_WORKFLOW = "approve_workflow"
     # Oversight records without content: turn fields, rule matches, counts.
     VIEW_OVERSIGHT_METRICS = "view_oversight_metrics"
     # Turn content: question, answer, sources, reasons, notes and who asked.
@@ -118,11 +120,7 @@ class BasePermission(ABC):
     ) -> QuerySet:
         """Filter *queryset* to items this class grants *operation* for *user*.
 
-        Implement this to let list endpoints apply your permission rules at the
-        database level instead of post-filtering every row.
-
-        Return the filtered ``QuerySet`` or ``queryset.none()`` to deny all items.
-        The default implementation returns the queryset unchanged.
+        Lets list endpoints filter in the database. Default: the queryset unchanged.
         """
         return queryset
 
@@ -176,11 +174,7 @@ class IsInAllowedGroups(BasePermission):
 
 
 class IsOwner(BasePermission):
-    """Allow only the authenticated owner of an object.
-
-    Parameterized: ``IsOwner(field="user_id")`` checks ``obj.user_id``.
-    Use ``IsOwner(field="owner_id")`` etc. for custom attribute names.
-    """
+    """Allow only the authenticated owner: ``IsOwner(field="user_id")`` checks ``obj.user_id``."""
 
     def __init__(self, field: str = "user_id") -> None:
         self.field = field
@@ -234,7 +228,6 @@ class ThreadDefaultPermission(BasePermission):
     )
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
-        # Only authenticated users can access threads
         if user is None or not user.is_authenticated:
             return False
         return True
@@ -296,11 +289,7 @@ class MemoryDefaultPermission(BasePermission):
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet:
-        """Filter *queryset* to memories this user may access for *operation*.
-
-        Applies the same rules as ``has_object_permission`` but at the
-        database level so list views avoid iterating every row.
-        """
+        """Filter *queryset* by the ``has_object_permission`` rules, in the database."""
         if user is None or not bool(user.is_authenticated):
             return queryset.none()
 
@@ -448,12 +437,16 @@ class IntegrationDefaultPermission(BasePermission):
 
 
 class WorkflowDefaultPermission(BasePermission):
-    """Any authenticated user may view, run, and author workflows.
+    """Any authenticated user may run a workflow. Authoring needs a model permission.
 
-    A stored definition is managed by whoever created it, and running someone
-    else's active definition is not managing it. A run is read by whoever it ran
-    as: its outputs are that principal's content. Staff manage and read every one
-    of both.
+    - Viewing and running a stored workflow: any authenticated user.
+    - Managing (create, edit, delete and list stored definitions, and running a
+      definition that is neither stored nor registered): the `MANAGE_PERMISSION` model
+      permission. A holder manages every stored definition.
+    - A run is read by the user it ran as, or by a holder of `VIEW_RUNS_PERMISSION`. Only
+      the user it ran as resumes or cancels it. `is_staff` grants nothing here.
+    - Deciding an approval step: the `APPROVE_PERMISSION` model permission, and never on
+      a run the approver acts as or started, so nobody approves their own run.
 
     Ownership lives here rather than in `WorkflowService`, so a deployment that
     overrides the `workflow` domain replaces the whole rule and not half of it.
@@ -463,10 +456,18 @@ class WorkflowDefaultPermission(BasePermission):
     WRITE: frozenset[Operation] = frozenset({Operation.RUN_WORKFLOW})
     MANAGE: frozenset[Operation] = frozenset({Operation.MANAGE_WORKFLOW})
 
+    MANAGE_PERMISSION = "django_ai_sdk_workflows.change_workflow"
+    VIEW_RUNS_PERMISSION = "django_ai_sdk_workflows.view_workflowrun"
+    APPROVE_PERMISSION = "django_ai_sdk_workflows.approve_steprun"
+
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
         if user is None or not bool(user.is_authenticated):
             return False
-        return operation in self.READ | self.WRITE | self.MANAGE
+        if operation in self.MANAGE:
+            return await _ahas_perm(user, self.MANAGE_PERMISSION)
+        if operation is Operation.APPROVE_WORKFLOW:
+            return await _ahas_perm(user, self.APPROVE_PERMISSION)
+        return operation in self.READ | self.WRITE
 
     async def has_object_permission(
         self,
@@ -475,18 +476,24 @@ class WorkflowDefaultPermission(BasePermission):
         obj: Any,
         **kwargs: Any,
     ) -> bool:
-        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+        from django_ai_sdk.workflows.models import Workflow, WorkflowRun
 
         if user is None or not bool(user.is_authenticated):
             return False
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
-            return True
-        if isinstance(obj, WorkflowSettings):
+        if isinstance(obj, Workflow):
             if operation in self.MANAGE:
-                return _owned_by(obj.created_by_id, user)
-            return True
+                return await _ahas_perm(user, self.MANAGE_PERMISSION)
+            return operation in self.READ | self.WRITE
         if isinstance(obj, WorkflowRun):
-            return _owned_by(obj.user_id, user)
+            if operation is Operation.APPROVE_WORKFLOW:
+                # SECURITY: four eyes. Nobody decides on a run that acts as them, or that
+                # they started as another account (a trigger fired by hand).
+                own = _owned_by(obj.user_id, user) or _owned_by(obj.started_by_id, user)
+                return not own and await _ahas_perm(user, self.APPROVE_PERMISSION)
+            if _owned_by(obj.user_id, user):
+                return True
+            # Viewers may read a run but not resume it, since resuming acts as its user.
+            return operation in self.READ and await _ahas_perm(user, self.VIEW_RUNS_PERMISSION)
         return False
 
     def get_queryset_perms(
@@ -495,18 +502,34 @@ class WorkflowDefaultPermission(BasePermission):
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet:
-        """Scope a list to what `user` owns, by the same rule as the object check."""
-        from django_ai_sdk.workflows.models import WorkflowRun, WorkflowSettings
+        """Scope a list by the same rule as the object check.
+
+        Checking model permissions may query the database, so async callers should
+        wrap this in `sync_to_async`.
+        """
+        from django_ai_sdk.workflows.models import Workflow, WorkflowRun
 
         if user is None or not bool(user.is_authenticated):
             return queryset.none()
-        if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        if queryset.model is Workflow:
+            if operation in self.MANAGE and not _has_perm(user, self.MANAGE_PERMISSION):
+                return queryset.none()
             return queryset
-        if queryset.model is WorkflowSettings:
-            return queryset.filter(created_by_id=user.pk)
         if queryset.model is WorkflowRun:
+            if operation in self.READ and _has_perm(user, self.VIEW_RUNS_PERMISSION):
+                return queryset
             return queryset.filter(user_id=user.pk)
         return queryset
+
+
+def _has_perm(user: UserType, perm: str) -> bool:
+    has_perm = getattr(user, "has_perm", None)
+    return has_perm is not None and bool(has_perm(perm))
+
+
+async def _ahas_perm(user: UserType, perm: str) -> bool:
+    ahas_perm = getattr(user, "ahas_perm", None)
+    return ahas_perm is not None and bool(await ahas_perm(perm))
 
 
 def user_pk(user: UserType) -> Any:
@@ -540,12 +563,7 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
 
 @lru_cache(maxsize=10)
 def get_domain_permissions(domain: PermissionDomain) -> list[type[BasePermission]]:
-    """Resolve default permission classes for a permission domain.
-
-    Resolution:
-    1. AI_SDK_PERMISSIONS setting (per-domain override), or
-    2. Built-in DOMAIN_PERMISSION_DEFAULTS (defaults)
-    """
+    """Resolve a domain's permission classes: AI_SDK_PERMISSIONS, else the built-in defaults."""
     overrides = resolve_setting("AI_SDK_PERMISSIONS", {}).get(domain.value)
     if overrides is not None:
         return [import_string(p) for p in overrides] if overrides else []
@@ -588,13 +606,9 @@ class PermissionsMixin:
         user: UserType,
         obj: Any,
     ) -> dict[str, bool]:
-        """Auto-discover frozenset permission groups and check user against them.
+        """Check the user against each upper-case frozenset group (READ, WRITE, MANAGE, ...).
 
-        Iterates the domain's permission classes, finds ``READ`` / ``WRITE`` /
-        ``MANAGE`` (and any other upper-case frozensets), and checks one
-        representative operation per group against the full permission chain.
-
-        Returns a dict like ``{"read": True, "write": False, "manage": False}``.
+        Returns e.g. ``{"read": True, "write": False, "manage": False}``.
         """
         groups: dict[str, Operation] = {}
         for perm_cls in cls.get_default_permissions():
@@ -634,12 +648,7 @@ class PermissionsMixin:
         queryset: QuerySet,
         permissions: list[type[BasePermission]] | None = None,
     ) -> QuerySet:
-        """Filter a queryset through the domain's permission classes.
-
-        Each permission class in the domain chain receives the queryset and
-        can return a filtered version.  Classes that don't know how to filter
-        this model pass it through unchanged.
-        """
+        """Filter a queryset through the domain's permission classes; unknown models pass through."""
         perms = permissions if permissions is not None else cls.get_default_permissions()
         for perm_cls in perms:
             perm = ensure_permission_instance(perm_cls)
@@ -650,22 +659,14 @@ class PermissionsMixin:
 def ensure_permission_instance(
     perm: type[BasePermission] | BasePermission,
 ) -> BasePermission:
-    """Normalise a permission class *or* instance to an instance.
-
-    Callers may store bare classes (e.g. ``[IsAuthenticated]``) or pre-built
-    instances (e.g. ``[IsInAllowedGroups(groups=["eng"])]``).  Both forms are
-    accepted throughout the permission-checking API; this helper enforces a
-    consistent runtime type.
-    """
+    """Normalise a permission class *or* instance (e.g. ``IsInAllowedGroups(...)``) to an instance."""
     return perm() if isinstance(perm, type) else perm
 
 
 def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
     """`agent.permissions` if non-empty, else the AGENT domain default.
 
-    An empty list falls back rather than disabling every check, matching
-    get_integration_permissions and get_automation_permissions. An agent that really
-    wants no gating says so with [AllowAll].
+    An empty list falls back rather than disabling checks; use [AllowAll] for no gating.
     """
     perms = getattr(agent, "permissions", None) if agent is not None else None
     if perms:
@@ -674,12 +675,7 @@ def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
 
 
 def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
-    """Resolve perms for an integration service.
-
-    Resolution:
-    1. ``service.permissions`` if non-empty (per-integration override)
-    2. Domain default for INTEGRATIONS (fallback)
-    """
+    """``service.permissions`` if non-empty, else the INTEGRATIONS domain default."""
     perms = getattr(service, "permissions", None)
     if perms:
         return perms

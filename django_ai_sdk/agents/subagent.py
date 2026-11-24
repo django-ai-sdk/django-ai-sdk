@@ -25,6 +25,7 @@ from django_ai_sdk.utils import resolve_setting
 
 from .tool_agent import (
     SKIPPED_META_KEY,
+    STREAMED_META_KEY,
     ToolAgent,
     default_hooks,
 )
@@ -171,12 +172,10 @@ def _tool_chunks_only(
     seen: set[str] | None = None,
 ) -> StreamingCallbackT | None:
     """Return a callback forwarding only tool chunks, tagged with ``name``.
-    ``seen`` collects the ids of forwarded tool results.
 
-    Haystack streams a tool result before the after_tool hooks mask it, so a
-    forwarded result is masked here by the subagent's own guard (current while
-    its run streams): the coordinator's policy may not hide what this one does.
-    A sync run only ever joins the coordinator's turn, whose stream masks it.
+    ``seen`` collects forwarded result ids. Haystack streams a result before after_tool
+    hooks mask it, so the subagent's own guard masks it here, and a call goes without
+    arguments its tool stage may refuse. A sync run only joins the coordinator's turn.
     """
     if callback is None:
         return None
@@ -189,7 +188,14 @@ def _tool_chunks_only(
         from django_ai_sdk.oversight.plugin import mask_streamed_result
 
         async def filtered(chunk: StreamingChunk) -> None:
-            if not (chunk.tool_calls or chunk.tool_call_result):
+            if chunk.tool_calls:
+                calls = [
+                    dataclasses.replace(c, arguments=None) for c in chunk.tool_calls if c.tool_name
+                ]
+                if not calls:
+                    return
+                chunk = dataclasses.replace(chunk, tool_calls=calls)
+            elif not chunk.tool_call_result:
                 return
             record(chunk)
             result = callback(_tag_subagent(await mask_streamed_result(chunk), name))
@@ -221,6 +227,8 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
     """Chunks for tool results the run produced without streaming them."""
     chunks = []
     for message in result.get("messages") or []:
+        if message.meta.get(STREAMED_META_KEY):
+            continue
         for tool_result in message.tool_call_results or []:
             origin_id = tool_result.origin.id or ""
             if origin_id in seen:
@@ -233,9 +241,8 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
 class FinalResponseHook:
     """Ask for a written response when the loop ended without one, as after_run.
 
-    One tool-less call, so the outcome does not depend on there being a spare step
-    left after the tool budget fired. It runs before oversight finishes the run, so
-    the coordinator reads a checked response.
+    One tool-less call, so no spare step is needed. Runs before oversight finishes the
+    run, so the coordinator reads a checked response.
     """
 
     allowed_hook_points = ["after_run"]
@@ -325,6 +332,8 @@ class SubagentStreamFilter:
             thread_id=self._thread_id or None,
             # The coordinator reads this, so finish judges it.
             read_answer=subagent_response,
+            # Its blocked calls reach the coordinator's stream, which drops their arguments.
+            on_tool_results=outer.on_tool_results if outer is not None else None,
         )
 
     def _span(self) -> Any:

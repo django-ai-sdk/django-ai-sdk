@@ -330,6 +330,11 @@ class TestTheRecordsValue:
         for capture in ("metadata", "none"):
             assert split_answer(lens, "finish", answer, keep=capture_masker(capture))[1] == {}
 
+    def test_the_record_masks_a_number_whatever_label_precedes_it(self):
+        # The model may read an invoice number that passes the BSN check; the record keeps none.
+        keep = capture_masker("masked")
+        assert keep.text("factuurnummer: 111222333") == "factuurnummer: [BSN]"
+
     def test_a_found_name_is_masked_before_the_detectors_cut_it_apart(self):
         keep = capture_masker("masked", {f"Jan Jansen <{EMAIL}>": "person"})
         assert keep.text(f"Mail Jan Jansen <{EMAIL}> today.") == "Mail [PERSON] today."
@@ -374,3 +379,20 @@ def test_the_admin_shows_no_content_and_nobody():
     for field in ("content", "actor_id", "thread_id", "user_message_id", "message_id"):
         assert field not in turn
     assert "note" not in review and "resolved_by_id" not in review
+
+
+def test_the_admin_filters_only_by_its_list_filters():
+    """Django takes a querystring lookup on any field, so a hidden one could be searched."""
+    from django.contrib import admin
+    from django.test import RequestFactory, modify_settings
+
+    with modify_settings(INSTALLED_APPS={"append": "django.contrib.admin"}):
+        from django_ai_sdk.oversight.admin import ReviewItemAdmin, TurnAdmin
+
+        request = RequestFactory().get("/")
+        turns = TurnAdmin(Turn, admin.site)
+        reviews = ReviewItemAdmin(ReviewItem, admin.site)
+        assert turns.lookup_allowed("outcome__exact", "blocked", request)
+        for lookup in ("actor_id", "thread_id__startswith", "content__stored__icontains"):
+            assert not turns.lookup_allowed(lookup, "x", request)
+        assert not reviews.lookup_allowed("note__icontains", "salary", request)

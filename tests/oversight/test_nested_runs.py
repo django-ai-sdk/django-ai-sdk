@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
 from django.test import override_settings
 from haystack.components.generators.chat import MockChatGenerator
 from haystack.dataclasses import ChatMessage as HaystackChatMessage
-from haystack.tools import Tool
+from haystack.dataclasses import ToolCall as HaystackToolCall
+from haystack import component
+from haystack.tools import ComponentTool, Tool
 
 from django_ai_sdk.agents import Agent
 from django_ai_sdk.common import ChatMessage
@@ -21,8 +24,10 @@ from tests.oversight.helpers import (
     INJECTION,
     LenientPolicy,
     RunPolicy,
+    Storage,
     agent_with,
     call,
+    chat,
     delegation,
     make_agent,
 )
@@ -261,6 +266,67 @@ class TestSubagents:
             )
         assert streamed
         assert all("jan@example.com" not in str(result) for result in streamed)
+
+    @pytest.mark.parametrize(
+        "policy", ["test-masking", "test-guard", ""], ids=["child", "joined", "no-coordinator"]
+    )
+    async def test_a_refused_call_keeps_no_arguments_in_the_coordinators_thread(self, policy):
+        ran: list[str] = []
+        send = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="send", arguments={"text": SECRET}, id="s1")]
+        )
+
+        class Coordinator(Agent):
+            _skip_auto_register = True
+            permissions = [AllowAll]
+            name = "coord"
+            agents = [secret_subagent(ran, send, "done")]  # noqa: RUF012
+
+        tools = await Coordinator().get_agent_tools()
+        delegate = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name=tools[0].name, arguments={"task": "go"}, id="d1")]
+        )
+        storage = Storage()
+        # The subagent's policy refuses the call, in its own turn, the coordinator's, or with
+        # no coordinator policy at all.
+        parts = await chat(make_agent([delegate, "Done."], storage, tools=tools, policy=policy), "go")
+        assert ran == []
+        assert SECRET not in json.dumps([m.tool_calls for m in storage.stored], default=str)
+        # Nor does the stream show them before the subagent's tool stage refused the call.
+        assert SECRET not in json.dumps(parts)
+        # With no coordinator policy, the stub comes back as the run's own error result.
+        shown = "tool-output-available" if policy else "tool-output-error"
+        outputs = [p["toolCallId"] for p in parts if p.get("type") == shown]
+        assert outputs.count("s1") == 1
+
+    async def test_an_agent_run_inside_a_tool_sends_no_result_the_stream_never_announced(self):
+        ran: list[str] = []
+        send = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="send", arguments={"text": SECRET}, id="s1")]
+        )
+        inner = secret_subagent(ran, send, "done")
+
+        @component
+        class Research:
+            @component.output_types(result=str)
+            def run(self, query: str) -> dict:
+                raise NotImplementedError
+
+            @component.output_types(result=str)
+            async def run_async(self, query: str) -> dict:
+                messages = [ChatMessage(role="user", content=query)]
+                return {"result": str(await inner().run(messages, tools=True))}
+
+        tool = ComponentTool(component=Research(), name="research", description="research")
+        use = HaystackChatMessage.from_assistant(
+            tool_calls=[HaystackToolCall(tool_name="research", arguments={"query": "go"}, id="r1")]
+        )
+        agent = make_agent([use, "Done."], Storage(), tools=[tool], policy="test-masking")
+        parts = await chat(agent, "go")
+        assert ran == []
+        announced = {p["toolCallId"] for p in parts if p.get("type") == "tool-input-start"}
+        outputs = {p["toolCallId"] for p in parts if p.get("type", "").startswith("tool-output")}
+        assert outputs <= announced
 
     async def test_the_same_policy_joins_the_coordinators_turn(self):
         ran: list[str] = []

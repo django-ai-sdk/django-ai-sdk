@@ -1,21 +1,7 @@
 """TurnGuard checks one turn, whatever channel it came from.
 
-Chat, workflow steps and your own code open a guard and report what happens
-(sources found, tools called, text produced). The guard is asked whether to go on
-three times: at the gate, before each tool call, and at finish. Closing it writes
-the turn to the record (see `recording`) and queues the background stages.
-
-    guard = await TurnGuard.start(agent, channel="api", user=user, input=text)
-    gate = await guard.gate()
-    if gate.blocked:
-        return gate.message
-    answer = await run_my_agent(gate.text)
-    finished = await guard.finish(answer)
-    await guard.close()
-    return finished.text
-
-A guard for an agent without a policy, or with oversight off, is inert and
-allows everything.
+It decides at the gate, before each tool call, and at finish; closing records the turn and
+queues the background stages. Without a policy, or with oversight off, it is inert.
 """
 
 from __future__ import annotations
@@ -57,7 +43,7 @@ from django_ai_sdk.oversight.types import (
 from django_ai_sdk.utils import scoped
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Iterable
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
@@ -73,6 +59,9 @@ _unguarded: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _current: contextvars.ContextVar[TurnGuard | None] = contextvars.ContextVar(
     "django_ai_sdk_oversight_guard", default=None
 )
+_watched: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "django_ai_sdk_oversight_watched", default=None
+)
 
 
 def unguarded() -> contextlib.AbstractContextManager[None]:
@@ -84,15 +73,30 @@ def is_unguarded() -> bool:
     return _unguarded.get()
 
 
+@contextlib.contextmanager
+def watching_turns() -> Generator[list[str]]:
+    """Collect the ids of the turns opened inside the block, in order.
+
+    A run that joins an outer turn opens none, so it adds nothing.
+    """
+    opened: list[str] = []
+    with scoped(_watched, opened):
+        yield opened
+
+
+def note_opened(guard: TurnGuard) -> None:
+    """Tell `watching_turns()` that `guard` opened a turn of its own."""
+    if (opened := _watched.get()) is not None:
+        opened.append(guard.id)
+
+
 def guarding(guard: TurnGuard | None) -> contextlib.AbstractContextManager[None]:
     """Make `guard` current for tool hooks and get_tools(). Tasks inherit it."""
     return scoped(_current, guard if guard is not None and guard.active else None)
 
 
 @contextlib.asynccontextmanager
-async def closing_turn(
-    guard: TurnGuard, *, keep_open: bool = False, error: Callable[[], str] = str
-) -> AsyncGenerator[None]:
+async def closing_turn(guard: TurnGuard, *, keep_open: bool = False) -> AsyncGenerator[None]:
     """Close `guard` when the block ends, recording an exception as the run's error.
 
     A disconnect is recorded as "disconnected"; `Blocked` is not an error. With
@@ -102,14 +106,14 @@ async def closing_turn(
         yield
     except BaseException as exc:
         if isinstance(exc, Blocked):
-            await guard.close(error=error())
+            await guard.close()
         elif isinstance(exc, GeneratorExit | asyncio.CancelledError):
             await guard.close(error="disconnected")
         else:
             await guard.close(error=type(exc).__name__)
         raise
     if not keep_open:
-        await guard.close(error=error())
+        await guard.close()
 
 
 def current_guard() -> TurnGuard | None:
@@ -171,6 +175,8 @@ class TurnGuard:
     answered: list[Answered] = field(default_factory=list)
     matched: list[Matched] = field(default_factory=list)
     restrict: list[str] | None = None
+    # Block messages by call (name and arguments): the same call again is blocked at once.
+    blocked_calls: dict[str, str] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     created_at: Any = None
     error: str = ""
@@ -181,6 +187,8 @@ class TurnGuard:
     # Blocked unread at the gate for exceeding MAX_INPUT_CHARS.
     too_long: bool = False
     blocked: bool = False
+    # The gate ran, so a model call now counts as seen.
+    gated: bool = False
     original_input: str = ""
     original_output: str = ""
     # A turn is finished once, inside its run or after it.
@@ -219,10 +227,10 @@ class TurnGuard:
         self.blocked = True
         self.note_error(error)
 
-    def set_history(self, messages: list[ChatMessage]) -> None:
+    def set_history(self, earlier: list[ChatMessage]) -> None:
         self.context.history = [
             HistoryItem(role=m.role, content=m.content or "")
-            for m in messages[:-1]
+            for m in earlier
             if m.role in {"user", "assistant"} and m.content
         ][-HISTORY_TURNS:]
 
@@ -347,10 +355,8 @@ class TurnGuard:
     ) -> TurnGuard:
         """Open a guard for one turn of `agent`. Inert unless a policy applies.
 
-        `oversight` overrides the agent's policy (Policy subclass or name); False
-        or "" opens no turn. If the policy cannot be chosen or loaded, every stage
-        blocks and the turn is recorded as blocked; with FAIL_MODE "open" the turn
-        runs unguarded and the failure is logged.
+        `oversight` overrides the agent's policy; False or "" opens no turn. A policy that
+        fails to load blocks every stage, or under FAIL_MODE "open" runs unguarded.
         """
         if input is None:
             input = last_user_text(messages or [])
@@ -410,12 +416,13 @@ class TurnGuard:
         )
         guard.context = TurnContext(
             turn_id=guard.id,
+            thread_id=guard.thread_id,
             channel=channel,
             agent_id=agent_key(agent),
             agent_name=str(getattr(agent, "name", "") or type(agent).__name__),
             input=input,
         )
-        guard.set_history(messages)
+        guard.set_history(messages[:-1])
         guard.agent_fingerprint = fingerprint(agent)
         return guard
 
@@ -448,14 +455,22 @@ class TurnGuard:
     async def gate(self) -> StageResult:
         """Judge the question before the model sees it, then write the turn ahead."""
         result = await stages.judge_question(self)
+        self.gated = True
         await self.write_ahead()
         return result
 
     async def gate_history(
-        self, messages: list[ChatMessage], *, history: bool = True
+        self,
+        earlier: list[ChatMessage],
+        question: ChatMessage | None = None,
+        *,
+        history: bool = True,
     ) -> StageResult:
-        """Judge history the server did not store itself. Call before `gate()`."""
-        return await stages.judge_history(self, messages, history=history)
+        """Judge history the server did not store itself. Call before `gate()`.
+
+        `question` brings only its attachments: `gate()` judges what it says.
+        """
+        return await stages.judge_history(self, earlier, question, history=history)
 
     async def tool_call(self, call: ToolCall) -> str | None:
         """Judge one tool call. Returns the block message, or None."""
@@ -479,9 +494,9 @@ class TurnGuard:
     async def close(self, *, error: str = "") -> str | None:
         """Record the turn and queue the background stages. Never raises.
 
-        Pending tool-result masking is cancelled first so nothing lands on a closed
-        turn. `error` is the run's own failure; with it, a turn no rule acted on
-        gets a blank outcome. Returns the turn id, or None (inert or failed write).
+        Cancels pending tool-result masking first so nothing lands on a closed turn.
+        With the run's `error`, a turn no rule acted on gets a blank outcome.
+        Returns the turn id, or None (inert or failed write).
         """
         if not self.active or self._closed:
             return None

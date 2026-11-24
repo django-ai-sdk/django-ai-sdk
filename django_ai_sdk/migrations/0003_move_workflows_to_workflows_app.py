@@ -4,21 +4,10 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-    """
-    State-only: WorkflowRun/WorkflowRunStep/WorkflowSettings move to the
-    `django_ai_sdk.workflows` app.
-    """
+    """Empty, kept for the graph: the workflows app now creates its own tables."""
 
     dependencies = [
         ("django_ai_sdk", "0002_memory_metadata_storage"),
     ]
 
-    operations = [
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
-                migrations.DeleteModel(name="WorkflowRunStep"),
-                migrations.DeleteModel(name="WorkflowRun"),
-                migrations.DeleteModel(name="WorkflowSettings"),
-            ],
-        ),
-    ]
+    operations = []

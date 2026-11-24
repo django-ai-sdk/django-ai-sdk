@@ -1,10 +1,7 @@
 """DRF serializers for the SDK viewsets.
 
-Request serializers validate input (DRF's 400 format, browsable-API forms, schema
-generation). Response serializers render what the services return: pydantic models are
-read by attribute like any object, model instances through ``ModelSerializer``.
-
-Swap a request serializer by overriding ``serializer_classes`` on a viewset subclass.
+Request serializers validate input; response serializers render what services return.
+Swap a request serializer via ``serializer_classes`` on a viewset subclass.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rest_framework import serializers
 
 from django_ai_sdk.agents.models import AgentSettings
-from django_ai_sdk.workflows.models import WorkflowRun, WorkflowRunStep, WorkflowSettings
+from django_ai_sdk.workflows.models import StepRun, Workflow, WorkflowRun
 from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
 
@@ -196,14 +193,17 @@ class WorkflowUpdateSerializer(serializers.Serializer):
     active = serializers.BooleanField(required=False)
 
 
-class WorkflowRunRequestSerializer(serializers.Serializer):
-    workflow = WorkflowDefinitionField()
+class WorkflowStartSerializer(serializers.Serializer):
     inputs = serializers.DictField(required=False, default=dict)
 
 
-class WorkflowRunByIdSerializer(serializers.Serializer):
-    inputs = serializers.DictField(required=False, default=dict)
-    run_id = serializers.CharField(required=False, allow_null=True, default=None)
+class WorkflowDecisionSerializer(serializers.Serializer):
+    approved = serializers.BooleanField()
+    note = serializers.CharField(required=False, default="", allow_blank=True, max_length=1000)
+
+
+class WorkflowTriggerPauseSerializer(serializers.Serializer):
+    paused = serializers.BooleanField()
 
 
 class TraceQuerySerializer(serializers.Serializer):
@@ -468,13 +468,13 @@ class IntegrationSerializer(serializers.Serializer):
 
 class WorkflowSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WorkflowSettings
-        fields = ["id", "name", "definition", "active"]
+        model = Workflow
+        fields = ["id", "name", "slug", "definition", "active"]
 
 
-class WorkflowRunStepSerializer(serializers.ModelSerializer):
+class StepRunSerializer(serializers.ModelSerializer):
     class Meta:
-        model = WorkflowRunStep
+        model = StepRun
         fields = [
             "id",
             "sequence",
@@ -483,6 +483,7 @@ class WorkflowRunStepSerializer(serializers.ModelSerializer):
             "status",
             "error",
             "detail",
+            "turn_id",
             "started_at",
             "completed_at",
         ]
@@ -494,7 +495,10 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "workflow_id",
+            "workflow_key",
             "status",
+            "attempt",
+            "trigger",
             "outputs",
             "error",
             "created_at",
@@ -504,7 +508,23 @@ class WorkflowRunSerializer(serializers.ModelSerializer):
 
 
 class WorkflowRunDetailSerializer(WorkflowRunSerializer):
-    steps = WorkflowRunStepSerializer(many=True, read_only=True)
+    steps = StepRunSerializer(many=True, read_only=True)
 
     class Meta(WorkflowRunSerializer.Meta):  # ty: ignore[invalid-attribute-override]
         fields = [*WorkflowRunSerializer.Meta.fields, "steps"]
+
+
+class WorkflowTriggerSerializer(serializers.Serializer):
+    workflow = serializers.CharField()
+    workflow_id = serializers.CharField(allow_null=True)
+    name = serializers.CharField()
+    kind = serializers.CharField()
+    cron = serializers.CharField(allow_blank=True)
+    timezone = serializers.CharField(allow_blank=True)
+    event = serializers.CharField(allow_blank=True)
+    run_as = serializers.CharField(allow_blank=True)
+    enabled = serializers.BooleanField()
+    paused = serializers.BooleanField()
+    next_run_at = serializers.CharField(allow_null=True)
+    last_fired_at = serializers.CharField(allow_null=True)
+    last_run = WorkflowRunSerializer(allow_null=True)

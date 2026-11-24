@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     import contextvars
     from collections.abc import Callable, Generator
 
+    from django.contrib.auth.base_user import AbstractBaseUser
+
 
 def resolve_setting(setting_name: str, default: Any = None) -> Any:
     """Read a Django setting, falling back to `default` when it is unset."""
@@ -26,6 +28,11 @@ def serialize(value: Any) -> Any:
         return {key: serialize(item) for key, item in value.items()}
     dump = getattr(value, "model_dump", None)
     return dump(mode="json") if callable(dump) else str(value)
+
+
+def isoformat_or_none(value: Any) -> str | None:
+    """ISO 8601 text of a date or datetime, or None when there is none."""
+    return value.isoformat() if value else None
 
 
 def as_uuid(value: Any) -> uuid.UUID | None:
@@ -60,3 +67,21 @@ def map_strings(value: Any, change: Callable[[str], str], *, keys: bool = False)
     if isinstance(value, list | tuple):
         return [map_strings(item, change, keys=keys) for item in value]
     return value
+
+
+async def aget_active_user(identifier: str) -> AbstractBaseUser | None:
+    """Return the active user whose USERNAME_FIELD is `identifier`, or None.
+
+    Also returns None when several users match a non-unique USERNAME_FIELD.
+    """
+    from django.contrib.auth import get_user_model
+
+    if not identifier:
+        return None
+    user_model = get_user_model()
+    # AbstractBaseUser declares no USERNAME_FIELD; concrete user models do.
+    field: str = user_model.USERNAME_FIELD  # ty: ignore[invalid-attribute-access, invalid-assignment]
+    try:
+        return await user_model._default_manager.aget(**{field: identifier, "is_active": True})
+    except (user_model.DoesNotExist, user_model.MultipleObjectsReturned):
+        return None

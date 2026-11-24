@@ -9,11 +9,12 @@ from django.core.checks import Error, Warning
 from django.db import DatabaseError
 from django.utils import timezone
 
+from django_ai_sdk.checks import dict_setting_errors
 from django_ai_sdk.oversight.agents import attribute_policy
 from django_ai_sdk.oversight.conf import (
-    DEFAULTS,
     FAIL_MODES,
     STREAM_MODES,
+    UNGUARDED_MODES,
     configured,
     deadline_ms,
     is_enabled,
@@ -21,7 +22,8 @@ from django_ai_sdk.oversight.conf import (
     setting,
 )
 from django_ai_sdk.oversight.guard.judging import FAIL_CLOSED_ACTIONS
-from django_ai_sdk.oversight.judges.base import Judge, Maybe, alias_defined, build_judge
+from django_ai_sdk.oversight.guard.masking import gate_masking_lenses
+from django_ai_sdk.oversight.judges.base import Judge, alias_defined, build_judge
 from django_ai_sdk.oversight.lenses import JudgeLens
 from django_ai_sdk.oversight.notifiers import configured_notifiers
 from django_ai_sdk.oversight.registry import (
@@ -31,7 +33,7 @@ from django_ai_sdk.oversight.registry import (
     get_invalid_policies,
     get_policies,
 )
-from django_ai_sdk.oversight.rules import Notify
+from django_ai_sdk.oversight.rules import Mask, Notify
 from django_ai_sdk.oversight.tasks import reflect_turn
 from django_ai_sdk.oversight.types import INLINE_STAGES, Capture, Mode, Stage
 
@@ -76,10 +78,6 @@ def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def _is_count(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
-
-
 def _is_positive_or_none(value: Any) -> bool:
     return value is None or (_is_number(value) and value > 0)
 
@@ -122,7 +120,10 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
         f"a dict of positive milliseconds or None by stage ({_listed(DEADLINE_STAGES)})",
     ),
     "MAX_INPUT_CHARS": (_is_positive_or_none, "a positive number of characters, or None"),
-    "MAX_OTHER_TEXT_CHUNKS": (_is_count, "a whole number of chunks of at least 1"),
+    "MAX_OTHER_TEXT_CHUNKS": (
+        lambda value: type(value) is int and value >= 1,
+        "a whole number of chunks of at least 1",
+    ),
     "CLIENT_DETAIL": (lambda value: value in CLIENT_DETAILS, f"one of {_listed(CLIENT_DETAILS)}"),
     "FAIL_MODE": (lambda value: value in FAIL_MODES, f"one of {_listed(FAIL_MODES)}"),
     "RETENTION": (
@@ -141,36 +142,15 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
         lambda value: _is_number(value) and value >= 0,
         "a number of seconds of at least 0",
     ),
+    "UNGUARDED_MODEL_CALLS": (
+        lambda value: value in UNGUARDED_MODES,
+        f"one of {_listed(UNGUARDED_MODES)}",
+    ),
 }
 
 
 def settings_checks() -> list[Error]:
-    user_settings = configured()
-    if not isinstance(user_settings, dict):
-        return [
-            Error(
-                f"AI_SDK_OVERSIGHT must be a dict, not a {type(user_settings).__name__}.",
-                hint="Set a dict, or remove it.",
-                id=f"{PREFIX}.E012",
-            )
-        ]
-    errors = []
-    for key, value in user_settings.items():
-        if key not in ACCEPTS:
-            errors.append(
-                Error(
-                    f"AI_SDK_OVERSIGHT has an unknown key {key!r}.",
-                    hint=f"The keys are {', '.join(DEFAULTS)}.",
-                    id=f"{PREFIX}.E012",
-                )
-            )
-            continue
-        is_accepted, accepted = ACCEPTS[key]
-        if not is_accepted(value):
-            errors.append(
-                Error(f"AI_SDK_OVERSIGHT[{key!r}] must be {accepted}.", id=f"{PREFIX}.E012")
-            )
-    return errors
+    return dict_setting_errors("AI_SDK_OVERSIGHT", ACCEPTS, PREFIX)
 
 
 def policies_in_use() -> set[str]:
@@ -262,7 +242,7 @@ def policy_checks(in_use: set[str]) -> list[Any]:
             continue
         messages.extend(notify_checks(name, resolved, notifiers, in_use=name in in_use))
         messages.extend(lens_checks(name, resolved))
-        messages.extend(reflect_block_checks(name, resolved))
+        messages.extend(waiting_rule_checks(name, resolved))
         if name in in_use:
             messages.extend(stream_mode_checks(name, resolved))
     return messages
@@ -296,37 +276,47 @@ def notify_checks(name: str, resolved: Any, notifiers: set[str], *, in_use: bool
     return messages
 
 
-def reflect_block_checks(name: str, resolved: Any) -> list[Any]:
-    """Enforced rules that block or take tools away, reading a lens judged only at reflect.
-
-    When their inline lens fails closed (or leaves the rule undecided), the rule waits for
-    the reflect lens, and by reflect it can no longer block or take tools away.
-    """
+def waiting_rule_checks(name: str, resolved: Any) -> list[Any]:
+    """Enforced rules that wait for a lens judged too late for them to act."""
     messages: list[Any] = []
+    gate_masking = {lens.name for lens in gate_masking_lenses(resolved)}
     for rule in resolved.active_rules():
-        stopping = sorted({a.kind for a in rule.then} & {"block", "restrict_tools"})
-        if rule.mode is not Mode.ENFORCE or not stopping:
+        if rule.mode is not Mode.ENFORCE:
             continue
         lenses = [
             lens
             for n in sorted(rule.lenses())
             if (lens := resolved.lenses.get(n)) is not None and lens.enabled
         ]
+        stopping = sorted({a.kind for a in rule.then} & {"block", "restrict_tools"})
         inline = [lens.name for lens in lenses if set(lens.stages) & set(INLINE_STAGES)]
-        later = [lens.name for lens in lenses if set(lens.stages) == {Stage.REFLECT}]
-        if not (inline and later):
-            continue
-        messages.append(
-            Warning(
-                f"Enforced rule {rule.name!r} in policy {name!r} would {' or '.join(stopping)} "
-                f"on {inline}, but also reads {later}, judged only at reflect: when "
-                f"{inline} fail or leave it undecided, the rule waits for reflect, where it "
-                "can no longer act.",
-                hint="Judge those lenses inline too, or split the rule: one that blocks on "
-                "the inline lenses, and one for reflect that alerts or queues.",
-                id=f"{PREFIX}.W018",
+        reflect_only = [lens.name for lens in lenses if set(lens.stages) == {Stage.REFLECT}]
+        if stopping and inline and reflect_only:
+            messages.append(
+                Warning(
+                    f"Enforced rule {rule.name!r} in policy {name!r} would "
+                    f"{' or '.join(stopping)} on {inline}, but also reads {reflect_only}, "
+                    f"judged only at reflect: when {inline} fail or leave it undecided, the "
+                    "rule waits for reflect, where it can no longer act.",
+                    hint="Judge those lenses inline too, or split the rule: one that blocks on "
+                    "the inline lenses, and one for reflect that alerts or queues.",
+                    id=f"{PREFIX}.W018",
+                )
             )
-        )
+        masks = [a for a in rule.then if isinstance(a, Mask)]
+        masked = sorted(gate_masking & {n for a in masks for n in a.lenses or rule.lenses()})
+        after_gate = [lens.name for lens in lenses if Stage.GATE not in lens.stages]
+        if masked and after_gate:
+            messages.append(
+                Warning(
+                    f"Enforced rule {rule.name!r} in policy {name!r} masks {masked} in the "
+                    f"question, but also reads {after_gate}, judged after the gate: the rule "
+                    "waits for them, so the model reads the question unmasked.",
+                    hint="Split the rule: one that masks on the gate lenses, and one for the "
+                    "others.",
+                    id=f"{PREFIX}.W019",
+                )
+            )
     return messages
 
 
@@ -367,9 +357,9 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
             for alias in lens.judges
             if isinstance(alias, str) and not alias_defined(alias)
         )
-        if lens.enabled and all(judge.missing() for judge in built_judges(lens)):
+        if lens.enabled and not any(_can_answer(judge, lens) for judge in built_judges(lens)):
             dead.add(lens.name)
-            if all(isinstance(spec, Maybe) for spec in lens.judges):
+            if not lens.usable_judges():
                 optional.add(lens.name)
     for rule in resolved.rules.values():
         blind = sorted(rule.lenses() & dead)
@@ -392,6 +382,13 @@ def lens_checks(name: str, resolved: Any) -> list[Any]:
                 )
             )
     return messages
+
+
+def _can_answer(judge: Any, lens: Any) -> bool:
+    try:
+        return not judge.missing() and judge.answers(lens)
+    except Exception:
+        return False
 
 
 def built_judges(lens: Any) -> list[Any]:
@@ -463,7 +460,11 @@ def deadline_errors(name: str, resolved: Any) -> list[Any]:
 def policy_errors(name: str, resolved: Any) -> list[str]:
     """What the checks would flag in one built policy; authored policies are held to it on save."""
     found = [m for m in lens_checks(name, resolved) if m.is_serious()]
-    found += [*stream_mode_checks(name, resolved), *deadline_errors(name, resolved)]
+    found += [
+        *waiting_rule_checks(name, resolved),
+        *stream_mode_checks(name, resolved),
+        *deadline_errors(name, resolved),
+    ]
     return [m.msg for m in found]
 
 
@@ -542,7 +543,7 @@ def task_backend_checks() -> list[Any]:
         Warning(
             f"Oversight's reflect stage and notifications {problem}.",
             hint="Configure TASKS with a backend that has a worker, such as "
-            "django_tasks_db.DatabaseBackend with ./manage.py db_worker.",
+            "django_ai_sdk.durable.tasks.DBOSTaskBackend with ./manage.py ai_sdk_worker.",
             id=f"{PREFIX}.W014",
         )
     ]

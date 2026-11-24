@@ -7,10 +7,9 @@
         mode=Mode.ENFORCE,
     )
 
-A rule starts in report mode, so its false-positive rate is known before it can
-block anyone. Conditions are Python over JSON nodes; a comparison on a lens without
-a usable answer is false (test with `L(name).missing`), and on a lens that failed
-this turn it is unknown, so `~L("grounded").is_true` does not match on a failure.
+Rules start in report mode, so false positives are known before they block anyone. A test
+on a lens without a usable answer is false (see `L(name).missing`); on a lens that failed
+this turn it is unknown, so `~L("grounded").is_true` does not match a failure.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ OPS: dict[str, Any] = {
     "contains": lambda v, x: isinstance(v, list | str) and x in v,
 }
 # Ops that read the answer itself, not its value.
-META_OPS = {"missing", "present", "confident", "unsure"}
+META_OPS = {"missing", "present", "confident", "unsure", "disputed"}
 
 
 def _num(value: Any) -> float | None:
@@ -74,8 +73,9 @@ class Condition:
     def to_dict(self) -> dict[str, Any]:
         return self.node
 
-    def lenses(self) -> set[str]:
-        return set(_node_lenses(self.node))
+    def lenses(self, op: str = "") -> set[str]:
+        """The lenses the condition reads; with `op`, only those it tests with it."""
+        return {leaf["lens"] for leaf in _leaves(self.node) if not op or leaf["op"] == op}
 
     def matches(
         self, answers: Mapping[str, Answer], unknown: Set[str] = frozenset()
@@ -94,11 +94,11 @@ def _children(node: Mapping[str, Any]) -> list[dict[str, Any]]:
     return node.get("all") or node.get("any") or []
 
 
-def _node_lenses(node: Mapping[str, Any]) -> Iterator[str]:
+def _leaves(node: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
     if "lens" in node:
-        yield node["lens"]
+        yield node
     for child in _children(node):
-        yield from _node_lenses(child)
+        yield from _leaves(child)
 
 
 def _node_matches(
@@ -129,6 +129,8 @@ def _node_matches(
         return answer.confidence >= node["value"]
     if op == "unsure":
         return answer.confidence < node["value"]
+    if op == "disputed":
+        return answer.disputed
     try:
         return bool(OPS[op](answer.value, operand))
     except TypeError:
@@ -189,6 +191,10 @@ class L:
     @property
     def present(self) -> Condition:
         return self._test("present")
+
+    @property
+    def disputed(self) -> Condition:
+        return self._test("disputed")
 
     # Returns a condition instead of a bool, so the signature differs from object's.
     def __eq__(self, value: object) -> Condition:  # ty: ignore[invalid-method-override]

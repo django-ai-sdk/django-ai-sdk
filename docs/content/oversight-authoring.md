@@ -94,6 +94,7 @@ await AuthoringService.save_policy("refunds", PolicyIn(**definition), user=reque
 An authored policy is checked as code's are (every lens has what answers it, every rule acts, a Mask points at an Entities lens, no cycle), and on top of that it may not:
 
 - **take a code policy's name**: code wins, and the save is refused;
+- **wait for a lens judged too late**: an enforced rule that blocks on an inline lens next to one judged only at reflect, or masks the question next to a lens judged after the gate, is a warning for code's policies (W018, W019) and refused here, on save and when the saved policy loads;
 - **extend an authored policy**: only code's policies and the packs;
 - **change an inherited lens or rule**: a lens or rule of its own may not take a name it inherits, a preset's default name (`pii`, `secrets`, …) included, and after the build every lens and rule of every parent must be exactly as that parent builds it, so a later parent cannot replace an earlier one's either. A lens or rule declared in code stays code's, mode included;
 - **keep more than a parent**: a higher `capture`, a longer `retention` (compared with what each parent builds, the `RETENTION` setting included for a kind it does not set), or `fail_mode: "open"` over a parent that fails closed;

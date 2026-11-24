@@ -13,6 +13,7 @@ from django_ai_sdk.permissions import (
     Operation,
     PermissionDomain,
     PermissionsMixin,
+    _ahas_perm,
     user_pk,
 )
 
@@ -41,8 +42,7 @@ class OversightDefaultPermission(BasePermission):
         from django_ai_sdk.oversight.apps import MODEL_PERMISSIONS as added
 
         perm = self.MODEL_PERMISSIONS.get(operation) or added.get(operation)
-        ahas_perm = getattr(user, "ahas_perm", None)
-        return perm is not None and ahas_perm is not None and await ahas_perm(perm)
+        return perm is not None and await _ahas_perm(user, perm)
 
     def get_queryset_perms(
         self, user: UserType, operation: Operation, queryset: QuerySet

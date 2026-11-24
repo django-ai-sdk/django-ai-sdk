@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from django.core.exceptions import ImproperlyConfigured
 
 from django_ai_sdk.logger import get_logger
+from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.conf import build_configured, setting
 from django_ai_sdk.oversight.patterns import mask_secrets
 from django_ai_sdk.oversight.types import Answer, Subject
@@ -59,7 +60,12 @@ def is_unavailable(error: str) -> bool:
 
 
 class Judge(ABC):
-    """Answers lenses. Return None to abstain and let the next judge try."""
+    """Answers lenses. Return None to abstain and let the next judge try.
+
+    `confidence` is 0 to 1 on this judge's own scale, compared with a lens's
+    `min_confidence`: report what you can stand behind, or it ends the chain every
+    time. A judge that is a model names it in `model`.
+    """
 
     # Who receives turn content, e.g. "model gateway". Empty means nothing leaves the process.
     external: ClassVar[str] = ""
@@ -84,6 +90,10 @@ class Judge(ABC):
     def missing(self) -> str:
         """Why this judge can't run here (e.g. an unset key), or "" when it can."""
         return ""
+
+    def answers(self, lens: Lens) -> bool:
+        """Whether this judge can answer `lens` at all, e.g. its answer type."""
+        return True
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.display_name, "external": self.external, "class": type(self).__name__}
@@ -118,7 +128,9 @@ async def ask_judge(
         )
 
     try:
-        answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
+        # A judge's own model calls are oversight, not the turn's.
+        with settled():
+            answer = await asyncio.wait_for(judge.answer(lens, context), timeout=judge.timeout)
     except TimeoutError:
         return failed("timeout")
     except asyncio.CancelledError:

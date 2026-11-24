@@ -1,7 +1,4 @@
-"""Read-only admin for the oversight record, scoped like the review API.
-
-It needs only metrics access, so it never shows content or who asked in which thread.
-"""
+"""Read-only admin for the oversight record: metrics access only, so no content or who asked."""
 
 from __future__ import annotations
 
@@ -9,6 +6,7 @@ from typing import Any
 
 from asgiref.sync import async_to_sync
 from django.contrib import admin
+from django.db.models.constants import LOOKUP_SEP
 
 from django_ai_sdk.oversight.models import LensAnswer, ReviewItem, RuleMatch, Turn
 from django_ai_sdk.oversight.permissions import METRICS, OversightAccess
@@ -39,6 +37,11 @@ class ScopedAdmin(ReadOnlyAdmin):
 
     def has_view_permission(self, request: Any, obj: Any = None) -> bool:
         return super().has_view_permission(request, obj) and self.may_read(request)
+
+    def lookup_allowed(self, lookup: str, value: str, request: Any) -> bool:
+        # Django allows any field in the querystring, so ?note__icontains= would search a hidden one.
+        field = lookup.split(LOOKUP_SEP, 1)[0]
+        return field in self.list_filter and super().lookup_allowed(lookup, value, request)
 
     def get_queryset(self, request: Any) -> Any:
         turns = OversightAccess.has_queryset_perms(

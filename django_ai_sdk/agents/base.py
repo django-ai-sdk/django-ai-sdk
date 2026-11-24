@@ -85,13 +85,9 @@ def _unavailable_part(stage: str, detail: str) -> dict[str, Any]:
 
 
 def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
-    """Rename tool to {integration_name}_{tool.name} and prepend `hint` (if set)
-    to its description.
+    """Rename tool to {integration_name}_{tool.name} and prepend `hint` to its description.
 
-    Nothing stops two unrelated MCP servers from defining the same tool name
-    (GitHub and Linear both have list_issues), and Haystack requires unique names
-    across everything handed to one agent, so without this, enabling two
-    integrations that happen to collide would fail agent construction outright.
+    Haystack needs unique tool names per agent, and two MCP servers may both define one.
     """
     try:
         updates: dict[str, Any] = {"name": f"{integration_name}_{tool.name}"}
@@ -109,71 +105,19 @@ def _namespaced(integration_name: str, tool: Any, hint: str = "") -> Any:
 
 
 class Agent(ABC, AgentInfoMixin, InlineFileCapability):
-    """
-    Base class for AI agents in the Django AI SDK.
+    """Base class for AI agents in the Django AI SDK.
 
-    Provides a consistent interface for creating agents that work
-    with the streaming view system. Each agent encapsulates:
-    - Name and instructions (AI personality)
-    - Tools (as methods for co-location)
-    - Adapter creation (backend-specific logic)
-    - Protocol handler for message conversion
-
-    This class includes the AgentInfoMixin which provides:
-    - info(): Get agent metadata
-    - agent_id: Stable UUID v5 ID
-
-    Registration:
-
-    Method 1: Settings-based (recommended)
-        # In your settings.py:
-        AI_SDK_AGENTS = [
-            "myapp.agents.MyAgent",
-        ]
-
-        # In your AppConfig.ready():
-        from django.utils.module_loading import import_string
-        from django.conf import settings
-        from django_ai_sdk.agents.registry import registry
-
-        for path in resolve_setting('AI_SDK_AGENTS', []):
-            import_string(path)
-        registry.setup()
-
-    Method 2: Decorator-based
-        from django_ai_sdk.agents import auto_register
-
-        @auto_register
-        class MyAgent(Agent):
-            name = "My Bot"
-            model = "gpt-4"
-
-    Every concrete subclass also auto-registers on definition (__init_subclass__),
-    so either method above is really just what gets the module imported. An
-    abstract shared base (abstract = True) is skipped regardless of how it's
-    reached — see AgentRegistry.register().
-
-    Usage:
-        from django_ai_sdk.protocols.vercel import VercelProtocolHandler
+    Concrete subclasses auto-register on definition (``abstract = True`` opts out), so
+    importing the module (AI_SDK_AGENTS or an app's ``agents`` module) is enough.
 
         class MyAgent(Agent):
             name = "My Bot"
             model = "gpt-4"
             instructions = prompt("You are a helpful agent...")
-            protocol = VercelProtocolHandler
-
-            async def get_pipeline_adapter(self): return SomeAdapter(...)
-
-        # Get registered agent by UUID
-        from django_ai_sdk.agents.registry import registry
-        agent = registry.get(agent_id)
-        return await agent.as_view(protocol_messages)
     """
 
-    # Name of agent.
     name: str | None = None
 
-    # Short description of agent.
     description: str | None = None
 
     # Model identifier for LLM backend.
@@ -235,9 +179,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     # Tools the agent must call before it may finish a run.
     required_tools: list[str] = []
 
-    # Declare one FilePipeline per supported file type.
-    # First pipeline whose processor accepts the uploaded file is used.
-    # Empty = fall back to get_default_file_pipeline() (TextFileProcessor, no LLM extraction).
+    # One FilePipeline per file type; the first whose processor accepts the file is used.
+    # Empty falls back to get_default_file_pipeline().
     file_pipelines: list[FilePipeline] = []
 
     # Enable automatic thread title generation based on chat messages.
@@ -257,20 +200,14 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     oversight: type[Policy] | str | Literal[False] | None = None
 
     # Generator factory from django_ai_sdk.generators, e.g. `openai_responses_chat`.
-    # Assign the factory itself, never call it: get_llm() builds it with this
-    # agent's model.
+    # Assign the factory, never call it: get_llm() builds it with this agent's model.
     llm: Callable[..., Any] | None = None
 
     # Vendor generation parameters, mapped onto Haystack's `generation_kwargs`.
     llm_kwargs: dict[str, Any] | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Auto-register Agent subclasses in the registry.
-
-        This enables settings-based registration:
-        - When a class is imported via AI_SDK_AGENTS, it auto-registers
-        - Works together with @auto_register decorator
-        """
+        """Auto-register Agent subclasses, so importing one via AI_SDK_AGENTS registers it."""
         super().__init_subclass__(**kwargs)
         # A plain function set as a class attribute would bind as a method and
         # receive `self` as its first argument, so keep `llm` unbound.
@@ -287,16 +224,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     @classmethod
     async def warmup(cls, agent: Agent, memory_id: str | None = None) -> None:
-        """
-        Warm up the RAG pipeline.
-
-        Delegates to rag_provider.warmup() if configured.
-        If no RAG provider is set, returns immediately.
-
-        Args:
-            agent: Instance of the agent
-            memory_id: Optional memory
-        """
+        """Warm up the RAG pipeline via rag_provider.warmup(), if one is set."""
         if agent.rag_provider is None:
             logger.debug("No RAG provider configured, skipping warmup")
             return
@@ -305,12 +233,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
     @classmethod
     def clear_rag_cache(cls, agent: Agent) -> None:
-        """
-        Clear the RAG cache.
-
-        Args:
-            agent: Instance of the agent
-        """
+        """Clear the RAG cache."""
         if agent.rag_provider is not None:
             agent.rag_provider.clear_cache()
             logger.debug("RAG cache cleared via provider")
@@ -322,19 +245,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         memory_id: str | None = None,
         force_rebuild: bool = False,
     ) -> Any:
-        """
-        Reindex the RAG pipeline for this agent.
-        Delegates to rag_provider.reindex() if configured.
+        """Reindex the RAG pipeline via rag_provider.reindex(); None without a provider.
 
-        Args:
-            agent: Instance of the agent
-            memory_id: Optional memory ID for document source
-            force_rebuild: If True, forces a complete rebuild of the index.
-                          For persistent storage backends (like Qdrant), this
-                          will delete and recreate the index from scratch.
-
-        Returns:
-            The reindexed RAG pipeline, or None if no provider
+        `force_rebuild` deletes and recreates persistent indexes (e.g. Qdrant).
         """
         if agent.rag_provider is None:
             logger.debug("No RAG provider configured, skipping reindex")
@@ -343,7 +256,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return await agent.rag_provider.reindex(agent, memory_id, force_rebuild)
 
     def __init__(self) -> None:
-        # Protocol handler setup
         self.protocol_handler = (
             self.protocol()
             if hasattr(self, "protocol") and self.protocol is not None
@@ -372,26 +284,15 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return None
 
     async def get_storage_adapter(self, thread_id: str | None = None) -> BaseStorageAdapter | None:
-        """
-        Get storage adapter for the given thread.
+        """Return the storage adapter bound to `thread_id`, or None without one.
 
-        If thread_id is provided, finds which storage actually contains the thread
-        queries all registered adapters, then returns that adapter type.
-        If thread not found anywhere, falls back to agent's configured storage.
-        If thread_id is None, returns None
-
-        Args:
-            thread_id: The thread ID to get storage for
-
-        Returns:
-            Storage adapter instance bound to thread_id
+        Uses the registered adapter holding the thread, else the agent's own storage.
         """
         if thread_id is None:
             return None
 
         from django_ai_sdk.storage.base import StorageAdapterRegistry
 
-        # Find storage of this thread
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             thread = await adapter_class.get_thread(thread_id)
             if thread:
@@ -419,9 +320,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return self.instructions
 
     def get_system_prompt(self) -> str:
-        """
-        Alias for get_instructions()
-        """
+        """Alias for get_instructions()."""
         base = self.get_instructions()
         if not self.agents:
             return base
@@ -438,12 +337,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     def get_title_generation_prompt(self) -> Prompt:
         """Return the system prompt used to generate a thread title.
 
-        Defaults to a prompt capped at the title sanity limit, not the much
-        larger `Thread.title` column `max_length` - the column width is a
-        storage ceiling, not a reasonable target length for a title, and
-        quoting it here would let the model "correctly" produce something
-        long enough to fail `generate_thread_title`'s own sanity check.
-        Override to customize tone/format.
+        Capped at the title sanity limit, not `Thread.title`'s max_length: a title that
+        long would fail `generate_thread_title`'s own check.
         """
         return build_title_generation_prompt(get_title_sanity_limit())
 
@@ -488,11 +383,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return factory(model=self.get_model() or None, **kwargs)
 
     def get_suggestion_generator(self) -> SuggestionGenerator | None:
-        """Return a configured SuggestionGenerator, or None to disable.
-
-        Uses self.suggestion_generator class attribute if set.
-        Override this method in subclasses for full control.
-        """
+        """Return a configured SuggestionGenerator, or None to disable."""
         if not self.suggestion_generator:
             return None
         return self.suggestion_generator(agent=self)
@@ -530,13 +421,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     ) -> list[Any]:
         """Build tool objects for a request. Override in subclasses for full control.
 
-        Each callable in the class-level `tools` list is called with context kwargs
-        and may return a single tool or a list. Providers can use any subset:
-          def get_my_tool(thread_id="", user_id="", **kwargs): ...
-          def get_my_tool(user_id="", **kwargs): ...
-
+        Each callable in `tools` gets context kwargs (thread_id, user_id; accept **kwargs)
+        and returns a tool or a list.
         """
-        # class-level tools
         tools = getattr(self.__class__, "tools", [])
         result = []
         for tool in tools:
@@ -546,16 +433,12 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             else:
                 result.append(items)
 
-        # integration tools
         result.extend(await self._get_integration_tools(user, thread_id=thread_id))
 
-        # artifact tools
         result.extend(await self.get_artifact_tools(thread_id=thread_id, user=user))
 
-        # subagent tools
         result.extend(await self.get_agent_tools(thread_id=thread_id, user=user))
 
-        # info about uploaded files
         result.extend(self.get_attachment_tools(thread_id))
         return result
 
@@ -564,18 +447,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         thread_id: str = "",
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
-        """Build one ComponentTool per subagent declared in ``self.agents``.
+        """Build one ComponentTool per subagent in ``self.agents``.
 
-        Each subagent becomes a native Haystack tool the coordinator can call
-        to delegate a sub-task. Guards:
-
-        - The agent itself and duplicate classes are skipped.
-        - Subagents the user lacks ``VIEW_AGENT`` permission on are skipped.
-        - Tool names are derived from the subagent display name and deduped.
-
-        The conversation is mapped into the subagent via ``inputs_from_state``,
-        so it receives the same thread context as the coordinator; its final
-        ``last_message`` text is returned to the coordinator as the tool output.
+        Skips itself, duplicates and subagents the user may not VIEW_AGENT. Each gets the
+        thread's conversation via ``inputs_from_state``.
         """
         from haystack.tools.component_tool import ComponentTool
 
@@ -609,7 +484,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             built = await build_subagent(subagent_cls, thread_id=thread_id, user=user)
             if built is None:
                 continue
-            sub_agent, subagent = built
+            haystack_agent, subagent = built
             agent_id = subagent.agent_id
 
             name = subagent_tool_name(subagent_cls)
@@ -626,7 +501,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                     # A delegation opens a child turn under the subagent's policy,
                     # or joins the coordinator's turn when the policy is the same.
                     component=SubagentStreamFilter(
-                        sub_agent,
+                        haystack_agent,
                         name=subagent_cls.name or name,
                         subagent=subagent,
                         thread_id=thread_id,
@@ -682,14 +557,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         citation_formatter: SourceFormatter | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[Any]:
-        """Build RAG tools from active ThreadMemory links for a thread.
-
-        Each memory with documents becomes a framework-specific tool.
-        Memories with 0 documents are skipped with a warning log.
-
-        Returns:
-            List of tool objects to include in the pipeline.
-        """
+        """Build RAG tools from a thread's active ThreadMemory links; empty memories are skipped."""
         if not self.rag_provider or not thread_id:
             return []
 
@@ -754,23 +622,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return tools
 
     async def get_rag_queryset(self, memory_id: str | None = None) -> Any:
-        """
-        Override to return a Django QuerySet of documents for RAG.
+        """Override to return a QuerySet of documents for RAG."""
 
-        Subclasses should override this method to customize which documents
-        are included in RAG.
-
-        Args:
-            memory_id: Optional memory ID to filter documents
-
-        Returns:
-            Django QuerySet of Document objects
-        """
-
-        # TODO: this ia to entangled with our own Entry model
-        # For now this is fine, but we might want to decouple it
-        # and provide a hint for overriding, but leave out the
-        # implementation details.
+        # TODO: too entangled with our own Entry model; decouple and hint at overriding.
         from django_ai_sdk.memories.models import Entry
 
         fields = ("id", "content", "data", "name", "memory_id")
@@ -779,20 +633,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return Entry.objects.none()
 
     async def get_rag_documents(self, memory_id: str | None = None) -> list[RagDocument]:
-        """
-        Get documents for RAG as RagDocuments.
-
-        This method uses get_rag_queryset() to get the Django QuerySet,
-        then converts it to RagDocuments using the utility function.
-
-        Override get_rag_queryset() to customize document selection.
-
-        Args:
-            memory_id: Optional memory ID to filter documents
-
-        Returns:
-            List of RagDocuments (vendor-neutral)
-        """
+        """Return get_rag_queryset() as RagDocuments; override that to pick documents."""
 
         logger.info(f"[get_rag_documents] memory_id={memory_id}, agent={self.__class__.__name__}")
         logger.debug(f"Fetching RAG documents for {self.__class__.__name__}, memory_id={memory_id}")
@@ -813,19 +654,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         return rag_docs
 
     async def get_rag_pipeline(self, memory_id: str | None = None) -> Any:
-        """
-        Get RAG pipeline/adapter for retrieval-augmented generation.
+        """Return a RAG adapter, or None. Override to enable RAG.
 
-        Override this method in subclasses to enable RAG functionality.
-
-        For Haystack: Return a RAG adapter: has .get_retriever() method
-        For OpenAI: Return a RAG adapter: has .retrieve() method
-
-        Args:
-            memory_id: Optional memory ID to use for document retrieval
-
-        Returns:
-            RAG adapter instance, or None if RAG is not enabled
+        Haystack adapters have .get_retriever(), OpenAI ones .retrieve().
         """
         return None
 
@@ -847,38 +678,24 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         Args:
             messages: ChatMessages, or dicts like `{"role": "user", "content": "..."}`.
-            system_prompt: Optional system prompt override
-            response_format: Optional Pydantic model for structured output. Pass None
-                explicitly to disable structured output even if the agent has a
-                default response_format set.
-            thread_id: Optional thread ID (forwarded to get_run_adapter)
-            user: Optional user (forwarded to get_run_adapter)
-            tools: Whether to resolve the agent's tools and run a tool-calling loop,
-                governed by this agent's own max_agent_steps/max_tool_calls — the
-                same limits a streamed subagent delegation uses, not a generic
-                default. Opt-in: resolving tools reaches every configured
-                integration, so a one-shot call (title generation, structured
-                extraction, ...) does not pay that cost unless it explicitly asks
-                for it. Ignored when response_format is set — tools and structured
-                output together are not supported yet (see Run.run).
-            channel: Where the turn came from, a name the app picks, e.g. "cron". The
-                turn is recorded under it and `get_oversight()` receives it. None
-                records "default".
-            oversight: A policy for this call only (a Policy subclass or a name).
-                False runs without oversight. None applies `get_oversight()`.
-                Only for trusted code; the HTTP endpoints never pass it.
+            system_prompt: Optional system prompt override.
+            response_format: Pydantic model for structured output. Pass None explicitly to
+                disable the agent's default.
+            thread_id: Optional thread ID (forwarded to get_run_adapter).
+            user: Optional user (forwarded to get_run_adapter).
+            tools: Run a tool loop under this agent's own max_agent_steps/max_tool_calls.
+                Opt-in, since resolving tools reaches every integration. Ignored with
+                response_format (not supported together yet).
+            channel: Where the turn came from, e.g. "cron"; recorded and passed to
+                `get_oversight()`. None records "default".
+            oversight: Policy for this call only; False runs without oversight. Trusted
+                code only; the HTTP endpoints never pass it.
 
-        If a rule masks the question, the last user message in the caller's list
-        is masked in place, so the caller stores the masked copy. The checks are
-        Haystack hooks on the run, so an override of `run()` that calls its own
-        model is not checked.
-
-        Returns:
-            Response string, or parsed Pydantic model if response_format is set
+        A masked question is masked in place in `messages`, so the caller stores that copy.
+        The checks are Haystack hooks: an override of `run()` with its own model is unchecked.
 
         Raises:
-            Blocked: The policy blocked the question or withheld the answer.
-                `Blocked.message` holds the text to show the user.
+            Blocked: The policy blocked the question or withheld the answer; show `message`.
         """
 
         from django_ai_sdk.adapters.run import Run
@@ -943,11 +760,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
         return Run(generator=self.get_llm())
 
-    #: Flat list of integration names (`["linear"]`) — every tool that integration
-    #: exposes reaches this agent. Names are registry keys, i.e. the `name` on
-    #: each Integration subclass. Narrowing an integration to a subset of its tools
-    #: per agent is not supported: restrict it at the integration instead, via
-    #: an MCP integration's `default_tools` allow-list.
+    #: Integration names (registry keys); every tool of each reaches this agent.
+    #: To expose fewer, restrict the integration itself (an MCP's `default_tools`).
     integrations: list[str] = []
 
     async def _allowed_integrations(
@@ -964,13 +778,10 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
         user: AbstractBaseUser | AnonymousUser | None = None,
         thread_id: str = "",
     ) -> list[Any]:
-        """Load tool objects from every integration listed in `self.integrations`.
+        """Load tools from every integration in `self.integrations` the user may use.
 
-        Resolves the names against the integrations registry (populated by each
-        integration app on startup, plus any DB-declared MCP servers) and skips any
-        the user isn't permitted to use, so an unauthorized integration's tools never
-        reach the model. Runs the remaining integrations concurrently — each one's
-        get_tools() is individually bounded.
+        Unauthorized integrations' tools never reach the model. Runs them concurrently;
+        each get_tools() is bounded.
         """
 
         async def _safe_get_tools(integration: Any) -> list[Any]:
@@ -992,9 +803,8 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Open the slow parts of the chat build, yielding what is being waited on.
 
-        What is opened here is cached, so `get_pipeline_adapter()` finds it ready.
-        Ends with a plain `start` if anything was named, so the build that follows
-        is not shown under the name of a step that is done.
+        Cached for `get_pipeline_adapter()`. Ends with a plain `start` so the build that
+        follows is not shown under a finished step.
         """
         named = False
         if self.rag_provider and thread_id:
@@ -1068,21 +878,9 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
     async def history(
         self, thread_id: str, user: AbstractBaseUser | AnonymousUser | None = None
     ) -> ThreadDetail:
-        """
-        Get conversation history for a thread.
+        """Return a thread's metadata and messages in protocol format, for the initial load.
 
-        Returns thread metadata and messages in protocol format suitable for initial load.
-        This works with any storage adapter (DB, Memory, etc.).
-
-        Args:
-            thread_id: The thread ID to fetch history for
-            user: Optional user for permission checking
-
-        Returns:
-            ThreadDetail containing thread metadata and protocol-formatted messages
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission
+        Raises PermissionDenied without VIEW_THREAD.
         """
         logger.debug(f"Fetching history for thread: {thread_id}")
 
@@ -1098,7 +896,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 ErrorCode.CONFIGURATION_ERROR,
             )
 
-        # Get thread metadata
         thread_info = await storage.__class__.get_thread(thread_id)
         if not thread_info:
             raise NotFound(f"Thread not found: {thread_id}")
@@ -1113,7 +910,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             agent=self,
         )
 
-        # Get messages using the instance method
         chat_messages = await storage.get_messages()
         logger.debug(f"Retrieved {len(chat_messages)} ChatMessages, converting to protocol format")
 
@@ -1122,7 +918,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
 
             await MemoryService.resolve_attachments(thread_id, chat_messages, user=user, agent=self)
 
-        # Convert to protocol format
         protocol_messages = self.protocol_handler.from_chat_messages(chat_messages)
 
         return ThreadDetail(
@@ -1130,33 +925,16 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
             messages=protocol_messages,
         )
 
-    # TODO: I liked the idea of as_view, but in the end it's more a response.
-    # This might be the first API change that breaks backwards compatibility.
-    # For now, keep it as a separate method with a different name.
-    # But we might move to a method called to_response()
-    # And we deprecate as_view() with a warning to replace with to_response()
+    # TODO: this is really a response; consider to_response() and deprecating as_view().
     async def as_view(
         self,
         protocol_messages: list[Any],
         thread_id: str | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> Any:
-        """
-        Convert protocol messages to streaming HTTP response with optional storage.
+        """Turn protocol messages into a streaming HTTP response, stored when threaded.
 
-        Similar to Django's as_view() pattern - converts the agent
-        into a response that can be returned directly from a view.
-
-        Args:
-            protocol_messages: Raw protocol messages (e.g., Vercel Message objects)
-            thread_id: Optional thread ID for conversation persistence
-            user: Optional user for conversation attribution and permission checks
-
-        Returns:
-            StreamingHttpResponse ready for Django views
-
-        Raises:
-            PermissionDenied: If user has no CHAT permission for this agent/thread
+        Raises PermissionDenied without CHAT permission for this agent/thread.
         """
         logger.debug(
             f"Agent as_view called: agent={self.__class__.__name__}, "
@@ -1173,7 +951,6 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                 user, Operation.CHAT, thread, get_agent_permissions(self), agent=self
             )
 
-        # Protocol handler converts to our intermediate ChatMessage format
         messages = self.protocol_handler.to_chat_messages(protocol_messages)
         logger.debug(
             f"Protocol handler converted {len(protocol_messages) if protocol_messages else 0} "

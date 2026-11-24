@@ -49,7 +49,8 @@ django_ai_sdk/
 ├── conversation/         # Thread + Message models
 ├── memories/             # MemoryService, Entry, documents
 ├── files/                # processors, transforms, pipelines
-├── workflows/            # definitions, executor, hooks
+├── workflows/            # definitions, runs, listeners
+├── durable/              # workflow runs, triggers and tasks on DBOS (opt-in app)
 ├── artifacts/            # ArtifactSchema
 ├── citations/            # CitationRegistry, formatter
 ├── suggestions/          # DefaultSuggestionGenerator
@@ -107,5 +108,6 @@ django_ai_sdk/
   {{< card link="permissions/" title="Permissions" icon="shield-check" subtitle="Operations, domains, built-in classes" >}}
   {{< card link="memories/" title="Memories" icon="folder" subtitle="MemoryService, documents, thread linking" >}}
   {{< card link="files/" title="Files" icon="document" subtitle="Processors, transforms, upload lifecycle" >}}
-  {{< card link="workflows/" title="Workflows" icon="server" subtitle="Definition schema, models, executor" >}}
+  {{< card link="workflows/" title="Workflows" icon="server" subtitle="Definition schema, models, runs" >}}
+  {{< card link="webhooks/" title="Webhooks" icon="globe-alt" subtitle="Inbound events, answered by an agent" >}}
 {{< /cards >}}

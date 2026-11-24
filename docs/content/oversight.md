@@ -9,7 +9,7 @@ weight: 10
 Oversight checks and records every turn of an agent that has a policy, on the SDK's entry points: the question, what retrieval found, the tools it called and the answer, whether it runs in chat, through `Agent.run()`, the HTTP run endpoints or a workflow step. It is separate from [tracing](/manual/tracing/): traces are debug data, deleted with their thread and all-or-nothing about content; the oversight record is kept apart, masked as `CAPTURE` says.
 
 {{< callout type="warning" >}}
-**What core does not check.** Tool results and retrieved sources are masked, not judged for instructions to the model (indirect prompt injection), and only the SDK's entry points are watched: see [Limitations](#limitations).
+**What core does not check.** Only the SDK's entry points are watched, and a tool result or retrieved source is judged only by the gate lenses your mask, block and `restrict_tools` rules read: see [Limitations](#limitations).
 {{< /callout >}}
 
 ## Quickstart
@@ -296,7 +296,7 @@ Under a policy, `run()`:
 
 ### Nested runs and subagents
 
-Each agent runs under its own policy. A run that starts inside another turn joins that turn when it resolves the same policy, or none: one request is one record. There is no second gate (the outer gate already judged the question); the nested run's tool calls are checked and recorded in the outer turn; and its output reaches the outer agent as a tool result, masked like any other, and the outer turn's finish judges the answer built from it.
+Each agent runs under its own policy. A run that starts inside another turn joins that turn when it resolves the same policy, or none: one request is one record. There is no second gate: the outer turn judges the nested run's question like a tool result, masked or withheld whole before its model reads it (a synchronous run cannot be judged: its tool calls are all blocked instead); the nested run's tool calls are checked and recorded in the outer turn; and its output reaches the outer agent as a tool result, masked like any other, and the outer turn's finish judges the answer built from it.
 
 A run under another policy (the nested agent's own, or an explicit `run(oversight=...)`) opens a child turn instead: its own gate, tool checks, finish and record, linked to the outer turn. Subagents follow the same rule. A delegation to a subagent whose policy is the parent's, or none, joins the parent's turn; one whose policy differs runs as a child turn under it, with the delegated task as its question. That subagent reads only the checked task, not the coordinator's conversation and tool results, which its policy never judged. When that policy blocks the task or withholds the subagent's answer, the coordinator reads the policy's message as the tool result.
 
@@ -341,7 +341,7 @@ For whoever works on the SDK itself. Oversight is a Haystack plugin, `django_ai_
 | `after_run` | `RecordUsageHook` | Adds the run's model and token usage to its turn, in a sync run too. |
 | `after_run` | `JudgeAnswerHook` | Gives the sources to the turn, and judges the answer (pass, mask or withhold). |
 
-`run_with_oversight(agent, messages, turn=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel (`None` records `default`), person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`turn.guard`, `turn.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and a caller asks `needs_own_turn_sync(turn)` first and runs nothing when it would need one of its own.
+`run_with_oversight(agent, messages, turn=TurnRequest(...))` opens the turn under the agent's policy, or joins the outer one (same policy or none); another policy opens a child turn. The `TurnRequest` names the agent, channel (`None` records `default`), person and thread, and what the caller wants along the way (`history_vouched`, `on_gated`, `read_answer`, `answer_schema`, `keep_open`); the run's `hook_context` carries it to the hooks, and it holds what oversight decided once the run returns (`turn.guard`, `turn.raise_if_blocked()`). Haystack skips `after_run` when a run raises or is cancelled, so `run_with_oversight()` closes the turn with the error then. The hooks save and load with the Agent. A sync run (`run_with_oversight_sync()`) cannot open a turn: inside one it joins, and when it would need one of its own it raises `RuntimeError`; a caller that wants to answer instead asks `needs_own_turn_sync(turn)` first.
 
 The SDK joins the plugin in one place: `run_with_oversight()` runs a copy of every Haystack Agent with the hooks in their places, whether `ToolAgent` built it or someone did by hand. A run that names no SDK agent in its `TurnRequest` joins the turn it runs in; outside one it runs under `DEFAULT_POLICY` and is recorded as "Haystack agent", and without `DEFAULT_POLICY` it opens no turn. That includes a plain `Run(generator).run()`. A side call opts out on purpose with `TurnRequest(oversight=False)`, as `run_side_task` does for titles, suggestions, citations and artifact extraction; like `run(oversight=False)`, it does not join the outer turn either. The call sites carry an `# Oversight:` comment, so `grep -rn "Oversight:" django_ai_sdk` finds them. The modules of `django_ai_sdk.oversight` the SDK may import are listed, each with the reason, in `SEAMS` in `tests/oversight/test_layers.py`, which fails on any other import.
 
@@ -542,7 +542,7 @@ A judge is a class with one method, `async answer(lens, context) -> Answer | Non
 | `external` | Who receives turn content when it runs ("My service"). Empty: it runs in this process. An external judge's failure is `unavailable`, which reflect asks again. |
 | `timeout` | Seconds before its answer is abandoned. Every SDK judge also takes `timeout=`. |
 
-`missing()` returns why it cannot run on this deployment (a package or key absent), so it abstains (return `None` from `answer` to abstain otherwise; an answer with neither a value nor an `error` is `no verdict`, and `FAIL_MODE` applies) and `ai_sdk.oversight.W005` says why. A lens none of whose judges can run answers the error `no judge can run here`, so `FAIL_MODE` decides for it rather than skipping it. For the shape of an answer, use what the lens reads: a yes/no is a bool (or a probability of yes, 0.5 and up is yes), a label one of the lens's labels, a score 0 to 1, found things a list of labels with their `spans`. `confidence` is how sure, from 0 to 1, on your judge's own scale.
+`missing()` returns why it cannot run on this deployment (a package or key absent), so it abstains (return `None` from `answer` to abstain otherwise; an answer with neither a value nor an `error` is `no verdict`, and `FAIL_MODE` applies) and `ai_sdk.oversight.W005` says why. Override `answers(lens)` to say which lenses your judge cannot answer at all. A lens none of whose judges can run or answer it answers the error `no judge can run here`, so `FAIL_MODE` decides for it rather than skipping it. For the shape of an answer, use what the lens reads: a yes/no is a bool (or a probability of yes, 0.5 and up is yes), a label one of the lens's labels, a score 0 to 1, found things a list of labels with their `spans`. `confidence` is how sure, from 0 to 1, on your judge's own scale.
 
 Subclass `Judge`, or `Classifier` for a model that answers typed questions, hosted or local. Implement `question(lens)` (your API's form of a yes/no, label or score question; `None` for a lens you cannot answer) and `async classify(state, questions, *, timeout=None) -> {name: Answer}`. The base decides what the model reads per lens subject, masks secrets first, refuses a text it would have to cut, sends one stage's questions about the same turn as one call, and rates each source for a "taken from" lens. `TypeSafe` is the worked example.
 
@@ -574,14 +574,41 @@ It answers `Flag`, `Choice` and `Score` lenses, and judges an `Entities` lens wi
 
 ### How a lens decides
 
-A judge lens asks its judges in order. The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) wins. When none is sure enough, the last one that answered decides: each judge's confidence is on a scale of its own, so they are never compared, and a lens lists its judges from quick to thorough. Every answer given on the way is kept in the result's `trail`. A `PatternJudge` judge's hit has confidence 1 and its miss `miss_confidence` (0.5 by default), so a miss asks the next judge; a `miss_confidence` at or above `min_confidence` ends the lens on a miss, and the judges after it are never asked.
+A judge lens asks its judges in order, quick to thorough:
+
+- The first answer whose confidence reaches the lens's `min_confidence` (0.75 by default) stands, and the judges after it are not asked.
+- A judge that is unsure hands over to the next one, which may overrule it. When none is sure enough, the last one that answered decides, and the answer stays unsure: a rule that should only act on a sure answer adds `.confident(x)`.
+- A judge that fails, or cannot run here, hands over too. A lens left without an answer that way has failed, and `FAIL_MODE` decides.
+- Every answer given on the way is kept in the result's `trail`.
+
+Confidence is each judge's own scale, so the lens only compares it with thresholds, never one judge's with another's:
+
+| Judge | Its confidence |
+| --- | --- |
+| `PatternJudge` | 1 for a hit; `miss_confidence` (0.5 by default) for a miss, so a miss asks the next judge. A `miss_confidence` at or above `min_confidence` ends the lens on a miss. |
+| A classifier (`TypeSafe`, `LocalClassifier`) | For a yes/no, how far the probability is from a coin flip: 0.75 is 87.5% yes or no. For a label, the label's probability. |
+| `LLMJudge` | What the model says of itself; 0.5 when it says nothing. |
+| Your own judge, a check | What you return; 1 when you return none. |
+
+So the order matters: list a judge after another only when you trust it more, since it overrules the earlier one's leaning. A model whose confidence is always high ends the chain every time it is asked, and passes every `.confident(x)` in a rule: put it last, or alone.
+
+Two judges you trust about equally can still share a lens. Then a rule decides what it means when they disagree. `L(name).disputed` is true when two models asked for the lens gave different answers, whichever of them stands:
+
+```python
+# Stop only when sure, and the judges agree.
+Rule("no_dose_advice", when=L("dose_advice").is_true & L("dose_advice").confident(0.7) & ~L("dose_advice").disputed, then=Block())
+# When in doubt, a person looks.
+Rule("safeguarding", when=L("safeguarding").is_true | L("safeguarding").disputed, then=Queue("care"))
+```
+
+A second opinion that must always be asked, not only when the first judge is unsure, is a second lens with its own judge, and a rule that reads both.
 
 ## Personal data and secrets
 
 A `PIILens` finds personal data by kind, with checksums where a kind has one: a number shaped like an IBAN that fails mod-97 is not reported.
 
-- **Default kinds**, the same in every country: `email`, `iban` (mod-97), `credit_card` (Luhn), `phone` (international format, `+31 6 ...` or `0031 ...`), `ip_address` (IPv4).
-- **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`).
+- **Default kinds**, the same in every country: `email` (also spelled out, as `jan [at] example [dot] nl` or `jan apenstaartje example punt nl`), `iban` (mod-97), `credit_card` (Luhn), `phone` (international format, `+31 6 ...` or `0031 ...`), `ip_address` (IPv4).
+- **Country kinds**, only when you name them: `bsn` (Dutch citizen service number, 11-check), `phone_nl` (`06-12345678`), `postcode_nl` (`1234 AB`). A number right after an invoice or order label (`invoice no. 202611188`, `factuurnummer:`) is not a BSN: one in eleven such numbers passes the 11-check. Only the label itself counts, so `factuur 111222333` leaves a real BSN unmasked for the model; that is the trade. A label a personal number goes by too (`kenmerk`, `referentie`) does not count, and the record masks the number whatever precedes it. `phone_nl` takes any grouping (`06-41-27-88-35`, `(06) 41278835`) but not a date and a time (`03-11-2026 14:00`).
 
 ```python
 from django_ai_sdk.oversight import DEFAULT_PII_KINDS, PIILens
@@ -633,7 +660,7 @@ Every notification has a stable `id`, the same however often a task sends it: a 
 
 - **The question** is masked at the gate, in place, before the model or the thread sees it. The client is told what the masked question reads (`input` in the `data-oversight` part), so it can replace its copy. Under `full` capture the record also keeps what was said.
 - **The history**: see [History](#history).
-- **Tool results** are masked once, when they arrive, before the model, the screen and the store see them, all three the same masked text. They are masked by the gate's `Entities` lenses that an enforced `Mask` rule reads. A result that cannot be checked (a masking lens failed or ran out of time) follows the tool fail mode: `closed` replaces the whole result with `[withheld: could not be checked]`; `open` passes it as it is and records the failure. A result (or source, or earlier message) longer than a judge reads (its `TEXT_CHARS`) is judged in overlapping chunks the shortest such judge reads. Rules read each chunk on its own, with the other lenses' answers on the whole text, and what any chunk decides holds: a low score or a "no" in one chunk is not outweighed by another, and an `Entities` lens masks what each chunk found, placed back in the whole text. A chunk that fails is a failed lens, as above. A text that needs more than `MAX_OTHER_TEXT_CHUNKS` chunks is too long, as above. The question and the answer are never chunked: a question too long for a judge fails that lens, and a longer one than `MAX_INPUT_CHARS` is blocked unread.
+- **Tool results** are masked once, when they arrive, before the model, the screen and the store see them, all three the same masked text. They are masked by the gate's `Entities` lenses that an enforced `Mask` rule reads, and judged by the gate lenses a block or `restrict_tools` rule reads (unless the lens sets `judges_tool_results = False`): a result such an enforced rule would block is withheld whole, and a rule in report mode records what it would have done and leaves the result alone. A result that cannot be checked (a masking lens failed or ran out of time) follows the tool fail mode: `closed` replaces the whole result with `[withheld: could not be checked]`; `open` passes it as it is and records the failure. A result (or source, or earlier message) longer than a judge reads (its `TEXT_CHARS`) is judged in overlapping chunks the shortest such judge reads. Rules read each chunk on its own, with the other lenses' answers on the whole text, and what any chunk decides holds: a low score or a "no" in one chunk is not outweighed by another, and an `Entities` lens masks what each chunk found, placed back in the whole text. A chunk that fails is a failed lens, as above. A text that needs more than `MAX_OTHER_TEXT_CHUNKS` chunks is too long, as above. The question and the answer are never chunked: a question too long for a judge fails that lens, and a longer one than `MAX_INPUT_CHARS` is blocked unread.
 
 Masking history or a tool result asks those lenses about that text as if it were the question. A remote judge on such a lens (a model, `TypeSafe`) is sent each earlier message and each tool result it masks as the question, with the rest of what an `input` lens sends ([the tables below](#where-turn-content-goes)). Keep masking lenses on patterns (`PIILens`, `SecretsLens`) where that must not happen.
 - **Sources** that retrieval found are masked like tool results, before the citations card shows them, the stored citations keep them, or `/threads/{id}/sources/` serves them.
@@ -656,6 +683,7 @@ A thread has its history judged once, each message on its own turn:
 
 - **Auto** (the default, `stream_mode = "auto"` on the policy or `STREAM_MODE`). The answer is held while an enforced rule may mask or withhold it at finish, and streams live otherwise; decided on each turn, so a rule switched to enforce holds the next answer. A policy in report mode streams live. A held answer, and what its tools were given and found, is shown only once finish passed it; meanwhile the chat shows which tools run. Reasoning is then neither shown nor stored: no lens judges it. Tool cards show what the model saw, its tool results masked at the tool stage: to keep something out of the tool cards, mask it there. Rows an artifact tool wrote with an answer that is withheld are deleted with it. A withheld answer also drops every tool call's arguments and result, from the store and the released cards, except a tool's receipt ([Tool receipts](/agents/#tool-receipts)): the keys it declared, so a workflow run it started can still be found.
 - **Live** (`stream_mode = "live"`). The answer reaches the client as the model writes it. Nothing judges it while it streams: finish fixes it once the stream ends. When finish blocks or masks, the last part tells the client to replace the answer on screen, and the stored message is already the fixed one. An answer is never cut off mid-stream.
+- **Tool calls**, in either mode, while an enforced rule may block a call for what it holds: a call's arguments reach the client with its result, once the tool stage let the call run, and a blocked call's arguments are not sent or stored. The policy of the turn that streams decides this: a subagent's calls under a stricter policy of its own are checked and recorded in its own turn, and streamed as the coordinator's policy says.
 - **Reflect** fixes only the stored copy. It runs after the stream has closed and pushes nothing to the client. The stored message is masked and carries a notice, so a reloaded thread shows it as adjusted.
 
 {{< callout type="warning" >}}
@@ -715,7 +743,7 @@ The **rows** (the turn, its answers and matches) and the review items keep, at e
 | --- | --- |
 | `none` | Nothing: there is no content, and no reasons, names or scores anywhere. |
 | `metadata` | The lengths of the question and answer, the sources' kinds and the tool names. No text at all: no title, URL, source key, reason, name or score. |
-| `masked` | Text, every string of it masked: the question, the answer, the history, every field of the sources (content, title, URL, key) and of the tool calls (arguments and results), reasons, names and per-item scores (their keys masked). Masked by the built-in patterns (every personal data kind, the country kinds too, and every secret); then every stretch of the question, the answer or the sources that any lens of the turn pointed at (three characters or more) is replaced, wherever it occurs, by the label the lens gave it: `[PERSON]`. |
+| `masked` | Text, every string of it masked: the question, the answer, the history, every field of the sources (content, title, URL, key) and of the tool calls (arguments and results), reasons, names and per-item scores (their keys masked). Masked by the built-in patterns (every personal data kind, the country kinds too, and every secret); then every stretch of the question, the answer or the sources that any lens of the turn pointed at (three characters or more) is replaced, wherever it occurs, by the label the lens gave it: `[PERSON]`. An answer a rule withheld or replaced is kept as the model gave it, masked the same way, beside what was shown instead (`output` and `shown_output`), so whoever reviews the stop reads what it stopped. |
 | `full` | All of that, unmasked, and what was shown where it differs from what was said. |
 
 A stretch a lens found in a tool call is masked only where the built-in patterns find it too: the call's text is not kept to point into. Reflect writes later, into the same content: under `masked` what it says is masked by the built-in patterns and by what its lenses pointed at.
@@ -752,7 +780,7 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
   - a synchronous delegation that needs a turn of its own: it is blocked ([Nested runs and subagents](#nested-runs-and-subagents)).
 
   The SDK's own side calls run with `oversight=False` on purpose: the thread title, the follow-up suggestions and the citations are model calls over a turn already judged, and are neither judged nor recorded themselves.
-- **No injection check on tool results or sources.** Tool results and retrieved sources are masked, but no lens asks whether they carry instructions to the model.
+- **Tool results and sources are judged by gate lenses only.** A lens asks whether one carries instructions to the model only when a mask, block or `restrict_tools` rule reads that gate lens; the packs' injection rule is in report mode, so it records and withholds nothing until you enforce it. Recording has its price: a pattern lens adds about a millisecond per tool result, a judge lens such as the packs' injection lens one judge call (about 0.2 s with a hosted classifier).
 - **Reflect notices arrive by polling.** Reflect runs after the stream has closed: what it masks reaches the client only when the thread is read again.
 
 ## Next

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
 import uuid
@@ -18,10 +17,15 @@ from haystack.dataclasses import (
 
 from django_ai_sdk.adapters.citations.grounding import Grounder, rebase, uncited
 from django_ai_sdk.adapters.citations.registry import current_registry
+from django_ai_sdk.adapters.run import (
+    ATTACHMENT_CONTEXT_META_KEY,
+    get_user_message,
+    get_user_text,
+)
 from django_ai_sdk.adapters.run import Run as Run  # re-exported: Run lived here
-from django_ai_sdk.adapters.run import get_user_message, get_user_text
 from django_ai_sdk.adapters.utils import merge_messages
 from django_ai_sdk.agents.subagent import SUBAGENT_META_KEY, SubagentStreamFilter
+from django_ai_sdk.agents.tool_agent import decode_tool_result, returned_error
 from django_ai_sdk.artifacts.schemas import turn_artifacts
 from django_ai_sdk.artifacts.tool_artifacts import build_artifact
 from django_ai_sdk.common import (
@@ -72,9 +76,7 @@ _CITED: object = object()
 
 
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
-    """
-    Parse tool result as JSON if valid, otherwise return as string.
-    """
+    """Parse tool result as JSON if valid, otherwise return as string."""
     try:
         return json.loads(str(arguments))
     except (json.JSONDecodeError, ValueError):
@@ -82,19 +84,12 @@ def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
 
 
 def parse_tool_output(obj: Any) -> Any:
-    """
-    Parse tool output from haystack to ensure it's JSON serializable.
-    """
+    """Make a Haystack tool output JSON serializable."""
     if hasattr(obj, "to_dict"):
         obj = obj.to_dict()
 
     if obj is None or isinstance(obj, (bool, int, float, str)):
-        if isinstance(obj, str):
-            try:
-                return ast.literal_eval(obj)
-            except (ValueError, SyntaxError):
-                return obj
-        return obj
+        return decode_tool_result(obj)
 
     if isinstance(obj, dict):
         return {k: parse_tool_output(v) for k, v in obj.items()}
@@ -105,7 +100,16 @@ def parse_tool_output(obj: Any) -> Any:
     return str(obj)
 
 
-# Marker appended when a tool result is cut to the size limit.
+def stored_tool_output(result: ToolCallResult) -> dict[str, Any]:
+    """A tool result as stored and streamed, decoded once.
+
+    `error` is set when the call raised or returned {"error": ...}.
+    """
+    output = parse_tool_output(result.to_dict())
+    output["error"] = bool(result.error) or returned_error(output.get("result"))
+    return output
+
+
 _TRUNCATION_NOTE = "\n\n... truncated, {omitted} chars omitted"
 
 
@@ -122,8 +126,7 @@ def get_tool_result_text(tool_call: dict[str, Any]) -> str:
 def truncate_tool_result(text: str) -> str:
     """Cap a replayed tool result so one big response cannot own the context.
 
-    Limit comes from ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables
-    truncation entirely.
+    Limit: ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables it.
     """
     limit = resolve_setting("AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT", 4000)
     if not isinstance(limit, int) or limit <= 0 or len(text) <= limit:
@@ -152,9 +155,7 @@ def _get_message_pairs(
 
 
 def get_reasoning_text(reasoning: ReasoningContent) -> str:
-    """
-    A chunk's reasoning text, also when the provider sends raw reasoning.
-    """
+    """A chunk's reasoning text, also when the provider sends raw reasoning."""
     if reasoning.reasoning_text:
         return reasoning.reasoning_text
     parts = (reasoning.extra or {}).get("content") or []
@@ -180,9 +181,7 @@ def get_error_event(info: ErrorInfo) -> ErrorEvent:
 
 
 class Stream:
-    """
-    Adapter for Haystack Pipelines that emits streaming events.
-    """
+    """Adapter for Haystack Pipelines that emits streaming events."""
 
     model: str | None = None
     instructions: str | None = None
@@ -204,7 +203,6 @@ class Stream:
     _citations_call_id: str | None = None
     _turn: StreamTurn | None = None
 
-    # Message processing configuration
     merge_messages: bool = False
 
     def __init__(
@@ -273,6 +271,11 @@ class Stream:
             )
             for tc in self.get_handoff_calls(message)
         ]
+        # Recorded with the turn that made them: the run hands them back, but they are not this
+        # answer's, so they count as stored already.
+        ids = [call.id for call in calls if call.id]
+        self._persisted_tool_ids.update(ids)
+        self._persisted_tool_output_ids.update(ids)
         replayed = [HaystackChatMessage.from_assistant(message.content or None, tool_calls=calls)]
         for tool_call, call in zip(self.get_handoff_calls(message), calls, strict=True):
             replayed.append(
@@ -302,16 +305,17 @@ class Stream:
                 continue
             # merging is text-only, inlined images are dropped here
             texts = [m.model_copy(update={"content": get_user_text(m)}) for m in group]
+            # Merged, attachment context is no longer apart: the gate judges all of it.
+            hinted = any(a.context for m in group for a in m.attachments)
+            meta = {ATTACHMENT_CONTEXT_META_KEY: 0} if hinted else None
             for role, content in merge_messages(texts):
                 if role == "user":
-                    converted_messages.append(HaystackChatMessage.from_user(content))
+                    converted_messages.append(HaystackChatMessage.from_user(content, meta=meta))
                 elif role == "assistant":
                     converted_messages.append(HaystackChatMessage.from_assistant(content))
 
-        # Ensure we have at least one message
-        # TODO: we now return a system message instead of a user message, this is a temporary fix
-        # In real-world scenarios: the agent could be working without user input, it might be
-        # handed of from another agent or system. We should support this case gracefully.
+        # TODO: temporary fix returning a system message; support runs without user
+        # input (a handoff from another agent or system).
         if not converted_messages:
             logger.warning("No messages available for Haystack pipeline!")
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))
@@ -334,7 +338,6 @@ class Stream:
         """Convert Haystack message tool calls to MessageChunks."""
         chunks = []
 
-        # Tool call starts and inputs
         for tool_call in message.tool_calls:
             chunks.append(
                 MessageChunk(
@@ -358,7 +361,7 @@ class Stream:
             )
 
         for tool_result in message.tool_call_results:
-            tool_output = parse_tool_output(tool_result.to_dict())
+            tool_output = stored_tool_output(tool_result)
             chunks.append(
                 MessageChunk(
                     type="tool_output",
@@ -653,7 +656,7 @@ class Stream:
                     logger.debug(f"Tool call result: {result.result}")
                 if self._turn is not None:
                     result = await self._turn.mask_tool_result(result)
-                tool_output = parse_tool_output(result.to_dict())
+                tool_output = stored_tool_output(result)
                 self._persist_tool(
                     stream_writer,
                     MessageChunk(
@@ -665,7 +668,7 @@ class Stream:
                     ),
                 )
                 yield ToolOutputEvent(tool_call_id=tool_call_id, tool_output=tool_output)
-                if not result.error:
+                if not tool_output["error"]:
                     async for event in self._tool_artifact(stream_writer, result):
                         yield event
 
@@ -781,7 +784,6 @@ class Stream:
             yield MessageStartEvent(message_id=message_id)
             for event in await turn.start():
                 yield event
-            # take snapshots of current contextvars
             # The task copies the context: tools see this turn's registry and artifacts.
             registry_token = current_registry.set(self.citation_registry)
             artifacts_token = turn_artifacts.set(self._artifact_ids)
@@ -845,7 +847,6 @@ class Stream:
                 yield event
             finish_reason = CONTENT_FILTER if finished.blocked else None
 
-            # the text is done
             yield TextEndEvent()
             if finished.blocked:
                 for event in withdrawn_citations(self._grounder, self._citations_call_id):
@@ -859,13 +860,13 @@ class Stream:
             yield MessageEndEvent(finish_reason=finish_reason)
 
             # No follow-up suggestions for a masked or withheld answer.
-            if not finished.changed and (suggestion := await self.get_suggestions(messages)):
+            if not finished.changed and (
+                suggestion := await self.get_suggestions(turn.as_gated(messages))
+            ):
                 yield suggestion
 
         except Exception as critical_error:
-            # Don't f-string `critical_error`: its text can contain braces,
-            # which would crash this logging call itself (see suggestions
-            # generator for the same fix and rationale).
+            # Don't f-string `critical_error`: braces in its text would crash this log call.
             info = describe_error(critical_error)
             logger.opt(exception=critical_error).error(
                 "Critical error in stream [{}] {}: {}: {}",

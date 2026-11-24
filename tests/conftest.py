@@ -61,9 +61,10 @@ def mock_agents_registry():
     from tests.mocks.agent import create_agent_mock
 
     agent = create_agent_mock()
-    with \
-        patch("django_ai_sdk.agents.registry.registry") as reg, \
-        patch("django_ai_sdk.agents.services.registry", reg):
+    with (
+        patch("django_ai_sdk.agents.registry.registry") as reg,
+        patch("django_ai_sdk.agents.services.registry", reg),
+    ):
         reg.get = MagicMock(return_value=agent)
         reg.all = MagicMock(return_value={"test-agent": agent})
         yield reg
@@ -79,8 +80,10 @@ def agent_permissions(mock_agents_registry):
             agent_permissions(DenyAll)        # single
             agent_permissions(IsOwner, DenyAll)  # multiple
     """
+
     def set_perms(*perms):
         mock_agents_registry.get.return_value.permissions = list(perms)
+
     return set_perms
 
 
@@ -115,6 +118,7 @@ def sample_agent_response():
 @pytest.fixture
 def rag_document_factory():
     """Factory for creating RagDocument objects."""
+
     def create(**kwargs):
         defaults = {
             "id": "test-doc-1",
@@ -124,6 +128,7 @@ def rag_document_factory():
         }
         defaults.update(kwargs)
         return RagDocument(**defaults)
+
     return create
 
 
@@ -146,3 +151,12 @@ def installs_as_is():
     installed = MagicMock(side_effect=lambda agent: agent)
     with patch("django_ai_sdk.oversight.plugin.apply_oversight", installed):
         yield installed
+
+
+@pytest.fixture(autouse=True)
+def inline_workflow_runs(request, monkeypatch):
+    """Queued workflow runs execute inline; tests that take `dbos` get the real worker."""
+    if "dbos" not in request.fixturenames:
+        from django_ai_sdk.durable.testing import run_inline
+
+        run_inline(monkeypatch)

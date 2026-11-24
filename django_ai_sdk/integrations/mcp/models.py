@@ -22,14 +22,9 @@ _BLOCKED_HOSTNAME_SUFFIXES = (".local", ".internal", ".localhost")
 
 
 def _validate_public_url(url: str) -> None:
-    """Reject a URL an SSRF-minded staff account could use to reach this app's own
-    network (a literal loopback/private/link-local IP, or a known internal
-    hostname) -- this app's own process is what fetches MCPServerConfig.url.
+    """SECURITY: reject literal internal IPs and internal hostnames (SSRF).
 
-    Static checks only, no DNS resolution: a hostname that *resolves* to a private
-    address isn't caught here (egress-firewall the deployment for that guarantee).
-    A hostname is also how a deployment that genuinely wants an internal MCP server
-    gets one -- no override setting needed for that.
+    No DNS resolution: a hostname resolving to a private address passes.
     """
     host = (urlparse(url).hostname or "").lower()
     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOSTNAME_SUFFIXES):
@@ -43,8 +38,7 @@ def _validate_public_url(url: str) -> None:
 
 
 def _get_fernet() -> Fernet:
-    """Derive the Fernet key used to encrypt/decrypt integration credentials
-    from Django's SECRET_KEY, so there's no second secret to configure."""
+    """Credential encryption key, derived from SECRET_KEY."""
     secret = settings.SECRET_KEY
     if isinstance(secret, str):
         secret = secret.encode()
@@ -116,7 +110,7 @@ class MCPOAuthToken(models.Model):
 
 
 class MCPOAuthClient(models.Model):
-    """Stores dynamically-registered OAuth client credentials (RFC 7591) per MCP server."""
+    """Dynamically registered OAuth client credentials per MCP server."""
 
     server_name = models.CharField(max_length=100, primary_key=True)
     client_id = models.CharField(max_length=500)
@@ -131,7 +125,6 @@ class MCPOAuthClient(models.Model):
         return f"OAuthClient({self.server_name})"
 
     def set_credentials(self, client_id: str, client_secret: str) -> None:
-        """Store client credentials; client_secret is encrypted, client_id is plaintext."""
         f = _get_fernet()
         self.client_id = client_id
         if client_secret:
@@ -140,7 +133,6 @@ class MCPOAuthClient(models.Model):
             self.client_secret = ""
 
     def get_client_secret(self) -> str:
-        """Retrieve decrypted client_secret."""
         if not self.client_secret:
             return ""
         try:
@@ -151,15 +143,7 @@ class MCPOAuthClient(models.Model):
 
 
 class MCPServerConfig(models.Model):
-    """One MCP server declared as data instead of code -- add/edit/enable from
-    Django admin or a settings UI, no app, no deploy, no restart.
-
-    Never overrides a same-named installed-app integration (see
-    integrations.registry); this is for adding a server with no code at all.
-
-    ``token``/``client_secret`` are Fernet-encrypted, same as ``MCPOAuthToken``.
-    Auth kinds match ``mcp.loader.AUTH_KINDS``.
-    """
+    """One MCP server declared as data; never overrides an installed-app integration."""
 
     AUTH_CHOICES = [
         ("static", "No auth"),
@@ -235,13 +219,7 @@ class MCPServerConfig(models.Model):
             return ""
 
     def to_integration(self) -> Any:
-        """Build the ``DynamicMCPIntegration`` this row describes.
-
-        Never raises -- a bad row (missing url, unknown auth) registers as needing
-        setup instead of breaking the registry for every other integration. Imports
-        are local to avoid a module-level cycle with loader.py, which already
-        imports this module's OAuth models the same way.
-        """
+        """Build this row's ``DynamicMCPIntegration``; a bad row needs setup, never raises."""
         from django_ai_sdk.integrations.mcp.loader import (
             DynamicMCPIntegration,
             build_mcp_config_safe,

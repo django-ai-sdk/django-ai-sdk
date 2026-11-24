@@ -1,8 +1,7 @@
 """Error codes: what a client is told when something fails.
 
-Clients only ever get a stable error code, its message and a short ``ref``. The
-exception text (provider URLs, file paths, class names) goes to the log, tagged
-with the same ``ref``, so a user can quote it to an admin.
+Clients get a stable code, its message and a ``ref``; the exception text goes to the
+log under that ref.
 """
 
 from __future__ import annotations
@@ -362,6 +361,19 @@ class ErrorInfo:
 
 def describe_error(exc: BaseException) -> ErrorInfo:
     return ErrorInfo(code=classify_error(exc), ref=new_ref())
+
+
+def public_detail(exc: BaseException) -> str:
+    """Text a stored record may show a client for `exc`, such as a failed step.
+
+    SDK errors keep their message; other text may hold hosts or SQL, so it is logged
+    under a ref instead.
+    """
+    if isinstance(exc, AiSdkError):
+        return str(exc)
+    info = describe_error(exc)
+    logger.warning("Recorded as error ref=%s: %s: %s", info.ref, type(exc).__name__, exc)
+    return f"{info.spec.message} (ref {info.ref})"
 
 
 # Malformed input from the caller. Only these, not any ValueError: a ValueError

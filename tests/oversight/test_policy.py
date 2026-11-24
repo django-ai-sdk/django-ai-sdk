@@ -24,6 +24,7 @@ from django_ai_sdk.oversight import (
     RestrictTools,
     Rule,
     Score,
+    SecretsLens,
     LensPack,
     RulePack,
     register_policy,
@@ -35,7 +36,7 @@ from django_ai_sdk.oversight.guard.judging import Answered, match_rules, answer_
 from django_ai_sdk.oversight.judges.base import Judge
 from django_ai_sdk.oversight.packs.security import SecurityPack
 from django_ai_sdk.oversight.registry import build_policy
-from django_ai_sdk.oversight.policy import validate_policy
+from django_ai_sdk.oversight.policy import ResolvedPolicy, validate_policy, validate_rule
 from django_ai_sdk.oversight.registry import get_invalid_policies
 from django_ai_sdk.oversight.registry import invalidate_policy
 from django_ai_sdk.oversight.types import (
@@ -131,6 +132,35 @@ class TestConditions:
         assert L("pii").contains("bsn").matches(answers)
         assert L("pii").is_true.matches(answers)
         assert (~(L("topic") == "billing")).matches(answers)
+
+    def test_disputed_is_two_models_that_answered_differently(self):
+        def said(value, *before, model="b"):
+            return Answer(value=value, model=model, trail=list(before))
+
+        lean_no = Answer(value=False, confidence=0.3, model="a")
+        missed = Answer(value=False, confidence=0.5)  # a pattern miss names no model
+        down = Answer(error="timeout", model="a")
+        disputed = L("x").disputed
+        assert disputed.matches({"x": said(True, lean_no)})
+        assert not disputed.matches({"x": said(False, lean_no)})
+        assert not disputed.matches({"x": said(True, missed)})
+        assert not disputed.matches({"x": said(True, down)})
+        assert not disputed.matches({"x": said(True)})
+        assert not disputed.matches({})
+        # A person looks when in doubt; a stop needs the judges to agree.
+        doubt = {"x": said(False, Answer(value=True, confidence=0.2, model="a"))}
+        assert (L("x").is_true | disputed).matches(doubt)
+        assert not (L("x").is_true & ~disputed).matches({"x": said(True, lean_no)})
+        assert disputed.matches({}, {"x"}) is None
+        assert Condition(disputed.to_dict()).lenses("disputed") == {"x"}
+
+    def test_only_a_yes_no_or_a_label_can_be_disputed(self):
+        score = JudgeLens(name="tox", answer=Score, judges=["judge"])
+        topic = JudgeLens(name="topic", answer=Choice, labels=["hr", "other"], judges=["judge"])
+        lenses = {"tox": score, "topic": topic}
+        validate_rule(Rule("r", when=L("topic").disputed, then=Alert()), lenses)
+        with pytest.raises(ImproperlyConfigured, match="only a yes/no or a label"):
+            validate_rule(Rule("r", when=L("tox").disputed, then=Alert()), lenses)
 
     def test_a_missing_answer_matches_nothing_but_missing(self):
         answers = {"broken": ans(None, error="timeout")}
@@ -281,6 +311,30 @@ class TestRuleEvaluation:
         # Restricting tools early would lose the mask at finish; blocking ends the turn.
         assert not at_gate(either, RestrictTools(["search"]), Mask())
         assert at_gate(either, Block(), Mask())
+
+    def test_a_rule_cannot_read_a_tool_call_lens_next_to_a_later_lens(self):
+        # The call's answer is gone by finish: the rule could never see both.
+        later = PIILens(name="later", subject=Subject.ANSWER)
+        call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
+        asked = PIILens(name="asked")
+        lenses = {lens.name: lens for lens in (later, call, asked)}
+        either = Rule("r", when=L("call").is_true | L("later").is_true, then=Block())
+        with pytest.raises(ImproperlyConfigured, match="give the tool call its own rule"):
+            validate_rule(either, lenses)
+        validate_rule(Rule("r", when=L("call").is_true & L("asked").is_true, then=Block()), lenses)
+
+    def test_a_tool_call_rule_decides_at_the_call(self):
+        # A gate lens that reflect asks again has no answer yet: the call is not let through.
+        call = SecretsLens(name="call", subject=Subject.TOOL_CALL)
+        asked = PIILens(name="asked", stages=[Stage.GATE, Stage.REFLECT])
+        rule = Rule(
+            "r", when=L("call").is_true & ~L("asked").is_true, then=Block(), mode=Mode.ENFORCE
+        )
+        resolved = ResolvedPolicy(
+            name="p", lenses={"call": call, "asked": asked}, rules={"r": rule}
+        )
+        [match] = match_rules(resolved, {"call": ans(["key"])}, Stage.TOOL, done=set())
+        assert [a.kind for a in match.acted] == ["block"]
 
     def test_report_matches_record_but_do_not_act(self):
         resolved = build_policy("test-parent")

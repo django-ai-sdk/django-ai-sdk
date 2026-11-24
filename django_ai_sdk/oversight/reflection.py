@@ -39,7 +39,7 @@ from django_ai_sdk.oversight.types import (
 from django_ai_sdk.utils import as_uuid
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
     from datetime import datetime
 
     from django.db.models import QuerySet
@@ -57,9 +57,17 @@ REFLECT_ATTEMPTS = 3
 MaskGroup = tuple[Matched, tuple[list[Any], str]]
 
 
-def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
+def answers_from(answer_rows: list[Any], lenses: Mapping[str, Lens]) -> dict[str, Answer]:
+    """The turn's own answers by lens.
+
+    A row at a stage its lens does not judge at is left out: a gate lens run on what a
+    tool returned, kept only to mask it.
+    """
     answers: dict[str, Answer] = {}
     for row in sorted(answer_rows, key=lambda row: row.created_at):
+        lens = lenses.get(row.lens)
+        if lens is not None and row.stage not in lens.stages:
+            continue
         if row.error or row.value is None:
             if row.lens not in answers:
                 answers[row.lens] = Answer(error=row.error or "no value", answerer=row.answerer)
@@ -69,6 +77,15 @@ def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
             confidence=row.confidence if row.confidence is not None else 1.0,
             answerer=row.answerer,
             model=row.model,
+            # What the other judges said, so a rule can still test `disputed`.
+            trail=[
+                Answer(
+                    value=step.get("value"),
+                    model=step.get("model") or "",
+                    error=step.get("error") or "",
+                )
+                for step in row.trail or []
+            ],
         )
     return answers
 
@@ -76,10 +93,9 @@ def answers_from(answer_rows: list[Any]) -> dict[str, Answer]:
 async def run_reflection(turn_id: str) -> int:
     """Run the policy's reflect lenses on a closed turn. Returns the number of answers added.
 
-    A lease makes a duplicate task return 0; a dead worker's lease runs out for
-    `oversight_sweep`. Results are written only while the lease holds. A failed run,
-    or one whose judge was down with attempts left, gives its claim back; the last
-    attempt keeps what it found and FAIL_MODE decides the rest.
+    A lease makes duplicates return 0 and gates every write; a dead worker's lease expires for
+    `oversight_sweep`. A failed or judge-down run with attempts left gives its claim back;
+    the last attempt keeps what it found and FAIL_MODE decides the rest.
     """
     from django_ai_sdk.oversight.models import Turn
 
@@ -234,7 +250,7 @@ async def judge_stored_turn(
             **unmasked_literals(masked[1], context.output),
         }
     existing = [row async for row in LensAnswer.objects.filter(turn=turn)]
-    context.answers = answers_from(existing)
+    context.answers = answers_from(existing, policy.lenses)
     has_text = content is not None and "input" in content and "output" in content
     if not has_text:
         logger.info("Turn {} kept no text; reflect judges only what it kept", turn.id)
@@ -284,6 +300,7 @@ async def judge_reflect_stage(
     for item in answered:
         context.answers[item.lens.name] = item.answer
     failed = {name for name, answer in context.answers.items() if answer.error}
+    failed |= {item.lens.name for item in answered if item.errored}
     matched = match_rules(
         policy,
         context.answers,
@@ -377,7 +394,12 @@ def apply_reflect_actions(
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
     events = notify_events(
-        turn.id, matched, agent=turn.agent_name, channel=turn.channel, stage=str(Stage.REFLECT)
+        turn.id,
+        matched,
+        thread_id=turn.thread_id,
+        agent=turn.agent_name,
+        channel=turn.channel,
+        stage=str(Stage.REFLECT),
     )
     notes = rule_notes(matched, set())
     if (masks or notes) and turn.message_id:

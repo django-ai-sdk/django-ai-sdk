@@ -1,4 +1,8 @@
-"""Workflows: stored definitions, ad-hoc and stored runs, run history."""
+"""Workflows: stored definitions, their runs and run history.
+
+Over HTTP only registered or stored workflows run, by key. A definition sent in a
+request is never run. `WorkflowService.run` is for trusted Python code only.
+"""
 
 from __future__ import annotations
 
@@ -10,18 +14,21 @@ from ninja import Router
 
 from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
-    WorkflowActionItem,
+    StepRunOut,
+    WorkflowDecisionIn,
     WorkflowItem,
+    WorkflowListenerItem,
     WorkflowRunDetailOut,
     WorkflowRunOut,
     WorkflowRunResponse,
-    WorkflowRunStepOut,
+    WorkflowTriggerItem,
+    WorkflowTriggerPauseIn,
 )
 from django_ai_sdk.errors import NotFound
-from django_ai_sdk.views.schemas import (
+from django_ai_sdk.utils import isoformat_or_none
+from django_ai_sdk.workflows.schemas import (
     WorkflowCreateRequest,
-    WorkflowRunByIdRequest,
-    WorkflowRunRequest,
+    WorkflowStartRequest,
     WorkflowUpdateRequest,
 )
 from django_ai_sdk.workflows.services import WorkflowService
@@ -29,13 +36,13 @@ from django_ai_sdk.workflows.services import WorkflowService
 routes = ApiRouter()
 
 
-def _iso(value: Any) -> str | None:
-    return value.isoformat() if value else None
-
-
 def _item(record: Any) -> WorkflowItem:
     return WorkflowItem(
-        id=str(record.id), name=record.name, definition=record.definition, active=record.active
+        id=str(record.id),
+        name=record.name,
+        slug=record.slug,
+        definition=record.definition,
+        active=record.active,
     )
 
 
@@ -43,25 +50,47 @@ def _run_out(run: Any, **extra: Any) -> dict[str, Any]:
     return {
         "id": str(run.id),
         "workflow_id": str(run.workflow_id) if run.workflow_id else None,
+        "workflow_key": run.workflow_key,
         "status": run.status,
+        "attempt": run.attempt,
+        "trigger": run.trigger,
         "outputs": run.outputs,
         "error": run.error,
         "created_at": run.created_at.isoformat(),
-        "started_at": _iso(run.started_at),
-        "completed_at": _iso(run.completed_at),
+        "started_at": isoformat_or_none(run.started_at),
+        "completed_at": isoformat_or_none(run.completed_at),
         **extra,
     }
 
 
-@routes.post("/workflows/run/", response={202: WorkflowRunResponse})
-async def run_workflow(request: HttpRequest, payload: WorkflowRunRequest) -> Any:
-    run = await WorkflowService.run(payload.workflow, inputs=payload.inputs, user=request.user)
-    return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+@routes.get("/workflows/listeners/", response=list[WorkflowListenerItem])
+async def list_workflow_listeners(request: HttpRequest) -> Any:
+    return await WorkflowService.list_listeners(user=request.user)
 
 
-@routes.get("/workflows/actions/", response=list[WorkflowActionItem])
-def list_workflow_actions(request: HttpRequest) -> Any:
-    return [WorkflowActionItem(**item) for item in WorkflowService.list_actions()]
+@routes.get("/workflows/triggers/", response=list[WorkflowTriggerItem])
+async def list_workflow_triggers(request: HttpRequest) -> Any:
+    items: list[WorkflowTriggerItem] = []
+    for item in await WorkflowService.list_triggers(user=request.user):
+        last = item.pop("last_run")
+        items.append(
+            WorkflowTriggerItem(**item, last_run=WorkflowRunOut(**_run_out(last)) if last else None)
+        )
+    return items
+
+
+@routes.post("/workflows/triggers/{key}/{trigger}/pause/", response={204: None})
+async def pause_workflow_trigger(
+    request: HttpRequest, key: str, trigger: str, payload: WorkflowTriggerPauseIn
+) -> Any:
+    await WorkflowService.set_trigger_paused(key, trigger, paused=payload.paused, user=request.user)
+    return 204, None
+
+
+@routes.post("/workflows/triggers/{key}/{trigger}/fire/", response={202: None})
+async def fire_workflow_trigger(request: HttpRequest, key: str, trigger: str) -> Any:
+    await WorkflowService.fire_trigger(key, trigger, user=request.user)
+    return 202, None
 
 
 @routes.get("/workflows/", response=list[WorkflowItem])
@@ -93,27 +122,38 @@ async def list_workflow_runs(
     return [WorkflowRunOut(**_run_out(r)) for r in runs]
 
 
-@routes.get("/workflows/{workflow_id}/runs/{run_id}/", response=WorkflowRunDetailOut)
-async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) -> Any:
-    run = await WorkflowService.get_run(run_id, user=request.user)
+async def _run_detail(request: HttpRequest, run_id: str, workflow_id: str | None) -> Any:
+    run = await WorkflowService.get_run(run_id, user=request.user, workflow_id=workflow_id)
     if run is None:
         # Absent covers both "no such run" and "not yours", by design.
         raise NotFound("Run not found")
     steps = [
-        WorkflowRunStepOut(
+        StepRunOut(
             id=str(s.id),
             sequence=s.sequence,
             step_name=s.step_name,
-            output=s.output if isinstance(s.output, dict) else None,
+            output=s.output,
             status=s.status,
             error=s.error,
             detail=s.detail,
-            started_at=_iso(s.started_at),
-            completed_at=_iso(s.completed_at),
+            turn_id=s.turn_id,
+            started_at=isoformat_or_none(s.started_at),
+            completed_at=isoformat_or_none(s.completed_at),
         )
         async for s in run.steps.all()
     ]
     return WorkflowRunDetailOut(**_run_out(run, steps=steps))
+
+
+@routes.get("/workflows/runs/{run_id}/", response=WorkflowRunDetailOut)
+async def get_workflow_run_by_id(request: HttpRequest, run_id: str) -> Any:
+    """Get a run by id, e.g. to follow a run started by key."""
+    return await _run_detail(request, run_id, None)
+
+
+@routes.get("/workflows/{workflow_id}/runs/{run_id}/", response=WorkflowRunDetailOut)
+async def get_workflow_run(request: HttpRequest, workflow_id: str, run_id: str) -> Any:
+    return await _run_detail(request, run_id, workflow_id)
 
 
 @routes.get("/workflows/{workflow_id}/", response=WorkflowItem)
@@ -141,14 +181,33 @@ async def delete_workflow(request: HttpRequest, workflow_id: str) -> Any:
     return 204, None
 
 
-@routes.post("/workflows/{workflow_id}/run/", response={202: WorkflowRunResponse})
-async def run_workflow_by_id(
-    request: HttpRequest, workflow_id: str, payload: WorkflowRunByIdRequest
-) -> Any:
-    run = await WorkflowService.run_by_id(
-        workflow_id, inputs=payload.inputs, user=request.user, run_id=payload.run_id
-    )
+@routes.post("/workflows/{key}/run/", response={202: WorkflowRunResponse})
+async def start_workflow(request: HttpRequest, key: str, payload: WorkflowStartRequest) -> Any:
+    run = await WorkflowService.start(key, inputs=payload.inputs, user=request.user)
     return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+
+
+@routes.post("/workflows/runs/{run_id}/resume/", response={202: WorkflowRunResponse})
+async def resume_workflow_run(request: HttpRequest, run_id: str) -> Any:
+    run = await WorkflowService.resume(run_id, user=request.user)
+    return 202, WorkflowRunResponse(run_id=str(run.id), status=run.status)
+
+
+@routes.post("/workflows/runs/{run_id}/cancel/", response=WorkflowRunResponse)
+async def cancel_workflow_run(request: HttpRequest, run_id: str) -> Any:
+    run = await WorkflowService.cancel(run_id, user=request.user)
+    return WorkflowRunResponse(run_id=str(run.id), status=run.status)
+
+
+@routes.post("/workflows/runs/{run_id}/steps/{step}/decision/", response=WorkflowRunResponse)
+async def decide_workflow_step(
+    request: HttpRequest, run_id: str, step: str, payload: WorkflowDecisionIn
+) -> Any:
+    """Approve or reject an approval step the run waits on. Not on a run that acts as you."""
+    run = await WorkflowService.decide(
+        run_id, step, approved=payload.approved, note=payload.note, user=request.user
+    )
+    return WorkflowRunResponse(run_id=str(run.id), status=run.status)
 
 
 def get_workflows_router(*, exclude: Collection[str] = (), **router_kwargs: Any) -> Router:

@@ -1,20 +1,7 @@
 """Lenses: one typed question about a turn each, answered by patterns, a check or judges.
 
-    class Competitors(PatternLens):       # code finds spans, which a Mask rule can mask
-        name = "competitors"
-        keywords = {"acme": ["Acme"], "globex": ["Globex"]}
-
-    class EvenAmount(CheckLens):          # plain Python, like a Django validator
-        name = "even_amount"
-        validators = [validate_even]      # raise Violation("...") to say yes
-
-    class PromptInjection(JudgeLens):     # judges, cheapest first
-        name = "injection_question"
-        judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier"), Maybe("judge")]
-
-A lens only answers; what to do about it is a `Rule` on the policy. `answer`
-picks Flag, Choice, Score or Entities; an answer option (`yes`, `labels`, `low`)
-belongs to the type that reads it. Inline, pass attributes as keyword arguments.
+A lens only answers; a `Rule` on the policy acts. `answer` picks Flag, Choice, Score or
+Entities; answer options (`yes`, `labels`, `low`) belong to the type that reads them.
 """
 
 from __future__ import annotations
@@ -40,6 +27,7 @@ from django_ai_sdk.oversight.judges.base import (
 from django_ai_sdk.oversight.judges.patterns import PatternJudge
 from django_ai_sdk.oversight.patterns import (
     DEFAULT_PII_KINDS,
+    PII_NOT_AFTER,
     PII_PATTERNS,
     PII_VERIFY,
     REFUSAL_PATTERNS,
@@ -284,6 +272,9 @@ class Lens:
     enabled: bool = True
     # Only ask when there are sources or tool results (this turn or earlier) to judge against.
     needs_grounding: bool = False
+    # Whether the question can be asked of what a tool returned. False for a question about
+    # the person writing, which a tool's text can't answer.
+    judges_tool_results: bool = True
 
     # Answer options, set only when the answer type reads them.
     yes: str
@@ -383,7 +374,8 @@ class PatternLens(Lens):
 
     `patterns` maps a label to regexes (a plain list labels hits with the lens's
     name), `keywords` a label to whole words, `verify` a label to a check such as
-    a checksum.
+    a checksum, `not_after` a label to a regex for the text right before a match
+    that makes it something else.
     """
 
     kind = "pattern"
@@ -391,6 +383,7 @@ class PatternLens(Lens):
     patterns: PatternTable = {}  # noqa: RUF012
     keywords: PatternTable = {}  # noqa: RUF012
     verify: Mapping[str, Verifier] = {}  # noqa: RUF012
+    not_after: Mapping[str, str] = {}  # noqa: RUF012
     flags: int = re.IGNORECASE
 
     @cached_property
@@ -399,6 +392,7 @@ class PatternLens(Lens):
             self.pattern_table(),
             keywords=self.keywords,
             verify=self.verify,
+            not_after=self.not_after,
             flags=self.flags,
             miss_confidence=1.0,
         )
@@ -530,12 +524,11 @@ def _takes_context(validator: Callable[..., Any]) -> bool:
 
 
 class JudgeLens(Lens):
-    """Answered by judges, cheapest first.
+    """Answered by judges, asked in order, quick to thorough.
 
-    An answer at or above `min_confidence` ends the chain, else the last usable
-    answer counts. `judges` are Judge instances, aliases from
-    AI_SDK_OVERSIGHT["JUDGES"] (`Maybe` skips one when undefined), or
-    {"class": ..., **kwargs} configs.
+    The first answer at or above `min_confidence` stands, else the last (unsure), so order by
+    trust; confidences are never compared between judges. No answer at all: FAIL_MODE decides.
+    `judges`: Judge instances, JUDGES aliases (`Maybe` skips undefined ones), or configs.
     """
 
     kind = "judge"
@@ -631,6 +624,7 @@ class PIILens(PatternLens):
     name = "pii"
     kinds: list[str] = list(DEFAULT_PII_KINDS)  # noqa: RUF012
     verify = PII_VERIFY
+    not_after = PII_NOT_AFTER
     flags = 0
 
     def pattern_table(self) -> PatternTable:

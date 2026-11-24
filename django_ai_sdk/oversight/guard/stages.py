@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -119,30 +120,28 @@ def _block_question(guard: TurnGuard, result: StageResult, message: str) -> Stag
 
 
 async def judge_history(
-    guard: TurnGuard, messages: list[ChatMessage], *, history: bool = True
+    guard: TurnGuard,
+    earlier: list[ChatMessage],
+    question: ChatMessage | None = None,
+    *,
+    history: bool = True,
 ) -> StageResult:
     """Judge earlier messages and attachment context that come with the question.
 
-    Each item is judged separately by the gate's lenses and masked in place, or
-    withheld whole when a mask cannot point into it. With `history=False` only
-    attachments are judged (a stored thread was judged turn by turn). Question
-    and items count together against MAX_INPUT_CHARS.
-
-    Blocks when an enforced rule that blocks or removes every tool matches any
-    item: history is resent every turn, so merely dropping tools would silently
-    leave every later turn without them. For the same reason alert, queue and
-    notify rules are skipped. Findings are recorded aside and never steer masks
-    or rules on the question itself.
+    Each item is masked in place or withheld whole; `history=False` judges only attachments.
+    An enforced block or remove-all-tools match blocks: history is resent every turn, so
+    dropping tools would silently strip every later turn (alert, queue, notify are skipped
+    too). Findings are recorded aside and never steer the question's masks or rules.
     """
     result = StageResult(Stage.GATE, text=guard.context.input)
     if not guard.active:
         return result
     # Set again below once judging has masked it.
-    guard.set_history(messages)
+    guard.set_history(earlier)
     if guard.policy_unloaded:
         return _block_question(guard, result, str(Block.DEFAULT_MESSAGE))
     lenses = guard.resolved.active_lenses(Stage.GATE, Subject.QUESTION)
-    items = _history_items(messages, history=history) if lenses else []
+    items = _history_items(earlier, question, history=history) if lenses else []
     if not items:
         return result
     unread, items = items[:-MAX_HISTORY_JUDGED], items[-MAX_HISTORY_JUDGED:]
@@ -159,7 +158,7 @@ async def judge_history(
 
     async def judge(text: str) -> StageResult:
         async with slots:
-            return await guard.masks.mask_other_text(lenses, text, Stage.GATE, blocks=True)
+            return await guard.masks.mask_other_text(lenses, text, Stage.GATE)
 
     try:
         judged = await asyncio.gather(*(judge(get()) for get, _ in items))
@@ -176,7 +175,7 @@ async def judge_history(
         if one.restrict is not None:
             guard.restrict = merge_restrict(guard.restrict, one.restrict)
     recorded = guard.record_aside(Stage.GATE, [o for one in judged for o in one.answered], found)
-    guard.set_history(messages)
+    guard.set_history(earlier)
     if result.blocked:
         result.notice = guard.notices.stage_notice(Stage.GATE, recorded, True, result.message)
         # The gate will not run after a block, so write the turn ahead here.
@@ -185,7 +184,7 @@ async def judge_history(
 
 
 def _history_items(
-    messages: list[ChatMessage], *, history: bool
+    earlier: list[ChatMessage], question: ChatMessage | None, *, history: bool
 ) -> list[tuple[Callable[[], str], Callable[[str], None]]]:
     """(read, write back) pairs for each text to judge.
 
@@ -193,9 +192,9 @@ def _history_items(
     so a vouched history does not cover it.
     """
     items: list[tuple[Callable[[], str], Callable[[str], None]]] = []
-    for index, message in enumerate(messages):
-        earlier = index < len(messages) - 1
-        if history and earlier and message.role in {"user", "assistant"} and message.content:
+    for message in [*earlier, question] if question else earlier:
+        said = message.role in {"user", "assistant"} and message.content
+        if history and said and message is not question:
             items.append(
                 (
                     lambda m=message: m.content,
@@ -219,6 +218,9 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
     if guard.policy_unloaded:
         return str(Block.DEFAULT_MESSAGE)
     try:
+        key = f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
+        if key in guard.blocked_calls:
+            return guard.blocked_calls[key]
         if not guard.allows_tool(call.name):
             return str(TOOL_UNAVAILABLE_MESSAGE)
         lenses = guard.resolved.active_lenses(Stage.TOOL, Subject.TOOL_CALL)
@@ -234,7 +236,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         tool_lenses = {lens.name for lens in lenses}
         # Failures of other lenses still count. A tool lens failure counts only for this call.
         errored = {name for name in guard.errored_lenses() if name not in tool_lenses}
-        # Judge every call, not just the first, so a retried call is blocked again.
+        # Judge every call, not just the first, so a rule blocks a changed call too.
         matched = [
             m
             for m in match_rules(
@@ -253,6 +255,7 @@ async def judge_tool_call(guard: TurnGuard, call: ToolCall) -> str | None:
         block = first_block_message(matched)
         guard.restrict = restricted_tools(matched, guard.restrict)
         if block is not None:
+            guard.blocked_calls[key] = block
             return block
         if not guard.allows_tool(call.name):
             restricting = next(

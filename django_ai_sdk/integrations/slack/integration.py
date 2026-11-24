@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import logging
+import re
+from typing import TYPE_CHECKING, Any
+
+from django.http import JsonResponse
+
+from django_ai_sdk.integrations.slack.verify import is_signed_by_slack
+from django_ai_sdk.integrations.webhooks.base import (
+    InboundEvent,
+    WebhookIntegration,
+    json_body,
+)
+
+if TYPE_CHECKING:
+    from django.http import HttpRequest, HttpResponse
+
+logger = logging.getLogger(__name__)
+
+POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
+
+TIMESTAMP_HEADER = "X-Slack-Request-Timestamp"
+SIGNATURE_HEADER = "X-Slack-Signature"
+
+# Slack writes a mention as <@U123ABC>.
+_MENTION = re.compile(r"<@[A-Z0-9]+>")
+
+
+class SlackIntegration(WebhookIntegration):
+    """Answer app mentions and direct messages with the configured agent.
+
+    Needs app_mentions:read, im:history and chat:write, Event Subscriptions on this path, and:
+
+        AI_SDK_INTEGRATIONS = {"slack": {
+            "BOT_TOKEN": env("SLACK_BOT_TOKEN"),
+            "SIGNING_SECRET": env("SLACK_SIGNING_SECRET"),
+            "ALLOW_FROM": ["U0123ABCD"],
+            "AGENT": "myapp.agents.SupportAgent",
+        }}
+    """
+
+    name = "slack"
+    label = "Slack"
+    # A top-level message uses its own ts, so its replies land in the same thread.
+    thread_per_ref = True
+
+    def missing_config(self) -> str | None:
+        return self._missing_secrets(
+            "BOT_TOKEN",
+            "SIGNING_SECRET",
+            hint="the bot token from the Slack app's Install page, the signing secret from "
+            "its Basic Information page.",
+        ) or self._missing_audience("Slack member ids (U…)")
+
+    def verify(self, request: HttpRequest) -> bool:
+        return is_signed_by_slack(
+            self.secret("SIGNING_SECRET"),
+            request.headers.get(TIMESTAMP_HEADER, ""),
+            request.headers.get(SIGNATURE_HEADER, ""),
+            request.body,
+        )
+
+    def parse(self, request: HttpRequest) -> InboundEvent | HttpResponse | None:
+        body = self._json(request)
+        if body is None:
+            return None
+
+        # Slack's endpoint check.
+        if body.get("type") == "url_verification":
+            return JsonResponse({"challenge": body.get("challenge", "")})
+
+        event = body.get("event") or {}
+        if not self._is_answerable(event):
+            return None
+
+        text = _MENTION.sub("", event.get("text", "")).strip()
+        return InboundEvent(
+            integration=self.name,
+            event_id=body.get("event_id", ""),
+            text=text,
+            conversation_id=event.get("channel", ""),
+            thread_ref=event.get("thread_ts") or event.get("ts", ""),
+            external_user_id=event.get("user", ""),
+            workspace_id=body.get("team_id", ""),
+        )
+
+    @staticmethod
+    def _is_answerable(event: dict[str, Any]) -> bool:
+        # bot_id: our own reply came back (would loop). subtype: an edit, join or file share.
+        if event.get("bot_id") or event.get("subtype"):
+            return False
+        if event.get("type") == "app_mention":
+            return True
+        return event.get("type") == "message" and event.get("channel_type") == "im"
+
+    async def reply(self, event: InboundEvent, text: str) -> None:
+        response = await self._post_reply(
+            POST_MESSAGE_URL,
+            json={"channel": event.conversation_id, "text": text, "thread_ts": event.thread_ref},
+            headers={"Authorization": f"Bearer {self.secret('BOT_TOKEN')}"},
+        )
+        if response is None:
+            return
+        # Slack returns 200 with ok=false on errors, so check the body.
+        body = json_body(response)
+        if not body.get("ok"):
+            logger.error(
+                "Slack refused a reply to %s: %s", event.conversation_id, body.get("error")
+            )

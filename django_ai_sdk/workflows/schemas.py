@@ -1,36 +1,47 @@
 from __future__ import annotations
 
+import re
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Union, get_args, get_origin
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_core import PydanticUndefined
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
-# `object` is a typed record of `fields`; `dict` is the open escape for JSON the
-# host shapes itself. A file is a `str` id or a `dict` reference under whatever
-# name the host picks — the engine has no opinion about what `pdfs` means, and
-# the step that reads it does.
+# `object` is a typed record of `fields`; `dict` is open JSON the host shapes.
 FieldType = Literal["str", "int", "float", "bool", "list", "dict", "object"]
 
-# A declared schema is a shape, not a program: bounds keep one from being a
-# pathology the compiler and every editor in front of it has to walk.
+# Bounds so a declared schema cannot be a pathology the compiler has to walk.
 MAX_DEPTH = 8
 MAX_FIELDS = 32
 MAX_ENUM = 64
+# A run walks every step in one worker, so definitions stay small.
+MAX_STEPS = 50
+# The workflow's listeners plus every step's.
+MAX_LISTENERS = 20
+MAX_DEFINITION_BYTES = 256 * 1024
+MAX_TRIGGERS = 10
+# Part of its schedule's name and of the runs it starts.
+TRIGGER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,49}$")
 
 _SCALARS = ("str", "int", "float", "bool")
 
-_TYPE_OF_ANNOTATION: dict[Any, FieldType] = {
-    str: "str",
-    int: "int",
-    float: "float",
-    bool: "bool",
-    list: "list",
-    dict: "dict",
+# `object` compiles to a model of its own.
+PY_TYPES: dict[FieldType, type] = {
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "list": list,
+    "dict": dict,
 }
+_TYPE_OF_ANNOTATION: dict[Any, FieldType] = {py: name for name, py in PY_TYPES.items()}
+
+# Built-in step types; AI_SDK_WORKFLOWS['STEPS'] may not reuse them.
+AGENT_STEP = "agent"
+APPROVAL_STEP = "approval"
 
 
 class FieldDefinition(BaseModel):
@@ -39,15 +50,13 @@ class FieldDefinition(BaseModel):
     type: FieldType = "str"
     description: str = ""
     required: bool = True
-    # The value an absent, not-required field takes. `None` means "no default":
-    # the field compiles to `type | None`, as it always has.
+    # `None` means no default: the field compiles to `type | None`.
     default: Any = None
-    # The values a scalar field may take. Compiles to Literal[...].
+    # Scalar fields only; compiles to Literal[...].
     enum: list[str | int | float | bool] | None = None
-    # The element type of a `list`. `None` leaves the list open.
+    # A `list`'s element type; `None` leaves the list open.
     items: FieldDefinition | None = None
-    # The members of an `object`. An object declares its fields; `dict` is the
-    # open JSON object.
+    # An `object`'s members.
     fields: dict[str, FieldDefinition] | None = None
 
     @model_validator(mode="after")
@@ -74,16 +83,10 @@ class FieldDefinition(BaseModel):
 
 
 def _check_default_matches_type(where: str, value: Any, field: FieldDefinition) -> None:
-    """A default has to be a real value of the field's own declared type.
-
-    `create_model` does not validate a `Field(default=...)` on its own, so a
-    stored definition can otherwise carry a default of the wrong shape straight
-    into a run's inputs silently.
-    """
+    """A default must match the field's type: `create_model` does not validate defaults."""
     if field.type in _SCALARS:
-        expected = {"str": str, "int": int, "float": float, "bool": bool}[field.type]
-        # bool is an int in Python, so an explicit type check keeps a bool default
-        # from passing for int/float, and a 0/1 from passing for bool.
+        expected = PY_TYPES[field.type]
+        # bool is an int subclass: keep bools out of int/float and 0/1 out of bool.
         if field.type == "bool":
             ok = isinstance(value, bool)
         else:
@@ -126,12 +129,8 @@ def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
         _check_bounds(f"{where}'s items", field.items, depth + 1)
 
 
-class ActionDefinition(BaseModel):
-    """An action named by key in `AI_SDK_WORKFLOW_ACTIONS`.
-
-    `config` is handed to the action as it is built, so one registered class serves
-    every definition that names it — which recipient, which step's output.
-    """
+class ListenerDefinition(BaseModel):
+    """A listener by key in `AI_SDK_WORKFLOWS['LISTENERS']`; `config` goes to its constructor."""
 
     type: str
     config: dict[str, Any] = {}
@@ -140,31 +139,41 @@ class ActionDefinition(BaseModel):
 class StepDefinition(BaseModel):
     """One step of a definition: an agent call, or a registered Step class."""
 
-    # "agent", or a key of AI_SDK_WORKFLOW_STEPS.
-    type: str = "agent"
-    # The step's key: its outcome is recorded under it, and later steps require it.
+    # AGENT_STEP, APPROVAL_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
+    type: str = AGENT_STEP
     name: str
-    # Names of earlier steps this one reads. A run's inputs are always available,
-    # so they are not listed here.
+    # Earlier steps this one reads (run inputs are always available).
     requires: list[str] = []
-    on_error: Literal["fail", "continue"] = "fail"
+    on_error: Literal["stop", "continue"] = "stop"
     agent_id: str = ""
-    system_prompt_override: str | None = None
-    # Structured output for an agent step. A registered step returns what it returns.
+    # Structured output; agent steps only.
     output_fields: dict[str, FieldDefinition] = {}
-    # The inputs this step sends as its conversation, in order. The author names
-    # them; the engine never infers a transcript from the shape of a value.
+    # Inputs sent as the step's conversation, in order; never inferred from a value's shape.
     history: list[str] = []
-    # Actions that fire for this step alone.
-    actions: list[ActionDefinition] = []
+    listeners: list[ListenerDefinition] = []
+    # `Step.config` for a registered step; checked by `validate_config` on store.
+    config: dict[str, Any] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_a_system_prompt(cls, data: Any) -> Any:
+        """Refuse `system_prompt_override`: a definition cannot replace an agent's prompt."""
+        if isinstance(data, dict) and data.get("system_prompt_override"):
+            raise ValueError(
+                "system_prompt_override is not accepted: a definition cannot replace an "
+                "agent's system prompt. Change the agent, or write the step in code."
+            )
+        return data
 
     @model_validator(mode="after")
     def _check_the_type_and_its_fields_agree(self) -> StepDefinition:
         if not self.name:
             raise ValueError("A step needs a name; its outcome is recorded under it.")
-        if self.type == "agent":
+        if self.type == AGENT_STEP:
             if not self.agent_id:
                 raise ValueError("An agent step needs an agent_id.")
+            if self.config:
+                raise ValueError("An agent step takes no config; configure the agent.")
         elif self.agent_id or self.output_fields or self.history:
             raise ValueError(
                 f"Step type {self.type!r} is a registered step, not an agent, so it "
@@ -173,28 +182,84 @@ class StepDefinition(BaseModel):
         return self
 
 
+class _Trigger(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Runs it starts record "<kind>:<name>" as their trigger.
+    name: str
+    # USERNAME_FIELD of the account runs act as. Code-declared workflows only; stored
+    # workflows' runs act as their creator.
+    run_as: str = ""
+    # "{word}" placeholders are filled (cron: name, workflow, scheduled_at, last_run_at;
+    # event: payload). A bare "{word}" keeps the value's type.
+    inputs: dict[str, Any] = {}
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _check_the_name(self) -> _Trigger:
+        if not TRIGGER_NAME.match(self.name):
+            raise ValueError(
+                f"Trigger name {self.name!r}: lowercase letters, digits, - and _, at most 50."
+            )
+        return self
+
+
+class CronTrigger(_Trigger):
+    """Start a run on a schedule: a 5-field cron expression, read in `timezone`."""
+
+    kind: Literal["cron"] = "cron"
+    cron: str
+    # An IANA zone, so "0 9 * * mon-fri" stays 9:00 across daylight saving.
+    timezone: str = "UTC"
+
+
+class EventTrigger(_Trigger):
+    """Start a run when the host reports `event` via `triggers.start_for_event`."""
+
+    kind: Literal["event"] = "event"
+    event: str = Field(min_length=1, max_length=100)
+
+
+Trigger = Annotated[CronTrigger | EventTrigger, Field(discriminator="kind")]
+
+
 class WorkflowDefinition(BaseModel):
-    # The shape of the stored JSON. Stored rows and run snapshots carry it, so a
-    # future format revision can gate on it rather than guess.
+    # Stored JSON format, so a future revision can gate on it.
     version: Literal[1] = 1
     name: str = ""
-    # What the caller must supply. Validated once, before the first step runs.
+    # Validated once, before the first step runs.
     input_fields: dict[str, FieldDefinition] = {}
     steps: list[StepDefinition]
-    # Actions that fire for the run and for every step in it.
-    actions: list[ActionDefinition] = []
+    # Fire for the run and every step in it.
+    listeners: list[ListenerDefinition] = []
+    triggers: list[Trigger] = []
+
+    @model_validator(mode="after")
+    def _check_the_size(self) -> WorkflowDefinition:
+        if len(self.steps) > MAX_STEPS:
+            raise ValueError(f"a workflow has at most {MAX_STEPS} steps, not {len(self.steps)}.")
+        if len(self.triggers) > MAX_TRIGGERS:
+            raise ValueError(
+                f"a workflow has at most {MAX_TRIGGERS} triggers, not {len(self.triggers)}."
+            )
+        names = [trigger.name for trigger in self.triggers]
+        if len(names) != len(set(names)):
+            raise ValueError(f"trigger names must be unique within a workflow: {names}.")
+        listeners = len(self.listeners) + sum(len(step.listeners) for step in self.steps)
+        if listeners > MAX_LISTENERS:
+            raise ValueError(f"a workflow has at most {MAX_LISTENERS} listeners, not {listeners}.")
+        size = len(self.model_dump_json().encode())
+        if size > MAX_DEFINITION_BYTES:
+            raise ValueError(
+                f"a workflow definition is at most {MAX_DEFINITION_BYTES} bytes as JSON, "
+                f"not {size}."
+            )
+        return self
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_a_pydantic_inputs_model(cls, data: Any) -> Any:
-        """`inputs=SomeBaseModel` authors `input_fields` with type annotations.
-
-        The model is authoring, not storage: it is normalized into the same
-        fields and never rides on the definition, so a stored definition and one
-        declared in code have one wire format. What pydantic can express as a
-        shape crosses; validators do not, so a model that carries any is
-        refused rather than half-honored.
-        """
+        """Turn `inputs=SomeBaseModel` into `input_fields`, so code and stored share one format."""
         if not isinstance(data, dict) or "inputs" not in data:
             return data
         data = {**data}
@@ -210,11 +275,9 @@ class WorkflowDefinition(BaseModel):
 
 
 def fields_from_model(model: type[BaseModel]) -> dict[str, FieldDefinition]:
-    """A pydantic model's fields as FieldDefinitions — the authoring shortcut.
+    """A pydantic model's fields as FieldDefinitions.
 
-    Validators on the model cannot cross into a schema that has to survive a
-    dump, so a model that carries any is refused outright: a check the author
-    wrote and the run silently skipped is the footgun.
+    Models with validators are refused: they would be silently skipped after a dump.
     """
     decorators = model.__pydantic_decorators__
     if decorators.field_validators or decorators.model_validators:
@@ -240,8 +303,7 @@ def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> Fiel
     annotation, optional = _split_optional(info.annotation)
     return FieldDefinition(
         description=info.description or "",
-        # `X | None` means an author's "optional" even though pydantic itself
-        # would still require the key with a null in it.
+        # `X | None` reads as optional, though pydantic would still require the key.
         required=info.is_required() and not optional,
         default=None if info.default is PydanticUndefined else info.default,
         **_type_kwargs(annotation, where),
@@ -293,11 +355,32 @@ def _type_kwargs(annotation: Any, where: str) -> dict[str, Any]:
     return {"type": field_type}
 
 
+# HTTP request payloads for the contrib Ninja layer. DRF's serializers mirror them.
+
+
+class WorkflowCreateRequest(BaseModel):
+    name: str
+    workflow: WorkflowDefinition
+
+
+class WorkflowUpdateRequest(BaseModel):
+    name: str | None = None
+    workflow: WorkflowDefinition | None = None
+    active: bool | None = None
+
+
+class WorkflowStartRequest(BaseModel):
+    inputs: dict[str, Any] = {}
+
+
 __all__ = [
-    "ActionDefinition",
+    "MAX_STEPS",
     "FieldDefinition",
     "FieldType",
+    "ListenerDefinition",
     "StepDefinition",
+    "WorkflowCreateRequest",
     "WorkflowDefinition",
-    "fields_from_model",
+    "WorkflowStartRequest",
+    "WorkflowUpdateRequest",
 ]

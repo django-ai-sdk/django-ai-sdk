@@ -25,6 +25,7 @@ from django_ai_sdk.oversight.models import LensAnswer, RuleMatch
 from django_ai_sdk.oversight.types import Stage, Subject, ToolCall
 from tests.oversight.helpers import (
     ENFORCE,
+    FnLens,
     Storage,
     broken,
     chat,
@@ -97,6 +98,157 @@ class TestTools:
         assert secret not in json.dumps(storage.stored[0].tool_calls)
         assert not any(p.get("type") == "tool-input-available" and p["input"] for p in parts)
 
+    async def test_a_live_stream_shows_a_calls_arguments_only_once_it_ran(self):
+        from django_ai_sdk.oversight import Block
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        def lookup(name: str, call_id: str) -> HaystackChatMessage:
+            asked = HaystackToolCall(tool_name="lookup", arguments={"name": name}, id=call_id)
+            return HaystackChatMessage.from_assistant(tool_calls=[asked])
+
+        name = policy(
+            "test-live-arguments",
+            [
+                FnLens(
+                    name="names_her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                )
+            ],
+            [Rule("not_her", when=L("names_her").is_true, then=Block("No."), mode=ENFORCE)],
+        )
+        tool, _ = lookup_tool()
+        replies = [lookup("Mevrouw Jansen", "c1"), lookup("Jan", "c2"), "Done."]
+        parts = await chat(make_agent(replies, Storage(), tools=[tool], policy=name), "look")
+        # Nothing holds this answer, yet the blocked call's arguments never reach the client.
+        assert "Mevrouw" not in json.dumps(parts)
+        shown = [p for p in parts if p.get("toolCallId") == "c2" and "available" in p["type"]]
+        assert [(p["type"], p.get("input")) for p in shown] == [
+            ("tool-input-available", {}),
+            ("tool-input-available", {"name": "Jan"}),
+            ("tool-output-available", None),
+        ]
+        # A policy whose tool call rules only report holds nothing back.
+        report = policy("test-live-arguments-report", [], [])
+        parts = await chat(make_agent(replies[1:], Storage(), tools=[tool], policy=report), "look")
+        shown = [p.get("input") for p in parts if p.get("type") == "tool-input-available"]
+        assert shown == [{"name": "Jan"}]
+
+    async def test_a_blocked_calls_refusal_is_not_judged_as_a_tool_result(self):
+        from django_ai_sdk.oversight import Block
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        # The refusal names what it stopped, which a gate rule would block in a tool result.
+        name = policy(
+            "test-own-refusal",
+            [
+                FnLens(
+                    name="to_her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Jansen" in text,
+                ),
+                PatternLens(name="wire", stages=[Stage.GATE], patterns=[r"wire the money"]),
+            ],
+            [
+                Rule(
+                    "not_her",
+                    when=L("to_her").is_true,
+                    then=Block("Not run: it would wire the money."),
+                    mode=ENFORCE,
+                ),
+                Rule("no_wires", when=L("wire").is_true, then=Block(), mode=ENFORCE),
+            ],
+        )
+        tool, _ = lookup_tool()
+        asked = HaystackToolCall(tool_name="lookup", arguments={"name": "Jansen"}, id="c1")
+        replies = [HaystackChatMessage.from_assistant(tool_calls=[asked]), "Done."]
+        storage = Storage()
+        await chat(make_agent(replies, storage, tools=[tool], policy=name), "look")
+        [stored] = storage.stored[0].tool_calls
+        assert stored["result"]["result"] == {"refused": "Not run: it would wire the money."}
+        assert not await RuleMatch.objects.filter(rule="no_wires").aexists()
+
+    async def test_a_call_id_used_again_still_has_its_result_masked(self):
+        from django_ai_sdk.oversight import Block, Mask, PIILens
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        def lookup(name: str) -> HaystackChatMessage:
+            # Some OpenAI-compatible servers number calls per step: call_0 both times.
+            asked = HaystackToolCall(tool_name="lookup", arguments={"name": name}, id="call_0")
+            return HaystackChatMessage.from_assistant(tool_calls=[asked])
+
+        name = policy(
+            "test-call-id-again",
+            [
+                FnLens(
+                    name="her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                ),
+                PIILens(name="iban", stages=[Stage.GATE], kinds=["iban"]),
+            ],
+            [
+                Rule("not_her", when=L("her").is_true, then=Block("No."), mode=ENFORCE),
+                Rule("mask_iban", when=L("iban").is_true, then=Mask(), mode=ENFORCE),
+            ],
+        )
+        tool, _ = lookup_tool()
+        replies = [lookup("Mevrouw Jansen"), lookup("Jan"), "Done."]
+        storage = Storage()
+        parts = await chat(make_agent(replies, storage, tools=[tool], policy=name), "look")
+        stored = json.dumps([m.model_dump(mode="json") for m in storage.stored])
+        assert "NL91ABNA0417164300" not in json.dumps(parts) + stored
+        assert "[IBAN]" in stored
+
+    async def test_the_openai_stream_carries_the_arguments_of_a_call_that_ran(self):
+        from django_ai_sdk.oversight import Block
+        from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
+        from haystack.dataclasses import ChatMessage as HaystackChatMessage
+        from haystack.dataclasses import ToolCall as HaystackToolCall
+
+        from tests.oversight.helpers import lookup_tool
+
+        name = policy(
+            "test-openai-arguments",
+            [
+                FnLens(
+                    name="her",
+                    subject=Subject.TOOL_CALL,
+                    stages=[Stage.TOOL],
+                    fn=lambda text, v: "Mevrouw" in text,
+                )
+            ],
+            [Rule("not_her", when=L("her").is_true, then=Block("No."), mode=ENFORCE)],
+        )
+        tool, _ = lookup_tool()
+        asked = HaystackToolCall(tool_name="lookup", arguments={"name": "Jan"}, id="c2")
+        replies = [HaystackChatMessage.from_assistant(tool_calls=[asked]), "Done."]
+        agent = make_agent(replies, Storage(), tools=[tool], policy=name)
+        agent.protocol_handler = OpenAIProtocolHandler()
+        response = await agent.as_view([{"role": "user", "content": "look"}])
+        body = b"".join([chunk async for chunk in response.streaming_content]).decode()
+        calls = [
+            call
+            for line in body.splitlines()
+            if line.startswith("data: {")
+            for choice in json.loads(line.removeprefix("data: ")).get("choices", [])
+            for call in choice["delta"].get("tool_calls") or []
+        ]
+        # Held back while the call was judged, then sent: the stream ends with the real ones.
+        assert [c["function"]["arguments"] for c in calls] == ['{"name": "Jan"}']
+
     async def test_the_gate_can_take_every_tool_away(self):
         agent = make_agent(["ok"], Storage())
         guard = await TurnGuard.start(agent, channel="test", input="something sneaky")
@@ -113,6 +265,22 @@ class TestTools:
         assert await guard.tool_call(call) == "No."
         turn_id = await guard.close()
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="no_secret_tools").acount() == 1
+
+    async def test_a_corrected_call_after_a_refusal_is_judged_again(self):
+        guard = await TurnGuard.start(make_agent([], None), channel="test", input="go")
+        await guard.gate()
+        refused = ToolCall(name="send", arguments={"text": "sk-proj-abcdefghijklmnopqrstuvwxyz12"})
+        assert await guard.tool_call(refused) == "No."
+        assert guard.allows_tool("send")
+        assert await guard.tool_call(ToolCall(name="send", arguments={"text": "hello"})) is None
+        await guard.close()
+
+    async def test_a_lens_reads_the_turns_thread(self):
+        guard = await TurnGuard.start(
+            make_agent([], None), channel="test", thread_id="t-42", input="go"
+        )
+        assert guard.context.thread_id == "t-42"
+        await guard.close()
 
     async def test_a_headless_tool_loop_reports_its_calls(self):
         from haystack.components.generators.chat import MockChatGenerator
@@ -288,6 +456,84 @@ class TestToolResultMasking:
         turn = await closed_turn(guard)
         assert turn.outcome != "blocked"
         assert not await RuleMatch.objects.filter(turn=turn, rule="stop_fraud").aexists()
+
+    async def test_a_report_rule_records_what_it_would_do_to_a_result_and_leaves_it(self):
+        from django_ai_sdk.oversight import Block
+
+        def rules(lens: str) -> list[Rule]:
+            return [Rule("would_stop", when=L(lens).is_true, then=Block())]
+
+        found = PatternLens(name="leak", stages=[Stage.GATE], patterns=[r"wire it"])
+        guard = await start(policy("test-report-result", [found], rules("leak")))
+        await guard.gate()
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
+        turn = await closed_turn(guard)
+        row = await RuleMatch.objects.aget(turn=turn, rule="would_stop", stage="tool")
+        assert not row.acted and turn.outcome == "allowed"
+        # A lens only a report rule reads withholds nothing when it fails.
+        down = FnLens(name="down", stages=[Stage.GATE], fn=broken)
+        guard = await start(policy("test-report-result-down", [down], rules("down")))
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
+
+    async def test_a_failed_lens_only_a_report_block_and_an_alert_read_withholds_nothing(self):
+        from django_ai_sdk.oversight import Alert, Block
+
+        down = FnLens(name="down", stages=[Stage.GATE], fn=broken)
+        rules = [
+            Rule("would_stop", when=L("down").is_true, then=Block()),
+            Rule("tell", when=L("down").is_true, then=Alert("info"), mode=ENFORCE),
+        ]
+        guard = await start(policy("test-report-down-alert", [down], rules))
+        assert await guard.mask_text("Please wire it today") == "Please wire it today"
+
+    async def test_a_lens_about_the_writer_does_not_judge_tool_results(self):
+        from django_ai_sdk.oversight import Block, L, PatternLens, Policy, RestrictTools, Rule
+        from django_ai_sdk.oversight.guard.masking import other_text_lenses
+        from django_ai_sdk.oversight.registry import get_resolved_policy
+
+        @register_policy
+        class Writer(Policy):
+            name = "test-writer"
+            lenses = [
+                PatternLens(
+                    name="relative",
+                    stages=[Stage.GATE],
+                    patterns=[r"my mother"],
+                    judges_tool_results=False,
+                ),
+                PatternLens(name="leak", stages=[Stage.GATE], patterns=[r"wire it"]),
+            ]
+            rules = [
+                Rule(
+                    "records_for_staff",
+                    when=L("relative").is_true,
+                    then=RestrictTools(["lookup"]),
+                    mode=ENFORCE,
+                ),
+                Rule("no_leak", when=L("leak").is_true, then=Block(), mode=ENFORCE),
+            ]
+
+        policy = await get_resolved_policy("test-writer")
+        assert [lens.name for lens in other_text_lenses(policy)] == ["leak"]
+        guard = await start("test-writer")
+        await guard.gate()
+        # A record that mentions someone's mother takes no tools away mid-turn.
+        assert await guard.mask_text("Visited; my mother said hi") == "Visited; my mother said hi"
+        assert guard.restrict is None
+
+    async def test_a_masking_lens_masks_tool_results_whatever_it_says(self):
+        from django_ai_sdk.oversight import L, Mask, PIILens, Policy, Rule
+        from django_ai_sdk.oversight.guard.masking import other_text_lenses
+        from django_ai_sdk.oversight.registry import get_resolved_policy
+
+        @register_policy
+        class Masked(Policy):
+            name = "test-mask-anyway"
+            lenses = [PIILens(name="pii", stages=[Stage.GATE], judges_tool_results=False)]
+            rules = [Rule("mask_pii", when=L("pii").is_true, then=Mask(), mode=ENFORCE)]
+
+        policy = await get_resolved_policy("test-mask-anyway")
+        assert [lens.name for lens in other_text_lenses(policy)] == ["pii"]
 
     async def test_a_result_a_gate_block_refuses_is_withheld_and_a_dict_is_masked(self):
         from django_ai_sdk.oversight.guard.notices import BLOCKED_TEXT
@@ -471,6 +717,30 @@ class TestToolsTakenAwayInChat:
             assert offered() == ["lookup"]
             guard.restrict = []
             assert offered() == []
+
+    async def test_the_model_is_told_once_which_tools_were_taken_away(self):
+        from haystack.components.agents.state.state import State
+        from haystack.dataclasses import ChatMessage
+
+        from django_ai_sdk.oversight.guard import guarding
+        from django_ai_sdk.oversight.plugin.hooks import TOOLS_REMOVED_META_KEY, LimitToolChoiceHook
+
+        from tests.oversight.helpers import lookup_tool
+
+        lookup, _ = lookup_tool()
+        send = dataclasses.replace(lookup, name="send")
+        state = State(schema={"messages": {"type": list[ChatMessage]}})
+        state.set("messages", [ChatMessage.from_user("hi")])
+        guard = await start("test-guard")
+        with guarding(guard):
+            guard.restrict = ["send"]
+            for _ in range(2):
+                # Every step offers the full list again.
+                state.data["tools"] = [lookup, send]
+                LimitToolChoiceHook().run(state)
+        notes = [m for m in state.get("messages") if m.meta.get(TOOLS_REMOVED_META_KEY)]
+        assert [n.meta[TOOLS_REMOVED_META_KEY] for n in notes] == [["send"]]
+        assert "send" in notes[0].text
 
     async def test_a_closed_turn_stops_the_run_and_limits_no_tools(self):
         from haystack.components.agents.state.state import State

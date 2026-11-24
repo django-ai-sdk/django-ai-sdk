@@ -6,30 +6,18 @@ from django_ai_sdk.integrations.base import IntegrationStatus
 
 
 class IntegrationOut(BaseModel):
-    """One integration's state for the generic GET /api/integrations list.
-
-    Capability flags let the client decide which actions to offer without knowing the
-    integration's kind. When supports_connect, the client calls the host project's
-    POST /{name}/connect endpoint to get the redirect URL. This list never carries
-    one itself, since building it needs the request.
-    """
+    """One integration's state for GET /api/integrations; flags drive the client's actions."""
 
     name: str
     label: str
-    #: What this integration's data actually is, shown next to the label so a user
-    #: (or an admin deciding whether to enable it for an assistant) knows what it's
-    #: for, not just its name. See Integration.hint.
     hint: str = ""
     kind: str
     status: IntegrationStatus
     supports_connect: bool = False
     supports_test: bool = True
-    #: "oauth" (call POST /{name}/connect, then follow its redirect_url) | None. A
-    #: string rather than a bool so another flow can be added without changing this
-    #: contract.
+    #: "oauth" or None; a string so more flows fit without a contract change.
     connect_kind: str | None = None
-    #: Set when the integration needs setup (e.g. a missing secret) — human-readable,
-    #: shown to the user instead of a blank/confusing DISCONNECTED status.
+    #: Human-readable setup problem, e.g. a missing secret.
     detail: str | None = None
     connected: bool | None = None
 

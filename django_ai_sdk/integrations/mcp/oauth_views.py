@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class OAuthCallbackError(Exception):
-    """Raised during OAuth callback validation with an HTTP error response."""
+    """OAuth callback failure carrying its HTTP status."""
 
     def __init__(self, message: str, http_status: int = 400) -> None:
         self.message = message
@@ -31,7 +31,6 @@ class OAuthCallbackError(Exception):
 
 
 async def _get_oauth_integration(server_name: str) -> DynamicMCPIntegration | None:
-    """Resolve a registered OAuth MCP integration, or None."""
     from django_ai_sdk.integrations.registry import get_integrations
 
     integration = (await get_integrations([server_name])).get(server_name)
@@ -77,7 +76,6 @@ async def _validate_callback_params(
 async def _resolve_token_endpoint(
     config: OAuthMCPIntegrationConfig, session_endpoint: str | None
 ) -> str:
-    """Resolve the token endpoint from session, config, or discovery."""
     if session_endpoint:
         return session_endpoint
     if config.token_endpoint:
@@ -133,11 +131,7 @@ async def oauth_callback(
             logger.exception("Token exchange/store failed for %r", server_name)
             return JsonResponse({"error": "Token exchange failed"}, status=500)
 
-        # A pre-connect status/tool check (e.g. the settings page) may have already
-        # cached "disconnected"/no-tools for this user before the token existed.
-        # Without this, that stale entry lives out its full TTL and the agent
-        # keeps treating the integration as unconfigured until something else
-        # (e.g. the "Reconnect" button) happens to invalidate it.
+        # Drop any "disconnected" status cached before the token existed.
         await integration.reconnect(user)
 
         success_url = resolve_setting("AI_SDK_MCP_OAUTH_SUCCESS_URL", "/")

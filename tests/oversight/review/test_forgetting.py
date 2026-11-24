@@ -10,7 +10,7 @@ from asgiref.sync import sync_to_async
 from django.test import AsyncClient
 from django.utils import timezone
 
-from django_ai_sdk.oversight.models import Turn
+from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
 from django_ai_sdk.oversight.retention import prune
 from django_ai_sdk.oversight.schemas import ResolveIn, TurnFilter
 from django_ai_sdk.oversight.services import OversightService
@@ -90,8 +90,6 @@ async def test_expired_content_reads_back_as_none():
     turn_id = await a_turn()
     user = await reader(METRICS, CONTENT)
     turn = await Turn.objects.aget(id=turn_id)
-    from django_ai_sdk.oversight.models import TurnContent
-
     await TurnContent.objects.filter(id=turn.content_id).aupdate(
         expires_at=timezone.now() - timedelta(days=1)
     )
@@ -100,3 +98,36 @@ async def test_expired_content_reads_back_as_none():
     await sync_to_async(prune)()
     detail = await OversightService.get_turn(turn_id, user=user)
     assert (detail.content, detail.content_state) == (None, "none")
+
+
+async def test_a_note_on_a_turn_whose_content_went_is_not_kept():
+    owner = await reader()
+    thread = await a_thread(owner)
+    await a_turn(thread_id=str(thread.id))
+    user = await reader(METRICS, CONTENT, REVIEW)
+    [item] = (await OversightService.list_reviews(user=user)).items
+    await thread.adelete()
+
+    closed = await OversightService.resolve_review(
+        item.id, ResolveIn(agree=True, note="Asked about pay."), user=user
+    )
+
+    assert closed is not None and (closed.agree, closed.note) == (True, "")
+    assert not await ReviewItem.objects.exclude(note="").aexists()
+
+
+async def test_expired_content_shows_no_notes():
+    turn_id = await a_turn()
+    user = await reader(METRICS, CONTENT, REVIEW)
+    [item] = (await OversightService.list_reviews(user=user)).items
+    await OversightService.resolve_review(
+        item.id, ResolveIn(agree=True, note="Asked about pay."), user=user
+    )
+    turn = await Turn.objects.aget(id=turn_id)
+    await TurnContent.objects.filter(id=turn.content_id).aupdate(
+        expires_at=timezone.now() - timedelta(days=1)
+    )
+
+    assert (await OversightService.get_turn(turn_id, user=user)).reviews[0].note == ""
+    [listed] = (await OversightService.list_reviews(user=user, status="done")).items
+    assert listed.note == ""

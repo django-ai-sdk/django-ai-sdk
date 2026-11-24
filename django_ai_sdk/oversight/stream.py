@@ -11,6 +11,7 @@ from haystack.dataclasses import StreamingChunk, ToolCallResult
 
 from django_ai_sdk.agents.tool_agent import BLOCKED_META_KEY
 from django_ai_sdk.artifacts.schemas import CitationsData
+from django_ai_sdk.common import ChatMessage
 from django_ai_sdk.events import (
     DataEvent,
     MessageEndEvent,
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.adapters.citations import SourceRegistry
     from django_ai_sdk.adapters.citations.grounding import Grounder
     from django_ai_sdk.adapters.suggestions import SuggestionGenerator
-    from django_ai_sdk.common import ChatMessage, StreamWriter
+    from django_ai_sdk.common import StreamWriter
     from django_ai_sdk.events import StreamEvent
 
 # The guard a stream reads before the run opened its turn: allows everything.
@@ -158,6 +159,8 @@ class StreamTurn:
         # Stored on the message so a reload shows them, even after an error or disconnect.
         self.sent: list[dict[str, Any]] = []
         self.held: list[StreamEvent] = []
+        # A call's arguments by its id, kept back until the tool stage has judged the call.
+        self.unjudged: dict[str, ToolInputCompleteEvent] = {}
         # Their arguments are neither stored nor released.
         self.blocked_call_ids: set[str] = set()
 
@@ -167,8 +170,6 @@ class StreamTurn:
                 result = stub.tool_call_result
                 if stub.meta.get(BLOCKED_META_KEY):
                     self.blocked_call_ids.add(result.origin.id or "")
-                    origin = dataclasses.replace(result.origin, arguments={})
-                    result = ToolCallResult(result=result.result, origin=origin, error=result.error)
                 chunk = StreamingChunk(content="", index=index, tool_call_result=result)
                 await queue.put(chunk)
 
@@ -181,6 +182,15 @@ class StreamTurn:
     @property
     def guard(self) -> TurnGuard:
         return self.turn.guard or _INERT
+
+    def as_gated(self, messages: list[ChatMessage]) -> list[ChatMessage]:
+        """The conversation as the gate left it, masked."""
+        if not self.guard.active:
+            return messages
+        context = self.guard.context
+        history = [ChatMessage.model_validate(h.model_dump()) for h in context.history]
+        question = [ChatMessage(role="user", content=context.input)] if context.input else []
+        return [*history, *question]
 
     @property
     def hold(self) -> bool:
@@ -233,8 +243,27 @@ class StreamTurn:
                 self.held.append(event)
                 progress = _held_progress(event)
                 return [progress] if progress is not None else []
+            return self._once_judged(event)
         # Held text is sent after the check. Held reasoning is never shown.
         return [] if self.hold else [event]
+
+    def _once_judged(self, event: StreamEvent) -> list[StreamEvent]:
+        """Keep a call's arguments back until its result shows the tool stage let it run.
+
+        The model streams them before that stage judges the call, and a blocked
+        call's may be what the block is about. Only under a policy that may block one.
+        """
+        policy = self.guard.policy
+        if policy is None or not policy.blocks_tool_calls():
+            return [event]
+        if isinstance(event, ToolInputCompleteEvent):
+            self.unjudged[event.tool_call_id] = event
+            return [event.model_copy(update={"tool_input": {}})]
+        if isinstance(event, ToolOutputEvent):
+            asked = self.unjudged.pop(event.tool_call_id, None)
+            if asked is not None and asked.tool_call_id not in self.blocked_call_ids:
+                return [asked, event]
+        return [event]
 
     async def mask_tool_result(self, result: ToolCallResult) -> ToolCallResult:
         """Once, so the card, storage and model all see the same text."""

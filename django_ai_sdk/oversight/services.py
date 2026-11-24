@@ -17,7 +17,7 @@ from uuid import UUID
 
 from asgiref.sync import sync_to_async
 from django.core.exceptions import ValidationError
-from django.db import connections
+from django.db import connections, transaction
 from django.db.models import Count, DateTimeField, Exists, F, OuterRef, Q
 from django.db.models.fields.json import KeyTransform
 from django.utils import timezone
@@ -137,7 +137,7 @@ class OversightService(OversightAccess):
             content=visible_content(content),
             content_state=state,
             answers=[_answer_out(a, resolved, texts if shown else None) for a in answers],
-            reviews=[_review_out(r, shown=shown) for r in reviews],
+            reviews=[_review_out(r, shown=content is not None) for r in reviews],
             error=turn.error,
             parent_turn_id=str(turn.parent_turn_id or ""),
             agent_fingerprint=turn.agent_fingerprint,
@@ -187,7 +187,12 @@ class OversightService(OversightAccess):
             rows = {row.id: row for row in await _turn_rows(listed, shown, reviews)}
         return Page[ReviewOut](
             items=[
-                _review_out(r, rows.get(str(r.turn_id)), shown=r.turn_id in shown) for r in items
+                _review_out(
+                    r,
+                    rows.get(str(r.turn_id)),
+                    shown=r.turn_id in shown and load_content(r.turn) is not None,
+                )
+                for r in items
             ],
             limit=limit,
             next_cursor=next_cursor,
@@ -233,10 +238,8 @@ class OversightService(OversightAccess):
             "agree": verdict.agree,
             "note": verdict.note,
         }
-        claimed = await ReviewItem.objects.filter(
-            pk=item.pk, status=ReviewItem.Status.OPEN
-        ).aupdate(**closed)
-        if not claimed:
+        closed = await sync_to_async(_close_review)(item.pk, item.turn_id, closed)
+        if closed is None:
             raise ConflictError("This review is closed already.")
         for field, value in closed.items():
             setattr(item, field, value)
@@ -513,8 +516,23 @@ def _answer_out(
     )
 
 
+def _close_review(item_id: Any, turn_id: Any, closed: dict[str, Any]) -> dict[str, Any] | None:
+    """Close the item if it is still open; returns what was written, else None.
+
+    The note is content, kept only while the turn's content is. The turn is locked as
+    `forget_turns` locks it, so a forget can't delete the content between check and write.
+    """
+    from django_ai_sdk.oversight.models import ReviewItem, Turn
+
+    with transaction.atomic():
+        if load_content(Turn.objects.select_for_update().get(pk=turn_id)) is None:
+            closed = {**closed, "note": ""}
+        open_item = ReviewItem.objects.filter(pk=item_id, status=ReviewItem.Status.OPEN)
+        return closed if open_item.update(**closed) else None
+
+
 def _review_out(item: Any, row: TurnOut | None = None, *, shown: bool) -> ReviewOut:
-    """`shown`: the reader may see the turn's content, which includes the note."""
+    """`shown`: the reader may see the turn's content, which includes the note, and it is kept."""
     return ReviewOut(
         id=str(item.id),
         turn_id=str(item.turn_id),

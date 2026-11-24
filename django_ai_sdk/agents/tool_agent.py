@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import dataclasses
 import json
 from typing import Any
 
@@ -22,6 +24,8 @@ TRUNCATED_META_KEY = "django_ai_sdk.truncated"
 # On a stub result for a call oversight blocked (True) or skipped with it (False).
 # The value stays as messages already stored carry it.
 BLOCKED_META_KEY = "django_ai_sdk.refused"
+# On a stub the turn's stream already sent, so no one sends it again.
+STREAMED_META_KEY = "django_ai_sdk.streamed"
 # On a tool result oversight has checked for masking.
 MASKED_META_KEY = "django_ai_sdk.masked"
 
@@ -37,14 +41,48 @@ def answer_calls_with(
 ) -> list[ChatMessage]:
     """Answer the last message's tool calls with error stubs, so they never run.
 
-    `stubs` holds a (payload, meta) pair per call. Returns the stub messages.
+    `stubs` holds a (payload, meta) pair per call. Returns the stub messages. A
+    blocked call's stub keeps none of its arguments: the block may be about them.
     """
     answers = [
-        ChatMessage.from_tool(json.dumps(payload), origin=call, error=True, meta=meta)
+        ChatMessage.from_tool(
+            json.dumps(payload),
+            origin=dataclasses.replace(call, arguments={}) if meta.get(BLOCKED_META_KEY) else call,
+            error=True,
+            meta=meta,
+        )
         for call, (payload, meta) in zip(messages[-1].tool_calls, stubs, strict=True)
     ]
     state.set("messages", [*messages, *answers], handler_override=replace_values)
     return answers
+
+
+def decode_tool_result(value: Any) -> Any:
+    """A tool's result as it returned it: Haystack writes a dict as JSON, older results as reprs."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except ValueError:
+        pass
+    try:
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        return value
+
+
+def returned_error(value: Any) -> bool:
+    """Whether a decoded result is the {"error": ...} a tool returns to report a safe error."""
+    return isinstance(value, dict) and bool(value.get("error"))
+
+
+def tool_failed(result: ToolCallResult) -> bool:
+    """A call failed when it raised or returned {"error": ...}."""
+    return bool(result.error) or returned_error(decode_tool_result(result.result))
+
+
+def tool_calls_made(state: State) -> int:
+    return sum((state.data.get("tool_call_counts") or {}).values())
 
 
 def tool_results(
@@ -80,14 +118,26 @@ class ToolCallBudgetHook:
         )
 
     def run(self, state: State) -> None:
-        counts = state.data.get("tool_call_counts") or {}
-        if sum(counts.values()) < self.max_tool_calls:
+        if tool_calls_made(state) < self.max_tool_calls:
             return
         messages = pending_tool_calls(state)
         if messages is None:
             return
         stub = ({"skipped": self.message}, {SKIPPED_META_KEY: True})
         answer_calls_with(state, messages, [stub] * len(messages[-1].tool_calls))
+
+
+class ToolCallBudgetSpentHook:
+    """Once the tool budget is spent, the next model step gets no tools, so it answers."""
+
+    allowed_hook_points = ["before_llm"]
+
+    def __init__(self, max_tool_calls: int) -> None:
+        self.max_tool_calls = max_tool_calls
+
+    def run(self, state: State) -> None:
+        if tool_calls_made(state) >= self.max_tool_calls and (tools := state.data.get("tools")):
+            tools[:] = []  # in place: the model and the ToolInvoker share this list
 
 
 class LogToolCallsHook:
@@ -229,13 +279,15 @@ def _tool_hooks(
     hooks = {point: list(items) for point, items in (base or {}).items()}
     replaced: tuple[type, ...] = ()
     if max_tool_calls is not None:
-        replaced += (ToolCallBudgetHook,)
+        replaced += (ToolCallBudgetHook, ToolCallBudgetSpentHook)
     if max_output_chars is not None:
         replaced += (ToolOutputLimitHook,)
     before = [h for h in hooks.get("before_tool", []) if not isinstance(h, replaced)]
     after = [h for h in hooks.get("after_tool", []) if not isinstance(h, replaced)]
+    before_llm = [h for h in hooks.get("before_llm", []) if not isinstance(h, replaced)]
     if max_tool_calls is not None:
         before.append(ToolCallBudgetHook(max_tool_calls))
+        before_llm.append(ToolCallBudgetSpentHook(max_tool_calls))
     if (
         not any(isinstance(h, ToolOutputLimitHook) for h in after)
         and (limit := tool_output_limit(max_output_chars)) is not None
@@ -243,6 +295,8 @@ def _tool_hooks(
         after.append(ToolOutputLimitHook(limit))
     hooks["before_tool"] = before
     hooks["after_tool"] = after
+    if before_llm:
+        hooks["before_llm"] = before_llm
     on_exit = hooks.setdefault("on_exit", [])
     if not any(isinstance(h, RequireToolsHook) for h in on_exit):
         on_exit.append(RequireToolsHook(required_tools))
@@ -282,9 +336,8 @@ class ToolAgentConfig(BaseModel):
     # Tools the agent must call before it may finish (see RequireToolsHook).
     required_tools: list[str] = []
 
-    # Forward the agent's streaming callback into tools that accept one
-    # subagent wrappers, so sub-agent tool calls stream to the client through
-    # the coordinator's event queue.
+    # Forward the streaming callback into subagent tools, so their tool calls stream
+    # through the coordinator's event queue.
     stream_subagent_tools: bool = True
 
 
@@ -315,16 +368,10 @@ class ToolAgent:
         hooks: dict[str, list[Any]] | None = None,
         stream_subagent_tools: bool = True,
     ) -> HaystackAgent:
-        """Build and return a configured Haystack Agent.
+        """Build a configured Haystack Agent, for streamed agents and subagent wrappers.
 
-        Shared construction path for both streamed agents (via ToolAgent.pipeline())
-        and subagent wrappers. Only non-None loop knobs are
-        passed, so defaults match the Haystack Agent's own defaults.
-
-        ``user_prompt`` + ``required_variables`` are used for subagents: they
-        make the Agent's ``run()`` accept a ``task`` parameter,
-        which is how the coordinator's tool call passes the
-        delegated sub-task down.
+        Only non-None loop knobs are passed, keeping Haystack's defaults. ``user_prompt`` and
+        ``required_variables`` give a subagent's ``run()`` the ``task`` the coordinator passes.
         """
         kwargs: dict[str, Any] = {
             "chat_generator": generator,

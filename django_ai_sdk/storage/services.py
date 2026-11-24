@@ -16,10 +16,22 @@ from django_ai_sdk.permissions import (
 from django_ai_sdk.storage.base import StorageAdapterRegistry
 
 if TYPE_CHECKING:
+    from django_ai_sdk.agents.base import Agent
     from django_ai_sdk.storage.schemas import ThreadDetail, ThreadInfo
     from django_ai_sdk.types import UserType
 
 logger = get_logger(__name__)
+
+
+def thread_metadata(agent_id: str, agent: Agent, created_via: str) -> dict[str, Any]:
+    """The metadata every new thread records about the agent it belongs to."""
+    return {
+        "agent_id": agent_id,
+        "model": agent.model,
+        "agent_name": agent.name or agent.__class__.__name__,
+        "agent_class": agent.__class__.__name__,
+        "created_via": created_via,
+    }
 
 
 async def _get_thread(thread_id: str) -> ThreadInfo | None:
@@ -39,11 +51,9 @@ async def _get_storage(thread_info: ThreadInfo) -> Any:
 
 
 class ThreadService(PermissionsMixin):
-    """
-    Service for thread operations across all storage adapters.
+    """Thread operations across all storage adapters.
 
-    All methods are async. Use the sync-prefixed aliases for sync contexts
-    (e.g., DRF class-based views).
+    All async; use the sync-prefixed aliases in sync contexts (e.g. DRF views).
     """
 
     domain = PermissionDomain.THREAD
@@ -58,25 +68,9 @@ class ThreadService(PermissionsMixin):
         user: UserType,
         thread_id: str | None = None,
     ) -> str:
-        """
-        Create a new thread in the appropriate storage.
+        """Create a thread in the agent's storage and return its id.
 
-        Uses the agent's configured storage adapter class.
-
-        Args:
-            agent_id: ID of the agent creating the thread
-            title: Thread title
-            metadata: Additional metadata. Auto-populates model, agent_name,
-                     agent_class, and created_via. Caller-provided values
-                     take precedence over auto-generated ones.
-            user: User for permission checking and thread ownership
-            thread_id: Optional custom thread ID
-
-        Returns:
-            Thread ID (UUID string)
-
-        Raises:
-            PermissionDenied: If user has no CREATE_THREAD permission
+        `metadata` overrides the auto-filled model/agent fields. Needs CREATE_THREAD.
         """
         from django_ai_sdk.agents.services import AgentService
 
@@ -86,13 +80,7 @@ class ThreadService(PermissionsMixin):
 
         storage_class = agent.storage_adapter
         title = title or ""
-        default_metadata = {
-            "agent_id": agent_id,
-            "model": agent.model,
-            "agent_name": agent.name or agent.__class__.__name__,
-            "agent_class": agent.__class__.__name__,
-            "created_via": "create_thread",
-        }
+        default_metadata = thread_metadata(agent_id, agent, "create_thread")
         default_metadata.update(metadata or {})
 
         thread_id = await storage_class.create_thread(
@@ -107,21 +95,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def get_thread(cls, thread_id: str, *, user: UserType) -> ThreadInfo | None:
-        """
-        Find thread by querying storage adapters.
-
-        Returns thread metadata including agent_id.
-
-        Args:
-            thread_id: Thread ID to look up
-            user: Required user for permission checking
-
-        Returns:
-            ThreadInfo with agent_id, or None if not found
-
-        Raises:
-            PermissionDenied: If user has no VIEW_THREAD permission for the thread
-        """
+        """Find a thread across storage adapters; None if not found. Needs VIEW_THREAD."""
         thread = await _get_thread(thread_id)
         if thread:
             await cls.has_perms(user, Operation.VIEW_THREAD, thread)
@@ -140,17 +114,7 @@ class ThreadService(PermissionsMixin):
         limit: int | None = 100,
         offset: int = 0,
     ) -> list[ThreadInfo]:
-        """
-        List all threads from all storage adapters.
-
-        Args:
-            user: Optional user for filtering thread ownership
-            limit: Maximum threads to return; None returns all (default 100)
-            offset: Number of threads to skip
-
-        Returns:
-            List of ThreadInfo from all storage types
-        """
+        """List threads from all storage adapters; `limit=None` returns all."""
         all_threads: list[ThreadInfo] = []
 
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
@@ -177,23 +141,7 @@ class ThreadService(PermissionsMixin):
         title: str | None = None,
         metadata: dict | None = None,
     ) -> bool:
-        """
-        Update thread metadata.
-
-        Finds thread in appropriate storage and updates it.
-
-        Args:
-            thread_id: Thread ID to update
-            user: Required user for permission checking
-            title: New title (optional)
-            metadata: New metadata to merge (optional)
-
-        Returns:
-            True if updated, False if not found
-
-        Raises:
-            PermissionDenied: If user has no UPDATE_THREAD permission
-        """
+        """Update a thread's title or merge its metadata; False if not found."""
         thread = await _get_thread(thread_id)
         if thread:
             await cls.has_perms(user, Operation.UPDATE_THREAD, thread)
@@ -208,19 +156,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def delete_thread(cls, thread_id: str, *, user: UserType) -> bool:
-        """
-        Delete a thread and all its messages.
-
-        Args:
-            thread_id: Thread ID to delete
-            user: Required user for permission checking
-
-        Returns:
-            True if deleted, False if not found
-
-        Raises:
-            PermissionDenied: If user has no DELETE_THREAD permission
-        """
+        """Delete a thread and its messages; False if not found."""
         thread = await _get_thread(thread_id)
         if thread:
             await cls.has_perms(user, Operation.DELETE_THREAD, thread)
@@ -235,18 +171,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def delete_all_threads(cls, *, user: UserType) -> int:
-        """
-        Delete current user's threads and their messages.
-
-        Args:
-            user: Required user for permission checking and thread ownership
-
-        Returns:
-            Total number of threads deleted
-
-        Raises:
-            PermissionDenied: If user has no DELETE_ALL_THREADS permission
-        """
+        """Delete the user's threads and their messages; returns how many."""
         total_deleted = 0
         for adapter_class in StorageAdapterRegistry.get_all_adapters():
             threads = await adapter_class.list_threads(user)
@@ -271,22 +196,7 @@ class ThreadService(PermissionsMixin):
         *,
         user: UserType,
     ) -> bool:
-        """
-        Rate a message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to rate
-            rating: 1 for good, -1 for bad
-            user: Required user for permission checking
-
-        Returns:
-            True if rated successfully
-
-        Raises:
-            ValueError: If thread or message not found
-            PermissionDenied: If user has no RATE_MESSAGE permission
-        """
+        """Rate a message: 1 good, -1 bad. Raises ValueError if not found."""
         thread = await _get_thread(thread_id)
         if not thread:
             raise NotFound("Thread not found")
@@ -300,21 +210,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def delete_message(cls, thread_id: str, message_id: str, *, user: UserType) -> bool:
-        """
-        Soft delete a message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to delete
-            user: Required user for permission checking
-
-        Returns:
-            True if deleted successfully
-
-        Raises:
-            ValueError: If thread or message not found
-            PermissionDenied: If user has no DELETE_MESSAGE permission
-        """
+        """Soft delete a message. Raises ValueError if not found."""
         thread = await _get_thread(thread_id)
         if not thread:
             raise NotFound("Thread not found")
@@ -328,21 +224,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def restore_message(cls, thread_id: str, message_id: str, *, user: UserType) -> bool:
-        """
-        Restore a soft-deleted message in a thread.
-
-        Args:
-            thread_id: Thread ID containing the message
-            message_id: Message ID to restore
-            user: Required user for permission checking
-
-        Returns:
-            True if restored successfully
-
-        Raises:
-            ValueError: If thread or message not found
-            PermissionDenied: If user has no RESTORE_MESSAGE permission
-        """
+        """Restore a soft-deleted message. Raises ValueError if not found."""
         thread = await _get_thread(thread_id)
         if not thread:
             raise NotFound("Thread not found")
@@ -356,23 +238,9 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     async def storage_for_thread(cls, thread_id: str, *, user: UserType) -> Any:
-        """
-        Resolve a thread's storage adapter, instantiated and bound to the thread.
+        """Return the thread's storage adapter, bound to the thread.
 
-        Convenience for the common pattern: look up the thread, find its
-        agent, get the agent's storage class, instantiate with
-        thread_id. Returns a ready-to-use storage adapter instance.
-
-        Args:
-            thread_id: Thread ID to get storage for
-            user: User for permission checking
-
-        Returns:
-            Storage adapter instance bound to the thread
-
-        Raises:
-            ValueError: If the thread does not exist or has no storage
-            PermissionDenied: If user has no VIEW_THREAD permission
+        Raises ValueError if the thread does not exist or has no storage.
         """
         thread = await _get_thread(thread_id)
         if thread is None:
@@ -382,18 +250,7 @@ class ThreadService(PermissionsMixin):
 
     @classmethod
     def get_storage(cls, agent: Any) -> type:
-        """
-        Get the storage adapter class for an agent.
-
-        Args:
-            agent: Agent instance
-
-        Returns:
-            Storage adapter class (not instantiated)
-
-        Raises:
-            ValueError: If agent has no storage_adapter configured
-        """
+        """Return the agent's storage adapter class. Raises ValueError if it has none."""
         storage_class = agent.storage_adapter
         if storage_class is None:
             raise AiSdkError(
@@ -403,31 +260,13 @@ class ThreadService(PermissionsMixin):
         return storage_class
 
 
-# ============================================================================
 # Thread history
-# ============================================================================
 
 
 async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
-    """
-    Get thread history: thread metadata and messages with feedbacks.
+    """Return a thread's metadata and messages, each with its feedbacks.
 
-    Messages include feedbacks via the protocol handler which reads them from
-    ChatMessage metadata. No feedbacks are duplicated in the response.
-
-    For memories, use GET /memories/thread/{thread_id}/
-    For file metadata, use aget_thread_file_meta().
-
-    Args:
-        thread_id: Thread ID to retrieve history for
-        user: Optional user for permission checking
-
-    Returns:
-        Dict with thread and messages (each message includes feedbacks)
-
-    Raises:
-        ValueError: If thread or agent not found
-        PermissionDenied: If user has no VIEW_THREAD permission
+    Memories: GET /memories/thread/{thread_id}/; files: aget_thread_file_meta().
     """
     from django_ai_sdk.agents.services import AgentService
 
@@ -443,28 +282,11 @@ async def aget_thread_history(thread_id: str, user: UserType) -> dict[str, Any]:
 get_thread_history = async_to_sync(aget_thread_history)
 
 
-# ============================================================================
 # Thread file metadata
-# ============================================================================
 
 
 async def aget_thread_file_meta(thread_id: str, *, user: UserType) -> dict[str, Any]:
-    """
-    Get file metadata for a thread: file_count and file_memory_id.
-
-    Does not raise if thread has no file memory, returns {file_count: 0, file_memory_id: None}.
-
-    Args:
-        thread_id: Thread ID to retrieve file metadata for
-        user: Required user for permission check
-
-    Returns:
-        Dict with file_count and file_memory_id
-
-    Raises:
-        ValueError: If thread not found in DB
-        PermissionDenied: If user has no VIEW_THREAD permission
-    """
+    """Return a thread's file_count and file_memory_id (0 and None without a file memory)."""
     thread = await _get_thread(thread_id)
     if thread is None:
         raise NotFound("Thread not found")
@@ -518,9 +340,7 @@ async def aget_thread_sources(thread_id: str, *, user: UserType) -> list[dict[st
     return list(sources.values())
 
 
-# ============================================================================
 # Sync wrappers for use in sync contexts
-# ============================================================================
 
 create_thread = async_to_sync(ThreadService.create_thread)
 rate_message = async_to_sync(ThreadService.rate_message)

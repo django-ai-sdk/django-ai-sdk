@@ -1,185 +1,227 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
 
+from django_ai_sdk.errors import public_detail
+from django_ai_sdk.oversight.calls import requires_turn
+from django_ai_sdk.oversight.guard import watching_turns
 from django_ai_sdk.workflows.steps import (
     OnError,
-    StepAlreadyRunning,
-    StepFailed,
+    RunSuperseded,
     StepOutcome,
+    StepRecorded,
     WorkflowContext,
+    WorkflowStopped,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import AnonymousUser
 
-    from django_ai_sdk.workflows.actions import WorkflowAction
+    from django_ai_sdk.workflows.listeners import RunListener
     from django_ai_sdk.workflows.steps import Step
 
 logger = logging.getLogger(__name__)
 
 
+# Runs one labelled unit of side effects. Under DBOS each unit is checkpointed,
+# so a recovered run replays a finished unit instead of redoing it.
+Perform = Callable[[str, Callable[[], Awaitable[Any]]], Awaitable[Any]]
+# Waits for a decision (topic, timeout seconds). None unless the run is durable.
+Wait = Callable[[str, float], Awaitable[Any]]
+
+# How long a step whose wait ran out waits again for a decision taken just then.
+DECISION_IN_FLIGHT_SECONDS = 60.0
+
+
+async def perform_now(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
+    """Do `unit` here and now: the in-process `Perform`."""
+    return await unit()
+
+
 class _StepRunner:
-    """Walks the declared steps once, in order."""
+    """Walks the declared steps once, in order.
 
-    def __init__(self, steps: Sequence[Step], *, actions: Sequence[WorkflowAction] = ()) -> None:
-        self.steps = list(steps)
-        self.actions = list(actions)
+    The walk only decides; every side effect goes through `perform`, so it is the
+    same in-process or under DBOS.
+    """
 
-    async def run(
+    def __init__(
         self,
+        steps: Sequence[Step],
         *,
-        inputs: Mapping[str, Any] | None = None,
-        principal: AbstractBaseUser | AnonymousUser | None = None,
-        completed: Mapping[str, Any] | None = None,
-        workflow: str = "",
-        run_id: str = "",
-    ) -> dict[str, StepOutcome]:
-        """Run each step whose required steps have completed, in declared order."""
-        check_pipeline(self.steps)
-
-        outcomes: dict[str, StepOutcome] = {}
-        ctx = WorkflowContext(
-            inputs=dict(inputs or {}),
-            steps=outcomes,
-            principal=principal,
-            workflow=workflow,
-            run_id=run_id,
+        listeners: Sequence[RunListener],
+        recorder: RunListener | None,
+        completed: Mapping[str, Any],
+        perform: Perform = perform_now,
+        wait: Wait | None = None,
+        **context: Any,
+    ) -> None:
+        self.steps = list(steps)
+        self.outcomes: dict[str, StepOutcome] = {}
+        self.ctx = WorkflowContext(
+            steps=self.outcomes, declared={step.name: step for step in self.steps}, **context
         )
+        self.listeners = list(listeners)
+        self.recorder = recorder
+        self.recorded = completed
+        self.perform = perform
+        self.wait = wait
+        # The exception the last step raised, so an in-process run raises it as is.
+        self.raised: Exception | None = None
 
-        await self._notify(self.actions, "on_run_start", lambda action: action.on_run_start(ctx))
+    async def run(self) -> dict[str, StepOutcome]:
+        """Run each step whose required steps have completed, in declared order."""
+        ctx = self.ctx
+        await self.perform(
+            "run:start",
+            lambda: self._notify(self.listeners, lambda listener: listener.on_run_start(ctx)),
+        )
         try:
-            await self._walk(ctx, outcomes, dict(completed or {}))
+            await self._walk()
         except Exception as exc:
-            await self._end(ctx, exc)
+            await self.perform("run:end", lambda error=exc: self._end(error))
             raise
-        await self._end(ctx, None)
-        return outcomes
+        await self.perform("run:end", lambda: self._end(None))
+        return self.outcomes
 
-    async def _end(self, ctx: WorkflowContext, error: BaseException | None) -> None:
-        await self._notify(self.actions, "on_run_end", lambda action: action.on_run_end(ctx, error))
+    async def _end(self, error: BaseException | None) -> None:
+        # A superseded attempt is not the run's end: the attempt that owns it tells them.
+        listeners = [] if isinstance(error, RunSuperseded) else self.listeners
+        await self._notify(listeners, lambda listener: listener.on_run_end(self.ctx, error))
 
-    @staticmethod
     async def _notify(
-        actions: Sequence[WorkflowAction],
-        what: str,
-        call: Callable[[WorkflowAction], Awaitable[None]],
+        self, listeners: Sequence[RunListener], call: Callable[[RunListener], Awaitable[None]]
     ) -> None:
-        """Tell each action, and carry on when one of them is broken.
-
-        An action watches the run; it does not do the run's work, so one that raises is
-        logged and the walk carries on. `StepAlreadyRunning` is the exception: an action
-        whose rows are also a claim refuses a duplicate delivery that way.
-        """
-        for action in actions:
+        """Recorder first (its errors stop the run), then listeners (errors logged)."""
+        if self.recorder is not None:
+            await call(self.recorder)
+        for listener in listeners:
             try:
-                await call(action)
-            except StepAlreadyRunning:
-                raise
+                await call(listener)
             except Exception:
-                logger.exception("Workflow action %s failed in %s", type(action).__name__, what)
+                logger.exception("Workflow listener %s failed", type(listener).__name__)
 
-    async def _walk(
-        self,
-        ctx: WorkflowContext,
-        outcomes: dict[str, StepOutcome],
-        recorded: Mapping[str, Any],
-    ) -> None:
+    async def _walk(self) -> None:
         """Run each step in turn, recording every one that will not run."""
         for index, step in enumerate(self.steps):
-            if step.name in recorded:
-                # Replayed without an action call: the row belongs to the run that
-                # completed it, so closing it again would re-date it.
-                outcomes[step.name] = StepOutcome(status="completed", output=recorded[step.name])
-                continue
-
-            # Completion, not a truthy value: a step that produced None still ran.
-            missing = [
-                name
-                for name in step.requires
-                if (done := outcomes.get(name)) is None or done.status != "completed"
-            ]
-            if missing:
-                waited = outcomes.get(missing[0])
-                how = "failed" if waited and waited.status == "failed" else "was skipped"
-                await self._settle(
-                    ctx, step, outcomes, StepOutcome(status="skipped", detail=f"{missing[0]} {how}")
+            if step.name in self.recorded:
+                # No listener call: closing the row again would re-date it.
+                self.outcomes[step.name] = StepOutcome(
+                    status="completed", output=self.recorded[step.name]
                 )
                 continue
 
-            if reason := await step.skip_when(ctx):
-                await self._settle(
-                    ctx, step, outcomes, StepOutcome(status="skipped", detail=reason)
-                )
-                continue
+            if step.waits and self.wait is not None:
+                outcome = await self._decided(step)
+            else:
+                outcome = await self.perform(f"step:{step.name}", lambda s=step: self._attempt(s))
+            self.outcomes[step.name] = outcome
 
-            await self._notify(
-                self._actions_for(step),
-                "on_step_start",
-                lambda action: action.on_step_start(ctx, step),
+            if outcome.status == "failed" and step.on_error is OnError.STOP:
+                await self.perform(
+                    f"abandon:{step.name}", lambda i=index: self._abandon(i, f"{step.name} failed")
+                )
+                raised, self.raised = self.raised, None
+                raise raised or WorkflowStopped(outcome.detail or f"Step {step.name!r} failed.")
+            self.raised = None
+
+    async def _attempt(self, step: Step, *, waiting: bool = False) -> StepOutcome:
+        """One step: skip it, run it, or (`waiting`) set it waiting. Records the outcome."""
+        ctx = self.ctx
+        # Completion, not a truthy value: a step that produced None still ran.
+        missing = [
+            name
+            for name in step.requires
+            if (done := self.outcomes.get(name)) is None or done.status != "completed"
+        ]
+        if missing:
+            waited = self.outcomes.get(missing[0])
+            how = "failed" if waited and waited.status == "failed" else "was skipped"
+            return await self._settle(
+                step, StepOutcome(status="skipped", detail=f"{missing[0]} {how}")
             )
-            try:
+
+        if reason := await step.skip_if(ctx):
+            return await self._settle(step, StepOutcome(status="skipped", detail=reason))
+
+        try:
+            await self._notify(
+                self._listeners_for(step), lambda listener: listener.on_step_start(ctx, step)
+            )
+        except StepRecorded as recorded:
+            self.outcomes[step.name] = recorded.outcome
+            return recorded.outcome
+        if waiting:
+            # Only the recorder hears it: for the listeners the step has not ended.
+            return await self._settle(
+                step, StepOutcome(status="waiting", detail=step.waiting_for()), listeners=False
+            )
+
+        opened: list[str] = []
+        try:
+            # A step's model calls must come from a turn.
+            with watching_turns() as opened, requires_turn(step.channel(ctx)):
                 outcome = await step.run(ctx)
-            except Exception as exc:
-                logger.warning("Step %s failed: %s", step.name, exc)
-                await self._settle(
-                    ctx, step, outcomes, StepOutcome(status="failed", detail=str(exc))
-                )
-                if step.on_error is OnError.FAIL:
-                    await self._abandon(ctx, index, outcomes, recorded, f"{step.name} failed")
-                    raise
-                continue
+        except Exception as exc:
+            logger.warning("Step %s failed: %s", step.name, exc)
+            self.raised = exc
+            outcome = StepOutcome(status="failed", detail=public_detail(exc))
+        if opened and not outcome.turn_id:
+            outcome.turn_id = opened[0]
+        return await self._settle(step, outcome)
 
-            await self._settle(ctx, step, outcomes, outcome)
-            if outcome.status == "failed" and step.on_error is OnError.FAIL:
-                await self._abandon(ctx, index, outcomes, recorded, f"{step.name} failed")
-                raise StepFailed(outcome.detail or f"Step {step.name!r} failed.")
-
-    def _actions_for(self, step: Step) -> list[WorkflowAction]:
-        """Run-wide actions fire for every step; a step's own fire for it alone."""
-        return [*self.actions, *step.actions]
-
-    async def _settle(
-        self,
-        ctx: WorkflowContext,
-        step: Step,
-        outcomes: dict[str, StepOutcome],
-        outcome: StepOutcome,
-    ) -> None:
-        """Put the outcome on the run's state and tell the actions."""
-        outcomes[step.name] = outcome
-        await self._notify(
-            self._actions_for(step),
-            "on_step_end",
-            lambda action: action.on_step_end(ctx, step, outcome),
+    async def _decided(self, step: Step) -> StepOutcome:
+        """A waiting step: set it waiting, wait for the decision, then record it."""
+        pending = await self.perform(f"step:{step.name}", lambda: self._attempt(step, waiting=True))
+        if pending.status != "waiting":
+            return pending
+        assert self.wait is not None
+        seconds = step.wait_seconds()
+        while (decision := await self.wait(f"approval:{step.name}", seconds)) is None:
+            # Out of time, unless a decision was taken meanwhile and is on its way.
+            if await self.perform(f"expire:{step.name}", lambda: self._expire(step)):
+                break
+            seconds = DECISION_IN_FLIGHT_SECONDS
+        return await self.perform(
+            f"decide:{step.name}", lambda: self._settle(step, step.decide(decision))
         )
 
-    async def _abandon(
-        self,
-        ctx: WorkflowContext,
-        index: int,
-        outcomes: dict[str, StepOutcome],
-        recorded: Mapping[str, Any],
-        reason: str,
-    ) -> None:
+    async def _expire(self, step: Step) -> bool:
+        """End `step`'s wait. False when a decision was taken first: it is on its way."""
+        expire = getattr(self.recorder, "expire", None)
+        return True if expire is None else await expire(step)
+
+    def _listeners_for(self, step: Step) -> list[RunListener]:
+        """Run-wide listeners fire for every step; a step's own fire for it alone."""
+        return [*self.listeners, *step.listeners]
+
+    async def _settle(
+        self, step: Step, outcome: StepOutcome, *, listeners: bool = True
+    ) -> StepOutcome:
+        """Put the outcome on the run's state and tell the recorder and listeners."""
+        self.outcomes[step.name] = outcome
+        await self._notify(
+            self._listeners_for(step) if listeners else [],
+            lambda listener: listener.on_step_end(self.ctx, step, outcome),
+        )
+        return outcome
+
+    async def _abandon(self, index: int, reason: str) -> None:
         """Record every step after `index` as skipped, so none is merely absent."""
         for step in self.steps[index + 1 :]:
-            if step.name in recorded:
-                continue
-            await self._settle(ctx, step, outcomes, StepOutcome(status="skipped", detail=reason))
+            if step.name not in self.recorded:
+                await self._settle(step, StepOutcome(status="skipped", detail=reason))
 
 
-def check_pipeline(steps: Sequence[Any], *, label: str = "A workflow") -> None:
-    """Raise ImproperlyConfigured unless the steps can run in the order given.
-
-    Takes declarations or compiled Steps: both carry `name` and `requires`.
-    """
+def validate_steps(steps: Sequence[Any], *, label: str = "A workflow") -> None:
+    """Raise ImproperlyConfigured unless the steps (declared or compiled) can run in order."""
     if not steps:
         raise ImproperlyConfigured(f"{label} has no steps to run.")
 
@@ -204,21 +246,32 @@ async def run_steps(
     steps: Sequence[Step],
     *,
     inputs: Mapping[str, Any] | None = None,
-    principal: AbstractBaseUser | AnonymousUser | None = None,
-    actions: Sequence[WorkflowAction] = (),
+    user: AbstractBaseUser | AnonymousUser | None = None,
+    listeners: Sequence[RunListener] = (),
+    recorder: RunListener | None = None,
     completed: Mapping[str, Any] | None = None,
     workflow: str = "",
     run_id: str = "",
+    perform: Perform = perform_now,
+    wait: Wait | None = None,
 ) -> dict[str, StepOutcome]:
-    """Run `steps` in declared order, reporting each outcome to `actions`."""
-    runner = _StepRunner(steps, actions=actions)
-    return await runner.run(
-        inputs=inputs,
-        principal=principal,
-        completed=completed,
+    """Run `steps` in declared order, reporting each outcome to `listeners`.
+
+    `recorder` errors stop the run; listener errors are only logged.
+    """
+    validate_steps(steps)
+    return await _StepRunner(
+        steps,
+        listeners=listeners,
+        recorder=recorder,
+        completed=dict(completed or {}),
+        perform=perform,
+        wait=wait,
+        inputs=dict(inputs or {}),
+        user=user,
         workflow=workflow,
         run_id=run_id,
-    )
+    ).run()
 
 
-__all__ = ["check_pipeline", "run_steps"]
+__all__ = ["Perform", "Wait", "perform_now", "run_steps", "validate_steps"]
