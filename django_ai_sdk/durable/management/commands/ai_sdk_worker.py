@@ -103,8 +103,7 @@ class Command(BaseCommand):
         """Wait until this is the only worker. False when stopped while waiting.
 
         DBOS recovers every unfinished run at launch, so two workers would both run them.
-        A Postgres advisory lock on its own session lets a deploy start the new worker
-        first. SQLite: one worker, by hand.
+        A session advisory lock lets a deploy start the new worker first; SQLite: by hand.
         """
         from django_ai_sdk.durable.conf import setting
 

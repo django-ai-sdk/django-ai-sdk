@@ -18,14 +18,13 @@ DEFAULTS: dict[str, Any] = {
     "SCHEMA": "dbos",
     # Who owns the workflows, queues and schedules in the system tables.
     "APP_NAME": "django-ai-sdk",
-    # Pinned, so a deploy recovers the runs the last one left. Change it only when step
-    # code changes in a way an unfinished run cannot replay: runs left under the old
-    # version are no longer run (the worker warns about them at start).
+    # Pinned so a deploy recovers the last one's runs. Change only when unfinished runs
+    # cannot replay new step code: runs under the old version are then left alone.
     "VERSION": "1",
     # False behind a pooler in transaction mode (PgBouncer), which drops LISTEN.
     "USE_LISTEN_NOTIFY": True,
-    # Queues by name, with DBOS register_queue options. No cap on "workflows": a run
-    # waiting days for an approval holds its slot.
+    # DBOS register_queue options by name. No cap on "workflows": a run waiting on an
+    # approval holds its slot.
     "QUEUES": {"workflows": {}, "default": {"worker_concurrency": 8}},
 }
 
@@ -77,7 +76,7 @@ def _postgres_url(db: dict[str, Any]) -> str:
     }
     host, port = str(db.get("HOST") or "localhost"), str(db.get("PORT") or "")
     if host.startswith("/"):
-        # A unix socket directory has no place in the URL's authority: libpq takes it as ?host=.
+        # libpq takes a unix socket directory as ?host=, not in the authority.
         params.update(host=host, **({"port": port} if port else {}))
         host, port = "", ""
     if port:

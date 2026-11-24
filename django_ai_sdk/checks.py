@@ -16,9 +16,7 @@ OVERSIGHT_APP = "django_ai_sdk.oversight"
 def check_oversight_installed(app_configs: Any = None, **kwargs: Any) -> list[Any]:
     """Report policies that are set while the oversight app is not installed.
 
-    Without the app, those agents run unguarded. An agent wants a policy when it
-    sets `oversight` or overrides `get_oversight()`. A DEFAULT_POLICY in
-    AI_SDK_OVERSIGHT applies to every agent.
+    Those agents run unguarded: `oversight`, a `get_oversight()` override or DEFAULT_POLICY.
     """
     from django.apps import apps
     from django.conf import settings

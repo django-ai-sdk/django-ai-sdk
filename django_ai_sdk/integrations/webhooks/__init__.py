@@ -1,10 +1,7 @@
 """Integrations that receive messages pushed in by a platform.
 
-To let an agent answer in a channel, implement verify, parse and reply on a
-WebhookIntegration, include webhooks/urls.py, and run a worker. The SDK ships
-`telegram`, `slack` and `github_events`.
-
-Reference: docs/content/manual/webhooks.md.
+Implement verify, parse and reply on a WebhookIntegration, include webhooks/urls.py,
+and run a worker. See docs/content/manual/webhooks.md.
 """
 
 from __future__ import annotations

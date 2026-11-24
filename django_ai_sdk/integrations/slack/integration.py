@@ -32,8 +32,7 @@ _MENTION = re.compile(r"<@[A-Z0-9]+>")
 class SlackIntegration(WebhookIntegration):
     """Answer app mentions and direct messages with the configured agent.
 
-    Needs a Slack app with the app_mentions:read, im:history and chat:write
-    scopes, with Event Subscriptions pointed at this integration's path, and:
+    Needs app_mentions:read, im:history and chat:write, Event Subscriptions on this path, and:
 
         AI_SDK_INTEGRATIONS = {"slack": {
             "BOT_TOKEN": env("SLACK_BOT_TOKEN"),
@@ -45,8 +44,7 @@ class SlackIntegration(WebhookIntegration):
 
     name = "slack"
     label = "Slack"
-    # One thread per Slack thread. A top-level message uses its own ts, so its
-    # replies land in the same thread.
+    # A top-level message uses its own ts, so its replies land in the same thread.
     thread_per_ref = True
 
     def missing_config(self) -> str | None:
@@ -70,7 +68,7 @@ class SlackIntegration(WebhookIntegration):
         if body is None:
             return None
 
-        # Slack checks the endpoint by asking for its challenge back.
+        # Slack's endpoint check.
         if body.get("type") == "url_verification":
             return JsonResponse({"challenge": body.get("challenge", "")})
 
@@ -92,8 +90,7 @@ class SlackIntegration(WebhookIntegration):
 
     @staticmethod
     def _is_answerable(event: dict[str, Any]) -> bool:
-        # A bot_id means our own reply came back. Answering it would loop forever.
-        # A subtype marks an edit, a join or a file share, not a question.
+        # bot_id: our own reply came back (would loop). subtype: an edit, join or file share.
         if event.get("bot_id") or event.get("subtype"):
             return False
         if event.get("type") == "app_mention":
@@ -108,8 +105,7 @@ class SlackIntegration(WebhookIntegration):
         )
         if response is None:
             return
-        # Slack returns 200 with ok=false on errors like a revoked token,
-        # so check the body, not the status code.
+        # Slack returns 200 with ok=false on errors, so check the body.
         body = json_body(response)
         if not body.get("ok"):
             logger.error(

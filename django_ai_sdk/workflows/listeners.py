@@ -9,11 +9,9 @@ if TYPE_CHECKING:
 
 
 class RunListener:
-    """Receives a run's progress.
+    """Receives a run's progress; callbacks default to no-ops.
 
-    Every callback is a no-op by default, so override only the ones you need. A
-    listener on one step gets only that step's callbacks. Run start and end go to
-    listeners on the workflow.
+    Step listeners get only that step's callbacks; run start/end go to workflow listeners.
     """
 
     description: str = ""
@@ -24,11 +22,7 @@ class RunListener:
 
     @classmethod
     def validate_config(cls, config: dict[str, Any]) -> None:
-        """Raise ValueError unless this listener accepts `config`.
-
-        Called when a definition is stored or registered, as for steps. By default a
-        listener takes no config; override this to accept settings.
-        """
+        """Raise ValueError unless this listener accepts `config` (default: none)."""
         if config:
             raise ValueError(f"{cls.__name__} takes no config, got keys {sorted(config)}.")
 
@@ -46,11 +40,7 @@ class RunListener:
 
 
 def get_listener_registry() -> dict[str, type[RunListener]]:
-    """Listeners a definition may name, by key, from `AI_SDK_WORKFLOWS['LISTENERS']`.
-
-    Read at call time, so a settings change needs no restart. A path that does not
-    import is left out with a warning (and system check E003).
-    """
+    """Listeners a definition may name, by key, from `AI_SDK_WORKFLOWS['LISTENERS']`."""
     return registered("LISTENERS", RunListener)
 
 

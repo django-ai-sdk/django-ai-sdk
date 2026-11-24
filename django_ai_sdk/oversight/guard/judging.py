@@ -100,10 +100,8 @@ async def answer_lens(
 ) -> Answer | None:
     """Ask a lens's steps in order until one is sure.
 
-    A lens none of whose judges can run here, or answer its kind of question,
-    answers NO_JUDGE, an error, so FAIL_MODE decides; it is not skipped. Only
-    reflect samples. `progress` collects answers as they arrive, so a caller that
-    cancels still has them.
+    A lens no judge here can answer gets NO_JUDGE (an error, so FAIL_MODE decides). Only
+    reflect samples. `progress` collects answers as they arrive, for a cancelling caller.
     """
     if not lens.applies(context):
         return None
@@ -162,8 +160,7 @@ def _ended_unsure(lens: Lens, answer: Answer | None, asked: list[Answer]) -> boo
 def should_retry(error: str, trail_errors: Sequence[str] = ()) -> bool:
     """True when reflect should ask a lens again after the deadline or an outage.
 
-    Only the last trail error counts: a usable answer kept at the deadline or
-    while a later judge was down carries that error there.
+    Only the last trail error counts: a kept answer carries the deadline or outage there.
     """
     last_error = trail_errors[-1] if trail_errors else ""
     return any(e == "deadline" or is_unavailable(e) for e in (error, last_error))
@@ -179,8 +176,8 @@ async def answer_lenses(
 ) -> list[Answered]:
     """Answer `lenses` concurrently. Lenses still running at the deadline answer "deadline".
 
-    A lens cut off after an unsure answer keeps it (failed, "deadline" last in its
-    trail) so reflect still asks the slower judges. No judge outlives its stage.
+    A cut-off lens keeps its unsure answer so reflect still asks slower judges.
+    No judge outlives its stage.
     """
     if not lenses:
         return []
@@ -257,13 +254,10 @@ def match_rules(
 ) -> list[Matched]:
     """Return rules that match now and have not matched earlier in this turn.
 
-    A rule waits until every lens it reads has had its chance, so gate and
-    reflect lenses can share a rule, unless what has answered already decides
-    one that stops the turn; a rule on a tool call decides at the call. A test on
-    an `errored` lens is unknown, never true, and the answer a failed lens kept
-    decides nothing. With `fail_closed`, a failed lens that leaves an enforced
-    rule undecided fires it with only its block, mask or tool restriction here:
-    a failure never alerts, queues or notifies.
+    A rule waits for all its lenses unless answers so far already decide a stopping rule;
+    tool-call rules decide at the call. A test on an errored lens is unknown, never true.
+    With `fail_closed`, a failed lens fires an undecided enforced rule's block, mask or tool
+    restriction only: a failure never alerts, queues or notifies.
     """
     answered = set(answers) | set(errored)
     # A failed lens may keep an unsure answer for the record; here it reads as failed.

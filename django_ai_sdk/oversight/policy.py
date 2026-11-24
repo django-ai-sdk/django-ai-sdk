@@ -1,12 +1,5 @@
 """Policies: an app's lenses and rules, layered over the built-in packs.
 
-    @register_policy
-    class Support(Policy):
-        name = "support"
-        extends = ["security", "quality"]
-        lenses = [Topic()]
-        rules = [Rule("hr_to_people", when=L("topic") == "hr", then=Queue("hr"))]
-
 The policy class wins over the packs it extends. Every value records where it
 came from; nothing changes a lens or rule declared in code at runtime.
 """

@@ -12,11 +12,9 @@ from typing import Any
 
 
 def run_inline(monkeypatch: Any) -> None:
-    """Make a queued run execute at once, in the test, with no DBOS schedules to read or write.
+    """Make a queued run execute at once, in the test, with no DBOS schedules.
 
-    The same `execute_run` the DBOS workflow calls, without checkpoints; a run's
-    rows record how it ended, as with a queue. An approval step fails at once,
-    since only a run on DBOS waits. `monkeypatch` is pytest's fixture.
+    No checkpoints, so an approval step fails at once. `monkeypatch` is pytest's fixture.
     """
     from asgiref.sync import async_to_sync
 

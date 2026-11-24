@@ -1,20 +1,7 @@
 """Lenses: one typed question about a turn each, answered by patterns, a check or judges.
 
-    class Competitors(PatternLens):       # code finds spans, which a Mask rule can mask
-        name = "competitors"
-        keywords = {"acme": ["Acme"], "globex": ["Globex"]}
-
-    class EvenAmount(CheckLens):          # plain Python, like a Django validator
-        name = "even_amount"
-        validators = [validate_even]      # raise Violation("...") to say yes
-
-    class PromptInjection(JudgeLens):     # judges, cheapest first
-        name = "injection_question"
-        judges = [PatternJudge(INJECTION_PATTERNS), Maybe("classifier"), Maybe("judge")]
-
-A lens only answers; what to do about it is a `Rule` on the policy. `answer`
-picks Flag, Choice, Score or Entities; an answer option (`yes`, `labels`, `low`)
-belongs to the type that reads it. Inline, pass attributes as keyword arguments.
+A lens only answers; a `Rule` on the policy acts. `answer` picks Flag, Choice, Score or
+Entities; answer options (`yes`, `labels`, `low`) belong to the type that reads them.
 """
 
 from __future__ import annotations
@@ -539,16 +526,9 @@ def _takes_context(validator: Callable[..., Any]) -> bool:
 class JudgeLens(Lens):
     """Answered by judges, asked in order, quick to thorough.
 
-    The first answer at or above `min_confidence` stands; if none is sure, the last
-    answer stands, unsure. So list a judge after another only when you trust it more;
-    for judges trusted alike, let the rule handle `L(name).disputed`.
-
-    Confidence is each judge's own scale, only compared with thresholds, never between
-    judges. A judge that fails also hands over; a lens left without an answer has
-    failed, and FAIL_MODE decides.
-
-    `judges` are Judge instances, aliases from AI_SDK_OVERSIGHT["JUDGES"]
-    (`Maybe` skips one when undefined), or {"class": ..., **kwargs} configs.
+    The first answer at or above `min_confidence` stands, else the last (unsure), so order by
+    trust; confidences are never compared between judges. No answer at all: FAIL_MODE decides.
+    `judges`: Judge instances, JUDGES aliases (`Maybe` skips undefined ones), or configs.
     """
 
     kind = "judge"

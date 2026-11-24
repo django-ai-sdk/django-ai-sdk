@@ -54,10 +54,8 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         )
         return
 
-    # Claimed here, where the work happens, so a platform redelivery or a second
-    # run of this task is dropped. The claim is kept even if the run then fails:
-    # its tools may already have acted. An event without an id is never deduped,
-    # or all such events would share one key.
+    # Claimed here so redeliveries and task reruns drop; kept on failure since tools
+    # may have acted. No id, no dedup, or all such events would share one key.
     key = f"ai_sdk:webhook:{event.integration}:{event.event_id}"
     if event.event_id and not await cache.aadd(key, 1, integration.dedup_ttl):
         logger.info("Dropping a repeat of %r event %s", event.integration, event.event_id)
@@ -86,9 +84,8 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         await integration.reply(event, ERROR_MESSAGE)
         return
 
-    # SECURITY: never trust the platform's sender id as a user. Runs act as the
-    # RUN_AS account, and tools, threads and memories are checked against it.
-    # Without RUN_AS the run is anonymous and reaches no integration.
+    # SECURITY: never trust the platform's sender id as a user. Runs act as RUN_AS,
+    # or anonymously (reaching no integration) without it.
     principal = await integration.aget_principal()
 
     storage, thread_id, history = await _load_conversation(agent, integration, event, principal)
@@ -111,7 +108,6 @@ async def run_inbound(payload: dict[str, Any]) -> None:
         )
         text = TIMEOUT_MESSAGE
     except Exception:
-        # Log it, since the generic reply tells the deployer nothing.
         logger.exception("Agent run for a %r event failed", event.integration)
         text = ERROR_MESSAGE
     finally:
@@ -154,9 +150,8 @@ async def _load_conversation(
                 thread_id=thread_id,
             )
         except Exception:
-            # Two events can race to create the same thread. If the thread now
-            # exists, use it. Storage may not be a database, so any error is
-            # checked this way rather than only integrity errors.
+            # Two events can race to create it; storage may not be a database, so
+            # any error is checked by looking the thread up again.
             if await storage_class.get_thread(thread_id) is None:
                 raise
         else:
@@ -177,8 +172,7 @@ async def _persist_turn(
     reply_text: str,
 ) -> None:
     """Store the user message and the reply on the thread."""
-    # No transaction, since storage may not be a database. A half-written turn
-    # looks unanswered next time, so log the failure loudly.
+    # No transaction (storage may not be a database); a half-written turn looks unanswered.
     try:
         if not user_message.id:
             user_message.id = str(uuid.uuid4())

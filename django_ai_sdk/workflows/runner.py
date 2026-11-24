@@ -30,13 +30,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# How the walk hands over a unit of work: a label, and a coroutine function that
-# does the unit's side effects and returns its result. In-process it is awaited
-# as is. Under DBOS (`workflows.durable`) each unit is a checkpointed step, so a
-# recovered run replays a finished unit's result instead of doing it again.
+# Runs one labelled unit of side effects. Under DBOS each unit is checkpointed,
+# so a recovered run replays a finished unit instead of redoing it.
 Perform = Callable[[str, Callable[[], Awaitable[Any]]], Awaitable[Any]]
-# How a waiting step gets its decision: a topic and a timeout in seconds. None
-# when the run cannot wait, which only a durable run can.
+# Waits for a decision (topic, timeout seconds). None unless the run is durable.
 Wait = Callable[[str, float], Awaitable[Any]]
 
 # How long a step whose wait ran out waits again for a decision taken just then.
@@ -51,9 +48,8 @@ async def perform_now(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
 class _StepRunner:
     """Walks the declared steps once, in order.
 
-    The walk itself only decides. Every side effect (running a step, telling the
-    recorder and listeners) happens inside a unit given to `perform`, so the walk
-    is the same whether it runs in-process or as a DBOS workflow.
+    The walk only decides; every side effect goes through `perform`, so it is the
+    same in-process or under DBOS.
     """
 
     def __init__(
@@ -116,8 +112,7 @@ class _StepRunner:
         """Run each step in turn, recording every one that will not run."""
         for index, step in enumerate(self.steps):
             if step.name in self.recorded:
-                # Replayed without a listener call: the row belongs to the run that
-                # completed it, so closing it again would re-date it.
+                # No listener call: closing the row again would re-date it.
                 self.outcomes[step.name] = StepOutcome(
                     status="completed", output=self.recorded[step.name]
                 )
@@ -226,10 +221,7 @@ class _StepRunner:
 
 
 def validate_steps(steps: Sequence[Any], *, label: str = "A workflow") -> None:
-    """Raise ImproperlyConfigured unless the steps can run in the order given.
-
-    Takes declarations or compiled Steps: both carry `name` and `requires`.
-    """
+    """Raise ImproperlyConfigured unless the steps (declared or compiled) can run in order."""
     if not steps:
         raise ImproperlyConfigured(f"{label} has no steps to run.")
 
@@ -265,9 +257,7 @@ async def run_steps(
 ) -> dict[str, StepOutcome]:
     """Run `steps` in declared order, reporting each outcome to `listeners`.
 
-    `recorder` (a `RunRecorder`) is called first. Its errors stop the run, while a
-    listener's errors are only logged. `perform` and `wait` are how a durable run
-    checkpoints each unit and waits for a decision (`workflows.durable`).
+    `recorder` errors stop the run; listener errors are only logged.
     """
     validate_steps(steps)
     return await _StepRunner(

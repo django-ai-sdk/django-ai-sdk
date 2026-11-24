@@ -1,8 +1,7 @@
 """A turn's content: which text is kept, how it is masked, and how it is read back.
 
-Anything that can quote the turn (judges' reasons, judge-written entity names,
-scores keyed by source URL) is stored with the content, so Capture governs it and
-forgetting or expiry destroys it.
+Anything that can quote the turn (judge reasons, entity names, source URLs) is stored as
+content, so Capture, forgetting and expiry cover it.
 """
 
 from __future__ import annotations
@@ -168,8 +167,7 @@ def turn_literals(guard: TurnGuard) -> dict[str, str]:
 def unmasked_literals(masked: str, shown: str) -> dict[str, str]:
     """Map each text that masking replaced in `shown` to its label.
 
-    shortcut: knows only the "[LABEL]" masks the SDK writes; a Mask with a custom
-    template is not recovered. Store the found texts per turn if that is needed.
+    shortcut: recovers only the SDK's "[LABEL]" masks, not custom Mask templates.
     """
     parts = _MASK.split(masked)
     if len(parts) == 1:
@@ -192,8 +190,7 @@ _MASK = re.compile(r"\[([A-Z][A-Z0-9_]*)\]")
 def found_literals(answered: Iterable[Answered], texts: Mapping[Subject, str]) -> dict[str, str]:
     """Map each text an entities lens found to its label.
 
-    Only entities count: they find names and addresses, which the record must not
-    keep; other lenses point at ordinary words that stay readable.
+    Only entities: they find names and addresses; other lenses point at ordinary words.
     """
     found: dict[str, str] = {}
     for item in answered:
@@ -280,9 +277,8 @@ def forget_thread(thread_id: Any) -> None:
 def forget_turns(turns: QuerySet[Turn]) -> None:
     """Delete the turns' content and reviewers' notes; the turns stay. Run in a transaction.
 
-    Locking first means a turn closing now, or later after it was swept as interrupted,
-    either finds itself `content_forgotten` or has stored its content already, which is
-    deleted here.
+    Locks first, so a turn closing now (or after a sweep) either sees `content_forgotten`
+    or already stored its content, which is deleted here.
     """
     from django_ai_sdk.oversight.models import ReviewItem, Turn, TurnContent
 

@@ -1,7 +1,6 @@
-"""Create or upgrade DBOS's tables. For a release step, before web processes queue runs.
+"""Create or upgrade DBOS's tables, for a release step before web processes queue runs.
 
-The worker migrates them too when it launches, so this matters only when a web
-process may queue a run before the first worker has started.
+The worker migrates at launch too; this matters when a web process queues first.
 """
 
 from __future__ import annotations

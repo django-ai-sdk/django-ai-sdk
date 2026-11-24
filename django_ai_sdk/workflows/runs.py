@@ -53,9 +53,7 @@ async def open_run(
 ) -> WorkflowRun:
     """Create a pending run of `workflow` with a copy of its definition.
 
-    The `workflow_key` is set here. It is the stored workflow's slug, the registered
-    workflow's name, or "adhoc" for any other definition. A trigger passes a `run_id`
-    derived from what fired it, so firing twice opens one run.
+    Triggers pass a `run_id` derived from what fired them, so firing twice opens one run.
     """
     if record is not None:
         key = record.slug
@@ -108,9 +106,8 @@ async def queue_run(
     """Check the inputs, then create the run and queue it.
 
     `user` is who the run acts as, `started_by` who asked; neither may approve it.
-    Bad inputs fail this call, not the worker. An existing `run_id` returns that run.
+    An existing `run_id` returns that run.
     """
-    # Only what the definition declares is stored: the schema is the contract.
     inputs = validate_inputs(workflow, inputs or {})
     if run_id is not None and (existing := await WorkflowRun.objects.filter(pk=run_id).afirst()):
         return existing
@@ -136,8 +133,7 @@ async def queue_run(
 def requeue(run_id: str) -> None:
     """Hand the run's current attempt to DBOS. Idempotent: the workflow id is fixed per attempt.
 
-    The worker calls it at start for every pending run, so a run whose web process
-    died between commit and queueing is not stranded.
+    The worker calls it at start, so a web crash between commit and queueing strands nothing.
     """
     from django_ai_sdk.workflows.durable import enqueue
 
@@ -166,11 +162,7 @@ def requeue_pending() -> int:
 
 
 def fail_stale_runs() -> int:
-    """Fail every running run whose DBOS workflow no longer runs. Returns how many.
-
-    Checks runs whose heartbeat is older than STALE_AFTER_SECONDS; fails them and their
-    unfinished steps. A run DBOS still runs is left alone. Called by the worker.
-    """
+    """Fail stale running runs (and their open steps) that DBOS no longer runs; return count."""
     from django_ai_sdk.durable import runtime
     from django_ai_sdk.workflows.conf import setting
     from django_ai_sdk.workflows.durable import ACTIVE_STATUSES
@@ -243,9 +235,7 @@ async def execute_run(
 ) -> WorkflowRun | None:
     """Claim `run_id`, walk its steps and close it. None when there was nothing to claim.
 
-    `workflows.durable` calls this with DBOS's `perform`, `wait` and workflow id, so
-    every unit is a checkpoint. The defaults do the same walk here and now, as tests
-    and inline callers do; such a run cannot wait for an approval.
+    With the default `perform`/`wait` it runs inline and cannot wait for an approval.
     """
     claimed = await perform("claim", lambda: _claim(run_id, workflow_id))
     if claimed is None:
@@ -290,7 +280,6 @@ async def walk_run(
     """Walk a claimed run's steps under its current attempt. The recorder closes it."""
     from django_ai_sdk.tasks import aget_principal
 
-    # The definition crossed the queue as JSON on the run row.
     workflow = WorkflowDefinition.model_validate(run.workflow_definition)
     user = await aget_principal(run.user_id, source=f"Workflow run {run.pk}")
     steps = compile_steps(workflow)
@@ -321,14 +310,9 @@ async def _close(run: WorkflowRun, attempt: int, *, quiet: bool = False, **field
 
 
 class RunRecorder(RunListener):
-    """Write one StepRun row per step, and stop the walk once the run is not ours.
-
-    Passed to `run_steps` as `recorder=`, so its errors stop the run. It raises
-    `RunSuperseded` once the run is no longer running under its attempt.
-    """
+    """Write one StepRun row per step; raise `RunSuperseded` once another attempt owns the run."""
 
     def __init__(self, run: WorkflowRun, steps: Sequence[Step]) -> None:
-        # Built by the worker, not a definition: it takes a run, not a config.
         super().__init__()
         self.run = run
         self.attempt = run.attempt
@@ -365,13 +349,11 @@ class RunRecorder(RunListener):
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
         """Claim this step's row for this attempt.
 
-        A completed row is this attempt's own (its worker died before DBOS recorded it):
-        raise `StepRecorded` with it, so the step does not run again.
+        A completed row means the worker died before DBOS recorded it: raise `StepRecorded`.
         """
         await self.beat()
         sequence = self.sequence[step.name]
-        # ON CONFLICT DO NOTHING leaves an existing row for the update below, and
-        # does not abort the caller's transaction.
+        # ON CONFLICT DO NOTHING: keeps the caller's transaction usable.
         await StepRun.objects.abulk_create(
             [StepRun(run=self.run, sequence=sequence, step_name=step.name)],
             ignore_conflicts=True,
@@ -396,10 +378,7 @@ class RunRecorder(RunListener):
             )
 
     async def expire(self, step: Step) -> bool:
-        """End a timed-out wait. False when a decision was taken first.
-
-        Same conditional update on WAITING as `WorkflowService.decide`, so exactly one wins.
-        """
+        """End a timed-out wait; False when a decision won (same WAITING update as decide)."""
         rows = StepRun.objects.filter(run=self.run, sequence=self.sequence[step.name])
         if await rows.filter(status=StepRun.Status.WAITING).aupdate(
             status=StepRun.Status.FAILED,
@@ -411,10 +390,9 @@ class RunRecorder(RunListener):
         return not await rows.filter(status=StepRun.Status.RUNNING).aexists()
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
-        """Upsert a step's outcome (a skipped step never started).
+        """Upsert a step's outcome.
 
-        A stopped run still records it, so resume skips it; then `RunSuperseded`. Not once
-        a later attempt took the run.
+        A stopped run still records a completed step, so resume skips it; a newer attempt's not.
         """
         if await self._alive():
             await self._write(step, outcome)
@@ -446,11 +424,7 @@ class RunRecorder(RunListener):
 
 
 def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> dict[str, Any]:
-    """The run's inputs, coerced to what the definition declares.
-
-    A definition that declares no inputs accepts anything, so a pipeline written in
-    code need not describe itself in JSON.
-    """
+    """The run's inputs, coerced to what the definition declares (none declared: anything)."""
     model = compile_inputs(workflow)
     if model is None:
         return dict(supplied)

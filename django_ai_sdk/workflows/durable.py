@@ -53,10 +53,7 @@ ACTIVE_STATUSES = frozenset({"PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"})
 
 
 def runs_under_other_versions() -> dict[str, str]:
-    """Unfinished runs under another AI_SDK_DBOS['VERSION']: {run id: version}.
-
-    Only a worker of that version picks them up; the worker warns about them at start.
-    """
+    """Unfinished runs under another AI_SDK_DBOS['VERSION'] (only that version resumes them)."""
     current = runtime.setting("VERSION")
     unfinished = runtime.client().list_workflows(
         name=RUN_WORKFLOW,
@@ -102,10 +99,7 @@ async def fire_cron(scheduled_at: str, context: dict[str, Any]) -> str | None:
 
 
 async def perform(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
-    """The runner's `Perform` under DBOS: `unit` as a checkpointed step.
-
-    Its result goes through JSON on the first run too, so a replay sees the same value.
-    """
+    """Run `unit` as a DBOS step; JSON round-trip on first run too, so replays match."""
 
     async def checkpointed() -> Any:
         async with runtime.fresh_connections():

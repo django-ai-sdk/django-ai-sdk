@@ -1,8 +1,6 @@
-"""DRF viewsets over the SDK services. Register them yourself or include
-``django_ai_sdk.contrib.drf.urls``; subclass one to change a single action.
+"""DRF viewsets over the SDK services. Register them or include ``.urls``.
 
-DRF views are sync, so they call the services' sync wrappers
-(``django_ai_sdk.storage.services.list_threads`` and friends).
+DRF views are sync, so they call the services' sync wrappers.
 """
 
 from __future__ import annotations
@@ -740,10 +738,7 @@ class MemoryViewSet(ApiViewSet):
 class WorkflowViewSet(ApiViewSet):
     """Stored workflow definitions and their runs.
 
-    Only registered or stored workflows run, by key (`workflows/<key>/run/`). A
-    definition sent in a request is never run. Read a run at
-    `workflows/runs/<run_id>/` and resume a failed one at
-    `workflows/runs/<run_id>/resume/`.
+    Only registered or stored workflows run, by key; a definition in a request never runs.
     """
 
     lookup_field = "workflow_id"

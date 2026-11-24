@@ -42,8 +42,7 @@ class Workflow(models.Model):
         verbose_name = "Workflow"
         verbose_name_plural = "Workflows"
         constraints = [
-            # "adhoc" is the key for runs of unstored, unregistered definitions. A
-            # stored workflow with that slug would share their channel and rules.
+            # "adhoc" keys unstored runs; a row with it would share their channel and rules.
             models.CheckConstraint(
                 condition=~models.Q(slug=ADHOC), name="django_ai_sdk_workflow_slug_not_adhoc"
             ),
@@ -59,8 +58,7 @@ class Workflow(models.Model):
         if self.slug:
             self._save_named(*args, **kwargs)
             return
-        # Two rows with the same name, saved at once, can pick the same free slug;
-        # the unique index refuses the second, which then picks the next one.
+        # Concurrent saves can pick the same slug; the loser retries with the next one.
         for attempt in range(SLUG_ATTEMPTS):
             self.slug = self._unique_slug()
             try:
@@ -87,8 +85,7 @@ class Workflow(models.Model):
         """A slug derived from `name`, suffixed until it is free."""
         base = (slugify(self.name) or f"workflow-{str(self.pk)[:8]}")[:NAME_MAX_LENGTH]
         slug, suffix = base, 2
-        # A row may share a registered workflow's name, e.g. to show it in a studio:
-        # the registered one wins at start, and the row is still reached by id.
+        # A row may share a registered name: the registered one wins; the row is reached by id.
         while slug == ADHOC or self.has_slug(slug):
             tail = f"-{suffix}"
             slug = f"{base[: NAME_MAX_LENGTH - len(tail)]}{tail}"
@@ -124,12 +121,10 @@ class WorkflowRun(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
     workflow_definition = models.JSONField(null=True, blank=True)
-    # Set by the server when the run opens, never by the caller. It is the stored
-    # workflow's slug, the registered workflow's name, or "adhoc". Step turns run
-    # on the channel "workflow:<workflow_key>:<step>".
+    # Server-set, never by the caller: slug, registered name or "adhoc".
+    # Step turns run on channel "workflow:<workflow_key>:<step>".
     workflow_key = models.CharField(max_length=NAME_MAX_LENGTH, default=ADHOC, db_index=True)
-    # What started the run: "manual" (a person or code), "cron:<trigger>" or
-    # "event:<trigger>" (`workflows.triggers`).
+    # "manual", "cron:<trigger>" or "event:<trigger>".
     trigger = models.CharField(max_length=120, default="manual", db_index=True)
 
     inputs = models.JSONField(default=dict, blank=True)
@@ -144,8 +139,7 @@ class WorkflowRun(models.Model):
         on_delete=models.SET_NULL,
         related_name="workflow_runs",
     )
-    # The person who asked for the run, when one did: `user` for a manual run, the
-    # operator who fired a trigger by hand. Like `user`, they cannot approve it.
+    # Who asked for the run (user or operator firing a trigger); cannot approve it.
     started_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -153,8 +147,7 @@ class WorkflowRun(models.Model):
         on_delete=models.SET_NULL,
         related_name="+",
     )
-    # How many times a worker has claimed this run. A worker only writes while its
-    # attempt is still the latest.
+    # Claim count; a worker writes only while its attempt is the latest.
     attempt = models.PositiveIntegerField(default=0)
     # Refreshed at the claim and at every step: when the run last made progress.
     heartbeat_at = models.DateTimeField(null=True, blank=True)
@@ -167,8 +160,6 @@ class WorkflowRun(models.Model):
 
     if TYPE_CHECKING:
         steps: Manager[StepRun]
-        # Django adds the FK's `_id` attribute at class build time, which a static
-        # checker reading this module does not see.
         user_id: Any
         started_by_id: Any
         workflow_id: Any

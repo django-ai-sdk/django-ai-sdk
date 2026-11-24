@@ -33,8 +33,7 @@ _MENTION = re.compile(r"^@\w+\s*")
 class TelegramIntegration(WebhookIntegration):
     """Answer messages sent to a Telegram bot with the configured agent.
 
-    Needs a bot from @BotFather, registered once with setWebhook (the url, and
-    WEBHOOK_SECRET as secret_token), and:
+    Register the bot once with setWebhook (WEBHOOK_SECRET as secret_token), and:
 
         AI_SDK_INTEGRATIONS = {"telegram": {
             "BOT_TOKEN": env("TELEGRAM_BOT_TOKEN"),
@@ -68,8 +67,7 @@ class TelegramIntegration(WebhookIntegration):
         if update is None:
             return None
 
-        # Answer only new messages. Edits, channel posts and callback queries use
-        # other keys.
+        # Only new messages; edits, channel posts and callbacks use other keys.
         message = update.get("message") or {}
         if not self._is_answerable(message):
             return None
@@ -81,31 +79,25 @@ class TelegramIntegration(WebhookIntegration):
             event_id=str(update.get("update_id", "")),
             text=_MENTION.sub("", message.get("text", "")).strip(),
             conversation_id=str(chat.get("id", "")),
-            # Reply to the message itself, so the answer is clear in a busy group
-            # and lands in the right forum topic.
+            # Reply to the message itself, so it lands in the right forum topic.
             thread_ref=str(message.get("message_id", "")),
             external_user_id=str(sender.get("id", "")),
         )
 
     @staticmethod
     def _is_answerable(message: dict[str, Any]) -> bool:
-        # is_bot means our own reply came back. Answering it would loop forever.
-        # A message without text is a sticker, a photo or a join, not a question.
+        # is_bot: our own reply came back (would loop). No text: a sticker, photo or join.
         if (message.get("from") or {}).get("is_bot"):
             return False
         return bool(message.get("text"))
 
     async def send(self, chat_id: str, text: str, *, reply_to: str | None = None) -> bool:
-        """Send a message to a chat, with or without an inbound event.
-
-        Returns whether Telegram accepted it. Refusals are logged, not raised.
-        """
+        """Send a message to a chat; whether Telegram accepted it. Refusals are logged."""
         payload: dict[str, Any] = {
             "chat_id": chat_id,
             "text": text[:MAX_MESSAGE_LENGTH],
         }
-        # Telegram message ids are numbers. Anything else is ignored, so the
-        # message still goes out, just not as a reply.
+        # A non-numeric id still sends, just not as a reply.
         if reply_to and str(reply_to).isdigit():
             payload["reply_parameters"] = {"message_id": int(reply_to)}
 
@@ -114,7 +106,6 @@ class TelegramIntegration(WebhookIntegration):
         )
         if response is None:
             return False
-        # Read ok and description from the body, which says why a send failed.
         body = json_body(response)
         if not body.get("ok"):
             logger.error(

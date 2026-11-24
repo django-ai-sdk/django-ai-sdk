@@ -23,18 +23,13 @@ if TYPE_CHECKING:
 def get_step_registry() -> dict[str, type[Step]]:
     """Step classes a definition may name, by key, from `AI_SDK_WORKFLOWS['STEPS']`.
 
-    The registry is the gate: a type that is not listed cannot be composed. A path
-    that does not import is left out with a warning (and system check E002). The
-    built-in approval step is always there.
+    The gate: unlisted types cannot be composed. The approval step is always present.
     """
     return {**registered("STEPS", Step), APPROVAL_STEP: ApprovalStep}
 
 
 def _field_annotation(field: FieldDefinition, label: str) -> Any:
-    """One declared field as a python annotation.
-
-    `label` names the nested models, so a validation error says where it was.
-    """
+    """One declared field as an annotation; `label` names nested models for errors."""
     if field.enum is not None:
         # Subscripting with a tuple is the only way to spell a dynamic Literal.
         return Literal[tuple(field.enum)]  # ty: ignore[invalid-type-form]
@@ -48,11 +43,7 @@ def _field_annotation(field: FieldDefinition, label: str) -> Any:
 
 
 def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[BaseModel]:
-    """Declared fields as a pydantic model.
-
-    One builder for both directions: a workflow's `input_fields` and a step's
-    `output_fields` mean the same thing pointed opposite ways.
-    """
+    """Declared fields as a pydantic model, for both `input_fields` and `output_fields`."""
     built: dict[str, Any] = {}
     for field_name, field in fields.items():
         annotation = _field_annotation(field, f"{name}_{field_name}")
@@ -81,11 +72,9 @@ def compile_inputs(workflow: WorkflowDefinition) -> type[BaseModel] | None:
 
 
 def inputs_json_schema(workflow: WorkflowDefinition) -> dict[str, Any]:
-    """The run's inputs as a JSON Schema, for an editor or a tool.
+    """The run's inputs as a JSON Schema, from the same model the run validates against.
 
-    One artifact, compiled from the same model the run validates against, so a
-    form and the run cannot disagree. A definition that declares nothing
-    is open, and the schema says so rather than saying nothing.
+    No declared inputs means an open schema.
     """
     model = compile_inputs(workflow)
     if model is None:
@@ -117,8 +106,7 @@ def _compile_step(
             )
         step = step_class()
         step.config = MappingProxyType(dict(declared.config))
-    # The definition is the authority: class attributes on a registered Step are not
-    # defaults it falls back to.
+    # The definition wins; Step class attributes are not fallback defaults.
     step.name = declared.name
     step.requires = tuple(declared.requires)
     step.on_error = OnError(declared.on_error)
@@ -130,11 +118,9 @@ def _agent_step(declared: StepDefinition) -> AgentStep:
     """An agent named by id, configured."""
     step = AgentStep()
     step.agent_id = declared.agent_id
-    # The inputs this step sends as its conversation — the author names them per
-    # step, never the engine inferring a transcript from a value's shape.
+    # Named per step by the author; never inferred from a value's shape.
     step.history = tuple(declared.history)
-    # Compiled once, so a definition that cannot compile says so before the first
-    # model call.
+    # Compiled now, so a bad schema fails before the first model call.
     step.schema = (
         model_from_fields(f"Output_{declared.name}", declared.output_fields)
         if declared.output_fields

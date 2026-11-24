@@ -1,13 +1,5 @@
 """The oversight hooks a Haystack Agent runs. Each does nothing outside a turn.
 
-    before_run   GateQuestionHook     judge history and question; mask, or block the run
-    before_llm   StopClosedTurnHook   stop a run whose turn has closed
-    before_llm   LimitToolChoiceHook  offer only the tools the turn allows
-    before_tool  JudgeToolCallHook    block a tool call the policy says no to
-    after_tool   MaskToolResultHook   mask a tool result before the model reads it
-    after_run    RecordUsageHook      add model and token usage to the turn
-    after_run    JudgeAnswerHook      judge the answer: pass, mask or withhold it
-
 If any tool call in a step is blocked, the whole step is answered with stubs,
 because Haystack runs a step's calls all together or not at all.
 """

@@ -80,12 +80,9 @@ class TurnMasks:
     async def mask_other_text(self, lenses: list[Lens], text: str, stage: Stage) -> StageResult:
         """Judge `text` like the gate judges the question, and mask it.
 
-        Text a mask cannot locate is replaced whole with UNCHECKED_TEXT. Only a
-        rule's mask, block and tool restriction are kept, so other text never
-        triggers alerts or notifications; a rule in report mode is kept for what
-        it would have done. At the tool stage a lens that fails fires no rule:
-        under a closed policy the result is withheld whole instead, when an
-        enforced rule reads the lens.
+        Unlocatable text becomes UNCHECKED_TEXT. Only mask, block and tool restriction are
+        kept, so other text never alerts or notifies. At the tool stage a failed lens fires
+        no rule; a closed policy withholds the result instead if an enforced rule reads it.
         """
         guard = self.guard
         judged = StageResult(stage, text=text)
@@ -203,10 +200,8 @@ async def judge_other_text(
 ) -> list[list[Answered]]:
     """Answers about other text, one list per part of it that rules read on its own.
 
-    Lenses the text is too long for are asked about each chunk their judges read
-    (at most MAX_OTHER_TEXT_CHUNKS), spans moved back to where they are in the
-    text; each chunk's answers come with the other lenses' answers on the whole.
-    A text that needs more chunks keeps its too-long answers, so FAIL_MODE decides.
+    Too-long lenses are asked per chunk (at most MAX_OTHER_TEXT_CHUNKS), spans shifted back;
+    a text needing more chunks keeps its too-long answers, so FAIL_MODE decides.
     """
     answered = await answer_lenses(lenses, context, Stage.GATE, deadline_ms=deadline)
     too_long = [o.lens for o in answered if o.answer.error == TOO_LONG]
@@ -286,9 +281,8 @@ def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
 def other_text_lenses(policy: ResolvedPolicy) -> list[Lens]:
     """`gate_masking_lenses` plus gate lenses a mask, block or restrict_tools rule reads.
 
-    A rule in report mode counts, or it would never record what it would have done
-    to a tool result. A lens that doesn't judge tool results is left out of the
-    second group only, so `judges_tool_results` never turns masking off.
+    Report-mode rules count, to record what they would have done. `judges_tool_results`
+    filters only the second group, so it never turns masking off.
     """
     masking = gate_masking_lenses(policy)
     names = {
@@ -314,8 +308,7 @@ def collect_masks(
 ) -> tuple[list[tuple[Matched, MaskGroup]], list[tuple[Matched, Mask]]]:
     """Collect the (spans, template) group each Mask action in `matched` masks in `subject`.
 
-    A mask that changes nothing is dropped, so the turn is never recorded as
-    masked when nothing was. Unpointed masks are returned apart for the caller.
+    No-op masks are dropped so the turn is never recorded as masked; unpointed ones come apart.
     """
     groups: list[tuple[Matched, MaskGroup]] = []
     unpointed: list[tuple[Matched, Mask]] = []

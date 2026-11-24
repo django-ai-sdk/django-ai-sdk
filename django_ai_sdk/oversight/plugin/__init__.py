@@ -1,20 +1,7 @@
 """Oversight as a Haystack plugin: the turn around a run, and the hooks inside it.
 
-    from django_ai_sdk.oversight import TurnRequest, run_with_oversight
-
-    turn = TurnRequest(agent=my_sdk_agent, user=user, channel="api")
-    result = await run_with_oversight(Agent(chat_generator=..., tools=...), messages, turn=turn)
-    turn.raise_if_blocked()
-
-`run_with_oversight` opens the turn under the agent's policy, runs a copy of the
-Agent with the oversight hooks in their places, and closes the turn after the
-run, also when it raises.
-
-A run inside a turn of the same policy (or none) joins it; another policy opens
-a child turn linked to the outer one. A run that names no SDK agent joins the
-turn it runs in, or runs under DEFAULT_POLICY outside one; a side call opts out
-with `TurnRequest(oversight=False)`. A sync run cannot open a turn, so one that
-needs its own raises. The SDK runs every Haystack Agent through here.
+A run inside a turn of the same policy joins it, another policy opens a child turn; a run
+naming no SDK agent joins or uses DEFAULT_POLICY. A sync run cannot open a turn.
 """
 
 from __future__ import annotations

@@ -1,12 +1,8 @@
 """Receive endpoint for webhook integrations.
 
-Include it in the host project's URLconf:
-
     path("api/integrations/", include("django_ai_sdk.integrations.webhooks.urls")),
 
-Slack's Event Subscriptions URL is then
-https://example.com/api/integrations/slack/webhook/. Keep the path stable, since
-the platform stores it.
+Keep the path stable: platforms store it.
 """
 
 from __future__ import annotations

@@ -105,8 +105,7 @@ class WorkflowService(PermissionsMixin):
     ) -> WorkflowRun:
         """Queue a run of `workflow` as `user`. For trusted code, never a client's JSON.
 
-        A registered workflow needs RUN_WORKFLOW. Any other definition was written by
-        the caller, so it also needs MANAGE_WORKFLOW.
+        Unregistered definitions are caller-written, so also need MANAGE_WORKFLOW.
         """
         await cls.has_perms(user, Operation.RUN_WORKFLOW, raise_on_deny=True)
         if not is_registered(workflow):
@@ -122,10 +121,9 @@ class WorkflowService(PermissionsMixin):
         inputs: dict[str, Any] | None = None,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Queue a run of the workflow named `key`.
+        """Queue a run of the workflow named `key` (registered wins over stored).
 
-        A registered workflow wins, then an active stored one by slug. Raises
-        `Workflow.DoesNotExist` when neither exists or the caller may not run it.
+        Raises `Workflow.DoesNotExist` when missing or the caller may not run it.
         """
         from django_ai_sdk.workflows.models import Workflow
 
@@ -150,12 +148,9 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Queue a failed or cancelled run again. It skips the steps that completed.
+        """Queue a failed or cancelled run again, skipping completed steps.
 
-        The run keeps its original definition, inputs and user. A run the caller may
-        not resume raises `WorkflowRun.DoesNotExist`. An ad-hoc run also needs
-        MANAGE_WORKFLOW, as starting one did. Pending and running runs are refused,
-        because a worker already owns them.
+        Ad-hoc runs also need MANAGE_WORKFLOW, as starting one did.
         """
         from django_ai_sdk.workflows.models import WorkflowRun
 
@@ -174,7 +169,6 @@ class WorkflowService(PermissionsMixin):
             status=WorkflowRun.Status.PENDING,
             error="",
             completed_at=None,
-            # The old attempt's DBOS workflow is done with; `requeue` sets the next one's.
             task_id=None,
             updated_at=Now(),
         )
@@ -193,11 +187,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> WorkflowRun:
-        """Stop a pending or running run. The step in flight finishes and keeps its outcome.
-
-        Only the user it runs as cancels it; resume picks it up again. An approval wait
-        stops at once, freeing its worker slot.
-        """
+        """Stop a pending or running run; the step in flight finishes and keeps its outcome."""
         from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 
         run = await cls._own_run(run_id, user)
@@ -221,8 +211,7 @@ class WorkflowService(PermissionsMixin):
             run=run, status__in=(StepRun.Status.RUNNING, StepRun.Status.WAITING)
         ).aupdate(status=StepRun.Status.SKIPPED, detail="cancelled", completed_at=timezone.now())
         if run.task_id:
-            # DBOS's cancel does not wake a run blocked in recv: an empty decision does,
-            # and the cancelled run then stops at its next step.
+            # DBOS cancel does not wake a run blocked in recv; an empty decision does.
             for name in waiting:
                 await runtime.send(
                     run.task_id,
@@ -246,9 +235,8 @@ class WorkflowService(PermissionsMixin):
     ) -> WorkflowRun:
         """Approve or reject the approval step `step` that `run_id` waits on.
 
-        Needs APPROVE_WORKFLOW on the run (never on a run that acts as or was started by
-        the caller). The first decision wins; a step no longer waiting raises
-        `DecisionConflict`. A run the caller may not see raises `WorkflowRun.DoesNotExist`.
+        Never by the run's own user or starter. First decision wins; later ones raise
+        `DecisionConflict`.
         """
         from django_ai_sdk.workflows.models import StepRun, WorkflowRun
 
@@ -354,14 +342,11 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> None:
-        """Fire a cron trigger now, outside its schedule. The schedule goes on as before.
+        """Fire a cron trigger now, outside its schedule.
 
-        The run records the caller as who started it, so they cannot approve it even
-        when it acts as another account. A stored workflow's run acts as its author,
-        so only its author fires it by hand; a registered one acts as its code's
-        `run_as`, which the deployment chose.
+        The caller is recorded as starter (so cannot approve). Stored runs act as their
+        author, so only the author fires them by hand.
         """
-
         await cls._managed_schedule(key, trigger, user)
         _declared, record = await afind(key)
         if record is not None and str(record.created_by_id or "") != str(user_pk(user) or ""):
@@ -410,10 +395,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> list[dict[str, str]]:
-        """The listeners a definition may name, for a UI that composes one.
-
-        Needs MANAGE_WORKFLOW, like composing a definition.
-        """
+        """The listeners a definition may name, for a UI that composes one."""
         await cls.has_perms(user, Operation.MANAGE_WORKFLOW, raise_on_deny=True)
         return [
             {"key": key, "description": listener.description}
@@ -427,10 +409,7 @@ class WorkflowService(PermissionsMixin):
         *,
         user: AbstractBaseUser | AnonymousUser | None = None,
     ) -> dict[str, Any] | None:
-        """The stored workflow's inputs as a JSON Schema, for whoever composes a run.
-
-        A row the caller may not run reads as absent.
-        """
+        """The stored workflow's inputs as a JSON Schema; None if the caller may not see it."""
         from django_ai_sdk.workflows.models import Workflow
 
         await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
@@ -494,8 +473,7 @@ class WorkflowService(PermissionsMixin):
         if workflow is not None:
             _validate_submitted(workflow)
             record.definition = workflow.model_dump()
-            # SECURITY: triggered runs act as the creator, so whoever writes the steps
-            # is who they act as; editing another's workflow cannot borrow their account.
+            # SECURITY: triggered runs act as the creator; editing must not borrow their account.
             record.created_by_id = user_pk(user)
         if name is not None:
             record.name = name
@@ -553,8 +531,7 @@ class WorkflowService(PermissionsMixin):
         from django_ai_sdk.workflows.models import WorkflowRun
 
         await cls.has_perms(user, Operation.VIEW_WORKFLOW, raise_on_deny=True)
-        # An unknown workflow_id filters to nothing, the same answer as a workflow
-        # whose runs are all someone else's.
+        # Unknown workflow_id looks like one whose runs are all someone else's.
         qs = (
             WorkflowRun.objects.filter(workflow_id=workflow_id)
             .defer(*RUN_BLOBS)

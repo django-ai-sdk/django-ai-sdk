@@ -1,8 +1,7 @@
 """Response schemas of the contrib Ninja endpoints.
 
-Request payloads are shared with the DRF layer and live in ``django_ai_sdk.views.schemas``;
-services return their own ``*Out`` models, used here directly where they fit. Import from
-here when you replace an endpoint and want to keep its response shape.
+Request payloads live in ``django_ai_sdk.views.schemas``. Import from here to keep a
+replaced endpoint's response shape.
 """
 
 from __future__ import annotations

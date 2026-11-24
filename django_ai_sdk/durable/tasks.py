@@ -2,9 +2,8 @@
 
     TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
 
-A task runs as a DBOS workflow of one step, on the queue its `queue_name` names
-(AI_SDK_DBOS['QUEUES'] declares them). A worker that dies mid-task runs it again
-once DBOS recovers it, so a task must be safe to repeat, as with any queue.
+A task runs as a one-step DBOS workflow on its `queue_name` queue. A task cut off by a
+dead worker runs again on recovery, so it must be safe to repeat.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from django_ai_sdk.durable import runtime
 if TYPE_CHECKING:
     from dbos import WorkflowStatus
 
-# The DBOS workflow every task runs as.
 TASK_WORKFLOW = "ai_sdk.task"
 
 _STATUSES = {

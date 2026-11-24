@@ -18,8 +18,7 @@ DEFAULTS: dict[str, Any] = {
     "LISTENERS": {},
     # False: a cron occurrence starts nothing, such as on a staging copy of production.
     "SCHEDULES_ENABLED": True,
-    # A running run with no progress for this long is checked against DBOS, and failed
-    # when its DBOS workflow no longer runs (`runs.fail_stale_runs`).
+    # Idle running runs older than this are failed if DBOS no longer runs them.
     "STALE_AFTER_SECONDS": 900,
 }
 
@@ -29,11 +28,9 @@ def setting(key: str) -> Any:
 
 
 def load_classes[T](name: str, base: type[T]) -> tuple[dict[str, type[T]], list[str]]:
-    """Import the classes listed under AI_SDK_WORKFLOWS[name].
+    """Import AI_SDK_WORKFLOWS[name] classes; return them by key plus a problem per bad path.
 
-    Returns the classes by key, plus a problem message for each path that does not
-    import or is not a `base` subclass. The system check reports the problems. At
-    run time those keys are just missing.
+    Bad keys are just missing at run time; the system check reports them.
     """
     classes: dict[str, type[T]] = {}
     problems: list[str] = []

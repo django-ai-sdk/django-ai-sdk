@@ -1,9 +1,7 @@
 """Turn a saved definition into a Policy class (`origin = "authored"`) and validate it.
 
-Beyond the code checks, a definition may extend only code policies, never replace
-an inherited lens or rule, configure lenses only within `INLINE_ARGS` (no regex,
-code or import path), never keep more than a parent (capture, retention, fail
-mode), and is held to the system checks, which never see authored policies.
+Stricter than code: extend code policies only, never replace an inherited lens or rule,
+inline lens args only (no regex or code), never keep more than a parent; system checks apply.
 """
 
 from __future__ import annotations

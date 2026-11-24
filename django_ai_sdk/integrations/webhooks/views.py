@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Integrations already warned about as unconfigured.
 _warned_unconfigured: set[str] = set()
 
 
@@ -72,8 +71,7 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         )
         return HttpResponse(status=200)
 
-    # Platform limits are far too high for one agent turn. Log the cut, since the
-    # person in the channel cannot see it.
+    # Platform limits are far too high for one agent turn.
     max_text = resolve_setting("AI_SDK_WEBHOOK_MAX_TEXT", 4000)
     if len(parsed.text) > max_text:
         logger.info(
@@ -84,8 +82,7 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         )
     parsed.text = parsed.text[:max_text]
 
-    # Every delivery is queued; the worker drops repeats, so a crash before the
-    # queue write leaves nothing claimed and the platform's retry gets through.
+    # The worker drops repeats, so a crash before queueing leaves nothing claimed.
     await handle_inbound.aenqueue(parsed.model_dump())
     return integration.ack(parsed)
 
@@ -97,7 +94,7 @@ async def _over_rate_limit(name: str, event: InboundEvent) -> bool:
         return False
     sender = event.external_user_id or "unknown"
     key = f"ai_sdk:webhook:rl:{name}:{sender}:{int(time.time() // 60)}"
-    # The async cache calls, since DatabaseCache may not run on the event loop.
+    # Async calls: DatabaseCache may not run on the event loop.
     if await cache.aadd(key, 1, timeout=120):
         return False
     return await cache.aincr(key) > per_minute

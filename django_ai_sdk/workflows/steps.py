@@ -34,19 +34,11 @@ class WorkflowStopped(Exception):
 
 
 class RunSuperseded(Exception):
-    """This worker no longer holds the run. It was cancelled, failed as stale, or resumed.
-
-    `RunRecorder` raises it before writing, so a stale worker stops instead of
-    overwriting the newer attempt.
-    """
+    """This worker no longer holds the run; raised before writing over a newer attempt."""
 
 
 class StepRecorded(Exception):
-    """The step's row already holds this attempt's outcome: the step does not run again.
-
-    `RunRecorder` raises it when a step finished and was recorded, but its worker died
-    before DBOS checkpointed it. The runner takes `outcome` as the step's.
-    """
+    """The step's row already holds this attempt's outcome (worker died before DBOS checkpoint)."""
 
     def __init__(self, outcome: StepOutcome) -> None:
         super().__init__(outcome.detail)
@@ -56,7 +48,6 @@ class StepRecorded(Exception):
 class OnError(StrEnum):
     """What a step's failure does to the rest of the run."""
 
-    # Abort the run.
     STOP = "stop"
     # Record it, skip this step's dependents, run the rest.
     CONTINUE = "continue"
@@ -69,28 +60,22 @@ class StepOutcome:
     output: Any = None
     # "waiting" only while an approval step waits for a decision.
     status: Literal["completed", "failed", "skipped", "waiting"] = "completed"
-    # One line on the outcome, for whoever reads the record.
     detail: str = ""
-    # The oversight turn the step opened, if any. The runner fills it in.
+    # Filled in by the runner.
     turn_id: str = ""
 
 
 @dataclass
 class WorkflowContext:
-    """The run's state, as a step or a listener sees it.
-
-    Two namespaces, so nothing collides: `inputs` is what the caller supplied,
-    `steps` is what has run so far, keyed by step name.
-    """
+    """The run's state: caller `inputs` and `steps` so far, as separate namespaces."""
 
     inputs: Mapping[str, Any] = field(default_factory=dict)
     steps: Mapping[str, StepOutcome] = field(default_factory=dict)
     user: AbstractBaseUser | AnonymousUser | None = None
-    # The run's workflow key (the stored workflow's slug, the registered workflow's
-    # name, or "adhoc") and its id, for listeners that report on the run.
+    # The run's workflow key (slug, registered name or "adhoc").
     workflow: str = ""
     run_id: str = ""
-    # The run's steps by name, so `approval` knows which one is an approval step.
+    # So `approval` knows which step is an approval step.
     declared: Mapping[str, Step] = field(default_factory=dict, repr=False)
 
     def input(self, name: str, default: Any = None) -> Any:
@@ -107,8 +92,7 @@ class WorkflowContext:
     def approval(self, name: str) -> dict[str, Any] | None:
         """The approval `{approved, by, note}` step `name` completed with, or None.
 
-        Use this, not `step(name)`: only an `ApprovalStep` is decided by a person. None for
-        any other step, a rejection, a timeout, or a step that did not run.
+        Use this, not `step(name)`: only an `ApprovalStep` is decided by a person.
         """
         outcome = self.steps.get(name)
         if not isinstance(self.declared.get(name), ApprovalStep) or outcome is None:
@@ -122,12 +106,9 @@ class WorkflowContext:
 class Step:
     """One unit of work in a workflow.
 
-    Runs once every step it `requires` completed; its result is filed under `name`.
-    At least once, not exactly once: recovery and resume may run it again, so a side
-    effect outside the run must be idempotent by `idempotency_key(ctx)`.
+    At least once, not exactly once: external side effects must use `idempotency_key(ctx)`.
     """
 
-    # The step's key in the run's record, and the name later steps require.
     name: str = ""
 
     requires: tuple[str, ...] = ()
@@ -136,8 +117,7 @@ class Step:
 
     listeners: tuple[RunListener, ...] = ()
 
-    # The StepDefinition's `config`, checked by `validate_config` before it is
-    # stored. Empty for a step written in code.
+    # The StepDefinition's `config`; empty for a step written in code.
     config: Mapping[str, Any] = MappingProxyType({})
 
     # True for a step that waits for a person (ApprovalStep). Only a durable run waits.
@@ -145,21 +125,15 @@ class Step:
 
     @classmethod
     def validate_config(cls, config: Mapping[str, Any]) -> None:
-        """Raise ValueError unless this step type accepts `config`.
+        """Raise ValueError unless this step type accepts `config` (default: none).
 
-        Called when a definition is stored or registered, so a bad config fails
-        early instead of in the worker. By default a step takes no config. Override
-        this to accept settings, for example with a pydantic model's `model_validate`.
+        Runs on store/register, so a bad config fails early instead of in the worker.
         """
         if config:
             raise ValueError(f"{cls.__name__} takes no config, got keys {sorted(config)}.")
 
     async def skip_if(self, ctx: WorkflowContext) -> str:
-        """A reason to skip, or "" to run.
-
-        A step having completed proves it produced something, never that the value
-        is usable, so a precondition that needs looking at goes here.
-        """
+        """A reason to skip, or "" to run. For preconditions on a required step's value."""
         return ""
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
@@ -167,11 +141,7 @@ class Step:
         raise NotImplementedError
 
     def idempotency_key(self, ctx: WorkflowContext) -> str:
-        """ "<run id>:<step name>": the same every time this step of this run runs.
-
-        It stays the same across recovery and resume, so an effect done under it is
-        done once however often the step runs. Only a recorded run has one.
-        """
+        """ "<run id>:<step name>", stable across recovery and resume. Recorded runs only."""
         if not ctx.run_id or not self.name:
             raise RuntimeError("Only a step of a recorded run has an idempotency key.")
         return f"{ctx.run_id}:{self.name}"
@@ -191,11 +161,7 @@ class Step:
         raise NotImplementedError
 
     def channel(self, ctx: WorkflowContext) -> str:
-        """The channel for this step's turns, "workflow:<key>:<step>".
-
-        The key is the stored workflow's slug or the registered workflow's name. It is
-        "adhoc" for any other definition, or a pipeline run with no workflow key.
-        """
+        """The channel for this step's turns, "workflow:<key>:<step>"."""
         return f"workflow:{ctx.workflow or ADHOC}:{self.name}"
 
     def turn(
@@ -208,9 +174,7 @@ class Step:
     ) -> AbstractAsyncContextManager[OpenTurn]:
         """Open a turn for a model this step calls directly, as the run's user.
 
-        Every model call in a step must happen inside a turn. An
-        AgentStep's `agent.run()` opens one itself. Use this for any other model
-        call, under `agent`'s policy or a named policy::
+        Every model call in a step needs a turn; `agent.run()` opens its own::
 
             async with self.turn(ctx, "translation", input=chunk) as t:
                 text = await t.finish(await translate(await t.gate()))
@@ -234,13 +198,9 @@ class Step:
 
 
 class AgentStep(Step):
-    """One structured agent call, as one step among others.
+    """One structured agent call, as one step among others."""
 
-    `agent` is a class a code-declared step imports; `agent_id` is the id a JSON
-    definition carries.
-    """
-
-    # Exactly one of these identifies the agent.
+    # Exactly one: `agent` for code steps, `agent_id` for JSON definitions.
     agent: type[Agent] | None = None
     agent_id: str = ""
 
@@ -250,8 +210,7 @@ class AgentStep(Step):
     # A system prompt replacing the agent's own; "" keeps the agent's.
     instructions: str = ""
 
-    # The inputs to send as the conversation before this step's own turn. A
-    # definition names its input fields per step; a code step names them itself.
+    # Inputs sent as the conversation before this step's own turn.
     history: tuple[str, ...] = ()
 
     async def get_agent(self) -> Agent:
@@ -278,8 +237,7 @@ class AgentStep(Step):
     def transcript(self, ctx: WorkflowContext) -> list[ChatMessage]:
         """The inputs named in `history`, as ChatMessages.
 
-        A string is a user turn, a dict one message, a list a conversation. Only user and
-        assistant turns: inputs must not speak with system authority.
+        User and assistant turns only: inputs must not speak with system authority.
         """
         transcript: list[ChatMessage] = []
         for name in self.history:
@@ -309,16 +267,13 @@ class AgentStep(Step):
         from django_ai_sdk.permissions import Operation, check_permissions, get_agent_permissions
 
         agent = await self.get_agent()
-        # SECURITY: composing an agent is not permission to run it, and a workflow
-        # is not a bypass.
+        # SECURITY: composing an agent is not permission to run it.
         await check_permissions(ctx.user, Operation.CHAT, get_agent_permissions(agent), agent=agent)
-        # Omitted rather than passed as None: Agent.run reads an explicit None as
-        # "no structured output", which would strip the agent's own.
+        # Omitted, not None: an explicit None would strip the agent's own structured output.
         response_format = {"response_format": self.schema} if self.schema else {}
         messages = await self.messages(ctx)
 
         try:
-            # Oversight: a workflow step is a turn like any other, under the agent's policy.
             result = await agent.run(
                 messages,
                 system_prompt=await self.system_prompt(ctx),
@@ -334,11 +289,7 @@ class AgentStep(Step):
         return self.outcome_for(result)
 
     def outcome_for(self, result: Any) -> StepOutcome:
-        """What the agent's result means as this step's outcome.
-
-        A declared schema that did not come back is a failure, so `on_error` decides
-        what it costs. A model that did is dumped to JSON, since it goes on the record.
-        """
+        """The agent's result as this step's outcome; a missing declared schema is a failure."""
         if isinstance(result, BaseModel):
             return StepOutcome(output=result.model_dump(mode="json"))
         if self.schema is not None:
@@ -351,19 +302,15 @@ class ApprovalConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # What the approver is asked, shown while the step waits.
+    # Shown to the approver while the step waits.
     prompt: str = Field(default="", max_length=255)
-    # How long the run waits for a decision before the step fails. A week by default.
     timeout_seconds: int = Field(default=7 * 24 * 3600, ge=60, le=90 * 24 * 3600)
 
 
 class ApprovalStep(Step):
-    """Wait for a person to approve the run before the steps after it.
+    """Wait (durably, on DBOS) for a person to approve the run before later steps.
 
-    The run waits durably, across restarts, so it needs DBOS (`django_ai_sdk.durable`).
-    The decision comes from `WorkflowService.decide`, and nobody decides on a run they
-    started. Approved, the step completes with `{approved, by, note}`. Rejected, or
-    without a decision in time, it fails, and its `on_error` decides what follows.
+    Rejection or timeout fails the step; nobody decides on a run they started.
     """
 
     waits = True

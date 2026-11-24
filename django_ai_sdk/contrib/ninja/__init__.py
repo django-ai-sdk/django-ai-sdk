@@ -13,12 +13,8 @@ Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
     api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
     api.add_router("/", ai_sdk_routers.get_oversight_router())
 
-The oversight and workflows routers are imported only when requested, and need
-``django_ai_sdk.oversight`` and ``django_ai_sdk.workflows`` in INSTALLED_APPS. The
-oversight router adds the authoring routes when that app is installed.
-
-Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
-``exclude={"delete_all_threads"}`` and add your own on the result.
+The oversight and workflows routers load lazily and need their apps installed. Each
+``get_*_router()`` returns a new Router, so ``exclude=`` endpoints or add your own.
 """
 
 from __future__ import annotations

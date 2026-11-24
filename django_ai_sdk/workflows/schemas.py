@@ -10,14 +10,10 @@ from pydantic_core import PydanticUndefined
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
-# `object` is a typed record of `fields`; `dict` is the open escape for JSON the
-# host shapes itself. A file is a `str` id or a `dict` reference under whatever
-# name the host picks — the engine has no opinion about what `pdfs` means, and
-# the step that reads it does.
+# `object` is a typed record of `fields`; `dict` is open JSON the host shapes.
 FieldType = Literal["str", "int", "float", "bool", "list", "dict", "object"]
 
-# A declared schema is a shape, not a program: bounds keep one from being a
-# pathology the compiler and every editor in front of it has to walk.
+# Bounds so a declared schema cannot be a pathology the compiler has to walk.
 MAX_DEPTH = 8
 MAX_FIELDS = 32
 MAX_ENUM = 64
@@ -25,16 +21,14 @@ MAX_ENUM = 64
 MAX_STEPS = 50
 # The workflow's listeners plus every step's.
 MAX_LISTENERS = 20
-# The definition as stored JSON, in bytes.
 MAX_DEFINITION_BYTES = 256 * 1024
-# Cron and event triggers on one workflow.
 MAX_TRIGGERS = 10
-# A trigger's name: part of its schedule's name and of the runs it starts.
+# Part of its schedule's name and of the runs it starts.
 TRIGGER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,49}$")
 
 _SCALARS = ("str", "int", "float", "bool")
 
-# The Python type of each field type. `object` compiles to a model of its own.
+# `object` compiles to a model of its own.
 PY_TYPES: dict[FieldType, type] = {
     "str": str,
     "int": int,
@@ -45,9 +39,8 @@ PY_TYPES: dict[FieldType, type] = {
 }
 _TYPE_OF_ANNOTATION: dict[Any, FieldType] = {py: name for name, py in PY_TYPES.items()}
 
-# The step type built in for agent calls. AI_SDK_WORKFLOWS['STEPS'] may not reuse it.
+# Built-in step types; AI_SDK_WORKFLOWS['STEPS'] may not reuse them.
 AGENT_STEP = "agent"
-# The step type built in for a person's approval (`steps.ApprovalStep`). Also reserved.
 APPROVAL_STEP = "approval"
 
 
@@ -57,15 +50,13 @@ class FieldDefinition(BaseModel):
     type: FieldType = "str"
     description: str = ""
     required: bool = True
-    # The value an absent, not-required field takes. `None` means "no default":
-    # the field compiles to `type | None`, as it always has.
+    # `None` means no default: the field compiles to `type | None`.
     default: Any = None
-    # The values a scalar field may take. Compiles to Literal[...].
+    # Scalar fields only; compiles to Literal[...].
     enum: list[str | int | float | bool] | None = None
-    # The element type of a `list`. `None` leaves the list open.
+    # A `list`'s element type; `None` leaves the list open.
     items: FieldDefinition | None = None
-    # The members of an `object`. An object declares its fields; `dict` is the
-    # open JSON object.
+    # An `object`'s members.
     fields: dict[str, FieldDefinition] | None = None
 
     @model_validator(mode="after")
@@ -92,16 +83,10 @@ class FieldDefinition(BaseModel):
 
 
 def _check_default_matches_type(where: str, value: Any, field: FieldDefinition) -> None:
-    """A default has to be a real value of the field's own declared type.
-
-    `create_model` does not validate a `Field(default=...)` on its own, so a
-    stored definition can otherwise carry a default of the wrong shape straight
-    into a run's inputs silently.
-    """
+    """A default must match the field's type: `create_model` does not validate defaults."""
     if field.type in _SCALARS:
         expected = PY_TYPES[field.type]
-        # bool is an int in Python, so an explicit type check keeps a bool default
-        # from passing for int/float, and a 0/1 from passing for bool.
+        # bool is an int subclass: keep bools out of int/float and 0/1 out of bool.
         if field.type == "bool":
             ok = isinstance(value, bool)
         else:
@@ -145,11 +130,7 @@ def _check_bounds(where: str, field: FieldDefinition, depth: int = 1) -> None:
 
 
 class ListenerDefinition(BaseModel):
-    """A listener named by key in `AI_SDK_WORKFLOWS['LISTENERS']`.
-
-    `config` is passed to the listener's constructor, so one registered class can
-    serve many definitions (a different recipient, a different step's output).
-    """
+    """A listener by key in `AI_SDK_WORKFLOWS['LISTENERS']`; `config` goes to its constructor."""
 
     type: str
     config: dict[str, Any] = {}
@@ -160,31 +141,23 @@ class StepDefinition(BaseModel):
 
     # AGENT_STEP, APPROVAL_STEP, or a key of AI_SDK_WORKFLOWS['STEPS'].
     type: str = AGENT_STEP
-    # The step's key: its outcome is recorded under it, and later steps require it.
     name: str
-    # Names of earlier steps this one reads. A run's inputs are always available,
-    # so they are not listed here.
+    # Earlier steps this one reads (run inputs are always available).
     requires: list[str] = []
     on_error: Literal["stop", "continue"] = "stop"
     agent_id: str = ""
-    # Structured output for an agent step. A registered step returns what it returns.
+    # Structured output; agent steps only.
     output_fields: dict[str, FieldDefinition] = {}
-    # The inputs this step sends as its conversation, in order. The author names
-    # them; the engine never infers a transcript from the shape of a value.
+    # Inputs sent as the step's conversation, in order; never inferred from a value's shape.
     history: list[str] = []
-    # Listeners that fire for this step alone.
     listeners: list[ListenerDefinition] = []
-    # Settings for a registered step, passed as `Step.config`. The class's
-    # `validate_config` checks them when the definition is stored.
+    # `Step.config` for a registered step; checked by `validate_config` on store.
     config: dict[str, Any] = {}
 
     @model_validator(mode="before")
     @classmethod
     def _refuse_a_system_prompt(cls, data: Any) -> Any:
-        """Refuse `system_prompt_override`: a definition cannot replace an agent's prompt.
-
-        Code steps can still set `AgentStep.instructions`.
-        """
+        """Refuse `system_prompt_override`: a definition cannot replace an agent's prompt."""
         if isinstance(data, dict) and data.get("system_prompt_override"):
             raise ValueError(
                 "system_prompt_override is not accepted: a definition cannot replace an "
@@ -212,16 +185,14 @@ class StepDefinition(BaseModel):
 class _Trigger(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Unique within the workflow. Runs it starts record "<kind>:<name>" as their trigger.
+    # Runs it starts record "<kind>:<name>" as their trigger.
     name: str
-    # The account its runs act as, by USERNAME_FIELD. Only a workflow declared in code
-    # may name one; a stored workflow's runs act as the person who created it.
+    # USERNAME_FIELD of the account runs act as. Code-declared workflows only; stored
+    # workflows' runs act as their creator.
     run_as: str = ""
-    # The run's inputs. "{word}" in a string is filled in: for a cron trigger from
-    # name, workflow, scheduled_at and last_run_at; for an event from its payload. A
-    # string that is just "{word}" takes the value as is, whatever its type.
+    # "{word}" placeholders are filled (cron: name, workflow, scheduled_at, last_run_at;
+    # event: payload). A bare "{word}" keeps the value's type.
     inputs: dict[str, Any] = {}
-    # Off keeps it from starting runs. An operator can also pause a cron trigger.
     enabled: bool = True
 
     @model_validator(mode="after")
@@ -243,11 +214,7 @@ class CronTrigger(_Trigger):
 
 
 class EventTrigger(_Trigger):
-    """Start a run when the host reports `event`, such as an inbound message.
-
-    The host calls `workflows.triggers.start_for_event(event, payload, idempotency_key=...)`;
-    a repeated key starts nothing new.
-    """
+    """Start a run when the host reports `event` via `triggers.start_for_event`."""
 
     kind: Literal["event"] = "event"
     event: str = Field(min_length=1, max_length=100)
@@ -257,16 +224,14 @@ Trigger = Annotated[CronTrigger | EventTrigger, Field(discriminator="kind")]
 
 
 class WorkflowDefinition(BaseModel):
-    # The shape of the stored JSON. Stored rows and run snapshots carry it, so a
-    # future format revision can gate on it rather than guess.
+    # Stored JSON format, so a future revision can gate on it.
     version: Literal[1] = 1
     name: str = ""
-    # What the caller must supply. Validated once, before the first step runs.
+    # Validated once, before the first step runs.
     input_fields: dict[str, FieldDefinition] = {}
     steps: list[StepDefinition]
-    # Listeners that fire for the run and for every step in it.
+    # Fire for the run and every step in it.
     listeners: list[ListenerDefinition] = []
-    # What starts a run besides a person or code asking: a schedule, or an event.
     triggers: list[Trigger] = []
 
     @model_validator(mode="after")
@@ -294,14 +259,7 @@ class WorkflowDefinition(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_a_pydantic_inputs_model(cls, data: Any) -> Any:
-        """`inputs=SomeBaseModel` authors `input_fields` with type annotations.
-
-        The model is authoring, not storage: it is normalized into the same
-        fields and never rides on the definition, so a stored definition and one
-        declared in code have one wire format. What pydantic can express as a
-        shape crosses; validators do not, so a model that carries any is
-        refused rather than half-honored.
-        """
+        """Turn `inputs=SomeBaseModel` into `input_fields`, so code and stored share one format."""
         if not isinstance(data, dict) or "inputs" not in data:
             return data
         data = {**data}
@@ -317,11 +275,9 @@ class WorkflowDefinition(BaseModel):
 
 
 def fields_from_model(model: type[BaseModel]) -> dict[str, FieldDefinition]:
-    """A pydantic model's fields as FieldDefinitions — the authoring shortcut.
+    """A pydantic model's fields as FieldDefinitions.
 
-    Validators on the model cannot cross into a schema that has to survive a
-    dump, so a model that carries any is refused outright: a check the author
-    wrote and the run silently skipped is the footgun.
+    Models with validators are refused: they would be silently skipped after a dump.
     """
     decorators = model.__pydantic_decorators__
     if decorators.field_validators or decorators.model_validators:
@@ -347,8 +303,7 @@ def _field_from_info(model: type[BaseModel], name: str, info: FieldInfo) -> Fiel
     annotation, optional = _split_optional(info.annotation)
     return FieldDefinition(
         description=info.description or "",
-        # `X | None` means an author's "optional" even though pydantic itself
-        # would still require the key with a null in it.
+        # `X | None` reads as optional, though pydantic would still require the key.
         required=info.is_required() and not optional,
         default=None if info.default is PydanticUndefined else info.default,
         **_type_kwargs(annotation, where),

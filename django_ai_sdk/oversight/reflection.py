@@ -93,10 +93,9 @@ def answers_from(answer_rows: list[Any], lenses: Mapping[str, Lens]) -> dict[str
 async def run_reflection(turn_id: str) -> int:
     """Run the policy's reflect lenses on a closed turn. Returns the number of answers added.
 
-    A lease makes a duplicate task return 0; a dead worker's lease runs out for
-    `oversight_sweep`. Results are written only while the lease holds. A failed run,
-    or one whose judge was down with attempts left, gives its claim back; the last
-    attempt keeps what it found and FAIL_MODE decides the rest.
+    A lease makes duplicates return 0 and gates every write; a dead worker's lease expires for
+    `oversight_sweep`. A failed or judge-down run with attempts left gives its claim back;
+    the last attempt keeps what it found and FAIL_MODE decides the rest.
     """
     from django_ai_sdk.oversight.models import Turn
 

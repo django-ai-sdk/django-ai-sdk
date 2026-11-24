@@ -1,12 +1,6 @@
-"""What starts a run besides a person: a cron schedule, or an event.
+"""What starts a run besides a person: a cron schedule (one DBOS schedule per trigger), or an event.
 
-- Cron: `sync_schedules()` keeps one DBOS schedule per trigger, "<workflow>:<trigger>";
-  `durable.fire_cron` opens the run. A paused schedule stays paused across deploys;
-  SCHEDULES_ENABLED off makes every occurrence start nothing.
-- Event: webhooks fire "<integration>.message"; hosts call `start_for_event`.
-
-The run id derives from what fired it, so firing twice opens one run. A run acts as
-the code's `run_as`, or as a stored workflow's last editor (`created_by`).
+Run ids derive from what fired them, so firing twice opens one run.
 """
 
 from __future__ import annotations
@@ -69,8 +63,7 @@ def fill(template: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
 def declared_workflows() -> list[tuple[str, WorkflowDefinition, Workflow | None]]:
     """(key, definition, row) for every workflow that can fire: code ones, then active rows.
 
-    A row shadowed by a code workflow of the same name is left out, as at start. A
-    row that cannot run is logged and left out.
+    Rows shadowed by a code workflow, or that cannot run, are left out.
     """
     from django_ai_sdk.workflows.models import Workflow
 
@@ -120,10 +113,7 @@ def refuse_run_as(definition: WorkflowDefinition) -> None:
 
 
 def cron_schedules(only: str | None = None) -> dict[str, ClientScheduleInput]:
-    """The DBOS schedule each enabled cron trigger should have, by schedule name.
-
-    `only` limits it to the workflow with that key.
-    """
+    """The DBOS schedule each enabled cron trigger should have, by name (`only`: one workflow)."""
     from django_ai_sdk.workflows.durable import QUEUE
 
     schedules: dict[str, ClientScheduleInput] = {}
@@ -145,10 +135,9 @@ def cron_schedules(only: str | None = None) -> dict[str, ClientScheduleInput]:
 
 
 def sync_schedules(only: str | None = None) -> list[str]:
-    """Make the DBOS schedules match the declared cron triggers. Returns their names.
+    """Make the DBOS schedules match the declared cron triggers; paused ones stay paused.
 
-    Undeclared or disabled ones are deleted; paused ones stay paused. `only` limits it
-    to one workflow, so concurrent saves cannot delete each other's.
+    `only` scopes it to one workflow, so concurrent saves cannot delete each other's.
     """
     from django_ai_sdk.durable.runtime import client
 
@@ -178,10 +167,7 @@ async def start_cron(
     *,
     started_by: AbstractBaseUser | AnonymousUser | None = None,
 ) -> str | None:
-    """Open and queue the run for one occurrence. Returns its id, or None when nothing runs.
-
-    `started_by` is the person who fired it by hand (`WorkflowService.fire_trigger`).
-    """
+    """Open and queue the run for one occurrence. Returns its id, or None when nothing runs."""
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.runs import queue_run
 
@@ -224,9 +210,7 @@ async def start_for_event(
 ) -> list[WorkflowRun]:
     """Start a run of every workflow with an enabled trigger on `event`.
 
-    `idempotency_key` names this delivery, such as a message's id: delivered again,
-    it starts nothing new and returns the runs it started the first time. A
-    trigger whose inputs the workflow refuses is logged and skipped.
+    A repeated `idempotency_key` starts nothing new and returns the first runs.
     """
     from django_ai_sdk.workflows.runs import queue_run
 
@@ -257,11 +241,7 @@ start_for_event_sync = async_to_sync(start_for_event)
 
 
 async def start_for_webhook(sender: Any, event: InboundEvent, **kwargs: Any) -> None:
-    """Report a webhook delivery as "<integration>.message". Never fails the webhook.
-
-    Connected to `event_received`. The event id is the idempotency key, so a
-    redelivery starts nothing new.
-    """
+    """Report a webhook delivery as "<integration>.message". Never fails the webhook."""
     if not event.event_id:
         return
     try:

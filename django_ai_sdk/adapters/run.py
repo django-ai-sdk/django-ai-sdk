@@ -53,9 +53,7 @@ def get_user_message(message: ChatMessage) -> HaystackChatMessage:
 
 
 class Run:
-    """
-    Runnable Haystack adapter.
-    """
+    """Runnable Haystack adapter."""
 
     model: str | None = None
     instructions: str | None = None
@@ -120,9 +118,7 @@ class Run:
     ) -> T | str | None:
         """Run the generator as a Haystack Agent: once, or as a tool loop with `tools`.
 
-        `request` names the turn (see `oversight.plugin`); `run_with_oversight` runs
-        it under oversight. Raises `Blocked` when the turn's gate blocked
-        the question or its finish withheld the answer.
+        Raises `Blocked` when the gate blocked the question or finish withheld the answer.
         """
         from django_ai_sdk.oversight.plugin import TurnRequest, run_with_oversight
 

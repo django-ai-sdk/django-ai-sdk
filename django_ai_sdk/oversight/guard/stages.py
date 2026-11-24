@@ -128,16 +128,10 @@ async def judge_history(
 ) -> StageResult:
     """Judge earlier messages and attachment context that come with the question.
 
-    Each item is judged separately by the gate's lenses and masked in place, or
-    withheld whole when a mask cannot point into it. With `history=False` only
-    attachments are judged (a stored thread was judged turn by turn). Question
-    and items count together against MAX_INPUT_CHARS.
-
-    Blocks when an enforced rule that blocks or removes every tool matches any
-    item: history is resent every turn, so merely dropping tools would silently
-    leave every later turn without them. For the same reason alert, queue and
-    notify rules are skipped. Findings are recorded aside and never steer masks
-    or rules on the question itself.
+    Each item is masked in place or withheld whole; `history=False` judges only attachments.
+    An enforced block or remove-all-tools match blocks: history is resent every turn, so
+    dropping tools would silently strip every later turn (alert, queue, notify are skipped
+    too). Findings are recorded aside and never steer the question's masks or rules.
     """
     result = StageResult(Stage.GATE, text=guard.context.input)
     if not guard.active:

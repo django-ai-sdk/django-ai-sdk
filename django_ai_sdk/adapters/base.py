@@ -76,9 +76,7 @@ _CITED: object = object()
 
 
 def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
-    """
-    Parse tool result as JSON if valid, otherwise return as string.
-    """
+    """Parse tool result as JSON if valid, otherwise return as string."""
     try:
         return json.loads(str(arguments))
     except (json.JSONDecodeError, ValueError):
@@ -86,9 +84,7 @@ def parse_tool_input(arguments: str | None) -> dict[str, Any] | str:
 
 
 def parse_tool_output(obj: Any) -> Any:
-    """
-    Parse tool output from haystack to ensure it's JSON serializable.
-    """
+    """Make a Haystack tool output JSON serializable."""
     if hasattr(obj, "to_dict"):
         obj = obj.to_dict()
 
@@ -114,7 +110,6 @@ def stored_tool_output(result: ToolCallResult) -> dict[str, Any]:
     return output
 
 
-# Marker appended when a tool result is cut to the size limit.
 _TRUNCATION_NOTE = "\n\n... truncated, {omitted} chars omitted"
 
 
@@ -131,8 +126,7 @@ def get_tool_result_text(tool_call: dict[str, Any]) -> str:
 def truncate_tool_result(text: str) -> str:
     """Cap a replayed tool result so one big response cannot own the context.
 
-    Limit comes from ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables
-    truncation entirely.
+    Limit: ``AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT``; 0 or below disables it.
     """
     limit = resolve_setting("AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT", 4000)
     if not isinstance(limit, int) or limit <= 0 or len(text) <= limit:
@@ -161,9 +155,7 @@ def _get_message_pairs(
 
 
 def get_reasoning_text(reasoning: ReasoningContent) -> str:
-    """
-    A chunk's reasoning text, also when the provider sends raw reasoning.
-    """
+    """A chunk's reasoning text, also when the provider sends raw reasoning."""
     if reasoning.reasoning_text:
         return reasoning.reasoning_text
     parts = (reasoning.extra or {}).get("content") or []
@@ -189,9 +181,7 @@ def get_error_event(info: ErrorInfo) -> ErrorEvent:
 
 
 class Stream:
-    """
-    Adapter for Haystack Pipelines that emits streaming events.
-    """
+    """Adapter for Haystack Pipelines that emits streaming events."""
 
     model: str | None = None
     instructions: str | None = None
@@ -213,7 +203,6 @@ class Stream:
     _citations_call_id: str | None = None
     _turn: StreamTurn | None = None
 
-    # Message processing configuration
     merge_messages: bool = False
 
     def __init__(
@@ -325,10 +314,8 @@ class Stream:
                 elif role == "assistant":
                     converted_messages.append(HaystackChatMessage.from_assistant(content))
 
-        # Ensure we have at least one message
-        # TODO: we now return a system message instead of a user message, this is a temporary fix
-        # In real-world scenarios: the agent could be working without user input, it might be
-        # handed of from another agent or system. We should support this case gracefully.
+        # TODO: temporary fix returning a system message; support runs without user
+        # input (a handoff from another agent or system).
         if not converted_messages:
             logger.warning("No messages available for Haystack pipeline!")
             converted_messages.append(HaystackChatMessage.from_system("No messages available."))
@@ -351,7 +338,6 @@ class Stream:
         """Convert Haystack message tool calls to MessageChunks."""
         chunks = []
 
-        # Tool call starts and inputs
         for tool_call in message.tool_calls:
             chunks.append(
                 MessageChunk(
@@ -798,7 +784,6 @@ class Stream:
             yield MessageStartEvent(message_id=message_id)
             for event in await turn.start():
                 yield event
-            # take snapshots of current contextvars
             # The task copies the context: tools see this turn's registry and artifacts.
             registry_token = current_registry.set(self.citation_registry)
             artifacts_token = turn_artifacts.set(self._artifact_ids)
@@ -862,7 +847,6 @@ class Stream:
                 yield event
             finish_reason = CONTENT_FILTER if finished.blocked else None
 
-            # the text is done
             yield TextEndEvent()
             if finished.blocked:
                 for event in withdrawn_citations(self._grounder, self._citations_call_id):
@@ -882,9 +866,7 @@ class Stream:
                 yield suggestion
 
         except Exception as critical_error:
-            # Don't f-string `critical_error`: its text can contain braces,
-            # which would crash this logging call itself (see suggestions
-            # generator for the same fix and rationale).
+            # Don't f-string `critical_error`: braces in its text would crash this log call.
             info = describe_error(critical_error)
             logger.opt(exception=critical_error).error(
                 "Critical error in stream [{}] {}: {}: {}",

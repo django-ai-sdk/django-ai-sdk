@@ -54,9 +54,7 @@ class OpenAIStreamChunk(BaseModel):
 
 
 class OpenAIProtocolHandler(BaseProtocolHandler):
-    """
-    Convert StreamEvent to OpenAI-compatible SSE format
-    """
+    """Convert StreamEvent to OpenAI-compatible SSE format."""
 
     def __init__(self, model: str = "gpt-4") -> None:
         self.model = model
@@ -103,20 +101,16 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
         adapter: Streamable,
         messages: list[ChatMessage],
     ) -> AsyncGenerator[bytes, None]:
-        """
-        Generate SSE-formatted streaming response in OpenAI format.
-        """
+        """Generate an SSE streaming response in OpenAI format."""
         # The agent shares one handler across requests: each stream gets its own state.
         state = copy.copy(self)
         state.id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         state.tool_calls_buffer = []
         state.current_tool_call = None
 
-        # Emit start chunk with role
         start_chunk = state._create_chunk(OpenAIDelta(role="assistant"))
         yield format_sse(start_chunk.model_dump())
 
-        # Get events from adapter
         events = adapter.stream(messages)
 
         try:
@@ -128,7 +122,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "text_chunk":
                         text_event = cast("TextChunkEvent", event)
-                        # Emit content chunk immediately
                         chunk = state._create_chunk(OpenAIDelta(content=text_event.content))
                         yield format_sse(chunk.model_dump())
 
@@ -138,7 +131,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
 
                     case "tool_call_start":
                         tool_start = cast("ToolCallStartEvent", event)
-                        # Start buffering tool call
                         state.current_tool_call = {
                             "id": tool_start.tool_call_id,
                             "type": "function",
@@ -157,7 +149,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                             if isinstance(tool_input.tool_input, dict)
                             else str(tool_input.tool_input)
                         )
-                        # Add arguments to current tool call
                         if state.current_tool_call:
                             state.current_tool_call["function"]["arguments"] = args
                             state.tool_calls_buffer.append(state.current_tool_call)
@@ -208,7 +199,6 @@ class OpenAIProtocolHandler(BaseProtocolHandler):
                         )
 
                     case "stream_end":
-                        # Termination marker
                         yield format_sse("[DONE]")
 
         finally:

@@ -1,21 +1,7 @@
 """TurnGuard checks one turn, whatever channel it came from.
 
-Chat, workflow steps and your own code open a guard and report what happens
-(sources found, tools called, text produced). The guard is asked whether to go on
-three times: at the gate, before each tool call, and at finish. Closing it writes
-the turn to the record (see `recording`) and queues the background stages.
-
-    guard = await TurnGuard.start(agent, channel="api", user=user, input=text)
-    gate = await guard.gate()
-    if gate.blocked:
-        return gate.message
-    answer = await run_my_agent(gate.text)
-    finished = await guard.finish(answer)
-    await guard.close()
-    return finished.text
-
-A guard for an agent without a policy, or with oversight off, is inert and
-allows everything.
+It decides at the gate, before each tool call, and at finish; closing records the turn and
+queues the background stages. Without a policy, or with oversight off, it is inert.
 """
 
 from __future__ import annotations
@@ -369,10 +355,8 @@ class TurnGuard:
     ) -> TurnGuard:
         """Open a guard for one turn of `agent`. Inert unless a policy applies.
 
-        `oversight` overrides the agent's policy (Policy subclass or name); False
-        or "" opens no turn. If the policy cannot be chosen or loaded, every stage
-        blocks and the turn is recorded as blocked; with FAIL_MODE "open" the turn
-        runs unguarded and the failure is logged.
+        `oversight` overrides the agent's policy; False or "" opens no turn. A policy that
+        fails to load blocks every stage, or under FAIL_MODE "open" runs unguarded.
         """
         if input is None:
             input = last_user_text(messages or [])
@@ -510,9 +494,9 @@ class TurnGuard:
     async def close(self, *, error: str = "") -> str | None:
         """Record the turn and queue the background stages. Never raises.
 
-        Pending tool-result masking is cancelled first so nothing lands on a closed
-        turn. `error` is the run's own failure; with it, a turn no rule acted on
-        gets a blank outcome. Returns the turn id, or None (inert or failed write).
+        Cancels pending tool-result masking first so nothing lands on a closed turn.
+        With the run's `error`, a turn no rule acted on gets a blank outcome.
+        Returns the turn id, or None (inert or failed write).
         """
         if not self.active or self._closed:
             return None

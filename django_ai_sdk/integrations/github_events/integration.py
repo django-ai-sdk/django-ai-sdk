@@ -33,9 +33,7 @@ EVENT_HEADER = "X-GitHub-Event"
 class GitHubEventsIntegration(WebhookIntegration):
     """Run the agent on a pull request and post its answer as a PR comment.
 
-    Point a repository or organization webhook at this integration's path
-    (HTTPS, the `pull_request` event, a sha256 secret). The token must be
-    allowed to comment on those repositories:
+    Webhook: HTTPS, the `pull_request` event, a sha256 secret; the token must comment:
 
         AI_SDK_INTEGRATIONS = {"github_events": {
             "WEBHOOK_SECRET": env("GITHUB_WEBHOOK_SECRET"),
@@ -45,8 +43,7 @@ class GitHubEventsIntegration(WebhookIntegration):
             "AGENT": "myapp.agents.ReviewAgent",
         }}
 
-    The event text only names the pull request. The agent's instructions define
-    the review. To read the diff, add the `github` integration to the agent.
+    To read the diff, give the agent the `github` integration.
     """
 
     # Not "github": that name is the MCP integration that reads the code.
@@ -64,8 +61,7 @@ class GitHubEventsIntegration(WebhookIntegration):
             "pull requests.",
         ):
             return missing
-        # One webhook secret can cover a whole organization, so require an
-        # explicit list of repositories.
+        # One webhook secret can cover a whole organization: require explicit repositories.
         if not self._config().get("ALLOW_WORKSPACES"):
             return (
                 "No repositories. Set AI_SDK_INTEGRATIONS['github_events']"
@@ -99,7 +95,6 @@ class GitHubEventsIntegration(WebhookIntegration):
         sender = (body.get("sender") or {}).get("login", "")
         if not repository or number is None:
             return None
-        # Skip the bot's own pushes so it never reviews its own work.
         bot = self.secret("BOT_USERNAME")
         if bot and sender.lower() == bot.lower():
             return None
@@ -112,9 +107,8 @@ class GitHubEventsIntegration(WebhookIntegration):
         ]
         return InboundEvent(
             integration=self.name,
-            # The signature covers the body, not the delivery header, so the body
-            # is the key: a captured request sent again under a new delivery id
-            # is still a repeat. GitHub's own redelivery resends the same body.
+            # Keyed on the signed body, not the unsigned delivery id, so a replay
+            # under a new delivery id is still a repeat.
             event_id=hashlib.sha256(request.body).hexdigest(),
             text="\n\n".join(part for part in parts if part),
             conversation_id=repository,

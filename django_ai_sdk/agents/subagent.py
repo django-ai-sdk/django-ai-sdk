@@ -172,15 +172,10 @@ def _tool_chunks_only(
     seen: set[str] | None = None,
 ) -> StreamingCallbackT | None:
     """Return a callback forwarding only tool chunks, tagged with ``name``.
-    ``seen`` collects the ids of forwarded tool results.
 
-    Haystack streams a tool result before the after_tool hooks mask it, so a
-    forwarded result is masked here by the subagent's own guard (current while
-    its run streams): the coordinator's policy may not hide what this one does.
-    For the same reason a call is forwarded without its arguments, which the
-    adapter takes from its result once it ran: this one's tool stage may refuse
-    the call for what they hold. A sync run only ever joins the coordinator's
-    turn, whose stream masks it.
+    ``seen`` collects forwarded result ids. Haystack streams a result before after_tool
+    hooks mask it, so the subagent's own guard masks it here, and a call goes without
+    arguments its tool stage may refuse. A sync run only joins the coordinator's turn.
     """
     if callback is None:
         return None
@@ -246,9 +241,8 @@ def _unstreamed_results(result: dict[str, Any], seen: set[str]) -> list[Streamin
 class FinalResponseHook:
     """Ask for a written response when the loop ended without one, as after_run.
 
-    One tool-less call, so the outcome does not depend on there being a spare step
-    left after the tool budget fired. It runs before oversight finishes the run, so
-    the coordinator reads a checked response.
+    One tool-less call, so no spare step is needed. Runs before oversight finishes the
+    run, so the coordinator reads a checked response.
     """
 
     allowed_hook_points = ["after_run"]

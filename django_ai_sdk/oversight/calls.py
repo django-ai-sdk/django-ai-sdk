@@ -1,8 +1,7 @@
 """Catch model calls that no policy sees.
 
-Inside `requires_turn()` (every workflow step runs in one), a model call through a
-generator `django_ai_sdk.generators` built must come from a turn, or from a run that
-chose no oversight; others follow UNGUARDED_MODEL_CALLS.
+Inside `requires_turn()` (every workflow step), an SDK generator's call must come from a
+turn or an opted-out run; others follow UNGUARDED_MODEL_CALLS.
 """
 
 from __future__ import annotations
@@ -79,8 +78,7 @@ def _check_model_call(generator: Any) -> None:
 def watched[T](generator: T) -> T:
     """Wrap `generator.run()` and `run_async()` so they call `_check_model_call` first.
 
-    The wrappers are bound on the instance. A deep copy (Haystack copies
-    components) stays watched, and the class signatures Haystack inspects stay intact.
+    Bound on the instance, so Haystack's deep copies stay watched and class signatures intact.
     """
     cls = type(generator)
     for name in ("run", "run_async"):

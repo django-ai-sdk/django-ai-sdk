@@ -120,11 +120,7 @@ class BasePermission(ABC):
     ) -> QuerySet:
         """Filter *queryset* to items this class grants *operation* for *user*.
 
-        Implement this to let list endpoints apply your permission rules at the
-        database level instead of post-filtering every row.
-
-        Return the filtered ``QuerySet`` or ``queryset.none()`` to deny all items.
-        The default implementation returns the queryset unchanged.
+        Lets list endpoints filter in the database. Default: the queryset unchanged.
         """
         return queryset
 
@@ -178,11 +174,7 @@ class IsInAllowedGroups(BasePermission):
 
 
 class IsOwner(BasePermission):
-    """Allow only the authenticated owner of an object.
-
-    Parameterized: ``IsOwner(field="user_id")`` checks ``obj.user_id``.
-    Use ``IsOwner(field="owner_id")`` etc. for custom attribute names.
-    """
+    """Allow only the authenticated owner: ``IsOwner(field="user_id")`` checks ``obj.user_id``."""
 
     def __init__(self, field: str = "user_id") -> None:
         self.field = field
@@ -236,7 +228,6 @@ class ThreadDefaultPermission(BasePermission):
     )
 
     async def has_permission(self, user: UserType, operation: Operation, **kwargs: Any) -> bool:
-        # Only authenticated users can access threads
         if user is None or not user.is_authenticated:
             return False
         return True
@@ -298,11 +289,7 @@ class MemoryDefaultPermission(BasePermission):
         operation: Operation,
         queryset: QuerySet,
     ) -> QuerySet:
-        """Filter *queryset* to memories this user may access for *operation*.
-
-        Applies the same rules as ``has_object_permission`` but at the
-        database level so list views avoid iterating every row.
-        """
+        """Filter *queryset* by the ``has_object_permission`` rules, in the database."""
         if user is None or not bool(user.is_authenticated):
             return queryset.none()
 
@@ -576,12 +563,7 @@ DOMAIN_PERMISSION_DEFAULTS: dict[PermissionDomain, list[str]] = {
 
 @lru_cache(maxsize=10)
 def get_domain_permissions(domain: PermissionDomain) -> list[type[BasePermission]]:
-    """Resolve default permission classes for a permission domain.
-
-    Resolution:
-    1. AI_SDK_PERMISSIONS setting (per-domain override), or
-    2. Built-in DOMAIN_PERMISSION_DEFAULTS (defaults)
-    """
+    """Resolve a domain's permission classes: AI_SDK_PERMISSIONS, else the built-in defaults."""
     overrides = resolve_setting("AI_SDK_PERMISSIONS", {}).get(domain.value)
     if overrides is not None:
         return [import_string(p) for p in overrides] if overrides else []
@@ -624,13 +606,9 @@ class PermissionsMixin:
         user: UserType,
         obj: Any,
     ) -> dict[str, bool]:
-        """Auto-discover frozenset permission groups and check user against them.
+        """Check the user against each upper-case frozenset group (READ, WRITE, MANAGE, ...).
 
-        Iterates the domain's permission classes, finds ``READ`` / ``WRITE`` /
-        ``MANAGE`` (and any other upper-case frozensets), and checks one
-        representative operation per group against the full permission chain.
-
-        Returns a dict like ``{"read": True, "write": False, "manage": False}``.
+        Returns e.g. ``{"read": True, "write": False, "manage": False}``.
         """
         groups: dict[str, Operation] = {}
         for perm_cls in cls.get_default_permissions():
@@ -670,12 +648,7 @@ class PermissionsMixin:
         queryset: QuerySet,
         permissions: list[type[BasePermission]] | None = None,
     ) -> QuerySet:
-        """Filter a queryset through the domain's permission classes.
-
-        Each permission class in the domain chain receives the queryset and
-        can return a filtered version.  Classes that don't know how to filter
-        this model pass it through unchanged.
-        """
+        """Filter a queryset through the domain's permission classes; unknown models pass through."""
         perms = permissions if permissions is not None else cls.get_default_permissions()
         for perm_cls in perms:
             perm = ensure_permission_instance(perm_cls)
@@ -686,22 +659,14 @@ class PermissionsMixin:
 def ensure_permission_instance(
     perm: type[BasePermission] | BasePermission,
 ) -> BasePermission:
-    """Normalise a permission class *or* instance to an instance.
-
-    Callers may store bare classes (e.g. ``[IsAuthenticated]``) or pre-built
-    instances (e.g. ``[IsInAllowedGroups(groups=["eng"])]``).  Both forms are
-    accepted throughout the permission-checking API; this helper enforces a
-    consistent runtime type.
-    """
+    """Normalise a permission class *or* instance (e.g. ``IsInAllowedGroups(...)``) to an instance."""
     return perm() if isinstance(perm, type) else perm
 
 
 def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
     """`agent.permissions` if non-empty, else the AGENT domain default.
 
-    An empty list falls back rather than disabling every check, matching
-    get_integration_permissions. An agent that really
-    wants no gating says so with [AllowAll].
+    An empty list falls back rather than disabling checks; use [AllowAll] for no gating.
     """
     perms = getattr(agent, "permissions", None) if agent is not None else None
     if perms:
@@ -710,12 +675,7 @@ def get_agent_permissions(agent: Agent | None) -> list[type[BasePermission]]:
 
 
 def get_integration_permissions(service: Any) -> list[type[BasePermission]]:
-    """Resolve perms for an integration service.
-
-    Resolution:
-    1. ``service.permissions`` if non-empty (per-integration override)
-    2. Domain default for INTEGRATIONS (fallback)
-    """
+    """``service.permissions`` if non-empty, else the INTEGRATIONS domain default."""
     perms = getattr(service, "permissions", None)
     if perms:
         return perms

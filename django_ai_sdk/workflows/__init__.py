@@ -1,8 +1,6 @@
 """Workflows: steps that pass results forward, declared in code or stored as JSON.
 
-This package exports what you declare a workflow with. Import the service and the
-models from their own modules (`django_ai_sdk.workflows.services`,
-`django_ai_sdk.workflows.models`), so importing this package needs no app registry.
+Services and models live in their own modules, so importing this needs no app registry.
 """
 
 from __future__ import annotations

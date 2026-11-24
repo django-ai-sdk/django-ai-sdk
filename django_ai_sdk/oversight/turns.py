@@ -1,10 +1,5 @@
 """A turn around model calls of your own, outside a Haystack Agent run.
 
-    async with turn(agent, channel="workflow:digest:write", user=user, input=text) as t:
-        question = await t.gate()  # raises Blocked
-        answer = await my_model(question)
-        return await t.finish(answer)  # masked; raises Blocked
-
 It opens, joins or skips a turn as `run_with_oversight` does, and inside it the SDK's
 generators count as overseen.
 """
@@ -36,10 +31,8 @@ if TYPE_CHECKING:
 class OpenTurn:
     """The turn that `turn()` yields.
 
-    When no turn opened (no policy, oversight off, or the run joined an outer
-    turn), `guard` is None and `gate()` and `finish()` return their input; the
-    outer turn judges a joined question like a tool result.
-    Otherwise use `guard` to report what the run found (`set_sources`, `add_usage`).
+    Without a turn of its own (no policy, oversight off, or joined), `guard` is None and
+    `gate()`/`finish()` return their input; otherwise report findings via `guard`.
     """
 
     def __init__(

@@ -8,8 +8,7 @@ import time
 
 VERSION = "v0"
 
-# Slack's recommended window. Older requests are refused as replays even with a
-# valid signature.
+# Slack's recommended replay window, even for a valid signature.
 MAX_AGE_SECONDS = 300
 
 

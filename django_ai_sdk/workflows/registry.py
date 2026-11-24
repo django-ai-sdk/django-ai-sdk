@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 # Matches Workflow.slug, so a declared and a stored name are one key space.
 NAME_MAX_LENGTH = 100
 
-# The key for runs of a definition that is neither stored nor registered. It is
-# reserved, so a policy that picks by channel can tell those runs apart.
+# Reserved key for unstored, unregistered runs, so channel policies can tell them apart.
 ADHOC = "adhoc"
 
 _registry: dict[str, WorkflowDefinition] = {}
@@ -33,10 +32,7 @@ _invalid: dict[str, str] = {}
 
 
 def register_workflow(definition: WorkflowDefinition) -> WorkflowDefinition:
-    """Add a WorkflowDefinition to the registry unless it cannot run.
-
-    Returns it unchanged either way, so a declaration stays importable on its own.
-    """
+    """Register a WorkflowDefinition unless it cannot run; return it unchanged either way."""
     try:
         validate_name(definition.name)
         validate_definition(definition)
@@ -78,11 +74,7 @@ def validate_name(name: str) -> None:
 
 
 def validate_definition(definition: WorkflowDefinition) -> None:
-    """Raise ImproperlyConfigured unless the definition is legal to store and compile.
-
-    The step graph is the runner's rule. What is left is the two registries: a step
-    type or a listener the deployment did not expose cannot be composed.
-    """
+    """Raise ImproperlyConfigured unless the definition is legal to store and compile."""
     from django_ai_sdk.workflows.definitions import get_step_registry
     from django_ai_sdk.workflows.listeners import get_listener_registry
     from django_ai_sdk.workflows.runner import validate_steps
@@ -166,11 +158,7 @@ def _cron_is_valid(expression: str) -> bool:
 
 
 def _compiles(name: str, fields: dict[str, FieldDefinition], where: str) -> None:
-    """Build a declared schema now, so a field name pydantic refuses is caught here.
-
-    A field called `model_dump` passes every name rule above and then takes out the
-    worker, so the only honest check is to build the model.
-    """
+    """Build the schema now: a field like `model_dump` passes name rules but kills the worker."""
     from django_ai_sdk.workflows.definitions import model_from_fields
 
     if not fields:
@@ -215,18 +203,14 @@ def get_invalid_workflows() -> dict[str, str]:
 
 
 async def aget_workflow(name: str) -> WorkflowDefinition | None:
-    """One workflow by name. A registered one wins over an active stored one.
-
-    A stored one that cannot run raises, like definition_of().
-    """
+    """One workflow by name; registered wins over stored. A broken stored one raises."""
     declared, row = await afind(name)
     return declared if row is None else definition_of(row)
 
 
 async def afind(name: str) -> tuple[WorkflowDefinition | None, Workflow | None]:
-    """The workflow named `name`: (registered definition, None) or (None, active row).
+    """(registered definition, None), (None, active row) or (None, None).
 
-    A registered workflow wins over a stored one. (None, None) when neither exists.
     The row is not parsed, so a caller can check permissions on it first.
     """
     from django_ai_sdk.workflows.models import Workflow
@@ -238,10 +222,7 @@ async def afind(name: str) -> tuple[WorkflowDefinition | None, Workflow | None]:
 
 
 def definition_of(row: Workflow) -> WorkflowDefinition:
-    """Parse and validate a stored workflow, named by its slug.
-
-    Raises pydantic's ValidationError or ImproperlyConfigured when it cannot run.
-    """
+    """Parse and validate a stored workflow, named by its slug."""
     from django_ai_sdk.workflows.schemas import WorkflowDefinition
 
     definition = WorkflowDefinition.model_validate({**row.definition, "name": row.slug})

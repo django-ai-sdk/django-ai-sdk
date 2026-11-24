@@ -7,18 +7,9 @@
         mode=Mode.ENFORCE,
     )
 
-A rule starts in report mode, so its false-positive rate is known before it can
-block anyone. Conditions are Python over JSON nodes; a comparison on a lens without
-a usable answer is false (test with `L(name).missing`), and on a lens that failed
-this turn it is unknown, so `~L("grounded").is_true` does not match on a failure.
-
-How sure a lens must be is the rule's call:
-
-    L("dose_advice").is_true & L("dose_advice").confident(0.7)    # stop only when sure
-    L("safeguarding").is_true | L("safeguarding").disputed        # a person looks when in doubt
-
-`confident`/`unsure` read the standing judge's own scale; `disputed` means two models
-answered differently.
+Rules start in report mode, so false positives are known before they block anyone. A test
+on a lens without a usable answer is false (see `L(name).missing`); on a lens that failed
+this turn it is unknown, so `~L("grounded").is_true` does not match a failure.
 """
 
 from __future__ import annotations

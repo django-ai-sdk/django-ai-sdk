@@ -1,7 +1,6 @@
 """Base class for integrations that receive events, not only offer tools.
 
-A WebhookIntegration is an Integration, so it shares credentials, config and the
-registry entry with the outbound side. One Slack app is one integration.
+It shares credentials, config and registry entry with the outbound side.
 """
 
 from __future__ import annotations
@@ -30,15 +29,14 @@ logger = logging.getLogger(__name__)
 # Seconds a reply to the platform may take. The run is already over by then.
 REPLY_TIMEOUT_SECONDS = 10
 
-# Dedup window for a platform that signs no timestamp. A captured request can be
-# replayed once the window ends, so a week instead of the default ten minutes.
+# Dedup window for a platform that signs no timestamp: replays work once it ends.
 UNSIGNED_DEDUP_TTL = 7 * 24 * 60 * 60
 
 
 class InboundEvent(BaseModel):
     """One message from a platform, in the same shape for every platform.
 
-    It is queued as a dict, so keep it to what `reply()` needs.
+    Queued as a dict, so keep it to what `reply()` needs.
     """
 
     integration: str
@@ -49,8 +47,7 @@ class InboundEvent(BaseModel):
     thread_ref: str = ""
     external_user_id: str = ""
     workspace_id: str = ""
-    # A per-event reply credential, for platforms that issue one. It travels
-    # with the event because reply() runs in the worker.
+    # Per-event reply credential; travels with the event since reply() runs in the worker.
     reply_token: str = ""
 
 
@@ -63,24 +60,21 @@ def json_body(response: Any) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
-# The event being answered, set during the run. Lets a tool post to the same
-# channel, such as uploading a file, without the agent passing the event along.
+# The event being answered, so a tool can post to the same channel.
 current_event: ContextVar[InboundEvent | None] = ContextVar("current_event", default=None)
 
 
 class WebhookIntegration(Integration):
     """An integration that receives platform events and answers with an agent.
 
-    Subclasses implement `verify`, `parse` and `reply`. `get_tools` and
-    `get_status` have defaults here.
+    Subclasses implement `verify`, `parse` and `reply`.
     """
 
     # Dotted path to the answering Agent. AI_SDK_INTEGRATIONS[name]["AGENT"] overrides it.
     agent: str = ""
 
     # -- inbound --
-    # These are sync and run in the request, within the platform's ack window
-    # (three seconds for Slack).
+    # Sync, in the request, within the platform's ack window (three seconds for Slack).
 
     @abstractmethod
     def verify(self, request: HttpRequest) -> bool:
@@ -90,8 +84,7 @@ class WebhookIntegration(Integration):
     def parse(self, request: HttpRequest) -> InboundEvent | HttpResponse | None:
         """Turn a verified request into an event to answer.
 
-        Return None to acknowledge and ignore it, such as the bot's own messages.
-        Return an HttpResponse to answer a platform handshake directly.
+        None acknowledges and ignores it; an HttpResponse answers a handshake directly.
         """
 
     def _json(self, request: HttpRequest) -> dict[str, Any] | None:
@@ -107,15 +100,12 @@ class WebhookIntegration(Integration):
 
     def ack(self, event: InboundEvent) -> HttpResponse:
         """Response sent once the event is queued, before the agent runs."""
-        # Override to return a body, such as a placeholder shown to the asker.
         return HttpResponse(status=200)
 
     # -- de-duplication --
 
-    #: Seconds during which a repeat of the same event id is ignored. Platforms
-    #: redeliver and django_tasks is at-least-once, so this keeps one answer per
-    #: event. Platforms that sign no timestamp use UNSIGNED_DEDUP_TTL, since the
-    #: window is their only replay protection.
+    #: Seconds a repeat event id is ignored: platforms redeliver and tasks are
+    #: at-least-once. Unsigned-timestamp platforms use UNSIGNED_DEDUP_TTL.
     dedup_ttl: int = 600
 
     # -- outbound --
@@ -136,15 +126,11 @@ class WebhookIntegration(Integration):
             logger.error("%s could not be reached to reply: %s", self.label, type(exc).__name__)
             return None
 
-    #: One thread per thread_ref (a Slack thread, a pull request) instead of one
-    #: per conversation. An event without a thread_ref then keeps no history.
+    #: One thread per thread_ref instead of per conversation; no thread_ref, no history.
     thread_per_ref: bool = False
 
     def thread_scope(self, event: InboundEvent) -> str | None:
-        """Key for the stored conversation, or None to keep no history.
-
-        By default one thread per platform conversation, such as a Telegram chat.
-        """
+        """Key for the stored conversation, or None to keep no history."""
         if not event.conversation_id:
             return None
         scope = f"ai-sdk:webhook:{self.name}:{event.conversation_id}"
@@ -204,8 +190,7 @@ class WebhookIntegration(Integration):
         identifier = self.secret("RUN_AS")
         user = await aget_active_user(identifier)
         if identifier and user is None:
-            # Fall back to anonymous, the lower privilege. The agent then reaches
-            # no integration.
+            # Anonymous is the lower privilege: the agent reaches no integration.
             logger.error(
                 "AI_SDK_INTEGRATIONS[%r]['RUN_AS'] = %r matches no single active user; "
                 "answering anonymously",
@@ -268,8 +253,7 @@ class WebhookIntegration(Integration):
                 "AI_SDK_INTEGRATIONS[%r]['AGENT'] = %r cannot be imported", self.name, path
             )
             return None
-        # The path may import something that is not an Agent. Only registered
-        # Agent subclasses have an _agent_id, and abstract agents are never registered.
+        # Only registered (non-abstract) Agent subclasses have an _agent_id.
         agent_id = getattr(agent_class, "_agent_id", "")
         if not agent_id:
             logger.error(

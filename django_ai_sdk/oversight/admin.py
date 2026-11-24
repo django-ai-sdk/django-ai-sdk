@@ -1,7 +1,4 @@
-"""Read-only admin for the oversight record, scoped like the review API.
-
-It needs only metrics access, so it never shows content or who asked in which thread.
-"""
+"""Read-only admin for the oversight record: metrics access only, so no content or who asked."""
 
 from __future__ import annotations
 

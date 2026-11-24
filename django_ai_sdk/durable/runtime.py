@@ -1,9 +1,6 @@
 """DBOS in this process: launched in the worker, a client everywhere else.
 
-Only the worker (`manage.py ai_sdk_worker`) launches DBOS, which recovers
-unfinished runs, dequeues and fires schedules. Web processes enqueue, send and
-cancel through a `DBOSClient`, which reads and writes the same tables without
-running anything.
+Web processes only read and write DBOS's tables through a `DBOSClient`; they run nothing.
 """
 
 from __future__ import annotations
@@ -26,8 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The modules that declare DBOS workflows. A workflow must be registered before
-# DBOS launches, or its unfinished runs are not recovered.
+# Imported before launch: an unregistered workflow's unfinished runs are not recovered.
 WORKFLOW_MODULES = (
     "django_ai_sdk.durable.tasks",
     "django_ai_sdk.workflows.durable",
@@ -114,8 +110,7 @@ async def enqueue(
 ) -> str:
     """Queue a run of the DBOS workflow named `workflow`. Returns its workflow id.
 
-    The id is the idempotency key: queueing an id that exists returns it and runs
-    nothing.
+    The id is the idempotency key: an existing id is returned and nothing runs.
     """
     options: EnqueueOptions = {
         "queue_name": queue,

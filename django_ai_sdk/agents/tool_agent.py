@@ -336,9 +336,8 @@ class ToolAgentConfig(BaseModel):
     # Tools the agent must call before it may finish (see RequireToolsHook).
     required_tools: list[str] = []
 
-    # Forward the agent's streaming callback into tools that accept one
-    # subagent wrappers, so sub-agent tool calls stream to the client through
-    # the coordinator's event queue.
+    # Forward the streaming callback into subagent tools, so their tool calls stream
+    # through the coordinator's event queue.
     stream_subagent_tools: bool = True
 
 
@@ -369,16 +368,10 @@ class ToolAgent:
         hooks: dict[str, list[Any]] | None = None,
         stream_subagent_tools: bool = True,
     ) -> HaystackAgent:
-        """Build and return a configured Haystack Agent.
+        """Build a configured Haystack Agent, for streamed agents and subagent wrappers.
 
-        Shared construction path for both streamed agents (via ToolAgent.pipeline())
-        and subagent wrappers. Only non-None loop knobs are
-        passed, so defaults match the Haystack Agent's own defaults.
-
-        ``user_prompt`` + ``required_variables`` are used for subagents: they
-        make the Agent's ``run()`` accept a ``task`` parameter,
-        which is how the coordinator's tool call passes the
-        delegated sub-task down.
+        Only non-None loop knobs are passed, keeping Haystack's defaults. ``user_prompt`` and
+        ``required_variables`` give a subagent's ``run()`` the ``task`` the coordinator passes.
         """
         kwargs: dict[str, Any] = {
             "chat_generator": generator,

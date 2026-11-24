@@ -1,10 +1,7 @@
 """DRF serializers for the SDK viewsets.
 
-Request serializers validate input (DRF's 400 format, browsable-API forms, schema
-generation). Response serializers render what the services return: pydantic models are
-read by attribute like any object, model instances through ``ModelSerializer``.
-
-Swap a request serializer by overriding ``serializer_classes`` on a viewset subclass.
+Request serializers validate input; response serializers render what services return.
+Swap a request serializer via ``serializer_classes`` on a viewset subclass.
 """
 
 from __future__ import annotations
