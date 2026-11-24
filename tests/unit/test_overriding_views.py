@@ -1,4 +1,4 @@
-"""Every recipe in docs/content/overriding-views.md, run for real.
+"""Every recipe in docs/content/serving/overriding-views.md, run for real.
 
 This module is its own URLconf (see the `urls` marker), so each recipe is mounted
 exactly as the docs show it.

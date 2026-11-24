@@ -1,17 +1,17 @@
 ---
 title: Protocols
 sidebar:
-  order: 3
+  order: 2
 ---
 
-The SDK separates **how a model runs** from **how messages are formatted on the wire**. Two adapters cover how a model runs; protocol handlers cover the wire format.
+The SDK separates how a model runs from how messages are formatted on the wire. Two adapters cover how a model runs; protocol handlers cover the wire format.
 
 - **`Stream`**: streaming chat, built on a Haystack `Pipeline`
 - **`Run`**: non-streaming calls with optional structured output
-- **Protocol handlers**: convert protocol messages (e.g. Vercel AI SDK) to internal `ChatMessage`s and back
+- **Protocol handlers**: convert protocol messages, for example the Vercel AI SDK's, to internal `ChatMessage`s and back
 
 :::note
-Contributor? Full API references live in the [Developer Manual](manual/index.md): [Stream and Run](manual/stream-and-run.md), [Stream Events](manual/stream-events.md), [Protocol Handler](manual/protocol-handler.md), [Protocol Parts](manual/protocol-parts.md).
+Contributor? Full API references live in the [Developer Manual](../manual/index.md): [Stream and Run](../manual/stream-and-run.md), [Stream Events](../manual/stream-events.md), [Protocol Handler](../manual/protocol-handler.md), [Protocol Parts](../manual/protocol-parts.md).
 :::
 
 ```
@@ -21,7 +21,7 @@ Client (SSE) <----> | VercelProtocolHandler |  ChatMessage  |  Stream    |----> 
                     +------------------------------------------------------+
 ```
 
-## The Intermediate Format: `ChatMessage`
+## The intermediate format: `ChatMessage`
 
 Regardless of protocol, agents talk internally in `django_ai_sdk.common.ChatMessage`. Protocol handlers translate on both sides of the boundary:
 
@@ -48,7 +48,7 @@ stream = Stream(
 )
 ```
 
-`Stream` requires an actual `haystack.Pipeline`: a bare generator isn't enough. The typical pipeline is built by `ToolAgent`:
+`Stream` requires an actual `haystack.Pipeline`. A bare generator isn't enough. `ToolAgent` builds the typical pipeline:
 
 ```python
 from django_ai_sdk.agents import ToolAgent, ToolAgentConfig
@@ -64,14 +64,14 @@ tool_agent = ToolAgent(
 pipeline = tool_agent.pipeline()
 ```
 
-Any Haystack pipeline works: the only requirement is that it accepts `messages` and streams `StreamingChunk`s through a callback. If the pipeline's first component is a Haystack `Agent`, `Stream` detects it and runs it directly (handling tool loops), otherwise it runs the pipeline as-is.
+Any Haystack pipeline works. The only requirement is that it accepts `messages` and streams `StreamingChunk`s through a callback. If the pipeline's first component is a Haystack `Agent`, `Stream` detects it and runs it directly, which handles tool loops. Otherwise it runs the pipeline as is.
 
 ### Streaming lifecycle
 
 `await stream.stream(messages)` is an async generator of `StreamEvent`s:
 
-1. **`MessageStartEvent`**: carries the `message_id`, generated **once** here as a UUID
-2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](oversight.md) rule acted
+1. **`MessageStartEvent`**: carries the `message_id`, generated once here as a UUID
+2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](../oversight/oversight.md) rule acted
 3. **`TextChunkEvent`**: one per chunk from the model
 4. **`ToolCallStartEvent`** / **`ToolInputCompleteEvent`** / **`ToolOutputEvent`**: tool calls as they happen
 5. **`SourceEvent`**: RAG sources, streamed with citation indices
@@ -85,12 +85,12 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 Events carry structured data, so protocol handlers render them into their own format.
 
 :::note
-When `store=True` and a `storage_adapter` is set, a `StreamWriter` accumulates chunks into a `ChatMessage` and persists it with the same `message_id` the frontend saw: a single ID through SSE, storage, and later operations like rating or deleting the message.
+When `store=True` and a `storage_adapter` is set, a `StreamWriter` accumulates chunks into a `ChatMessage` and persists it with the same `message_id` the frontend saw. One ID runs through SSE, storage and later operations like rating or deleting the message.
 :::
 
 ### Running a Stream directly
 
-You don't usually call `stream()` yourself: `agent.as_view()` does. But it's a plain async generator, so it works anywhere:
+You don't usually call `stream()` yourself. `agent.as_view()` calls it. But it's a plain async generator, so it works anywhere:
 
 ```python
 async for event in stream.stream(messages):
@@ -102,7 +102,7 @@ async for event in stream.stream(messages):
 
 ## Run
 
-`Run` wraps a generator for **non-streaming** calls. It's the return value of `get_run_adapter()` and powers `agent.run()`: title generation, structured extraction, background jobs.
+`Run` wraps a generator for non-streaming calls. It's the return value of `get_run_adapter()` and powers `agent.run()`: title generation, structured extraction, background jobs.
 
 ```python
 from django_ai_sdk.adapters.base import Run
@@ -125,31 +125,31 @@ class Movie(BaseModel):
 movie = await run.run(messages, response_format=Movie)
 ```
 
-`Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](manual/generators.md#structured-output).
+`Run` passes the Pydantic model to the generator with the keyword argument that generator wants, `text_format` on the OpenAI Responses API or `response_format` on Chat Completions. It then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject. See [Generators](../manual/generators.md#structured-output).
 
 ### Tools
 
-`Run` itself has no notion of tools - it only ever wraps a plain generator. Pass
-`tools=True` to `Agent.run()` instead: it resolves `self.get_tools()` and runs them to
-completion via `ToolAgent.build_agent` - the same assembly a streamed subagent
-delegation uses (`build_subagent`) - governed by this agent's own `max_agent_steps`
-and `max_tool_calls` (as a `ToolCallBudgetHook`), never a generic default:
+`Run` itself has no notion of tools. It only wraps a plain generator. Pass
+`tools=True` to `Agent.run()` instead. It resolves `self.get_tools()` and runs them to
+completion through `ToolAgent.build_agent`, the same assembly a streamed subagent
+delegation uses (`build_subagent`). This agent's own `max_agent_steps` and
+`max_tool_calls` (as a `ToolCallBudgetHook`) govern the run, never a generic default:
 
 ```python
 reply = await agent.run(messages, tools=True)   # -> str | None
 ```
 
 The flag defaults to `False` so a one-shot call (title generation, structured
-extraction) never reaches every configured integration unless it explicitly asks to.
-Passing a `response_format` skips tool resolution regardless of `tools` - structured
-output and tool use together are not supported yet, see
-[Structured output from a tool loop](manual/generators.md#structured-output-from-a-tool-loop)
-for the two-call alternative. See [Headless tool runs](manual/stream-and-run.md#headless-tool-runs)
+extraction) never reaches every configured integration unless it asks to.
+Passing a `response_format` skips tool resolution whatever `tools` says. The SDK
+doesn't support structured output and tool use together yet. See
+[Structured output from a tool loop](../manual/generators.md#structured-output-from-a-tool-loop)
+for the two-call alternative. See [Headless tool runs](../manual/stream-and-run.md#headless-tool-runs)
 for the full call chain and a diagram.
 
 ---
 
-## Protocol Handlers
+## Protocol handlers
 
 Protocol handlers translate between your frontend's wire format and internal `ChatMessage`s. `Agent.as_view()` uses `agent.protocol_handler`, set from the class-level `protocol` attribute.
 
@@ -157,7 +157,7 @@ Protocol handlers translate between your frontend's wire format and internal `Ch
 
 Agents default to `VercelProtocolHandler`, which implements the [Vercel AI SDK Data Stream Protocol](https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol). Any Vercel-compatible frontend (`@ai-sdk/react`, `useChat`) works without backend changes.
 
-Inbound (`to_chat_messages`) parses Vercel `Message` objects; outbound (`from_chat_messages`) renders `ChatMessage`s back to that shape for history loads. Streams are emitted as SSE:
+Inbound (`to_chat_messages`) parses Vercel `Message` objects; outbound (`from_chat_messages`) renders `ChatMessage`s back to that shape for history loads. The handler emits streams as SSE:
 
 ```
 data: {"type":"start","messageId":"msg_abc123"}
@@ -202,7 +202,7 @@ class MyProtocolHandler(BaseProtocolHandler):
         ...
 ```
 
-`StreamEvent`s are your inputs for `sse()`: render them into whatever stream format your frontend speaks. Assign the handler to `protocol` on your agent and every view picks it up automatically.
+`StreamEvent`s are your inputs for `sse()`: render them into whatever stream format your frontend speaks. Assign the handler to `protocol` on your agent and every view uses it.
 
 ---
 
@@ -220,4 +220,4 @@ response = await stream_response(
 )
 ```
 
-`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request. It opens no [oversight](oversight.md#limitations) turn.
+`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request. It opens no [oversight](../oversight/oversight.md#limitations) turn.

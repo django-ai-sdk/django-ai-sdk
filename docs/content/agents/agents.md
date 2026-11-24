@@ -1,18 +1,18 @@
 ---
 title: Agents
 sidebar:
-  order: 2
+  order: 1
 ---
 
-An **agent** is the core of the Django AI SDK. It's a plain Python class that describes how your AI behaves, what it can do, and how it streams responses.
+An agent is the core of the Django AI SDK. It's a plain Python class that describes how your AI behaves, what it can do, and how it streams responses.
 
-This guide covers everything about defining agents. See the [Protocols](protocols.md) guide for how `Stream` and `Run` work, and [Views and Routing](views-and-routing.md) for wiring agents to HTTP endpoints.
+This guide covers everything about defining agents. See the [Protocols](../serving/protocols.md) guide for how `Stream` and `Run` work, and [Views and Routing](../serving/views-and-routing.md) for wiring agents to HTTP endpoints.
 
 :::note
-Contributor? The [Developer Manual](manual/index.md) covers internals: [Agent](manual/agent.md), [Agent Registry](manual/agent-registry.md), [RAG](manual/rag.md).
+Contributor? The [Developer Manual](../manual/index.md) covers internals: [Agent](../manual/agent.md), [Agent Registry](../manual/agent-registry.md), [RAG](../manual/rag.md).
 :::
 
-## Anatomy of an Agent
+## Anatomy of an agent
 
 ```python
 from django_ai_sdk import Agent
@@ -54,7 +54,7 @@ AI_SDK_AGENTS = [
 ]
 ```
 
-Each agent gets a **stable UUID** derived from its module and class name, so it never changes between restarts. Resolve agents by ID with `AgentService`:
+Each agent gets a stable UUID derived from its module and class name, so it never changes between restarts. Resolve agents by ID with `AgentService`:
 
 ```python
 from django_ai_sdk.agents.services import AgentService
@@ -66,7 +66,7 @@ Mark a class `abstract = True` to use it as a shared base without registering it
 
 ---
 
-## Class Configuration
+## Class configuration
 
 These class attributes configure an agent's behavior:
 
@@ -75,8 +75,8 @@ These class attributes configure an agent's behavior:
 | `name` | None | Display name |
 | `description` | `None` | Short description, surfaced in agent listings |
 | `model` | `None` | Model identifier passed to the generator |
-| `llm` | `openai_responses_chat` | Generator factory from [`django_ai_sdk.generators`](manual/generators.md), assigned uncalled |
-| `llm_kwargs` | `None` | Vendor generation parameters, e.g. `{"reasoning": {"effort": "low"}}` |
+| `llm` | `openai_responses_chat` | Generator factory from [`django_ai_sdk.generators`](../manual/generators.md), assigned uncalled |
+| `llm_kwargs` | `None` | Vendor generation parameters, for example `{"reasoning": {"effort": "low"}}` |
 | `instructions` | `"You are a helpful agent."` | System prompt, built with `prompt()` |
 | `protocol` | `VercelProtocolHandler` | Protocol handler for message conversion |
 | `storage_adapter` | `MemoryStorageAdapter` | Storage used when a thread isn't found elsewhere |
@@ -97,7 +97,7 @@ These class attributes configure an agent's behavior:
 | `file_pipelines` | `[]` | Per-file-type processing pipelines |
 | `citation_formatter_class` | `DefaultCitationFormatter` | How RAG sources are rendered to the model |
 | `suggestion_generator` | `None` | Generates follow-up suggestions after a reply |
-| `oversight` | `None` | The [oversight](oversight.md) policy every turn runs under: a `Policy` subclass, a policy's name, `None` (the `DEFAULT_POLICY`) or `False` (none) |
+| `oversight` | `None` | The [oversight](../oversight/oversight.md) policy every turn runs under: a `Policy` subclass, a policy's name, `None` (the `DEFAULT_POLICY`) or `False` (none) |
 | `hidden` | `False` | Hide from registry listings |
 | `abstract` | `False` | Shared base, not registered |
 | `warmup_on_init` | `False` | Warm up RAG on agent initialization |
@@ -127,13 +127,13 @@ An agent exposes two adapter hooks. You implement them; the SDK uses them.
 Both have defaults: a `Stream` over a `ToolAgent` with the agent's generator, tools and limits, and a `Run` around the same generator. Override them for another pipeline or generator.
 :::
 
-See the [Protocols guide](protocols.md) for the full `Stream` and `Run` API.
+See the [Protocols guide](../serving/protocols.md) for the full `Stream` and `Run` API.
 
 ---
 
 ## Tools
 
-Tools let the model call your Python functions. The SDK expects **Haystack `Tool` objects**: the model's tool schema is derived from them.
+Tools let the model call your Python functions. The SDK expects Haystack `Tool` objects. It derives the model's tool schema from them.
 
 ### Class-level tools
 
@@ -171,9 +171,9 @@ def get_memory_files(thread_id="", user_id="", **kwargs) -> Tool:
     """List files attached to the current thread."""
 ```
 
-### Multi-Agent Swarms
+### Multi-agent swarms
 
-A single agent can delegate sub-tasks to a team of **subagent agents**. Any `Agent` subclass can declare a crew with the `agents` class attribute:
+A single agent can delegate sub-tasks to a team of subagent agents. Any `Agent` subclass can declare a crew with the `agents` class attribute:
 
 ```python
 class PirateBoatExpertAgent(Agent):
@@ -200,16 +200,16 @@ class PirateSwarmAgent(Agent):
     instructions = prompt("You are a triage agent for a crew of pirate subagents. ...")
 ```
 
-When the coordinator builds its tools, each subagent becomes a **native Haystack `ComponentTool`** the coordinator can call to delegate a sub-task:
+When the coordinator builds its tools, each subagent becomes a native Haystack `ComponentTool` the coordinator can call to delegate a sub-task:
 
-- The subagent runs its **own agent loop** — its own generator, tools, and system prompt — and its final message is returned to the coordinator as the tool output. Subagents are ephemeral and stateless; the coordinator's `Stream` remains the single source of streamed *text*, but the subagent's **tool calls stream too** (see [Observability](#observability)), so sub-agent activity is visible in the UI while the report text stays single-sourced.
-- The tool schema is a single `task` parameter; the coordinator is instructed to delegate with a self-contained task description.
-- Subagent tool names are derived from the subagent display name (slugified), deduped with a numeric suffix on collision.
-- Subagents the user lacks `VIEW_AGENT` permission on are skipped automatically.
-- Cyclic crews (A delegates to B, B back to A) are detected at build time and the back-edge is skipped.
-- The coordinator's `get_system_prompt()` automatically appends an `Available subagents:` roster.
+- The subagent runs its own agent loop, with its own generator, tools and system prompt. Its final message goes back to the coordinator as the tool output. Subagents are ephemeral and stateless. The coordinator's `Stream` remains the single source of streamed *text*, but the subagent's tool calls stream too (see [Observability](#observability)). So the UI shows sub-agent activity while the report text stays single-sourced.
+- The tool schema is a single `task` parameter. The SDK instructs the coordinator to delegate with a self-contained task description.
+- The SDK derives subagent tool names from the subagent display name (slugified) and dedupes them with a numeric suffix on collision.
+- The SDK skips subagents the user lacks `VIEW_AGENT` permission on.
+- The SDK detects cyclic crews (A delegates to B, B back to A) at build time and skips the back-edge.
+- The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
 
-Subagents are ordinary `Agent` subclasses with `hidden = True` — they keep the `name`/`description`/`model`/`tools`/`instructions` attributes, so they only need a `tools` list and an instructions prompt:
+Subagents are ordinary `Agent` subclasses with `hidden = True`. They keep the `name`/`description`/`model`/`tools`/`instructions` attributes, so they only need a `tools` list and an instructions prompt:
 
 ```python
 class MySubagent(Agent):
@@ -221,7 +221,7 @@ class MySubagent(Agent):
     instructions = prompt("You are a subagent. Complete delegated tasks concisely.")
 ```
 
-Guardrails live on each `Agent` itself: subagents cap their own loop via `max_agent_steps` and `max_tool_calls` (via `ToolCallBudgetHook`), both defaulting to `6` — `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Each `Agent` sets its own guardrails. A subagent caps its own loop with `max_agent_steps` and `max_tool_calls` (through `ToolCallBudgetHook`), both defaulting to `6`. `max_tool_calls = None` disables the cap. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
 
 ### Observability
 
@@ -231,16 +231,16 @@ Guardrails live on each `Agent` itself: subagents cap their own loop via `max_ag
 config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
 ```
 
-The two swarm demos wire it into both the coordinator and (via `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls **and** for the subagent's calls: the coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default), and `SubagentStreamFilter` passes only tool-related chunks through — the subagent's raw text tokens are dropped so the report isn't streamed twice. Those forwarded chunks are persisted into the conversation history as they happen — in the order the calls actually start, so the stored history matches the streamed one and subagent tool activity survives a page reload.
+The two swarm demos wire it into both the coordinator and (through `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls and for the subagent's calls. The coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default). `SubagentStreamFilter` passes only tool-related chunks through and drops the subagent's raw text tokens, so the report isn't streamed twice. The SDK persists those forwarded chunks into the conversation history as they happen, in the order the calls start. So the stored history matches the streamed one, and subagent tool activity survives a page reload.
 
-Subagent loop limits are per-subagent class attributes, not just coordinator settings: `max_agent_steps` caps total loop iterations and `max_tool_calls` (via `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` + `trafilatura`).
+Subagent loop limits are per-subagent class attributes, not only coordinator settings. `max_agent_steps` caps total loop iterations and `max_tool_calls` (through `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
 
 ### Overriding `get_tools()`
 
 For full control, override `get_tools()` on your agent. The default implementation combines:
 
 1. Class-level `tools` providers
-2. Integration tools (`integrations` list, resolved via the integrations registry)
+2. Integration tools (`integrations` list, resolved through the integrations registry)
 3. Artifact submission tools (`artifacts` list)
 4. Subagent agent tools (`agents` list, one `ComponentTool` per subagent)
 
@@ -254,7 +254,7 @@ class MyAgent(Agent):
 
 ### Tools for uploaded files, and required tools
 
-Two hooks, two questions:
+Two hooks answer two questions:
 
 | | `get_attachment_tools(thread_id)` | `get_run_required_tools(messages)` |
 | --- | --- | --- |
@@ -265,7 +265,7 @@ Two hooks, two questions:
 
 `required_tools` (a class attribute) lists names that are required on every run; `get_run_required_tools()` adds names for one turn.
 
-A required tool is not run for you: the model supplies the arguments, so the model calls it. When it tries to answer without having called a required tool, it is told to call it now and gets another turn; that happens at most twice per run. A required name the run has no tool for is ignored, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
+The SDK does not run a required tool for you. The model supplies the arguments, so the model calls it. When the model tries to answer without having called a required tool, the SDK tells it to call the tool now and gives it another turn. That happens at most twice per run. The SDK ignores a required name the run has no tool for, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
 
 For example, always read an attached PDF with your own tool:
 
@@ -284,7 +284,7 @@ class MyAgent(Agent):
         return []
 ```
 
-To give the model a file's content without any tool call, override `format_attachment()` instead: its text goes straight into the context line of the attachment.
+To give the model a file's content without any tool call, override `format_attachment()` instead. Its text goes straight into the context line of the attachment.
 
 ### Integration tools
 
@@ -292,7 +292,7 @@ Declare `integrations = ["linear", "weather"]` and every tool that integration e
 
 ### Artifact tools
 
-Agents can submit structured results as **artifacts**. Each `ArtifactSchema` subclass in the `artifacts` list becomes a submission tool the model can call during a turn:
+Agents can submit structured results as artifacts. Each `ArtifactSchema` subclass in the `artifacts` list becomes a submission tool the model can call during a turn:
 
 ```python
 class MyArtifact(ArtifactSchema):
@@ -328,11 +328,11 @@ class MyAgent(Agent):
     tool_artifacts = {"lookup_file": ToolArtifact(FileArtifact, looked_up_file)}
 ```
 
-When the stream sees the tool's result, the builder gets the tool's arguments and its result (a returned list or dict comes back as one). The artifact is then stored and streamed right after it as its own `artifact_*` tool part: the frontend renders it with the component it already has, and it is saved with the message. The model only gets the tool's own result. Data the artifact rejects is logged and skipped. Only streamed chats show it: in `Agent.run()` the tool runs as usual. It works for any tool of the run: your own, package, MCP or RAG tools, also ones your `get_pipeline_adapter` adds after `get_tools()`.
+When the stream sees the tool's result, the builder gets the tool's arguments and its result (a returned list or dict comes back as one). The SDK then stores the artifact and streams it right after the result as its own `artifact_*` tool part. The frontend renders it with the component it already has, and the SDK saves it with the message. The model only gets the tool's own result. The SDK logs and skips data the artifact rejects. Only streamed chats show it. In `Agent.run()` the tool runs as usual. It works for any tool of the run: your own, package, MCP or RAG tools, including ones your `get_pipeline_adapter` adds after `get_tools()`.
 
 ### Tool receipts
 
-When [oversight](oversight.md) withholds an answer, every tool call's arguments and result are dropped with it: they could reveal what was withheld. A tool that starts something durable, such as a workflow run or a payout claim, can declare the keys of its result that identify it, its receipt. Those keys are kept, so the chat can still show the run and the person does not start a second one:
+When [oversight](../oversight/oversight.md) withholds an answer, the SDK drops every tool call's arguments and result with it, because they could reveal what was withheld. A tool that starts something durable, such as a workflow run or a payout claim, can declare the keys of its result that identify it, its receipt. Those keys are kept, so the chat can still show the run and the person does not start a second one:
 
 ```python
 from django_ai_sdk import with_receipt
@@ -342,20 +342,20 @@ start_run_tool = with_receipt(
 )
 ```
 
-`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). The declared keys are trusted: you, the tool's author, chose them. Their values are still screened: only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters) are kept, and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key); anything else is left out. The stored call and its released card get `{**receipt, "withheld": true}` as the result; arguments stay dropped. A failed call keeps nothing. Receipts are read from the streaming agent's tools and its subagents', at any depth (`Stream`).
+`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). The SDK trusts the declared keys, because you, the tool's author, chose them. It still screens their values. It keeps only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters), and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key). It leaves anything else out. The stored call and its released card get `{**receipt, "withheld": true}` as the result. Arguments stay dropped. A failed call keeps nothing. The SDK reads receipts from the streaming agent's tools and its subagents', at any depth (`Stream`).
 
 ---
 
-## Retrieval-Augmented Generation (RAG)
+## Retrieval-augmented generation (RAG)
 
-RAG connects documents stored in **memories** to your agent. The `RAGProvider` caches pipelines per agent and memory and exposes a per-memory retrieval tool for the model to call.
+RAG connects documents stored in memories to your agent. The `RAGProvider` caches pipelines per agent and memory and exposes a per-memory retrieval tool for the model to call.
 
 ### Enabling RAG
 
 1. Set `rag_provider = RAGProvider()` on the agent.
 2. Override `get_rag_queryset()` to return the documents to index.
 3. Implement `get_rag_pipeline()` (or one of the named variants) to return a RAG pipeline.
-4. Link memories to threads: `get_rag_tools()` builds one tool per active memory.
+4. Link memories to threads. `get_rag_tools()` builds one tool per active memory.
 
 ```python
 from django_ai_sdk.memories.models import Entry
@@ -393,44 +393,44 @@ class MyAgent(Agent):
 | `ChromaDBQueryExpanderRAG` | Dense embedding retrieval with ChromaDB |
 | `QdrantBM25HybridRAG` | Hybrid SPLADE + BGE embeddings with RRF, stored in Qdrant |
 
-Override `get_rag_pipeline()` to return one of the variants. You can factor each into its own method (e.g. `get_rag_pipeline_qdrant()`) and call it from `get_rag_pipeline()`; the base method returns `None` (RAG disabled).
+Override `get_rag_pipeline()` to return one of the variants. You can factor each into its own method, for example `get_rag_pipeline_qdrant()`, and call it from `get_rag_pipeline()`. The base method returns `None`, which disables RAG.
 
 ### Lifecycle
 
-- **Warm up**: `Agent.warmup(agent, memory_id)` pre-builds and caches pipelines.
-- **Reindex**: `Agent.reindex(agent, memory_id, force_rebuild)` rebuilds indexes (persistent backends like Qdrant delete and recreate).
-- **Clear cache**: `Agent.clear_rag_cache(agent)` drops cached pipelines.
-- **CLI**: `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](cli.md)).
+- **Warm up.** `Agent.warmup(agent, memory_id)` pre-builds and caches pipelines.
+- **Reindex.** `Agent.reindex(agent, memory_id, force_rebuild)` rebuilds indexes (persistent backends like Qdrant delete and recreate).
+- **Clear cache.** `Agent.clear_rag_cache(agent)` drops cached pipelines.
+- **CLI.** `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](../operations/cli.md)).
 
 ### Citations
 
-Retrieved sources are streamed back as numbered citations. `get_citation_registry()` returns a fresh per-turn registry, and `citation_formatter_class` controls how sources are rendered for the model. The `DefaultCitationFormatter` numbers sources so the model can reference them inline.
+The SDK streams retrieved sources back as numbered citations. `get_citation_registry()` returns a fresh per-turn registry, and `citation_formatter_class` controls how sources are rendered for the model. The `DefaultCitationFormatter` numbers sources so the model can reference them inline.
 
 ---
 
 ## Storage
 
-Conversations live in **threads** of **messages**. Two storage adapters ship with the SDK:
+Conversations live in threads of messages. Two storage adapters ship with the SDK:
 
 - `MemoryStorageAdapter`: in-memory, useful for tests and prototypes
-- `DbStorageAdapter`: persists via the Django ORM
+- `DbStorageAdapter`: persists through the Django ORM
 
 :::note
-`MemoryStorageAdapter` is in-memory only: use `DbStorageAdapter` whenever conversations must survive a restart.
+`MemoryStorageAdapter` is in-memory only. Use `DbStorageAdapter` whenever conversations must survive a restart.
 :::
 
-`get_storage_adapter(thread_id)` locates which adapter actually holds a thread (querying all registered adapters) and returns the right instance, falling back to the agent's configured `storage_adapter`.
+`get_storage_adapter(thread_id)` finds the adapter that holds a thread by querying all registered adapters, and returns that instance. It falls back to the agent's configured `storage_adapter`.
 
 ```python
 class MyAgent(Agent):
     storage_adapter = DbStorageAdapter
 ```
 
-`storage_adapter` is the attribute you configure (the same name is also used as the effective instance attribute in `__init__`). `Agent` additionally declares a `storage` class annotation for the same purpose: either way, the effective adapter defaults to `MemoryStorageAdapter` and comes from `storage_adapter` at runtime.
+`storage_adapter` is the attribute you configure (the same name is also used as the effective instance attribute in `__init__`). `Agent` also declares a `storage` class annotation for the same purpose. Either way, the effective adapter defaults to `MemoryStorageAdapter` and comes from `storage_adapter` at runtime.
 
 ---
 
-## Structured Output
+## Structured output
 
 `Agent.run()` returns a Pydantic model when a `response_format` is set:
 
@@ -452,27 +452,27 @@ class MyAgent(Agent):
 
 Pass `response_format=None` explicitly to `run()` to disable structured output for a single call.
 
-`run()` also takes `tools` (default `False`): pass `tools=True` and the agent's own
-`get_tools()` are resolved and run to completion headless - no streaming, one call in,
-one final answer out. Opt-in, not opt-out: resolving tools reaches every configured
-integration, so a one-shot call (title generation, structured extraction, a workflow
-step) does not pay that cost unless it explicitly asks for it. Setting a
-`response_format` skips tools regardless of the flag - structured output and a tool
-loop together aren't supported yet, see
-[Structured output from a tool loop](manual/generators.md#structured-output-from-a-tool-loop).
+`run()` also takes `tools` (default `False`). Pass `tools=True` and the agent resolves
+its own `get_tools()` and runs them to completion headless: no streaming, one call in,
+one final answer out. The flag is opt-in, not opt-out. Resolving tools reaches every
+configured integration, so a one-shot call (title generation, structured extraction, a
+workflow step) does not pay that cost unless it asks for it. Setting a
+`response_format` skips tools whatever the flag says. The SDK doesn't support
+structured output and a tool loop together yet. See
+[Structured output from a tool loop](../manual/generators.md#structured-output-from-a-tool-loop).
 
-This only ever applies to the SDK's own `Run` adapter - a `get_run_adapter()` override
-that returns something else is left alone, rather than a tool loop being forced onto
-it. See [Headless tool runs](manual/stream-and-run.md#headless-tool-runs) for the exact
-call chain and the diagram: it's governed by *this* agent's own `max_agent_steps` and
-`max_tool_calls`, via the same assembly a streamed subagent delegation uses - never a
-generic default.
+This applies only to the SDK's own `Run` adapter. The SDK leaves a `get_run_adapter()`
+override that returns something else alone and doesn't force a tool loop onto it. See
+[Headless tool runs](../manual/stream-and-run.md#headless-tool-runs) for the exact call
+chain and the diagram. *This* agent's own `max_agent_steps` and `max_tool_calls` govern
+the run, through the same assembly a streamed subagent delegation uses, never a generic
+default.
 
 ---
 
 ## Oversight
 
-With the [oversight](oversight.md) app installed, every turn an agent with a policy runs through the SDK's entry points is checked and recorded under that policy: chat, `run()`, the HTTP run endpoints and workflow steps alike ([the paths it does not guard](oversight.md#limitations)).
+With the [oversight](../oversight/oversight.md) app installed, the SDK checks and records every turn that an agent with a policy runs through the SDK's entry points, under that policy: chat, `run()`, the HTTP run endpoints and workflow steps alike ([the paths it does not guard](../oversight/oversight.md#limitations)).
 
 ```python
 from django_ai_sdk.errors import Blocked
@@ -493,7 +493,7 @@ except Blocked as blocked:
     answer = blocked.message           # the policy's text for the person asking
 ```
 
-`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](manual/oversight.md#agents-and-runs); what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked, in [the guide](oversight.md#every-sdk-entry-point-is-a-turn).
+[The manual](../manual/oversight.md#agents-and-runs) documents `oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked`. [The guide](../oversight/oversight.md#every-sdk-entry-point-is-a-turn) covers what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked.
 
 ---
 
@@ -509,13 +509,13 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-`Agent.as_view()` and `Agent.history()` check permissions before doing anything, raising `PermissionDenied` when the user lacks access. See the [Views and Routing guide](views-and-routing.md) for wiring.
+`Agent.as_view()` and `Agent.history()` check permissions before doing anything and raise `PermissionDenied` when the user lacks access. See the [Views and Routing guide](../serving/views-and-routing.md) for wiring.
 
 ---
 
 ## Files
 
-Set `file_upload = True` to accept file uploads on threads; leaving it `False` rejects uploads to the agent's threads with a `PermissionDenied`. Each `FilePipeline` pairs a processor (e.g. `TextFileProcessor`) with optional transforms, including LLM extraction agents, that run over the uploaded file:
+Set `file_upload = True` to accept file uploads on threads. Leaving it `False` rejects uploads to the agent's threads with a `PermissionDenied`. Each `FilePipeline` pairs a processor, such as `TextFileProcessor`, with optional transforms, including LLM extraction agents, that run over the uploaded file:
 
 ```python
 class MyAgent(Agent):
@@ -528,7 +528,7 @@ class MyAgent(Agent):
     ]
 ```
 
-See the [Files reference](manual/files.md) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
+See the [Files reference](../manual/files.md) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
 
 ---
 
@@ -545,18 +545,18 @@ class MyAgent(Agent):
 
 ---
 
-## Reference Agents
+## Reference agents
 
-The demo project ships seven agents in `demos/studio/apps/agents/`, each showcasing a different pattern:
+The demo project ships seven agents in `demos/studio/apps/agents/`, each showing a different pattern:
 
 | Agent | Pattern |
 | --- | --- |
 | `PirateBasicAgent` | Full-featured agent: RAG, tools, integrations, citations, suggestions, files |
-| `PirateSwarmAgent` | Coordinator + hidden pirate subagents (`agents = [...]`) |
-| `DeepResearchAgent` | Coordinator + hidden web-research subagent |
+| `PirateSwarmAgent` | Coordinator and hidden pirate subagents (`agents = [...]`) |
+| `DeepResearchAgent` | Coordinator and hidden web-research subagent |
 | `DefaultRuntimeAgent` | Base for DB-configured runtime agents |
 | `WorkspaceAgent` | Artifact-based workspace workflows |
 | `PirateExtractionAgent` | Structured extraction used inside file pipelines |
-| `ResearchPlannerAgent` | Hidden web-research worker (search + fetch tools) |
+| `ResearchPlannerAgent` | Hidden web-research worker (search and fetch tools) |
 
 Browse them in the repository for working examples of everything in this guide.

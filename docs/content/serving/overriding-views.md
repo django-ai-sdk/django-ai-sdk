@@ -1,12 +1,12 @@
 ---
 title: Overriding Views
 sidebar:
-  order: 6
+  order: 3
 ---
 
-The [ready-made endpoints](views-and-routing.md#pick-a-starting-point) are meant to be bent, not forked. Each recipe below changes one thing and keeps the rest of the SDK's behaviour, including permission checks, which live in the services and not in the views.
+The [ready-made endpoints](views-and-routing.md#pick-a-starting-point) are meant to be changed, not forked. Each recipe below changes one thing and keeps the rest of the SDK's behaviour, including permission checks, which live in the services and not in the views.
 
-Rule of thumb: **extend, don't rewrite.** Call the SDK's own endpoint (Ninja) or `super()` (DRF) and adjust the result. Only drop down to the services when the response has to look completely different.
+Extend the endpoints instead of rewriting them. Call the SDK's own endpoint (Ninja) or `super()` (DRF) and adjust the result. Call the services directly only when the response has to look completely different.
 
 :::note
 Every recipe on this page runs in the test suite (`tests/unit/test_overriding_views.py`), so it stays correct as the SDK changes.
@@ -48,12 +48,12 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
     return response
 ```
 
-- Names in `exclude` are the endpoint function names, which are also the OpenAPI `operationId`s. A name that doesn't exist raises `ValueError` at startup, so a typo can't silently leave the original in place.
+- Names in `exclude` are the endpoint function names, which are also the OpenAPI `operationId`s. A name that doesn't exist raises `ValueError` at startup, so a typo can't leave the original in place unnoticed.
 - Pass the same `operation_id` and response schema (all of them live in `django_ai_sdk.contrib.ninja.schemas`) to keep a generated frontend client unchanged.
 - Need a different response shape? Skip the wrapper and call the service (`ThreadService.threads(...)`) with your own schema.
 
 :::caution
-Register the replacement on the router that `get_*_router(exclude=...)` returned, not on a separate `Router`: Ninja resolves a path per router, so a second router on a shared path answers `405 Method Not Allowed` for the other methods.
+Register the replacement on the router that `get_*_router(exclude=...)` returned, not on a separate `Router`. Ninja resolves a path per router, so a second router on a shared path answers `405 Method Not Allowed` for the other methods.
 :::
 
 ### Remove an endpoint
@@ -80,7 +80,7 @@ The same keywords can go to the factory instead (`ai_sdk_routers.get_agents_rout
 
 ### Change error responses
 
-`register_error_handlers(api)` answers every exception with an [error code](errors.md). Ninja uses the most specific handler, so registering one for a narrower type overrides it for just that type:
+`register_error_handlers(api)` answers every exception with an [error code](errors.md). Ninja uses the most specific handler, so registering one for a narrower type overrides it for that type only:
 
 ```python
 from django_ai_sdk.errors import NotFound
@@ -92,11 +92,11 @@ def not_found(request, exc):
     return api.create_response(request, {"error": "gone"}, status=404)
 ```
 
-To change a code's message, status or `retryable` flag everywhere (chat streams included), use `register_error_code()` instead; see [Your own codes](errors.md#your-own-codes).
+To change a code's message, status or `retryable` flag everywhere (chat streams included), use `register_error_code()` instead. See [Your own codes](errors.md#your-own-codes).
 
 ## Django REST framework
 
-The viewsets are plain DRF: subclass one and register the subclass on your own router.
+The viewsets are plain DRF viewsets. Subclass one and register the subclass on your own router.
 
 ### Register your own router
 
@@ -147,11 +147,11 @@ class MyThreadViewSet(ThreadViewSet):
         return Response({"thread_id": thread_id, "format": "markdown"})
 ```
 
-Inside an action, use DRF as usual: `self.get_serializer(data=request.data)` validates a body with the serializer registered for the action in `serializer_classes`, and `self.page(request)` returns `(limit, offset)` from the pagination class. Call the services' sync wrappers (`django_ai_sdk.memories.services.list_memories(...)` and friends), and raise service errors as they are; the viewset maps them.
+Inside an action, use DRF as usual. `self.get_serializer(data=request.data)` validates a body with the serializer registered for the action in `serializer_classes`, and `self.page(request)` returns `(limit, offset)` from the pagination class. Call the services' sync wrappers (`django_ai_sdk.memories.services.list_memories(...)` and friends), and raise service errors as they are. The viewset maps them.
 
 ### Swap a request serializer
 
-Each viewset maps actions to request serializers in `serializer_classes`. Extend it with a stricter or larger serializer; the action itself stays the SDK's:
+Each viewset maps actions to request serializers in `serializer_classes`. Extend it with a stricter or larger serializer. The action itself stays the SDK's:
 
 ```python
 from rest_framework import serializers
@@ -215,7 +215,7 @@ class AdminWorkflowViewSet(WorkflowViewSet):
     throttle_classes = [UserRateThrottle]
 ```
 
-These classes are an extra gate in front of the SDK's own checks, not a replacement: a user who passes `IsAdminUser` still only sees the workflows the SDK's permission classes allow. To change *those* rules, configure `AI_SDK_PERMISSIONS` (see [Permissions](manual/permissions.md)).
+These classes are an extra gate in front of the SDK's own checks, not a replacement. A user who passes `IsAdminUser` still only sees the workflows the SDK's permission classes allow. To change *those* rules, configure `AI_SDK_PERMISSIONS` (see [Permissions](../manual/permissions.md)).
 
 ### Change error responses
 

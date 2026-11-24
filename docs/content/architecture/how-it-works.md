@@ -1,18 +1,18 @@
 ---
 title: How It Works
 sidebar:
-  order: 8
+  order: 1
 ---
 
-This page explains what happens under the hood when a request flows through the SDK. You don't need to know this to use it, but it helps when extending or debugging things.
+This page explains what happens inside the SDK when a request flows through it. You don't need to know this to use the SDK, but it helps when you extend or debug it.
 
-![Request flow](images/graphs/data_flow.svg)
+![Request flow](../images/graphs/data_flow.svg)
 
 :::note
-Contributor? The [System Architecture](manual/architecture.md) manual page goes deeper into components and design patterns.
+Contributor? The [System Architecture](../manual/architecture.md) manual page goes deeper into components and design patterns.
 :::
 
-## Request Lifecycle
+## Request lifecycle
 
 When a client sends a chat message:
 
@@ -45,7 +45,7 @@ Inside the streaming response:
 
 ## ChatMessage
 
-`ChatMessage` (`django_ai_sdk.common`) is the single message type that flows through the whole system. It starts simple and gets richer as it moves through the pipeline:
+`ChatMessage` (`django_ai_sdk.common`) is the single message type that flows through the whole system. It starts with a role and content and gains metadata as it moves through the pipeline:
 
 ```python
 from django_ai_sdk.common import ChatMessage
@@ -67,13 +67,13 @@ assistant_msg = ChatMessage(
 )
 ```
 
-There's no separate "input message" vs "storage message" type. The same class handles both: optional fields default to empty/zero.
+There's no separate "input message" and "storage message" type. The same class handles both, and optional fields default to empty or zero.
 
 ---
 
 ## The `message_id`
 
-One `message_id` is generated in `Stream.stream()` as a UUID and used everywhere:
+`Stream.stream()` generates one `message_id` as a UUID, and every step uses it:
 
 1. `MessageStartEvent(message_id=...)`: sent to the frontend first
 2. The `StreamWriter` builds the `ChatMessage` with that same id
@@ -84,7 +84,7 @@ The frontend never sees one id and the database another.
 
 ---
 
-## Streaming Events
+## Streaming events
 
 Adapters don't produce protocol-specific output. `Stream.stream()` yields normalized `StreamEvent` objects that any protocol handler can consume:
 
@@ -117,7 +117,7 @@ The full set: `MessageStartEvent`, `TextChunkEvent`, `ReasoningChunkEvent`, `Dat
 
 ## StreamWriter
 
-When a `Stream` is created with `store=True` and a `storage_adapter`, it sets up a `StreamWriter` that aggregates chunks into a complete `ChatMessage`:
+When you create a `Stream` with `store=True` and a `storage_adapter`, it sets up a `StreamWriter` that aggregates chunks into a complete `ChatMessage`:
 
 ```python
 from django_ai_sdk.common import StreamWriter, MessageChunk
@@ -147,20 +147,20 @@ complete_message = await writer.finalize("stop")
 
 The `django_ai_sdk.conversation` app provides two models:
 
-- **Thread**: a conversation container with `id` (UUID), `title`, `agent_id`, `metadata`, timestamps.
-- **Message**: a single message in a thread with `id` (UUID, the stream's `message_id`), a thread FK, and the serialized `ChatMessage`.
+- `Thread`: a conversation container with `id` (UUID), `title`, `agent_id`, `metadata`, timestamps.
+- `Message`: a single message in a thread with `id` (UUID, the stream's `message_id`), a thread FK, and the serialized `ChatMessage`.
 
 ### How storage gets wired
 
-You don't manually store messages. When you pass `thread_id` to `as_view()`:
+You don't store messages yourself. When you pass `thread_id` to `as_view()`:
 
 1. `get_storage_adapter(thread_id)` locates the adapter that holds the thread (querying all registered adapters) and falls back to the agent's configured `storage_adapter`.
-2. The newest user message is stored immediately via `storage_adapter.store_chat_message()`.
-3. The storage adapter is handed to `get_pipeline_adapter()` and set on the returned `Stream`.
+2. `storage_adapter.store_chat_message()` stores the newest user message right away.
+3. `as_view()` hands the storage adapter to `get_pipeline_adapter()`, which sets it on the returned `Stream`.
 4. `Stream.stream()` creates a `StreamWriter` with `storage_callback=storage_adapter.storage_callback`.
-5. When streaming finishes, `StreamWriter.finalize()` calls the callback, storing the assistant message.
+5. When streaming finishes, `StreamWriter.finalize()` calls the callback, which stores the assistant message.
 
-If you don't pass `thread_id`, no storage happens: messages stream through and are gone.
+If you don't pass `thread_id`, nothing is stored. Messages stream through and are gone.
 
 :::note
 Pass `thread_id` to `as_view()` whenever a conversation should persist. Without it, streaming still works but nothing is saved.
@@ -197,9 +197,9 @@ StorageAdapterRegistry.register(FileStorageAdapter)
 
 ---
 
-## The `stream_response()` Function
+## The `stream_response()` function
 
-This is the low-level function that `as_view()` calls. Use it directly when you want a custom view that assembles its own adapter:
+`stream_response()` is the low-level function that `as_view()` calls. Use it directly when you want a custom view that assembles its own adapter:
 
 ```python
 from django_ai_sdk.responses import stream_response
@@ -218,4 +218,4 @@ async def my_custom_view(request):
 
 It returns a `StreamingHttpResponse` with `content_type="text/event-stream"`, CORS headers, and the `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends.
 
-A custom view that calls `stream_response()` is not guarded by [oversight](oversight.md#limitations).
+[Oversight](../oversight/oversight.md#limitations) does not guard a custom view that calls `stream_response()`.

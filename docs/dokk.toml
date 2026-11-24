@@ -15,23 +15,28 @@ color = "green"
 
 [[sidebar]]
 label = "Start"
-items = ["index.md", "quickstart.md"]
+items = ["index.md"]
 
 [[sidebar]]
-label = "Guide"
-items = [
-  "agents.md",
-  "protocols.md",
-  "integrations.md",
-  "views-and-routing.md",
-  "overriding-views.md",
-  "errors.md",
-  "how-it-works.md",
-  "cli.md",
-  "oversight.md",
-  "oversight-authoring.md",
-  "workflow-steps.md",
-]
+autogenerate = "getting-started"
+
+[[sidebar]]
+autogenerate = "agents"
+
+[[sidebar]]
+autogenerate = "serving"
+
+[[sidebar]]
+autogenerate = "oversight"
+
+[[sidebar]]
+autogenerate = "workflows"
+
+[[sidebar]]
+autogenerate = "operations"
+
+[[sidebar]]
+autogenerate = "architecture"
 
 [[sidebar]]
 autogenerate = "manual"

@@ -1,7 +1,7 @@
 ---
 title: Views and Routing
 sidebar:
-  order: 5
+  order: 1
 ---
 
 This page covers exposing agents over HTTP: ready-made endpoints for django-ninja and Django REST framework, a framework-free chat view, and the services underneath if you'd rather write your own.
@@ -14,7 +14,7 @@ This page covers exposing agents over HTTP: ready-made endpoints for django-ninj
 | Django REST framework | `pip install django-ai-sdk[drf]` | `include("django_ai_sdk.contrib.drf.urls")` |
 | Neither / your own style | nothing extra | `ChatView` plus the services below |
 
-The SDK never imports Ninja or DRF itself; the `contrib` layers are optional. Both are thin: every endpoint calls a service (`ThreadService`, `AgentService`, `MemoryService`, `WorkflowService`, `IntegrationService`, `TraceService`), and the services do the permission checks. So whichever you choose, behaviour is the same.
+The SDK never imports Ninja or DRF itself; the `contrib` layers are optional. Both are thin. Every endpoint calls a service (`ThreadService`, `AgentService`, `MemoryService`, `WorkflowService`, `IntegrationService`, `TraceService`), and the services do the permission checks. So behaviour is the same whichever you choose.
 
 :::caution
 The contrib layers are **beta**: URLs and response shapes may still change between minor releases. Pin your version if a frontend client is generated from them.
@@ -46,9 +46,9 @@ urlpatterns = [
 ]
 ```
 
-`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](manual/oversight.md#review-api). DRF has no review routes: call `OversightService` from your own view.
+`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check. See [Review API](../manual/oversight.md#review-api). DRF has no review routes. Call `OversightService` from your own view.
 
-Each `get_*_router()` builds a **new** Router, so you can trim it and add your own endpoints next to the SDK's without changing the router for anyone else. That is why they are functions rather than module-level routers: Ninja can't remove an endpoint from a router, so `exclude` has to happen while it is built.
+Each `get_*_router()` builds a new Router, so you can trim it and add your own endpoints next to the SDK's without changing the router for anyone else. That is why they are functions rather than module-level routers. Ninja can't remove an endpoint from a router, so `exclude` has to happen while the router is built.
 
 ```python
 router = ai_sdk_routers.get_threads_router(exclude={"delete_all_threads"})
@@ -60,7 +60,7 @@ async def export_thread(request, thread_id: str):
 api.add_router("/", router)
 ```
 
-List endpoints take `?limit=&offset=`: `limit` defaults to 100 and is capped at 100 (a larger value is a 422), the same bound as the DRF layer. The services themselves accept `limit=None` for everything; over HTTP a client pages through with `offset`, and an endpoint that really must return everything is one you write yourself.
+List endpoints take `?limit=&offset=`. `limit` defaults to 100 and is capped at 100, the same bound as the DRF layer. A larger value is a 422. The services themselves accept `limit=None` to return everything. Over HTTP a client pages through with `offset`. An endpoint that must return everything is one you write yourself.
 
 `exclude` takes endpoint function names, which are also the OpenAPI `operationId`s; a misspelt name raises at startup. Your own routers can live on the same `NinjaAPI`, which is how the studio demo adds its health, digest and account endpoints (`demos/studio/apps/agents/views/ninja.py`).
 
@@ -121,13 +121,13 @@ urlpatterns = [
 ]
 ```
 
-Without a thread the conversation isn't persisted and the client sends the whole history every turn. That suits a help widget or a one-off question. The agent comes from the view (`agent=`), never from the request body, so a client can't switch agents through that URL. The `CHAT` permission is checked either way.
+Without a thread the conversation isn't persisted and the client sends the whole history every turn. That suits a help widget or a one-off question. The agent comes from the view (`agent=`), never from the request body, so a client can't switch agents through that URL. The view checks the `CHAT` permission either way.
 
 Subclass it and override `get_agent()` or `error_response(exc)` to change how the agent is picked or how failures look. For everything else, call the services as shown in the rest of this page. They raise typed errors (`NotFound`, `PermissionDenied`, ...), and `django_ai_sdk.errors.error_response(exc)` turns any exception into the status and body both contrib layers send. See [Error Handling](errors.md) for the codes.
 
-## The Chat Endpoint
+## The chat endpoint
 
-Agents expose `as_view()`, which returns a ready-to-return `StreamingHttpResponse`. The minimal hand-written endpoint:
+Agents expose `as_view()`, which returns a ready-to-return `StreamingHttpResponse`. Here is the minimal hand-written endpoint:
 
 ```python
 from ninja import Router
@@ -142,7 +142,7 @@ async def chat(request, payload: ChatRequest):
     return await agent.as_view(payload.messages, user=request.user)
 ```
 
-- **`payload.messages`**: Vercel protocol messages. `as_view()` converts them via the agent's protocol handler, applies `max_history`, stores the last user message, builds the pipeline adapter, and streams the response.
+- **`payload.messages`**: Vercel protocol messages. `as_view()` converts them with the agent's protocol handler, applies `max_history`, stores the last user message, builds the pipeline adapter, and streams the response.
 - **`user`**: passed to the adapter and used for permission checks and conversation attribution.
 - **`thread_id`**: pass it to persist the conversation (see below).
 
@@ -160,7 +160,7 @@ class ChatRequest(BaseModel):
 
 ## AgentService
 
-`AgentService` is the single entry point for resolving agents: it checks the registry first, then falls back to DB-configured runtime agents.
+`AgentService` is the single entry point for resolving agents. It checks the registry first, then falls back to DB-configured runtime agents.
 
 ```python
 from django_ai_sdk.agents.services import AgentService
@@ -191,15 +191,15 @@ Common agent endpoints:
 The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then `agent.run(chat_messages, user=..., channel="api")`:
 
 :::note
-`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output. Under an [oversight](oversight.md) policy the run is checked like a chat turn; when the policy refuses, the reply is `{"result": <the policy's message>, "thread_id": "", "blocked": true}` (Ninja and DRF alike). Without a thread, the server never stored the history the client sends: the gate judges it on every request. `/threads/{id}/run/` takes the thread's stored history instead, as chat does, so it is judged once.
+`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output. Under an [oversight](../oversight/oversight.md) policy the run is checked like a chat turn; when the policy refuses, the reply is `{"result": <the policy's message>, "thread_id": "", "blocked": true}` (Ninja and DRF alike). Without a thread, the server never stored the history the client sends, so the gate judges it on every request. `/threads/{id}/run/` takes the thread's stored history instead, as chat does, so the gate judges it once.
 :::
 
-## Threads and Messages
+## Threads and messages
 
-Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](manual/memories.md) for the full `MemoryService` API and the demo's memory endpoints.
+Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](../manual/memories.md) for the full `MemoryService` API and the demo's memory endpoints.
 
 :::note
-Contributor? The [ThreadService](manual/thread-service.md) manual page documents every method and its permission checks.
+Contributor? The [ThreadService](../manual/thread-service.md) manual page documents every method and its permission checks.
 :::
 
 ```python
@@ -263,9 +263,9 @@ await ThreadService.restore_message(thread_id, message_id, user=request.user)
 
 ---
 
-## Non-Streaming Runs on Threads
+## Non-streaming runs on threads
 
-Useful for structured extraction or a "quick answer" that doesn't need SSE:
+A non-streaming run is useful for structured extraction or a "quick answer" that doesn't need SSE:
 
 ```python
 from django_ai_sdk.errors import Blocked
@@ -289,9 +289,9 @@ async def run_thread(request, thread_id: str, payload: ChatRequest):
 
 ---
 
-## Runtime-Configured Agents
+## Runtime-configured agents
 
-Besides code-defined agents, the SDK supports **runtime agents**: `AgentSettings` rows in the database that configure a base class, model, system prompt, tools, integrations, and access control without code changes. A UI (or admin) creates them via `AgentService`:
+Besides code-defined agents, the SDK supports **runtime agents**: `AgentSettings` rows in the database that configure a base class, model, system prompt, tools, integrations, and access control without code changes. A UI (or admin) creates them through `AgentService`:
 
 ```python
 config = await AgentService.create_runtime_agent(
@@ -319,7 +319,7 @@ await AgentService.update_runtime_agent(runtime_id, data, user=request.user)
 await AgentService.delete_runtime_agent(runtime_id, user=request.user)
 ```
 
-What's available for runtime agents is declared in settings:
+Settings declare what runtime agents can use:
 
 ```python
 # settings.py
@@ -341,7 +341,7 @@ AI_SDK_RUNTIME_AGENT_TOOLS = {
 
 ## Permissions
 
-Agents declare `permissions` classes; `as_view()`, `history()`, and `AgentService` check them before acting, raising `PermissionDenied` when access is denied.
+Agents declare `permissions` classes; `as_view()`, `history()`, and `AgentService` check them before acting and raise `PermissionDenied` when access is denied.
 
 ```python
 from django_ai_sdk.views.permissions import aagent_permissions, agent_permissions
@@ -362,13 +362,13 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-See the [Agents guide](agents.md#permissions) for declaring permissions on agents, and the [Permissions reference](manual/permissions.md) for the operation enum, domains, and built-in classes.
+See the [Agents guide](../agents/agents.md#permissions) for declaring permissions on agents, and the [Permissions reference](../manual/permissions.md) for the operation enum, domains, and built-in classes.
 
 ---
 
 ## Workflows
 
-The SDK ships a workflow engine for orchestrating multi-step agent tasks. A `WorkflowDefinition` describes steps; `WorkflowService` runs and tracks them.
+The SDK ships a workflow engine that runs multi-step agent tasks. A `WorkflowDefinition` describes steps; `WorkflowService` runs and tracks them.
 
 ```python
 from django_ai_sdk.workflows import WorkflowDefinition
@@ -390,7 +390,7 @@ run = await WorkflowService.get_run(run_id, user=request.user)  # None when abse
 await WorkflowService.list_listeners(user=request.user)
 ```
 
-Listener implementations are wired in settings:
+You wire listener implementations in settings:
 
 ```python
 AI_SDK_WORKFLOWS = {
@@ -398,8 +398,8 @@ AI_SDK_WORKFLOWS = {
 }
 ```
 
-## CORS and Streaming
+## CORS and streaming
 
 :::note
-`stream_response()` (used by `as_view()`) sets SSE headers and a `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends. Configure CORS for the streaming endpoint via `django-cors-headers` (already a dependency) or `AI_SDK_STREAM_CORS_ORIGIN`.
+`stream_response()` (used by `as_view()`) sets SSE headers and a `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends. Configure CORS for the streaming endpoint with `django-cors-headers` (already a dependency) or `AI_SDK_STREAM_CORS_ORIGIN`.
 :::

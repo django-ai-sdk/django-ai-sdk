@@ -4,21 +4,19 @@ sidebar:
   order: 1
 ---
 
-Let's build your first AI agent in under 5 minutes.
+This page builds your first AI agent in under 5 minutes.
 
-## What You'll Build
+## What you'll build
 
-A simple agent that responds to messages with streaming AI responses. By the end, you'll have a working `/api/chat` endpoint.
+An agent that answers messages with streamed responses. By the end, you'll have a working `/api/chat` endpoint.
 
 ---
 
 ## Install
 
-```bash
-pip install django-ai-sdk
-```
+::install[django-ai-sdk]{tools="uv pip"}
 
-The Haystack runtime is a plain dependency, not an extra: the adapters, pipelines
+The Haystack runtime is a plain dependency, not an extra. The adapters, pipelines
 and generators are Haystack components. Everything else is opt-in, so you install
 only what you use:
 
@@ -27,42 +25,46 @@ only what you use:
 | `qdrant` / `chroma` | a vector store for RAG, plus fastembed | `chroma` also pulls kubernetes, grpc and uvicorn[standard] |
 | `rag` | both vector stores | |
 | `mcp`, `files` | MCP integrations, document extraction | small |
-| `anthropic`, `mistral`, `ollama`, `openrouter`, `huggingface` | one hosted provider each (see [Generators](manual/generators.md)) | small |
+| `anthropic`, `mistral`, `ollama`, `openrouter`, `huggingface` | one hosted provider each (see [Generators](../manual/generators.md)) | small |
 | `providers` | all five of those | small |
-| `transformers` | runs a Hugging Face model locally | **pulls torch (~500 MB)** |
+| `transformers` | runs a Hugging Face model locally | pulls torch (about 500 MB) |
 | `all` | everything above | |
 
+::::details[Why a missing extra fails on first use]
 Each optional feature lives in its own module that imports its package at the top,
-and those modules are loaded on first use - so a Qdrant project never installs
-chromadb, and an OpenAI project never installs mistral. Reach for a feature whose
-extra is missing and you get the import error naming the package, e.g.
-`No module named 'haystack_integrations.document_stores.qdrant'`; the table above
+and the SDK loads those modules on first use. So a Qdrant project never installs
+chromadb, and an OpenAI project never installs mistral. Use a feature whose extra
+is missing and you get the import error naming the package, for example
+`No module named 'haystack_integrations.document_stores.qdrant'`. The table above
 says which extra provides it.
+::::
 
-Streaming needs an ASGI server, but the SDK does not choose one for you: install
-daphne, uvicorn or hypercorn yourself. Nothing the demo project happens to use -
-allauth, DRF, django-cors-headers, a `django-tasks` backend - is a dependency of the
-SDK either.
+Streaming needs an ASGI server, but the SDK does not choose one for you. Install
+daphne, uvicorn or hypercorn yourself. The SDK doesn't depend on the packages the
+demo project happens to use either: allauth, DRF, django-cors-headers or a
+`django-tasks` backend.
 
-```bash
-pip install "django-ai-sdk[haystack]"
-```
+::install[django-ai-sdk[haystack]]{tools="uv pip"}
 
 The `haystack` extra pulls in Haystack and the components agents run on. That's all you need to start.
 
 Want the full set of extras (MCP, vector stores, document parsing, providers)?
 
-```bash
-pip install "django-ai-sdk[all]"
-```
+::install[django-ai-sdk[all]]{tools="uv pip"}
 
 Ready-made HTTP endpoints are separate, so you only pull in the framework you use:
 
-```bash
-pip install "django-ai-sdk[ninja]"  # or: django-ai-sdk[drf]
-```
+::::tabs{sync="framework"}
+:::tab[django-ninja]
+::install[django-ai-sdk[ninja]]{tools="uv pip"}
+:::
 
-See [Views and Routing](views-and-routing.md#pick-a-starting-point).
+:::tab[Django REST framework]
+::install[django-ai-sdk[drf]]{tools="uv pip"}
+:::
+::::
+
+See [Views and Routing](../serving/views-and-routing.md#pick-a-starting-point).
 
 Optional extras you can install narrowly:
 
@@ -75,27 +77,29 @@ Optional extras you can install narrowly:
 
 ## Configure Django
 
-Add the app to your `INSTALLED_APPS`:
+::::steps
+1. Add the app to your `INSTALLED_APPS`:
 
-```python
-# settings.py
-INSTALLED_APPS = [
-    # ... your apps
-    "django_ai_sdk",
-]
-```
+   ```python
+   # settings.py
+   INSTALLED_APPS = [
+       # ... your apps
+       "django_ai_sdk",
+   ]
+   ```
 
-Run migrations:
+2. Run migrations:
 
-```bash
-python manage.py migrate
-```
+   ```bash
+   python manage.py migrate
+   ```
+::::
 
-This creates tables for conversation storage. You won't need to think about them: the SDK handles it automatically.
+This creates tables for conversation storage. The SDK manages them, so you won't need to think about them.
 
-## Create an Agent
+## Create an agent
 
-An agent is just a Python class with personality:
+An agent is a Python class:
 
 ```python
 # agents.py
@@ -140,19 +144,16 @@ class ShakespeareAgent(Agent):
         )
 ```
 
-Three things to note:
-- **name**: What to call your agent
-- **instructions**: How it should behave (the system prompt)
-- **get_pipeline_adapter**: Returns the `Stream` that powers streaming chat
-- **llm**: The generator factory `get_llm()` builds - it defaults to `openai_responses_chat`, so you can leave it out for OpenAI
+Four things to note:
+- `name`: what to call your agent
+- `instructions`: how it should behave (the system prompt)
+- `get_pipeline_adapter`: returns the `Stream` that runs streaming chat
+- `llm`: the generator factory `get_llm()` builds. It defaults to `openai_responses_chat`, so you can leave it out for OpenAI
 
-`openai_responses_chat` works with any endpoint that speaks the OpenAI Responses API. Point `OPENAI_API_URL` at a local server (vLLM, llama.cpp) or leave it unset for OpenAI, and use `openai_chat` for a Chat Completions-only endpoint. Other providers get their own factory - see [Generators](manual/generators.md). Every `AI_SDK_*` setting is listed in the [Settings Reference](manual/settings.md).
+`openai_responses_chat` works with any endpoint that speaks the OpenAI Responses API. Point `OPENAI_API_URL` at a local server (vLLM, llama.cpp) or leave it unset for OpenAI, and use `openai_chat` for a Chat Completions-only endpoint. Other providers get their own factory. See [Generators](../manual/generators.md). Every `AI_SDK_*` setting is listed in the [Settings Reference](../manual/settings.md).
+## Register your agent
 
-That's it. No complex configuration. No framework setup.
-
-## Register Your Agent
-
-Your agent must be **registered** before it can be used. Add it to `AI_SDK_AGENTS` in your `settings.py`:
+Your agent must be registered before it can be used. Add it to `AI_SDK_AGENTS` in your `settings.py`:
 
 ```python
 # settings.py
@@ -161,7 +162,7 @@ AI_SDK_AGENTS = [
 ]
 ```
 
-The SDK loads these classes at startup. Each agent gets a **stable UUID** derived from its module and class name, so you can retrieve it anywhere:
+The SDK loads these classes at startup. Each agent gets a stable UUID derived from its module and class name, so you can retrieve it anywhere:
 
 ```python
 from django_ai_sdk.agents.services import AgentService
@@ -170,9 +171,9 @@ from django_ai_sdk.agents.services import AgentService
 agent = await AgentService.get(agent_id)
 ```
 
-Agents are also registered automatically by the `@auto_register` decorator: `AI_SDK_AGENTS` just makes sure the module is imported.
+The `@auto_register` decorator also registers agents. `AI_SDK_AGENTS` makes sure the module is imported.
 
-## Wire It to a View
+## Wire it to a view
 
 Connect your agent to Django Ninja:
 
@@ -191,7 +192,7 @@ async def chat(request, payload: ChatRequest):
     return await agent.as_view(payload.messages, user=request.user)
 ```
 
-The `as_view()` method handles everything:
+The `as_view()` method does the rest:
 - Protocol conversion (Vercel AI SDK Data Stream Protocol in, `ChatMessage`s internally)
 - Building the pipeline adapter and streaming to the model
 - Returning an SSE `StreamingHttpResponse`
@@ -211,25 +212,27 @@ urlpatterns = [
 ]
 ```
 
-## Test It
+## Test it
 
-Start your server:
+::::steps
+1. Start your server:
 
-```bash
-python manage.py runserver
-```
+   ```bash
+   python manage.py runserver
+   ```
 
-Send a message:
+2. Send a message:
 
-```bash
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -H "Accept: text/event-stream" \
-  -d '{
-    "messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello!"}]}],
-    "agent_id": "your-agent-uuid"
-  }'
-```
+   ```bash
+   curl -X POST http://localhost:8000/api/chat \
+     -H "Content-Type: application/json" \
+     -H "Accept: text/event-stream" \
+     -d '{
+       "messages": [{"role": "user", "parts": [{"type": "text", "text": "Hello!"}]}],
+       "agent_id": "your-agent-uuid"
+     }'
+   ```
+::::
 
 You'll see a streaming response:
 
@@ -246,30 +249,30 @@ data: {"type":"finish"}
 data: [DONE]
 ```
 
-**You did it!** Your agent is live and streaming responses.
+Your agent now streams responses.
 
 :::note
-**What just happened?** `as_view()` converted the protocol messages to internal `ChatMessage`s, `get_pipeline_adapter()` built a `ToolAgent` pipeline and returned a `Stream`, Haystack streamed chunks normalized into `StreamEvent`s, and the events were serialized to the Vercel protocol over SSE. All in about 50 lines of code.
+**What just happened?** `as_view()` converted the protocol messages to internal `ChatMessage`s. `get_pipeline_adapter()` built a `ToolAgent` pipeline and returned a `Stream`. Haystack streamed chunks, normalized into `StreamEvent`s. The protocol handler serialized the events to the Vercel protocol over SSE. All of this takes about 50 lines of code.
 :::
 
-## Next Steps
+## Next steps
 ::::cards
-:::card[Give It Tools]{href="agents.md"}
+:::card[Give It Tools]{href="../agents/agents.md"}
 Let it call Python functions
 :::
-:::card[Add Knowledge]{href="agents.md#retrieval-augmented-generation-rag"}
+:::card[Add Knowledge]{href="../agents/agents.md#retrieval-augmented-generation-rag"}
 Connect a knowledge base with RAG
 :::
-:::card[Add Integrations]{href="integrations.md"}
+:::card[Add Integrations]{href="../agents/integrations.md"}
 GitHub, Linear, weather, MCP
 :::
-:::card[Add Persistence]{href="views-and-routing.md"}
+:::card[Add Persistence]{href="../serving/views-and-routing.md"}
 Threads and message history
 :::
-:::card[Go Deeper]{href="how-it-works.md"}
+:::card[Go Deeper]{href="../architecture/how-it-works.md"}
 How requests flow through the SDK
 :::
-:::card[Developer Manual]{href="manual/index.md"}
+:::card[Developer Manual]{href="../manual/index.md"}
 Architecture details for contributors
 :::
 ::::
