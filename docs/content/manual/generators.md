@@ -1,7 +1,7 @@
 ---
 title: Generators
-type: docs
-weight: 123
+sidebar:
+  order: 123
 ---
 
 `django_ai_sdk.generators` holds one factory per Haystack chat generator class. Each
@@ -33,7 +33,7 @@ Factory names follow the Haystack class name minus `Generator`:
 | `openrouter_chat` | `OpenRouterChatGenerator` | `django-ai-sdk[openrouter]` |
 
 A factory whose integration package is missing raises `ImportError` naming the extra
-that provides it. See [Settings Reference](/manual/settings/#provider-credentials)
+that provides it. See [Settings Reference](settings.md#provider-credentials)
 for the settings each vendor reads.
 
 ## Using a generator on an agent
@@ -142,7 +142,7 @@ table above), and a Haystack `Agent`'s tool loop applies its generation kwargs t
 run would force early steps - "should I call `search_web`?" - into your final
 answer's schema too, and several generators (the last two rows above) accept no
 schema kwarg at all, at any step. Passing both does not raise: `response_format`
-wins and tools are skipped entirely - see [Tools](/protocols/#tools).
+wins and tools are skipped entirely - see [Tools](../protocols.md#tools).
 
 The supported shape is two calls instead of one: run the tool loop free-form, then
 make one more tool-less call to shape the finished text:
@@ -193,7 +193,7 @@ Nothing in `Run`, `Agent`, or the adapters changes.
 ## Token usage while streaming
 
 The adapters never reconfigure a generator: what the factory built is what runs. That
-matters for [token accounting](/manual/tracing/), because the two OpenAI APIs differ:
+matters for [token accounting](tracing.md), because the two OpenAI APIs differ:
 
 - `openai_responses_chat` reports usage on a streamed response without being asked.
 - `openai_chat` (Chat Completions) reports none unless `stream_options` is requested,

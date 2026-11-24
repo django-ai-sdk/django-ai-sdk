@@ -232,9 +232,8 @@ check-extras.sh
 ideas/
 plans/
 
-# Hugo build output (the docs are served from public/docs/; only
+# Docs build output (the docs are served from public/docs/; only
 # public/index.html is tracked in git)
 /public/docs/
-/docs/public/
-/docs/resources/
+/docs/.dokk/
 .tackline/

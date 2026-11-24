@@ -1,7 +1,7 @@
 ---
 title: Test Tooling
-type: docs
-weight: 115
+sidebar:
+  order: 115
 ---
 
 The reusable test infrastructure: shared fixtures, factories, and mock builders in `tests/`.
@@ -112,4 +112,4 @@ storage.store_chat_message = AsyncMock(return_value="msg_1")
 storage.get_messages = AsyncMock(return_value=[])
 ```
 
-Next: [CLI](../cli/), management command implementation.
+Next: [CLI](cli.md), management command implementation.

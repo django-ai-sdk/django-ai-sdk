@@ -1,14 +1,14 @@
 ---
 title: Protocol Handler
-type: docs
-weight: 107
+sidebar:
+  order: 107
 ---
 
 The interface that converts internal events to your frontend's wire format.
 
-{{< callout type="info" >}}
-Usage first? See the [Protocols guide](/protocols/). This page is the API reference.
-{{< /callout >}}
+:::note
+Usage first? See the [Protocols guide](../protocols.md). This page is the API reference.
+:::
 
 ## Interface
 
@@ -78,4 +78,4 @@ response = await stream_response(
 
 `agent.as_view()` uses this internally. Use it directly when a custom view assembles its own adapter, for example a one-off pipeline per request.
 
-Next: [Protocol Parts](../protocol-parts/), the wire format in detail.
+Next: [Protocol Parts](protocol-parts.md), the wire format in detail.

@@ -1,0 +1,47 @@
+# Django AI SDK documentation, built with dokk: make docs-serve / make docs-build
+title = "Django AI SDK"
+description = "Build AI agents in Django: agents, workflows, subagents and RAG."
+site_url = "https://django-ai-sdk.github.io/django-ai-sdk/docs/"
+content_dir = "content"
+out_dir = "../public/docs"
+
+[links]
+github = "https://github.com/django-ai-sdk/django-ai-sdk"
+edit_url = "https://github.com/django-ai-sdk/django-ai-sdk/edit/dev/docs/content/{path}"
+
+[theme]
+style = "vega"
+color = "green"
+
+[[sidebar]]
+label = "Start"
+items = ["index.md", "quickstart.md"]
+
+[[sidebar]]
+label = "Guide"
+items = [
+  "agents.md",
+  "protocols.md",
+  "integrations.md",
+  "views-and-routing.md",
+  "overriding-views.md",
+  "errors.md",
+  "how-it-works.md",
+  "cli.md",
+  "oversight.md",
+  "oversight-authoring.md",
+  "workflow-steps.md",
+]
+
+[[sidebar]]
+autogenerate = "manual"
+
+[[sidebar]]
+label = "Links"
+items = [
+  { label = "GitHub", link = "https://github.com/django-ai-sdk/django-ai-sdk" },
+  { label = "PyPI", link = "https://pypi.org/project/django-ai-sdk/" },
+]
+
+[llms]
+enabled = true

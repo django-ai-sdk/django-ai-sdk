@@ -1,10 +1,10 @@
 ---
 title: Files
-type: docs
-weight: 118
+sidebar:
+  order: 118
 ---
 
-How uploaded files become searchable text: the processor → transforms pipeline, the upload/processing lifecycle, and the thread file memory. The public entry point is `FilePipeline`; agents declare one per supported file type via the `file_pipelines` attribute (see the [Agents guide](/agents/#files)).
+How uploaded files become searchable text: the processor → transforms pipeline, the upload/processing lifecycle, and the thread file memory. The public entry point is `FilePipeline`; agents declare one per supported file type via the `file_pipelines` attribute (see the [Agents guide](../agents.md#files)).
 
 ## The Pipeline
 
@@ -92,7 +92,7 @@ status = await aget_task_status(task_id)  # from DocumentUploadResponse.task_id
 
 Key behaviors:
 
-- **Where it runs**: with the default `django_tasks` backend the pipeline runs inline in the upload request; a worker only picks it up once you configure a durable `TASKS` backend. See [Background Tasks](/manual/settings/#background-tasks).
+- **Where it runs**: with the default `django_tasks` backend the pipeline runs inline in the upload request; a worker only picks it up once you configure a durable `TASKS` backend. See [Background Tasks](settings.md#background-tasks).
 - **Timeouts**: a run is failed after `AI_SDK_FILE_PIPELINE_TIMEOUT` seconds (default 900); `django_tasks` has no native timeout.
 - **Stale processing**: a document stuck in `processing` past its deadline (timeout + 60s) is failed as orphaned when its status is polled via `get_document_status()` / `get_task_status()`.
 - **Cancellation**: `cancelled_at` is checked at each `on_step` checkpoint (between processor/transforms), never mid-call.
@@ -162,7 +162,7 @@ class MyAgent(Agent):
     tool_artifacts = {ASK_IMAGE_TOOL: ASK_IMAGE_ARTIFACT}
 ```
 
-See [Artifacts after a tool](../../agents/#artifacts-after-a-tool).
+See [Artifacts after a tool](../agents.md#artifacts-after-a-tool).
 
 ## Thread File Memory
 
@@ -175,7 +175,7 @@ await MemoryService.delete_thread_file(thread_id, doc_id, user=request.user)
 await MemoryService.get_document_status(doc_id, user=request.user)           # DocumentStatusOut
 ```
 
-The demo wires this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`) so the frontend knows how many files a thread has and which memory holds them. See [Memories](/manual/memories/) for the full API.
+The demo wires this to `GET /threads/{id}/files/meta/` (`aget_thread_file_meta`) so the frontend knows how many files a thread has and which memory holds them. See [Memories](memories.md) for the full API.
 
 ## Fonts
 

@@ -1,16 +1,16 @@
 ---
 title: How It Works
-type: docs
-weight: 8
+sidebar:
+  order: 8
 ---
 
 This page explains what happens under the hood when a request flows through the SDK. You don't need to know this to use it, but it helps when extending or debugging things.
 
-![Request flow](/images/graphs/data_flow.png)
+![Request flow](images/graphs/data_flow.png)
 
-{{< callout type="info" >}}
-Contributor? The [System Architecture](/manual/architecture/) manual page goes deeper into components and design patterns.
-{{< /callout >}}
+:::note
+Contributor? The [System Architecture](manual/architecture.md) manual page goes deeper into components and design patterns.
+:::
 
 ## Request Lifecycle
 
@@ -162,9 +162,9 @@ You don't manually store messages. When you pass `thread_id` to `as_view()`:
 
 If you don't pass `thread_id`, no storage happens: messages stream through and are gone.
 
-{{< callout type="info" >}}
+:::note
 Pass `thread_id` to `as_view()` whenever a conversation should persist. Without it, streaming still works but nothing is saved.
-{{< /callout >}}
+:::
 
 ### Custom storage
 
@@ -218,4 +218,4 @@ async def my_custom_view(request):
 
 It returns a `StreamingHttpResponse` with `content_type="text/event-stream"`, CORS headers, and the `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends.
 
-A custom view that calls `stream_response()` is not guarded by [oversight](/oversight/#limitations).
+A custom view that calls `stream_response()` is not guarded by [oversight](oversight.md#limitations).

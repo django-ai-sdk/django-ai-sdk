@@ -1,12 +1,12 @@
 ---
 title: Step Workflows
-type: docs
-weight: 55
+sidebar:
+  order: 55
 ---
 
 A real pipeline is not only agent steps: it fetches a file, converts it, calls an API, validates what came back, writes rows. This page is how you declare those in Python, so a host does not orchestrate around the engine and lose the record of what happened.
 
-There is one runner. A [stored `WorkflowDefinition`](/manual/workflows/) is compiled into the same `Step` objects this page declares and walked by the same `run_steps`, so both read back from one record. What differs is who authors it and what it may reach: a definition is JSON written at runtime, held to the step types the deployment registered; a pipeline is code, free to do work no model is involved in.
+There is one runner. A [stored `WorkflowDefinition`](manual/workflows.md) is compiled into the same `Step` objects this page declares and walked by the same `run_steps`, so both read back from one record. What differs is who authors it and what it may reach: a definition is JSON written at runtime, held to the step types the deployment registered; a pipeline is code, free to do work no model is involved in.
 
 A step is a named unit of work that reads the run's state and returns a value. The runner does not interpret what it returns.
 
@@ -86,7 +86,7 @@ outcomes = await run_steps(
 
 It sends the inputs named in `history` as the transcript, then one turn. Override the async `user_message(ctx)` to write that turn, or `messages(ctx)` to write the whole conversation; both may query. By default the turn is what the steps in `requires` produced, each under a `[name]` heading. A `None` result is reported as `failed`, not stored.
 
-A step's call is a turn under the agent's [oversight](/oversight/) policy, recorded on the channel `workflow:<key>:<step>`. The key is the run's `workflow_key`, which the server sets when it opens the run: the stored workflow's slug, the registered workflow's name, or `adhoc` for any other definition. A definition's own `name` never picks it, so a definition cannot borrow the channel a policy chooses by, and no stored or registered workflow may be called `adhoc`. The `history` inputs are not what the server stored: the gate judges them on every run. A question the policy blocks or an answer it withholds fails the step (`blocked by oversight: ...` or `withheld by oversight: ...`), so `on_error` decides what that costs; a masked structured result is rebuilt from its masked JSON. A step that overrides `run()` and calls the agent itself passes `channel=self.channel(ctx)` and handles `django_ai_sdk.errors.Blocked`.
+A step's call is a turn under the agent's [oversight](oversight.md) policy, recorded on the channel `workflow:<key>:<step>`. The key is the run's `workflow_key`, which the server sets when it opens the run: the stored workflow's slug, the registered workflow's name, or `adhoc` for any other definition. A definition's own `name` never picks it, so a definition cannot borrow the channel a policy chooses by, and no stored or registered workflow may be called `adhoc`. The `history` inputs are not what the server stored: the gate judges them on every run. A question the policy blocks or an answer it withholds fails the step (`blocked by oversight: ...` or `withheld by oversight: ...`), so `on_error` decides what that costs; a masked structured result is rebuilt from its masked JSON. A step that overrides `run()` and calls the agent itself passes `channel=self.channel(ctx)` and handles `django_ai_sdk.errors.Blocked`.
 
 The transcript is **named, not guessed**. An input is data until a step names it as `history`, so a list of role-shaped rows that happens to be data is never mistaken for a prompt, and a workflow with two agent steps can give each a different conversation. What a history field holds is the author's choice: a `str` arrives as one user turn, a message dict as one message, a list item-by-item.
 
@@ -273,7 +273,7 @@ as a real failure.
 
 ## Limitations
 
-Workflows are a beta: retries, timeouts, parallel steps, one worker, run data and snapshot semantics are listed once, under [Beta limitations](/manual/workflows/#beta-limitations). What concerns writing steps in particular:
+Workflows are a beta: retries, timeouts, parallel steps, one worker, run data and snapshot semantics are listed once, under [Beta limitations](manual/workflows.md#beta-limitations). What concerns writing steps in particular:
 
 - **No re-run of one step.** A failed step runs again only when the whole run is resumed, which continues past whatever already completed.
 - **A blocked event loop blocks the worker.** A step that blocks the loop (sync work not wrapped in `sync_to_async`) stalls every other run in that worker until it returns.

@@ -26,26 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Setup Graphviz
         run: |
           sudo apt-get update
           sudo apt-get install -y graphviz
-          pip install graphviz
-
-      - name: Setup Hugo
-        uses: peaceiris/actions-hugo@v3
-        with:
-          extended: true
 
       - name: Build docs
-        run: |
-          python docs/graph.py
-          hugo --source docs --baseURL /django-ai-sdk/docs/ --destination ../public/docs
+        run: make docs-build
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

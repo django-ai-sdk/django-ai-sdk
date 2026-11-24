@@ -1,7 +1,7 @@
 ---
 title: Protocol Parts
-type: docs
-weight: 108
+sidebar:
+  order: 108
 ---
 
 Wire-format reference for protocol handlers. Primarily for contributors working on handlers or adapters.
@@ -78,7 +78,7 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 
 ## Oversight parts
 
-When an [oversight](/oversight/) rule acts on a turn, the stream says so, and the notices are stored with the message:
+When an [oversight](../oversight.md) rule acts on a turn, the stream says so, and the notices are stored with the message:
 
 ```
 {"type":"data-oversight","data":{"turn_id":"...","stage":"gate","outcome":"masked","input":"Mail me at [EMAIL]"}}
@@ -86,7 +86,7 @@ When an [oversight](/oversight/) rule acts on a turn, the stream says so, and th
 {"type":"finish","finishReason":"content-filter"}
 ```
 
-`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A blocked question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](../oversight/#client-notices).
+`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A blocked question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](oversight.md#client-notices).
 
 ## Warmup parts
 
@@ -176,5 +176,5 @@ Rules: each part on its own `data:` line (JSON with `ensure_ascii=False`); `\n\n
 ## References
 
 - [Vercel AI SDK Data Stream Protocol](https://ai-sdk.dev/docs/ai-sdk-ui/streaming-protocol)
-- [Stream and Run](../stream-and-run/): event emission
-- [Protocol Handler](../protocol-handler/): the handler interface
+- [Stream and Run](stream-and-run.md): event emission
+- [Protocol Handler](protocol-handler.md): the handler interface

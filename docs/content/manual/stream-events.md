@@ -1,7 +1,7 @@
 ---
 title: Stream Events
-type: docs
-weight: 105
+sidebar:
+  order: 105
 ---
 
 The normalized events `Stream.stream()` yields, and how tool calls and errors surface.
@@ -16,7 +16,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `TextChunkEvent` | Text token | `content` |
 | `ReasoningChunkEvent` | Reasoning token | `content` |
 | `DataEvent` | Arbitrary structured data | `data_type`, `data` |
-| `DataEvent` (`oversight`) | An [oversight](../oversight/#client-notices) rule acted at the gate, the tool stage or finish | `data_type="oversight"`, `data`: `turn_id`, `stage`, `outcome`, and `message`, `replace` or `input` as they apply |
+| `DataEvent` (`oversight`) | An [oversight](oversight.md#client-notices) rule acted at the gate, the tool stage or finish | `data_type="oversight"`, `data`: `turn_id`, `stage`, `outcome`, and `message`, `replace` or `input` as they apply |
 | `ToolCallStartEvent` | Tool call begins | `tool_call_id`, `tool_name` |
 | `ToolInputChunkEvent` | Incremental tool args | `tool_call_id`, `input_chunk` |
 | `ToolInputCompleteEvent` | Tool args ready | `tool_call_id`, `tool_name`, `tool_input` |
@@ -25,7 +25,7 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `SuggestionEvent` | Follow-up questions | `suggestions` |
 | `TextEndEvent` | The answer's text is complete; citations may still follow | (none) |
 | `MessageEndEvent` | Message complete | `finish_reason` (`content-filter` when oversight blocked the question or withheld the answer) |
-| `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](/errors/)) |
+| `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](../errors.md)) |
 | `StreamEndEvent` | Stream terminated | (none) |
 
 ## Handling Events
@@ -69,4 +69,4 @@ Helpers: `parse_tool_input()` JSON-decodes tool arguments (falling back to the r
 - Cancellation (`pipeline_task.cancel()` in `finally`) persists the partial message with `finish_reason="cancelled"`.
 - `MessageEndEvent` and `StreamEndEvent` always terminate the stream cleanly.
 
-Next: [ID Generation](../id-generation/), how the `message_id` flows through the system.
+Next: [ID Generation](id-generation.md), how the `message_id` flows through the system.

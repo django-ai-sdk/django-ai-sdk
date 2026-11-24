@@ -1,16 +1,16 @@
 ---
 title: Stream and Run
-type: docs
-weight: 104
+sidebar:
+  order: 104
 ---
 
 The two adapters an `Agent` uses to talk to a Haystack model: `Stream` (streaming chat) and `Run` (non-streaming calls).
 
-{{< callout type="info" >}}
-Usage first? See the [Protocols guide](/protocols/). This page is the API reference.
-{{< /callout >}}
+:::note
+Usage first? See the [Protocols guide](../protocols.md). This page is the API reference.
+:::
 
-![Adapter Flow](/images/graphs/adapter_flow.png)
+![Adapter Flow](../images/graphs/adapter_flow.png)
 
 | Adapter | Purpose | Powered by |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ class MyAgent(Agent):
 
 `Run.get_messages()` keeps only `user` and `assistant` messages and converts them to Haystack `ChatMessage`s; a `system_prompt` passed to `run()` is prepended as a system message.
 
-{{< callout type="info" >}}
+:::note
 `Run` only ever wraps a plain generator — it has no notion of tools, and never
 has. Two earlier shapes tried to give it one (`Run(agent=prebuilt_agent)`, then
 `Run(generator, tools=[...])`) and were both deleted: both had zero real
@@ -68,11 +68,11 @@ step-cap setting instead of the calling agent's own limits — a real subagent
 class run headless would have silently lost its own `max_agent_steps`. See
 [Headless tool runs](#headless-tool-runs) below for the shape that replaced
 them.
-{{< /callout >}}
+:::
 
 ## Headless tool runs
 
-![Headless Tool Run Flow](/images/graphs/headless_tool_run_flow.png)
+![Headless Tool Run Flow](../images/graphs/headless_tool_run_flow.png)
 
 An `Agent` can run its own tools to completion **without streaming** — no
 `Stream`, no SSE connection, no client reading chunks. One call in, one final
@@ -91,7 +91,7 @@ with_tools = tools and resolved is None
 ```
 
 - **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
-- **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](../generators/#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
+- **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](generators.md#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
 
 `get_run_adapter()` must return a `Run`: oversight runs as hooks on its Haystack Agent, so anything else would go unchecked and raises `TypeError`. `Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
@@ -109,7 +109,7 @@ return await adapter.run(
 
 This is **the same assembly** `build_subagent()` uses to turn a subagent into
 a real Haystack `Agent` for streamed delegation (see [Subagent
-Delegation](../agent/#subagent-delegation)) — `default_hooks(self)` and
+Delegation](agent.md#subagent-delegation)) — `default_hooks(self)` and
 `max_agent_steps=self.max_agent_steps` are the calling agent's own governance,
 not a generic constant. A class with `max_agent_steps = 4` gets 4 steps
 whether it's delegated to live or run headless by itself; one function,
@@ -122,14 +122,14 @@ handoff, where a lost result means a lost answer to the user mid-conversation.
 A headless run has no ongoing conversation to lose context from — the caller
 gets back whatever the last message says, cut short or not.
 
-{{< callout type="warning" >}}
+:::caution
 No shipped code calls `agent.run(tools=True)` yet — not in `django_ai_sdk`,
 not in the demo project. The mechanism is tested and correct, but there's no
 example to copy from; a workflow step that needs tool access is the obvious
 first real caller.
-{{< /callout >}}
+:::
 
-Under an [oversight](../oversight/#agents-and-runs) policy, `Agent.run()` is one
+Under an [oversight](oversight.md#agents-and-runs) policy, `Agent.run()` is one
 turn, and oversight runs inside the Haystack Agent as hooks
 (`django_ai_sdk.oversight.plugin`), which `run_with_oversight` adds on every run. The
 `TurnRequest` says whose turn it is. `run_with_oversight` opens its
@@ -141,7 +141,7 @@ answer is returned (`JudgeAnswerHook`). A refusal raises
 `django_ai_sdk.errors.Blocked`.
 
 What oversight does not guard (`stream_response()` from your own view, an adapter
-other than `Stream`) is listed under [Limitations](/oversight/#limitations).
+other than `Stream`) is listed under [Limitations](../oversight.md#limitations).
 
 ## Stream
 
@@ -158,9 +158,9 @@ Stream(
 )
 ```
 
-{{< callout type="warning" >}}
+:::caution
 `pipeline` must be a real `haystack.Pipeline`: anything else raises `TypeError`. A `ToolAgent` exposes its pipeline via `tool_agent.pipeline()`.
-{{< /callout >}}
+:::
 
 ### Pipeline vs Agent Component
 
@@ -210,4 +210,4 @@ async for event in stream.stream(messages):
     ...
 ```
 
-Next: [Stream Events](../stream-events/), what `stream()` yields.
+Next: [Stream Events](stream-events.md), what `stream()` yields.

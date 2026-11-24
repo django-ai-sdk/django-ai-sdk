@@ -1,7 +1,7 @@
 ---
 title: RAG Variants
-type: docs
-weight: 113
+sidebar:
+  order: 113
 ---
 
 The Haystack-backed RAG pipeline variants, their config, and the document model.
@@ -17,9 +17,8 @@ All variants live in `django_ai_sdk.rags` and subclass `RAGBase`.
 | `QdrantBM25HybridRAG` | Hybrid SPLADE + BGE with RRF fusion | Qdrant |
 
 ## Setup
-
-{{< tabs >}}
-{{< tab name="BM25" >}}
+::::tabs
+:::tab[BM25]
 Lightweight, fast, no GPU. Best for small to medium document sets. `BM25QueryExpanderRAGConfig` is a plain `RAGConfig`: no extra options.
 
 ```python
@@ -30,8 +29,8 @@ rag = BM25QueryExpanderRAG(
     config=BM25QueryExpanderRAGConfig(top_k=5, n_expansions=4),
 )
 ```
-{{< /tab >}}
-{{< tab name="ChromaDB" >}}
+:::
+:::tab[ChromaDB]
 Dense embedding retrieval persisted in ChromaDB.
 
 ```python
@@ -42,8 +41,8 @@ rag = ChromaDBQueryExpanderRAG(
     config=ChromaDBQueryExpanderRAGConfig(top_k=5),
 )
 ```
-{{< /tab >}}
-{{< tab name="Qdrant" >}}
+:::
+:::tab[Qdrant]
 Hybrid retrieval: SPLADE sparse + BGE dense embeddings fused with Reciprocal Rank Fusion (RRF), stored in Qdrant.
 
 ```python
@@ -54,8 +53,8 @@ rag = QdrantBM25HybridRAG(
     config=QdrantBM25HybridRAGConfig(top_k=5),
 )
 ```
-{{< /tab >}}
-{{< /tabs >}}
+:::
+::::
 
 ## Choosing a Variant
 
@@ -120,7 +119,7 @@ from django_ai_sdk.rags.config import QdrantStorageConfig
 config = QdrantStorageConfig.from_settings(memory_id="mem-1")
 ```
 
-See the [Settings Reference](/manual/settings/) for both settings.
+See the [Settings Reference](settings.md) for both settings.
 
 ### Remote Embeddings
 
@@ -131,7 +130,7 @@ AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
 AI_SDK_EMBEDDINGS_DIM = 4096
 ```
 
-Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](/cli/)).
+Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](../cli.md)).
 
 ## Documents
 
@@ -160,4 +159,4 @@ RagDocument(
 
 The default `Agent.get_rag_documents(memory_id)` calls your `get_rag_queryset(memory_id)` and maps the results. Override either to control exactly what gets indexed.
 
-Next: [Storage](../storage/), where conversations persist.
+Next: [Storage](storage.md), where conversations persist.

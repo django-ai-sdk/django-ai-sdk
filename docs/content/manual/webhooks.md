@@ -1,12 +1,12 @@
 ---
 title: Webhooks
-type: docs
-weight: 124
+sidebar:
+  order: 124
 ---
 
 A **webhook integration** points the other way from a tool integration: a platform pushes an event in, an agent answers it, and the answer is posted back in the same channel. The SDK ships `telegram`, `slack` and `github_events`; writing another is three methods.
 
-A webhook is answered by an **agent**, not a workflow: an inbound message is a turn in a conversation, and the thread carries the history. Scheduled work has no one to reply to and runs a workflow instead, from a [cron trigger](/manual/workflows/#triggers). To start a workflow from a message as well, report it with `start_for_event`.
+A webhook is answered by an **agent**, not a workflow: an inbound message is a turn in a conversation, and the thread carries the history. Scheduled work has no one to reply to and runs a workflow instead, from a [cron trigger](workflows.md#triggers). To start a workflow from a message as well, report it with `start_for_event`.
 
 ## Setup
 

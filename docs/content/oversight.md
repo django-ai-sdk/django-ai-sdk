@@ -1,16 +1,16 @@
 ---
 title: Oversight
-type: docs
-weight: 10
+sidebar:
+  order: 10
 ---
 
 **Block prompt injection, mask personal data and send risky turns to a person, on the SDK's entry points your agent runs through, from one Python class.**
 
-Oversight checks and records every turn of an agent that has a policy, on the SDK's entry points: the question, what retrieval found, the tools it called and the answer, whether it runs in chat, through `Agent.run()`, the HTTP run endpoints or a workflow step. It is separate from [tracing](/manual/tracing/): traces are debug data, deleted with their thread and all-or-nothing about content; the oversight record is kept apart, masked as `CAPTURE` says.
+Oversight checks and records every turn of an agent that has a policy, on the SDK's entry points: the question, what retrieval found, the tools it called and the answer, whether it runs in chat, through `Agent.run()`, the HTTP run endpoints or a workflow step. It is separate from [tracing](manual/tracing.md): traces are debug data, deleted with their thread and all-or-nothing about content; the oversight record is kept apart, masked as `CAPTURE` says.
 
-{{< callout type="warning" >}}
+:::caution
 **What core does not check.** Only the SDK's entry points are watched, and a tool result or retrieved source is judged only by the gate lenses your mask, block and `restrict_tools` rules read: see [Limitations](#limitations).
-{{< /callout >}}
+:::
 
 ## Quickstart
 
@@ -72,7 +72,7 @@ INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.oversight"]
 python manage.py migrate
 ```
 
-No extra to install and no settings to add: every `AI_SDK_OVERSIGHT` key has a default ([the settings](/manual/oversight/#settings)).
+No extra to install and no settings to add: every `AI_SDK_OVERSIGHT` key has a default ([the settings](manual/oversight.md#settings)).
 
 ### Run it
 
@@ -98,7 +98,7 @@ The turn is recorded (`Turn`, with the lens's answer and the rule's match) and a
 
 ### Test it
 
-`dry_run` takes a policy through one exchange as a turn would, records nothing and needs no model for pattern and check lenses; `tool_calls=[{"name": ..., "arguments": ...}]` checks the model's calls before the answer ([the manual](/manual/oversight/#testing)). Its judges are real, so a model judge is called: in tests, give a judge lens an `LLMJudge` on a `FakeLLM`. `FakeLLM` runs the agent itself on canned replies, so a test needs no model either:
+`dry_run` takes a policy through one exchange as a turn would, records nothing and needs no model for pattern and check lenses; `tool_calls=[{"name": ..., "arguments": ...}]` checks the model's calls before the answer ([the manual](manual/oversight.md#testing)). Its judges are real, so a model judge is called: in tests, give a judge lens an `LLMJudge` on a `FakeLLM`. `FakeLLM` runs the agent itself on canned replies, so a test needs no model either:
 
 ```python
 from unittest.mock import patch
@@ -135,7 +135,7 @@ async def test_the_agent_answers_without_a_model():
 
 ### Review what it queued
 
-Queued turns are `ReviewItem` rows, per queue. The Django admin lists turns, lens answers, rule matches and review items, read-only and without the turn's content. To work the queues, mount the review API, an opt-in layer, and give reviewers its model permissions ([Review API](/manual/oversight/#review-api)):
+Queued turns are `ReviewItem` rows, per queue. The Django admin lists turns, lens answers, rule matches and review items, read-only and without the turn's content. To work the queues, mount the review API, an opt-in layer, and give reviewers its model permissions ([Review API](manual/oversight.md#review-api)):
 
 ```python
 from django_ai_sdk.contrib.ninja import get_oversight_router
@@ -638,9 +638,9 @@ Reflect and notifications run as `django-tasks` tasks on the `default` queue: co
 
 ## When things fail
 
-A lens has failed when its check or judge raised, timed out, missed the stage's deadline (`DEADLINE_MS`), or was handed more text than it reads. Under `FAIL_MODE` `"closed"`, the default, an enforced rule that blocks, masks or takes tools away counts as matched when a lens it reads failed: a judge's outage blocks the turns its rules guard rather than let them through unjudged. `"open"` lets them through and records the failure; a policy may set its own `fail_mode` ([the settings](/manual/oversight/#settings)).
+A lens has failed when its check or judge raised, timed out, missed the stage's deadline (`DEADLINE_MS`), or was handed more text than it reads. Under `FAIL_MODE` `"closed"`, the default, an enforced rule that blocks, masks or takes tools away counts as matched when a lens it reads failed: a judge's outage blocks the turns its rules guard rather than let them through unjudged. `"open"` lets them through and records the failure; a policy may set its own `fail_mode` ([the settings](manual/oversight.md#settings)).
 
-`manage.py check` reports a broken policy, an unknown judge alias or a deadline a judge cannot meet before a turn does: every check is in the [manual](/manual/oversight/#system-checks).
+`manage.py check` reports a broken policy, an unknown judge alias or a deadline a judge cannot meet before a turn does: every check is in the [manual](manual/oversight.md#system-checks).
 
 ### When a turn breaks
 
@@ -650,7 +650,7 @@ A turn is written when its gate ends, before the model runs, with status `open` 
 python manage.py oversight_sweep --stale-after 30m --reflect-after 10m --limit 500
 ```
 
-It marks turns still `open` after `--stale-after` as `interrupted` (a turn still running is closed as usual when it ends), and queues reflection again for turns whose task was lost or whose worker died holding the lease ([Commands](/manual/oversight/#commands)).
+It marks turns still `open` after `--stale-after` as `interrupted` (a turn still running is closed as usual when it ends), and queues reflection again for turns whose task was lost or whose worker died holding the lease ([Commands](manual/oversight.md#commands)).
 
 A turn that ends in an error of its run (the model failed mid-stream, a tool raised, the client went away before finish) is closed with that error (`"disconnected"` for a client gone) and a blank outcome, unless a rule had already acted: it allowed nothing through.
 
@@ -681,14 +681,14 @@ A thread has its history judged once, each message on its own turn:
 
 ## What the person sees: auto and live
 
-- **Auto** (the default, `stream_mode = "auto"` on the policy or `STREAM_MODE`). The answer is held while an enforced rule may mask or withhold it at finish, and streams live otherwise; decided on each turn, so a rule switched to enforce holds the next answer. A policy in report mode streams live. A held answer, and what its tools were given and found, is shown only once finish passed it; meanwhile the chat shows which tools run. Reasoning is then neither shown nor stored: no lens judges it. Tool cards show what the model saw, its tool results masked at the tool stage: to keep something out of the tool cards, mask it there. Rows an artifact tool wrote with an answer that is withheld are deleted with it. A withheld answer also drops every tool call's arguments and result, from the store and the released cards, except a tool's receipt ([Tool receipts](/agents/#tool-receipts)): the keys it declared, so a workflow run it started can still be found.
+- **Auto** (the default, `stream_mode = "auto"` on the policy or `STREAM_MODE`). The answer is held while an enforced rule may mask or withhold it at finish, and streams live otherwise; decided on each turn, so a rule switched to enforce holds the next answer. A policy in report mode streams live. A held answer, and what its tools were given and found, is shown only once finish passed it; meanwhile the chat shows which tools run. Reasoning is then neither shown nor stored: no lens judges it. Tool cards show what the model saw, its tool results masked at the tool stage: to keep something out of the tool cards, mask it there. Rows an artifact tool wrote with an answer that is withheld are deleted with it. A withheld answer also drops every tool call's arguments and result, from the store and the released cards, except a tool's receipt ([Tool receipts](agents.md#tool-receipts)): the keys it declared, so a workflow run it started can still be found.
 - **Live** (`stream_mode = "live"`). The answer reaches the client as the model writes it. Nothing judges it while it streams: finish fixes it once the stream ends. When finish blocks or masks, the last part tells the client to replace the answer on screen, and the stored message is already the fixed one. An answer is never cut off mid-stream.
 - **Tool calls**, in either mode, while an enforced rule may block a call for what it holds: a call's arguments reach the client with its result, once the tool stage let the call run, and a blocked call's arguments are not sent or stored. The policy of the turn that streams decides this: a subagent's calls under a stricter policy of its own are checked and recorded in its own turn, and streamed as the coordinator's policy says.
 - **Reflect** fixes only the stored copy. It runs after the stream has closed and pushes nothing to the client. The stored message is masked and carries a notice, so a reloaded thread shows it as adjusted.
 
-{{< callout type="warning" >}}
+:::caution
 In live mode the client has the whole text before finish runs: an enforced finish `Mask` or `Block` then only replaces what the client already showed, and only in a client that applies the `replace` notice (`ai_sdk.oversight.W011` warns). Stock clients that ignore `data-*` parts, and the OpenAI protocol, never do. A Markdown image in the answer, rendered by the client, makes it fetch the image's URL, with whatever data the URL carries, before the exfiltration lens can stop it. `auto` holds exactly when such a rule is enforced. For an agent that reads sensitive data, keep `auto` and enforce the security pack's `exfiltration_in_answer`, so the answer is held until finish has looked for such links, or use a client that does not load remote images. A client or channel that needs the whole answer before it shows anything buffers it itself.
-{{< /callout >}}
+:::
 
 ## What the client is told
 
@@ -698,7 +698,7 @@ What the gate, the tool stage and finish did reaches the chat client as a `data-
 {"turn_id": "...", "stage": "gate", "outcome": "masked", "input": "Mail me at [EMAIL]"}
 ```
 
-Every key, the finish reasons and how the notices are stored are in [the manual](/manual/oversight/#client-notices). By default (`CLIENT_DETAIL`) a part is sent only when an enforced rule acted in a way the person sees, and it names no rules: rule names and every stage's answers would say what the policy tests. A queue, an alert or a notification is never told on its own, so a client cannot probe the policy with it. A blocked tool call reaches the client as that tool's result, `{"refused": "<the rule's message>"}`.
+Every key, the finish reasons and how the notices are stored are in [the manual](manual/oversight.md#client-notices). By default (`CLIENT_DETAIL`) a part is sent only when an enforced rule acted in a way the person sees, and it names no rules: rule names and every stage's answers would say what the policy tests. A queue, an alert or a notification is never told on its own, so a client cannot probe the policy with it. A blocked tool call reaches the client as that tool's result, `{"refused": "<the rule's message>"}`.
 
 ## Where turn content goes
 
@@ -737,7 +737,7 @@ A policy's `capture` says how much of a turn's content the record keeps; the dep
 
 Everything that can quote a turn lives in its **content**: the question, the answer, the history, the sources and tool calls, and beside them what was said about the turn in words: judges' reasons, the names a judge gave in its own words for an `Entities` lens, and per-item scores keyed by source. Capture decides what of that is kept, and deleting the thread deletes all of it at once.
 
-The **rows** (the turn, its answers and matches) and the review items keep, at every level, only what cannot quote the turn: who asked (the user's id), outcome, labels and severity; each answer's value, confidence, who answered and error, and where in the text it pointed (offsets and labels); the rule matches; who closed a review and whether they agreed. An answer's value there is the record's: a flag, a label, a score, and for an `Entities` lens the labels it declares or the kinds its patterns report (`["email", "iban"]`). Any other name is `"[found]"` ([`LensAnswer`](/manual/oversight/#models)).
+The **rows** (the turn, its answers and matches) and the review items keep, at every level, only what cannot quote the turn: who asked (the user's id), outcome, labels and severity; each answer's value, confidence, who answered and error, and where in the text it pointed (offsets and labels); the rule matches; who closed a review and whether they agreed. An answer's value there is the record's: a flag, a label, a score, and for an `Entities` lens the labels it declares or the kinds its patterns report (`["email", "iban"]`). Any other name is `"[found]"` ([`LensAnswer`](manual/oversight.md#models)).
 
 | Capture | The content keeps |
 | --- | --- |
@@ -750,7 +750,7 @@ A stretch a lens found in a tool call is masked only where the built-in patterns
 
 Under `masked`, reflect does not judge the masked content where a chat thread stores the turn: it reads the question and answer as the thread stores them, so a mask it asks for reaches the stored answer. A turn with no stored messages (a run endpoint) is judged as its content keeps it, masked.
 
-Retention is per policy: `{"content": 90, "metadata": 730}` days by default, stamped on each row as `expires_at`; `manage.py oversight_prune` deletes what expired: schedule it daily ([Retention](/manual/oversight/#retention)).
+Retention is per policy: `{"content": 90, "metadata": 730}` days by default, stamped on each row as `expires_at`; `manage.py oversight_prune` deletes what expired: schedule it daily ([Retention](manual/oversight.md#retention)).
 
 ## Forgetting
 
@@ -785,6 +785,6 @@ Oversight keeps content in the clear, masked as `CAPTURE` says. It is not encryp
 
 ## Next
 
-- The [Oversight manual](/manual/oversight/): every class, setting, model and check.
-- The [review API](/manual/oversight/#review-api): read turns and resolve review items, behind model permissions.
-- [Runtime authoring](/oversight-authoring/): define whole policies without a deploy, checked like code's, and turn their own rules and lenses on or off; an opt-in app.
+- The [Oversight manual](manual/oversight.md): every class, setting, model and check.
+- The [review API](manual/oversight.md#review-api): read turns and resolve review items, behind model permissions.
+- [Runtime authoring](oversight-authoring.md): define whole policies without a deploy, checked like code's, and turn their own rules and lenses on or off; an opt-in app.

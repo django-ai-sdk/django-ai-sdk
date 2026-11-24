@@ -1,7 +1,7 @@
 ---
 title: Integrations
-type: docs
-weight: 4
+sidebar:
+  order: 4
 ---
 
 **Integrations** give agents tools from external services: GitHub, Linear, Notion, weather, or any MCP server. Each integration is its own Django app that registers itself on startup; an agent opts in by listing integration names.
@@ -40,9 +40,9 @@ get_integrations(["linear", "weather"])   ← integrations registry
 
 `weather` needs no setup at all and works out of the box. The MCP-backed ones connect to an MCP server you configure (see below).
 
-{{< callout type="info" >}}
+:::note
 `weather` requires no credentials: just add it to `INSTALLED_APPS` and an agent's `integrations` list and it works.
-{{< /callout >}}
+:::
 
 ---
 
@@ -77,10 +77,8 @@ Every tool the integration exposes reaches this agent, namespaced as `linear_...
 ## MCP Servers
 
 MCP (Model Context Protocol) servers plug into agents through three configuration kinds, declared in `AI_SDK_INTEGRATIONS` under the server name:
-
-{{< tabs >}}
-
-{{< tab name="Static server" >}}
+::::tabs
+:::tab[Static server]
 ```python
 AI_SDK_INTEGRATIONS = {
     "my_server": {
@@ -91,9 +89,8 @@ AI_SDK_INTEGRATIONS = {
     },
 }
 ```
-{{< /tab >}}
-
-{{< tab name="Token-authenticated server" >}}
+:::
+:::tab[Token-authenticated server]
 ```python
 AI_SDK_INTEGRATIONS = {
     "my_server": {
@@ -103,9 +100,8 @@ AI_SDK_INTEGRATIONS = {
     },
 }
 ```
-{{< /tab >}}
-
-{{< tab name="OAuth server (RFC 9728)" >}}
+:::
+:::tab[OAuth server (RFC 9728)]
 MCP servers that advertise OAuth discovery are connected interactively. The SDK discovers the authorization and token endpoints, manages the client registration and PKCE flow, and stores the resulting token per user.
 
 ```python
@@ -117,9 +113,8 @@ AI_SDK_INTEGRATIONS = {
     },
 }
 ```
-{{< /tab >}}
-
-{{< /tabs >}}
+:::
+::::
 
 Related settings:
 
@@ -129,7 +124,7 @@ AI_SDK_MCP_DISCOVERY_CACHE_TTL = 3600  # seconds
 AI_SDK_MCP_OAUTH_SUCCESS_URL = "/settings/integrations"
 ```
 
-The full list (refresh thresholds, issuer allow-lists, client name, cache TTLs) is in the [Settings Reference](/manual/settings/).
+The full list (refresh thresholds, issuer allow-lists, client name, cache TTLs) is in the [Settings Reference](manual/settings.md).
 
 ### Declaring MCP servers in the database
 
@@ -165,9 +160,9 @@ AI_SDK_INTEGRATION_CB_COOLDOWN = 60      # seconds a failing integration is skip
 
 Each integration's `get_status()` reports one of `active`, `degraded`, `expired`, or `disconnected`, so a UI can show per-integration health without guessing.
 
-{{< callout type="info" >}}
+:::note
 Slow or dead integrations are bounded by `AI_SDK_INTEGRATION_TIMEOUT` (default 3s) and skipped for `AI_SDK_INTEGRATION_CB_COOLDOWN` (default 60s) while the circuit breaker is open: recovery is automatic.
-{{< /callout >}}
+:::
 
 ---
 
@@ -217,4 +212,4 @@ Add `"myapp.integrations.zendesk"` to `INSTALLED_APPS`, configure it under `AI_S
 
 See `django_ai_sdk/integrations/weather/` for a complete minimal example.
 
-Integrations can also point the other way: `telegram`, `slack` and `github_events` receive events a platform pushes in, and an agent answers them in the same channel. See [Webhooks](/manual/webhooks/).
+Integrations can also point the other way: `telegram`, `slack` and `github_events` receive events a platform pushes in, and an agent answers them in the same channel. See [Webhooks](manual/webhooks.md).

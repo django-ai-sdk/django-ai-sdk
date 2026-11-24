@@ -1,16 +1,16 @@
 ---
 title: Oversight
-type: docs
-weight: 127
+sidebar:
+  order: 127
 ---
 
-The [Oversight guide](/oversight/) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
+The [Oversight guide](../oversight.md) starts with a quickstart and covers the ideas. This page documents what core oversight ships: the classes, settings, stages, models, seams and checks.
 
-Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are the opt-in [authoring app](/oversight-authoring/). A lens or rule declared in code changes only with a deploy.
+Core records turns and creates review items. Reading the record and resolving review items is the review API, an opt-in layer above core ([Review API](#review-api)). Policies operators write at runtime are the opt-in [authoring app](../oversight-authoring.md). A lens or rule declared in code changes only with a deploy.
 
 ## Imports
 
-Everything an app uses imports from `django_ai_sdk.oversight`; its submodules are internal. The declaration API loads with the package; the rest loads on first use, so a policy file imports no model client. The review API (`services`, `schemas`, `permissions`) and the [authoring app](/oversight-authoring/) are opt-in layers with modules of their own.
+Everything an app uses imports from `django_ai_sdk.oversight`; its submodules are internal. The declaration API loads with the package; the rest loads on first use, so a policy file imports no model client. The review API (`services`, `schemas`, `permissions`) and the [authoring app](../oversight-authoring.md) are opt-in layers with modules of their own.
 
 | For | Names |
 | --- | --- |
@@ -54,14 +54,14 @@ Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error
 | `FAIL_MODE` | `"closed"` | What a failed lens means: its check or judge raised, timed out, missed the deadline or was handed more than it reads (too long). `closed` treats an enforced rule that blocks, masks or takes tools away as matched when a lens it reads failed and the lenses that did answer leave it undecided (an `all` with one test already false is decided), withholds a tool result it cannot check, and blocks a turn whose policy cannot be chosen or loaded. A rule matched on a failure only blocks, masks or takes tools away: it never alerts, queues or notifies, so an outage does not flood the review queue. Rules in report mode only record it. `open` lets the turn through and records the failure, and runs a turn whose policy cannot load unguarded. A policy may set its own (`fail_mode`); anything but `"open"` is closed. |
 | `RETENTION` | `{"content": 90, "metadata": 730}` | Days a turn's content (`TurnContent`, with the reasons kept in it, and reviewers' notes) and its metadata (the turn, its answers, matches and review items) are kept, as each row's `expires_at`. A policy may set either. `oversight_prune` deletes expired rows ([Retention](#retention)). |
 | `NOTIFIERS` | `[]` | Where notifying matches are sent: instances, class names, or `{"class": ..., **kwargs}`. As in `JUDGES`, a class name without a dot is one of `django_ai_sdk.oversight.notifiers` (`"LogNotifier"`); otherwise it is a dotted path. One that cannot be built is logged and left out. |
-| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches [authored policies](/oversight-authoring/); `0` reads them every turn. |
+| `RUNTIME_CACHE_SECONDS` | `10` | How long each process caches [authored policies](../oversight-authoring.md); `0` reads them every turn. |
 | `UNGUARDED_MODEL_CALLS` | `"refuse"` | A model called through the SDK's generators where a turn is required (every workflow step) but outside one: `refuse` raises `UnguardedModelCall` before the call, `warn` logs it once per place, `allow` lets it be. A step calls its model through `Agent.run()` or `self.turn()` (`django_ai_sdk.oversight.turns`). |
 
 Outside the dict:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `AI_SDK_MODEL_PRICES` | `{}` | Prices the judges' answers (`Answer.cost`) ([Settings](/manual/settings/)). |
+| `AI_SDK_MODEL_PRICES` | `{}` | Prices the judges' answers (`Answer.cost`) ([Settings](settings.md)). |
 | `TYPESAFE_API_KEY` | unset | The `TypeSafe` judge's key; without it that judge abstains (`ai_sdk.oversight.W005`). |
 | `TYPESAFE_MODEL` | unset | A TypeSafe model to pin; unset leaves the choice to `typesafe-sdk`. `TypeSafe(model=...)` overrides it. |
 
@@ -154,9 +154,9 @@ Remote (`external` names who receives the turn's content; secrets are masked fir
 | `LLMJudge(model=None, *, llm=None, base_url="", api_key_env="", generation_kwargs=None, timeout=None)` | Any chat model. Subclass it and set `instructions` for another system prompt. `base_url` and `api_key_env` name a server of your own: the judge then speaks Chat Completions (Ollama, vLLM, LM Studio, llama.cpp), and abstains while the key's variable is unset. Without them, the default gateway (OpenAI Responses, `OPENAI_API_URL`). `llm`: an SDK generator factory or its dotted path, for another provider. `external = "model gateway"`, 45 s timeout. Structured output where the generator supports it, parsed JSON where not. |
 | `TypeSafe(model=None, *, timeout=None)` | TypeSafe, a hosted commercial classification service. `external = "TypeSafe"`, 20 s timeout. Needs the `typesafe` extra and `TYPESAFE_API_KEY`, else abstains (`ai_sdk.oversight.W005`). Answers `Flag`, `Choice` and `Score` lenses, and an `Entities` lens with `per_source = True` by asking one yes/no per source: the value is the titles of the sources that answer yes, `items` each source's probability. One stage's questions about the same turn go out as one request. A failed request is an `unavailable` error, so `FAIL_MODE` applies and reflect asks again. |
 
-`TypeSafe` is a `Classifier` (`judges.classifier`), the base for any model that answers typed questions: see the guide's [Your own judge](/oversight/#your-own-judge).
+`TypeSafe` is a `Classifier` (`judges.classifier`), the base for any model that answers typed questions: see the guide's [Your own judge](../oversight.md#your-own-judge).
 
-What each remote judge sends, per lens subject and with every limit, is in the guide's [Where turn content goes](/oversight/#where-turn-content-goes).
+What each remote judge sends, per lens subject and with every limit, is in the guide's [Where turn content goes](../oversight.md#where-turn-content-goes).
 
 A judge lens's judges are asked in order until one is sure (its confidence reaches the lens's `min_confidence`). When none is, the last one that answered decides: confidences from different judges are on different scales and are never compared. Every other answer is kept in its `trail`. A chain that ends on an error or the deadline after only unsure answers counts as failed (`FAIL_MODE`), and keeps the unsure answer for the record.
 
@@ -208,7 +208,7 @@ A policy is registered by `@register_policy` (in any module; an installed app's 
 
 `ResolvedPolicy.sources` says where each lens (`lens:<name>`), rule (`rule:<name>`) and policy option (`policy.capture`, ...) came from: the name of the policy that declared it. The extended policies come first and the class wins; a policy's `capture` capped by the deployment's `CAPTURE` says `settings`. A resolved policy is cached until settings change or a policy registers; `invalidate_policy(name)` clears it and every policy that extends it.
 
-An app can register whole policies at runtime. It adds a loader with `add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `invalidate_policy()`), that registers policies (`register_policy`) and removes them (`unregister_policy`). The [authoring app](/oversight-authoring/) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
+An app can register whole policies at runtime. It adds a loader with `add_policy_loader(loader)`: an `async` callable, awaited before policy lookups at most once per `RUNTIME_CACHE_SECONDS` (and again after `invalidate_policy()`), that registers policies (`register_policy`) and removes them (`unregister_policy`). The [authoring app](../oversight-authoring.md) is one. A policy registered this way is built and checked like code's. A loader is code and is trusted like code: only the authoring app adds its own limits on what an authored policy may change.
 
 A policy that fails to load (a missing parent, a cycle) blocks its agents' turns; only `FAIL_MODE = "open"` leaves them unguarded. The reason is logged and kept (`registry.broken_reason(name)`).
 
@@ -310,7 +310,7 @@ Permissions are the `oversight` domain of `AI_SDK_PERMISSIONS`. The default, `dj
 | `VIEW_OVERSIGHT_METRICS` | `django_ai_sdk_oversight.view_turn` | Turns without their content, answers' values, rule matches, counts. |
 | `VIEW_OVERSIGHT_CONTENT` | `django_ai_sdk_oversight.view_turncontent` | On top of metrics: the turn's content, the preview, who asked, thread and message ids, answers' reasons, spans and words, reviewers' notes. |
 | `REVIEW_OVERSIGHT` | `django_ai_sdk_oversight.change_reviewitem` | The review queues, and closing an item with a verdict. The queue lists each item's turn row only to a reader who also holds metrics, and its content only to one who holds content. |
-| `VIEW_OVERSIGHT_AUTHORING` | `django_ai_sdk_oversight_authoring.view_authoredpolicy` | The [policies defined at runtime](/oversight-authoring/) and what a definition may use (the opt-in authoring app). |
+| `VIEW_OVERSIGHT_AUTHORING` | `django_ai_sdk_oversight_authoring.view_authoredpolicy` | The [policies defined at runtime](../oversight-authoring.md) and what a definition may use (the opt-in authoring app). |
 | `AUTHOR_OVERSIGHT` | `django_ai_sdk_oversight_authoring.change_authoredpolicy` | Saving, toggling, trying and deleting a policy defined at runtime. |
 
 A reviewer may hold review alone: they then work the queue from each item's queue and rule, without the turn's row, and close it without seeing the question. Grant metrics, and content, for a reviewer who should judge the turn itself.
@@ -335,7 +335,7 @@ What was forgotten reads back as gone. A turn whose thread or user was deleted, 
 
 `forget_turns(turns)` takes a queryset of turns, locks them, deletes their `TurnContent` rows (the turns stay, `content` cleared), blanks reviewers' notes on them and sets `content_forgotten` on those not closed yet (open, or interrupted), so they store no content when they close. `forget_thread(thread_id)` forgets every turn in a thread. Both run in the caller's transaction.
 
-Deleting a thread calls `forget_thread`. Deleting a user forgets each turn they asked without a thread, 500 turns at a time, then clears `actor_id` on all their turns (`content.forget_actor`). A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](/oversight/#forgetting) says what goes and what stays; [Commands](#commands) run it again).
+Deleting a thread calls `forget_thread`. Deleting a user forgets each turn they asked without a thread, 500 turns at a time, then clears `actor_id` on all their turns (`content.forget_actor`). A failure there is logged and leaves the user's turns as they were, all or nothing ([Forgetting](../oversight.md#forgetting) says what goes and what stays; [Commands](#commands) run it again).
 
 ## Retention
 

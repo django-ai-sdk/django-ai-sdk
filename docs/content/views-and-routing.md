@@ -1,7 +1,7 @@
 ---
 title: Views and Routing
-type: docs
-weight: 5
+sidebar:
+  order: 5
 ---
 
 This page covers exposing agents over HTTP: ready-made endpoints for django-ninja and Django REST framework, a framework-free chat view, and the services underneath if you'd rather write your own.
@@ -16,9 +16,9 @@ This page covers exposing agents over HTTP: ready-made endpoints for django-ninj
 
 The SDK never imports Ninja or DRF itself; the `contrib` layers are optional. Both are thin: every endpoint calls a service (`ThreadService`, `AgentService`, `MemoryService`, `WorkflowService`, `IntegrationService`, `TraceService`), and the services do the permission checks. So whichever you choose, behaviour is the same.
 
-{{< callout type="warning" >}}
+:::caution
 The contrib layers are **beta**: URLs and response shapes may still change between minor releases. Pin your version if a frontend client is generated from them.
-{{< /callout >}}
+:::
 
 ### django-ninja
 
@@ -46,7 +46,7 @@ urlpatterns = [
 ]
 ```
 
-`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](/manual/oversight/#review-api). DRF has no review routes: call `OversightService` from your own view.
+`get_oversight_router()` serves the oversight review API, signed in by session with a CSRF check; see [Review API](manual/oversight.md#review-api). DRF has no review routes: call `OversightService` from your own view.
 
 Each `get_*_router()` builds a **new** Router, so you can trim it and add your own endpoints next to the SDK's without changing the router for anyone else. That is why they are functions rather than module-level routers: Ninja can't remove an endpoint from a router, so `exclude` has to happen while it is built.
 
@@ -64,7 +64,7 @@ List endpoints take `?limit=&offset=`: `limit` defaults to 100 and is capped at 
 
 `exclude` takes endpoint function names, which are also the OpenAPI `operationId`s; a misspelt name raises at startup. Your own routers can live on the same `NinjaAPI`, which is how the studio demo adds its health, digest and account endpoints (`demos/studio/apps/agents/views/ninja.py`).
 
-`register_error_handlers()` covers the whole API, so your own endpoints on it answer errors the same way: raise `NotFound` or `UserError` from `django_ai_sdk.errors` and the client gets the matching code. See [Error Handling](/errors/).
+`register_error_handlers()` covers the whole API, so your own endpoints on it answer errors the same way: raise `NotFound` or `UserError` from `django_ai_sdk.errors` and the client gets the matching code. See [Error Handling](errors.md).
 
 ### Django REST framework
 
@@ -76,7 +76,7 @@ urlpatterns = [
 ]
 ```
 
-That registers `ThreadViewSet`, `MessageViewSet`, `AgentViewSet`, `RuntimeAgentViewSet`, `MemoryViewSet`, `WorkflowViewSet` and `IntegrationViewSet`, plus the streaming `ChatView` at `threads/<id>/chat/`. Authentication, permission and throttle classes come from your `REST_FRAMEWORK` settings. The viewsets answer errors with [error codes](/errors/) whatever your `EXCEPTION_HANDLER` is; set it to `django_ai_sdk.contrib.drf.exception_handler` to give your own views the same.
+That registers `ThreadViewSet`, `MessageViewSet`, `AgentViewSet`, `RuntimeAgentViewSet`, `MemoryViewSet`, `WorkflowViewSet` and `IntegrationViewSet`, plus the streaming `ChatView` at `threads/<id>/chat/`. Authentication, permission and throttle classes come from your `REST_FRAMEWORK` settings. The viewsets answer errors with [error codes](errors.md) whatever your `EXCEPTION_HANDLER` is; set it to `django_ai_sdk.contrib.drf.exception_handler` to give your own views the same.
 
 To change one resource, subclass its viewset and register it on your own router:
 
@@ -106,7 +106,7 @@ The viewsets are ordinary `GenericViewSet`s:
 - **URL names** use the `ai-sdk-` prefix: `ai-sdk-thread-list`, `ai-sdk-memory-detail`, `ai-sdk-chat`, and so on.
 - DRF views are sync; they call the services' sync wrappers (`django_ai_sdk.storage.services.list_threads` and friends).
 
-Need to change what these endpoints do? See [Overriding Views](/overriding-views/) for replacing, removing and extending endpoints in both frameworks.
+Need to change what these endpoints do? See [Overriding Views](overriding-views.md) for replacing, removing and extending endpoints in both frameworks.
 
 ### Your own views
 
@@ -123,7 +123,7 @@ urlpatterns = [
 
 Without a thread the conversation isn't persisted and the client sends the whole history every turn. That suits a help widget or a one-off question. The agent comes from the view (`agent=`), never from the request body, so a client can't switch agents through that URL. The `CHAT` permission is checked either way.
 
-Subclass it and override `get_agent()` or `error_response(exc)` to change how the agent is picked or how failures look. For everything else, call the services as shown in the rest of this page. They raise typed errors (`NotFound`, `PermissionDenied`, ...), and `django_ai_sdk.errors.error_response(exc)` turns any exception into the status and body both contrib layers send. See [Error Handling](/errors/) for the codes.
+Subclass it and override `get_agent()` or `error_response(exc)` to change how the agent is picked or how failures look. For everything else, call the services as shown in the rest of this page. They raise typed errors (`NotFound`, `PermissionDenied`, ...), and `django_ai_sdk.errors.error_response(exc)` turns any exception into the status and body both contrib layers send. See [Error Handling](errors.md) for the codes.
 
 ## The Chat Endpoint
 
@@ -190,17 +190,17 @@ Common agent endpoints:
 
 The run endpoint uses `protocol_handler.to_chat_messages(payload.messages)` then `agent.run(chat_messages, user=..., channel="api")`:
 
-{{< callout type="info" >}}
-`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output. Under an [oversight](/oversight/) policy the run is checked like a chat turn; when the policy refuses, the reply is `{"result": <the policy's message>, "thread_id": "", "blocked": true}` (Ninja and DRF alike). Without a thread, the server never stored the history the client sends: the gate judges it on every request. `/threads/{id}/run/` takes the thread's stored history instead, as chat does, so it is judged once.
-{{< /callout >}}
+:::note
+`/agents/{id}/run/` returns a JSON reply instead of a stream, useful for quick answers, extraction, or structured output. Under an [oversight](oversight.md) policy the run is checked like a chat turn; when the policy refuses, the reply is `{"result": <the policy's message>, "thread_id": "", "blocked": true}` (Ninja and DRF alike). Without a thread, the server never stored the history the client sends: the gate judges it on every request. `/threads/{id}/run/` takes the thread's stored history instead, as chat does, so it is judged once.
+:::
 
 ## Threads and Messages
 
-Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](/manual/memories/) for the full `MemoryService` API and the demo's memory endpoints.
+Conversations live in threads. `ThreadService` manages them; `MemoryService` links the memories (documents) an agent can retrieve in that thread. See the [Memories reference](manual/memories.md) for the full `MemoryService` API and the demo's memory endpoints.
 
-{{< callout type="info" >}}
-Contributor? The [ThreadService](/manual/thread-service/) manual page documents every method and its permission checks.
-{{< /callout >}}
+:::note
+Contributor? The [ThreadService](manual/thread-service.md) manual page documents every method and its permission checks.
+:::
 
 ```python
 from django_ai_sdk.memories.services import MemoryService
@@ -362,7 +362,7 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-See the [Agents guide](/agents/#permissions) for declaring permissions on agents, and the [Permissions reference](/manual/permissions/) for the operation enum, domains, and built-in classes.
+See the [Agents guide](agents.md#permissions) for declaring permissions on agents, and the [Permissions reference](manual/permissions.md) for the operation enum, domains, and built-in classes.
 
 ---
 
@@ -400,6 +400,6 @@ AI_SDK_WORKFLOWS = {
 
 ## CORS and Streaming
 
-{{< callout type="info" >}}
+:::note
 `stream_response()` (used by `as_view()`) sets SSE headers and a `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends. Configure CORS for the streaming endpoint via `django-cors-headers` (already a dependency) or `AI_SDK_STREAM_CORS_ORIGIN`.
-{{< /callout >}}
+:::

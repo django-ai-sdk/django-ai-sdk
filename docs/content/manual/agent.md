@@ -1,14 +1,14 @@
 ---
 title: Agent
-type: docs
-weight: 102
+sidebar:
+  order: 102
 ---
 
 Deep dive into the `Agent` class: what it configures and which hooks the SDK calls.
 
-{{< callout type="info" >}}
-Building an app? See the [Agents guide](/agents/). This page is the internal reference.
-{{< /callout >}}
+:::note
+Building an app? See the [Agents guide](../agents.md). This page is the internal reference.
+:::
 
 ## Responsibilities
 
@@ -21,7 +21,7 @@ The `Agent` is the coordinator. It:
 
 ## Configuration
 
-Key class attributes (full table in the [Agents guide](/agents/)):
+Key class attributes (full table in the [Agents guide](../agents.md)):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ Key class attributes (full table in the [Agents guide](/agents/)):
 | `max_history` | `None` | Cap on messages sent to the model |
 | `response_format` | `None` | Pydantic model for structured `run()` output |
 | `title_generation` | `True` | Auto-generate thread titles |
-| `oversight` | `None` | Oversight policy: a `Policy` subclass, a name, `None` (`DEFAULT_POLICY`) or `False`; see [Oversight](../oversight/#agents-and-runs) |
+| `oversight` | `None` | Oversight policy: a `Policy` subclass, a name, `None` (`DEFAULT_POLICY`) or `False`; see [Oversight](oversight.md#agents-and-runs) |
 | `permissions` | `None` | Permission classes gating operations; `None` or `[]` uses the `agent` domain default |
 | `warmup_on_init` | `False` | Warm up RAG on instantiation |
 | `hidden` / `abstract` | `False` | Registry behavior flags |
@@ -78,7 +78,7 @@ The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get
 
 ## Storage Resolution
 
-`get_storage_adapter(thread_id)` queries all registered adapters for the thread and returns a bound instance, falling back to the agent's `storage_adapter`. See [Storage](../storage/).
+`get_storage_adapter(thread_id)` queries all registered adapters for the thread and returns a bound instance, falling back to the agent's `storage_adapter`. See [Storage](storage.md).
 
 ## Tool Assembly
 
@@ -89,11 +89,11 @@ The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get
 3. Artifact submission tools (`artifacts`)
 4. Subagent agent tools (`agents` list — one `ComponentTool` per subagent)
 
-`get_rag_tools(thread_id, user)` appends one retrieval tool per active memory when `rag_provider` is set. See [RAG](../rag/).
+`get_rag_tools(thread_id, user)` appends one retrieval tool per active memory when `rag_provider` is set. See [RAG](rag.md).
 
 ## Subagent Delegation
 
-![Subagent Flow](/images/graphs/subagent_flow.png)
+![Subagent Flow](../images/graphs/subagent_flow.png)
 
 Declaring `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent into a delegate-able Haystack `ComponentTool`. Only plain `Agent` subclasses can appear in that list — a `RuntimeAgent` (DB-configured) never can, since its `__init__` requires an `AgentSettings` row and `agents = [...]` holds bare classes with no way to pass one in. `hidden = True` on a subagent is a convention, not an enforcement.
 
@@ -103,7 +103,7 @@ Declaring `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent in
   3. **Build it.** `build_subagent(subagent_cls, thread_id, user)` → `(HaystackAgent, Agent)` (the SDK agent, whose policy guards the delegation), or `None` for a cyclic graph (see below).
   4. **Name the tool.** `subagent_tool_name(subagent_cls)` slugifies the display name. A collision appends a short suffix derived from the colliding class's `agent_id` (`research_planner_7f3a2c`) — guaranteed not to collide again, unlike an incrementing counter; the same pattern `get_rag_tools()` already uses for a memory-tool-name collision.
   5. **Wrap it** as a `ComponentTool` scoped to a single `task` string parameter — delegation, not remote tool invocation.
-- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](../stream-and-run/#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one, and oversight's finish joins after it when the subagent runs (`run_with_oversight` adds the hooks), so finish judges the written response.
+- `build_subagent(cls, thread_id, user)` (in `django_ai_sdk.agents.subagent`) builds the subagent with its own generator/tools/prompt plus a `task` user-variable. A second cycle guard here — a `ContextVar` tracking the chain of classes currently being built on this asyncio task — catches a graph cycle the declaration-level check can't (A delegates to B, B delegates to A, several hops apart). Loop limits and hooks come from `default_hooks(subagent)` (`agents/tool_agent.py`): always `LogToolCallsHook`, plus `ToolCallBudgetHook(subagent.max_tool_calls)` when that's set (default `6`; `None` disables the cap), and `max_agent_steps=subagent.max_agent_steps` (default `6`). This is the same function [`Agent.run(tools=True)`](stream-and-run.md#headless-tool-runs) uses for a headless run — a subagent class is governed identically whether it's delegated to live or run by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one, and oversight's finish joins after it when the subagent runs (`run_with_oversight` adds the hooks), so finish judges the written response.
 - The subagent's response becomes the tool output via `outputs_to_string` — see [Handoff output](#handoff-output) for what that contains and how a cut-short run is recovered. The coordinator remains the single source of streamed *text*, but the subagent's tool calls/results stream to the client via `stream_subagent_tools` (default on) and are persisted into the conversation history — `SubagentStreamFilter` forwards only tool chunks, in the order they happen.
 - The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
 
@@ -159,7 +159,7 @@ history written before this existed still loads.
 
 This is display attribution by name, on stored tool calls — a separate system
 from the tracing span's `agent_id`/`agent_name` columns (see
-[Subagents in a trace](/manual/tracing/#subagents-in-a-trace)), which exist for
+[Subagents in a trace](tracing.md#subagents-in-a-trace)), which exist for
 stable lookups and are keyed by id precisely to avoid the name-collision this
 system accepts for display.
 
@@ -223,7 +223,7 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 
 | Hook | Returns |
 | --- | --- |
-| `get_llm(**kwargs)` | A chat generator built by the `llm` factory (default `openai_responses_chat`), with this agent's model and `llm_kwargs` applied. See [Generators](/manual/generators/). |
+| `get_llm(**kwargs)` | A chat generator built by the `llm` factory (default `openai_responses_chat`), with this agent's model and `llm_kwargs` applied. See [Generators](generators.md). |
 
 ## Entry Point
 
@@ -241,4 +241,4 @@ Classmethods that delegate to `rag_provider` (no-op without a provider):
 response = await agent.as_view(payload.messages, thread_id=..., user=request.user)
 ```
 
-Next: [Agent Registry](../agent-registry/), registration and stable-ID resolution.
+Next: [Agent Registry](agent-registry.md), registration and stable-ID resolution.

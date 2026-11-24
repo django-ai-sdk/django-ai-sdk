@@ -1,10 +1,10 @@
 ---
 title: Workflows
-type: docs
-weight: 121
+sidebar:
+  order: 121
 ---
 
-The workflow engine orchestrates multi-step agent tasks: steps that pass results forward, and listeners that watch the run. The [Views and Routing guide](/views-and-routing/#workflows) covers the public API; this page documents the definition schema, models, and how a run executes.
+The workflow engine orchestrates multi-step agent tasks: steps that pass results forward, and listeners that watch the run. The [Views and Routing guide](../views-and-routing.md#workflows) covers the public API; this page documents the definition schema, models, and how a run executes.
 
 ## Installing
 
@@ -225,7 +225,7 @@ A definition is checked when it is written, not only when it runs: `create` and 
 
 ## Who may do what
 
-`WorkflowDefaultPermission` is the default for the `workflow` [permission domain](/manual/permissions/):
+`WorkflowDefaultPermission` is the default for the `workflow` [permission domain](permissions.md):
 
 | Operation | Who |
 | --- | --- |
@@ -361,7 +361,7 @@ At run time an entry that does not import is left out of its registry with a war
 
 ## Step Workflows
 
-A queued run compiles its definition into `Step` objects and calls the `run_steps` walker. The [Step Workflows guide](/workflow-steps/) covers writing step classes and listeners; this section is the reference for the runtime objects.
+A queued run compiles its definition into `Step` objects and calls the `run_steps` walker. The [Step Workflows guide](../workflow-steps.md) covers writing step classes and listeners; this section is the reference for the runtime objects.
 
 ### Step
 
@@ -372,7 +372,7 @@ A queued run compiles its definition into `Step` objects and calls the `run_step
 | `on_error` | `OnError.STOP` | `STOP` stops the run; `CONTINUE` records the failure and runs the rest. |
 | `listeners` | `()` | Listeners that fire for this step alone. |
 
-`config` is what a definition configured a registered step with (empty for a step written in code), and the classmethod `validate_config(config)` raises `ValueError` unless the type accepts it; by default a step accepts no config. `skip_if(ctx) -> str` returns a reason to skip or `""` to run. A skipped step is recorded with its reason and produces nothing, so whatever reads it skips in turn. `run(ctx) -> StepOutcome` is the work. `channel(ctx)` is the channel its turns are recorded on (`workflow:<key>:<step>`), and `turn(ctx, agent_or_policy, input=... | messages=...)` opens one for a model the step calls itself: a step's model calls must come from a turn ([Model calls outside a turn](/oversight/#model-calls-outside-a-turn)).
+`config` is what a definition configured a registered step with (empty for a step written in code), and the classmethod `validate_config(config)` raises `ValueError` unless the type accepts it; by default a step accepts no config. `skip_if(ctx) -> str` returns a reason to skip or `""` to run. A skipped step is recorded with its reason and produces nothing, so whatever reads it skips in turn. `run(ctx) -> StepOutcome` is the work. `channel(ctx)` is the channel its turns are recorded on (`workflow:<key>:<step>`), and `turn(ctx, agent_or_policy, input=... | messages=...)` opens one for a model the step calls itself: a step's model calls must come from a turn ([Model calls of your own](../oversight.md#model-calls-of-your-own-run_with_oversight)).
 
 `AgentStep` adds `agent` / `agent_id`, `schema` (a real pydantic model, so nested output is expressible), `instructions` and `history` (the inputs to send as the conversation — the step names them; a `str` input is one turn, a list is a conversation); it implements `run` as one structured call, with async `system_prompt(ctx)`, `user_message(ctx)` and `messages(ctx)` overrides, which may query. A `None` result is reported as `failed`, not stored.
 

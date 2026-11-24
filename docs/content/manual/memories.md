@@ -1,7 +1,7 @@
 ---
 title: Memories
-type: docs
-weight: 119
+sidebar:
+  order: 119
 ---
 
 A **memory** is a named knowledge base the SDK indexes for retrieval. Documents and files are uploaded into a memory, and a memory can be linked to threads so its contents reach the agent. This page covers the data model, the `MemoryService` API, and the demo's memory endpoints.
@@ -49,11 +49,11 @@ await MemoryService.add_memory_group(memory_id, group_id, can_manage=False, user
 await MemoryService.remove_memory_group(memory_id, group_id, user=request.user)
 ```
 
-Access is enforced by the domain's `MemoryDefaultPermission` (or your `AI_SDK_PERMISSIONS["memory"]` override): see [Permissions](/manual/permissions/).
+Access is enforced by the domain's `MemoryDefaultPermission` (or your `AI_SDK_PERMISSIONS["memory"]` override): see [Permissions](permissions.md).
 
 ## Documents
 
-File uploads are deduplicated by content hash and processed in the background. See [Files](/manual/files/) for the processing lifecycle.
+File uploads are deduplicated by content hash and processed in the background. See [Files](files.md) for the processing lifecycle.
 
 ```python
 resp = await MemoryService.upload_document(memory_id, file, user=request.user)
@@ -82,11 +82,11 @@ await MemoryService.toggle_memory_active(thread_id, memory_id, active=False, use
 await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=request.user)
 ```
 
-`link_memories(agent_id, thread_id)` / `unlink_memories(agent_id, thread_id)` (used in the [Views and Routing guide](/views-and-routing/#threads-and-messages)) resolve the agent's configured default memories before linking.
+`link_memories(agent_id, thread_id)` / `unlink_memories(agent_id, thread_id)` (used in the [Views and Routing guide](../views-and-routing.md#threads-and-messages)) resolve the agent's configured default memories before linking.
 
 ## Demo Endpoints
 
-Ready-made memory endpoints ship in the contrib layers: `get_memories_router()` for django-ninja (mount it at `/memories`) and `MemoryViewSet` for DRF. See [Views and Routing](/views-and-routing/#pick-a-starting-point). List and detail responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed by `django_ai_sdk.views.permissions.memory_permissions()`.
+Ready-made memory endpoints ship in the contrib layers: `get_memories_router()` for django-ninja (mount it at `/memories`) and `MemoryViewSet` for DRF. See [Views and Routing](../views-and-routing.md#pick-a-starting-point). List and detail responses include an `ObjectPermissions` block (`can_read` / `can_write` / `can_manage`) computed by `django_ai_sdk.views.permissions.memory_permissions()`.
 
 | Endpoint | Operation |
 | --- | --- |
@@ -134,6 +134,6 @@ Pass the citation's passages as repeated `quote` parameters (at most 8 count, ea
 
 All three check `VIEW_DOCUMENT` on the document's memory. They need the `files` extra (`pdf-oxide`, `Pillow`, `openpyxl`). A file is converted on every request (about 0.1 s). The helpers work on bytes, not memories: `django_ai_sdk.files.previews` (`to_pdf`, `quote_page`, `render_page`, `passage_areas`) and `django_ai_sdk.views.files` (`asource_file_response`, `asource_page_response`) for your own views.
 
-{{< callout type="warning" >}}
+:::caution
 Calling pdf-oxide yourself? Call `pdf_oxide.disable_logging()` first, or use `files.previews`, which does. With its logging on, converting an Office file deadlocks.
-{{< /callout >}}
+:::

@@ -1,10 +1,10 @@
 ---
 title: CLI Implementation
-type: docs
-weight: 116
+sidebar:
+  order: 116
 ---
 
-Internals of the `warmup_rag` management command. User-facing usage lives in the [CLI guide](/cli/).
+Internals of the `warmup_rag` management command. User-facing usage lives in the [CLI guide](../cli.md).
 
 File: `django_ai_sdk/management/commands/warmup_rag.py`. The SDK also ships `refresh_integrations` (`django_ai_sdk/integrations/mcp/management/commands/refresh_integrations.py`) for MCP integrations.
 

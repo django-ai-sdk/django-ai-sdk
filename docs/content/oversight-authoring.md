@@ -1,12 +1,12 @@
 ---
 title: Runtime authoring
-type: docs
-weight: 11
+sidebar:
+  order: 11
 ---
 
 **Define a whole policy without a deploy: its lenses, its rules and what it builds on.**
 
-Runtime authoring is an opt-in app on top of [oversight](/oversight/) and its [review API](/manual/oversight/#review-api). An operator saves a policy definition; every process turns it into an ordinary `Policy` class and runs it exactly like one declared in code.
+Runtime authoring is an opt-in app on top of [oversight](oversight.md) and its [review API](manual/oversight.md#review-api). An operator saves a policy definition; every process turns it into an ordinary `Policy` class and runs it exactly like one declared in code.
 
 The line between the two is fixed: **a lens or rule declared in code changes only with a deploy**. What an operator authors (a policy, its rules, its lenses) can be changed and turned on or off at runtime.
 
@@ -35,7 +35,7 @@ AI_SDK_OVERSIGHT_AUTHORING = {
 
 Run `manage.py migrate`. On start the app adds a policy loader (`django_ai_sdk.oversight.add_policy_loader`), so every process, task workers included, registers the authored policies. Remove the app and policies are code's alone: core never imports it. To remove it, run `manage.py migrate django_ai_sdk_oversight_authoring zero` first, then take it out of `INSTALLED_APPS`; turns of agents still naming an authored policy are refused from then on.
 
-With the app installed, `get_oversight_router()` also serves its routes, next to the review routes. Leave them out with its `exclude=`. The [manual's permission table](/manual/oversight/#review-api) names the model permission behind each operation.
+With the app installed, `get_oversight_router()` also serves its routes, next to the review routes. Leave them out with its `exclude=`. The [manual's permission table](manual/oversight.md#review-api) names the model permission behind each operation.
 
 | Route | Body | Permission |
 | --- | --- | --- |

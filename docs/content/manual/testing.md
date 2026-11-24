@@ -1,18 +1,18 @@
 ---
 title: Testing
-type: docs
-weight: 114
+sidebar:
+  order: 114
 ---
 
 How the SDK test suite is structured and how to write tests for your agents.
 
-{{< callout type="info" >}}
-Fixtures, factories, and mock builders are documented on [Test Tooling](../test-tooling/).
-{{< /callout >}}
+:::note
+Fixtures, factories, and mock builders are documented on [Test Tooling](test-tooling.md).
+:::
 
 ## Strategy
 
-![Testing Pyramid](/images/graphs/testing_pyramid.png)
+![Testing Pyramid](../images/graphs/testing_pyramid.png)
 
 | Component | Test type | Focus |
 | --- | --- | --- |
@@ -170,4 +170,4 @@ async def test_denied(user_without_perms):
         await ThreadService.get_thread(thread_id, user=user_without_perms)
 ```
 
-Next: [Test Tooling](../test-tooling/), fixtures, factories, and mocks.
+Next: [Test Tooling](test-tooling.md), fixtures, factories, and mocks.

@@ -1,7 +1,7 @@
 ---
 title: Custom Storage Adapters
-type: docs
-weight: 111
+sidebar:
+  order: 111
 ---
 
 Reference for implementing custom storage adapters.
@@ -131,4 +131,4 @@ async def test_custom_adapter_roundtrip():
     assert await storage.restore_message(msg_id) is True
 ```
 
-See [Testing](../testing/) for the full test setup.
+See [Testing](testing.md) for the full test setup.

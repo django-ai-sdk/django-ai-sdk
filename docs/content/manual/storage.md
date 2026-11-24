@@ -1,16 +1,16 @@
 ---
 title: Storage
-type: docs
-weight: 109
+sidebar:
+  order: 109
 ---
 
 How conversations persist. Conversations are **threads** of **messages**; all adapters speak the same `ChatMessage` format.
 
-![Storage Architecture](/images/graphs/storage_architecture.png)
+![Storage Architecture](../images/graphs/storage_architecture.png)
 
-{{< callout type="info" >}}
-Thread operations in views? Use [ThreadService](../thread-service/). Building a custom backend? See [Custom Storage Adapters](../storage-registry/).
-{{< /callout >}}
+:::note
+Thread operations in views? Use [ThreadService](thread-service.md). Building a custom backend? See [Custom Storage Adapters](storage-registry.md).
+:::
 
 ## Available Adapters
 
@@ -96,7 +96,7 @@ The async `storage_callback(chat_message)` is what `StreamWriter` calls to auto-
 3. `Stream.get_final_message()` attaches citation sources, then calls `stream_writer.finalize("stop")`.
 4. `finalize()` invokes `storage_adapter.storage_callback(message)` to persist it.
 
-Failed or cancelled streams persist with `finish_reason="error"` / `"cancelled"`. The same `message_id` flows through SSE, storage, and API endpoints: see [ID Generation](../id-generation/).
+Failed or cancelled streams persist with `finish_reason="error"` / `"cancelled"`. The same `message_id` flows through SSE, storage, and API endpoints: see [ID Generation](id-generation.md).
 
 ## Examples
 
@@ -123,4 +123,4 @@ for msg in await memory_storage.get_messages():
     await db_storage.store_chat_message(msg)
 ```
 
-Next: [ThreadService](../thread-service/), permission-checked thread operations.
+Next: [ThreadService](thread-service.md), permission-checked thread operations.

@@ -1,7 +1,7 @@
 ---
 title: Protocols
-type: docs
-weight: 3
+sidebar:
+  order: 3
 ---
 
 The SDK separates **how a model runs** from **how messages are formatted on the wire**. Two adapters cover how a model runs; protocol handlers cover the wire format.
@@ -10,9 +10,9 @@ The SDK separates **how a model runs** from **how messages are formatted on the 
 - **`Run`**: non-streaming calls with optional structured output
 - **Protocol handlers**: convert protocol messages (e.g. Vercel AI SDK) to internal `ChatMessage`s and back
 
-{{< callout type="info" >}}
-Contributor? Full API references live in the [Developer Manual](/manual/): [Stream and Run](/manual/stream-and-run/), [Stream Events](/manual/stream-events/), [Protocol Handler](/manual/protocol-handler/), [Protocol Parts](/manual/protocol-parts/).
-{{< /callout >}}
+:::note
+Contributor? Full API references live in the [Developer Manual](manual/index.md): [Stream and Run](manual/stream-and-run.md), [Stream Events](manual/stream-events.md), [Protocol Handler](manual/protocol-handler.md), [Protocol Parts](manual/protocol-parts.md).
+:::
 
 ```
                     +--------------------- agent.py ---------------------+
@@ -71,7 +71,7 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 `await stream.stream(messages)` is an async generator of `StreamEvent`s:
 
 1. **`MessageStartEvent`**: carries the `message_id`, generated **once** here as a UUID
-2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](/oversight/) rule acted
+2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](oversight.md) rule acted
 3. **`TextChunkEvent`**: one per chunk from the model
 4. **`ToolCallStartEvent`** / **`ToolInputCompleteEvent`** / **`ToolOutputEvent`**: tool calls as they happen
 5. **`SourceEvent`**: RAG sources, streamed with citation indices
@@ -84,9 +84,9 @@ Any Haystack pipeline works: the only requirement is that it accepts `messages` 
 
 Events carry structured data, so protocol handlers render them into their own format.
 
-{{< callout type="info" >}}
+:::note
 When `store=True` and a `storage_adapter` is set, a `StreamWriter` accumulates chunks into a `ChatMessage` and persists it with the same `message_id` the frontend saw: a single ID through SSE, storage, and later operations like rating or deleting the message.
-{{< /callout >}}
+:::
 
 ### Running a Stream directly
 
@@ -125,7 +125,7 @@ class Movie(BaseModel):
 movie = await run.run(messages, response_format=Movie)
 ```
 
-`Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](/manual/generators/#structured-output).
+`Run` passes the Pydantic model to the generator using whichever kwarg that generator wants - `text_format` on the OpenAI Responses API, `response_format` on Chat Completions - then validates the reply. Vendors without a run-time schema parameter (Ollama, Anthropic, Hugging Face) raise `ValueError` instead of sending a keyword their client would reject; see [Generators](manual/generators.md#structured-output).
 
 ### Tools
 
@@ -143,8 +143,8 @@ The flag defaults to `False` so a one-shot call (title generation, structured
 extraction) never reaches every configured integration unless it explicitly asks to.
 Passing a `response_format` skips tool resolution regardless of `tools` - structured
 output and tool use together are not supported yet, see
-[Structured output from a tool loop](/manual/generators/#structured-output-from-a-tool-loop)
-for the two-call alternative. See [Headless tool runs](/manual/stream-and-run/#headless-tool-runs)
+[Structured output from a tool loop](manual/generators.md#structured-output-from-a-tool-loop)
+for the two-call alternative. See [Headless tool runs](manual/stream-and-run.md#headless-tool-runs)
 for the full call chain and a diagram.
 
 ---
@@ -220,4 +220,4 @@ response = await stream_response(
 )
 ```
 
-`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request. It opens no [oversight](/oversight/#limitations) turn.
+`agent.as_view()` uses this internally. Use it directly when you want a custom view that assembles its own adapter, for example an endpoint that builds a one-off pipeline per request. It opens no [oversight](oversight.md#limitations) turn.

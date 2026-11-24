@@ -1,12 +1,12 @@
 ---
 title: ID Generation
-type: docs
-weight: 106
+sidebar:
+  order: 106
 ---
 
 How a single `message_id` flows from generation → SSE → storage → later operations.
 
-![ID Generation Flow](/images/graphs/id_generation.png)
+![ID Generation Flow](../images/graphs/id_generation.png)
 
 The `message_id` is generated **once** in `Stream.stream()`:
 
@@ -52,4 +52,4 @@ The result is available as `stream.message_result`.
 - With a `citation_registry`, `Stream` emits a `SourceEvent` per registered source after a retrieval tool runs, in cumulative-index order. `source_id` is `doc_id` or `doc_id:chunk_id`.
 - With `suggestion_generator`, `Stream` generates follow-up questions after the reply using the last six messages and the response. Generation runs under `AI_SDK_SUGGESTION_TIMEOUT` (default 5s); timeouts and errors are logged and skipped, never fatal.
 
-Next: [Protocol Handler](../protocol-handler/), converting events to wire format.
+Next: [Protocol Handler](protocol-handler.md), converting events to wire format.

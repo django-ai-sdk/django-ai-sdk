@@ -2,9 +2,8 @@
 """
 Graphviz diagram generator for Django AI SDK documentation.
 
-Generates the diagrams used by the Hugo site. Output goes to
-docs/static/images/graphs/ so pages can reference them as
-/images/graphs/<name>.png.
+Generates the diagrams used by the docs. Output goes to
+docs/content/images/graphs/, next to the pages that show them.
 
 Run with: uv run python docs/graph.py
 """
@@ -12,7 +11,7 @@ Run with: uv run python docs/graph.py
 import graphviz
 from pathlib import Path
 
-OUTPUT_DIR = Path(__file__).parent / "static" / "images" / "graphs"
+OUTPUT_DIR = Path(__file__).parent / "content" / "images" / "graphs"
 
 
 def create_graph(name: str, **attrs) -> graphviz.Digraph:

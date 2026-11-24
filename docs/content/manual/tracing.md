@@ -1,7 +1,7 @@
 ---
 title: Tracing
-type: docs
-weight: 122
+sidebar:
+  order: 122
 ---
 
 Every Haystack span of a run — the agent, each step, each LLM call, each tool call — persisted as a `Trace` row and linked to the `Thread` and `Message` it was produced for. Opt-in, the way Haystack itself treats tracing: installing the SDK changes nothing until you add the app.
@@ -120,7 +120,7 @@ The rule is to count **leaf spans only**, which are exactly the LLM calls in eve
 
 ### Provider caveat
 
-The Responses API reports usage on a streamed response without being asked, so the default `openai_responses_chat` needs no configuration - the tracer accepts its `input_tokens`/`output_tokens` names alongside the `prompt_tokens`/`completion_tokens` of Chat Completions. Chat Completions omits usage from a *streamed* response entirely unless `stream_options.include_usage` is requested; the adapters do not add it, because the option is invalid on a non-streaming call. Declare it on the agent instead - see [Generators](/manual/generators/#token-usage-while-streaming). A generator that reports no usage leaves the token columns null.
+The Responses API reports usage on a streamed response without being asked, so the default `openai_responses_chat` needs no configuration - the tracer accepts its `input_tokens`/`output_tokens` names alongside the `prompt_tokens`/`completion_tokens` of Chat Completions. Chat Completions omits usage from a *streamed* response entirely unless `stream_options.include_usage` is requested; the adapters do not add it, because the option is invalid on a non-streaming call. Declare it on the agent instead - see [Generators](generators.md#token-usage-while-streaming). A generator that reports no usage leaves the token columns null.
 
 ## TraceService
 
@@ -237,4 +237,4 @@ A subagent's tokens are counted twice on purpose: once in its own
 `by_subagent` entry, once folded into the outer total — the same span, two
 questions.
 
-Next: [Settings Reference](../settings/), for the tracing settings and every other `AI_SDK_*` value.
+Next: [Settings Reference](settings.md), for the tracing settings and every other `AI_SDK_*` value.

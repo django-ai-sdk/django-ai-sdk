@@ -1,16 +1,16 @@
 ---
 title: Agents
-type: docs
-weight: 2
+sidebar:
+  order: 2
 ---
 
 An **agent** is the core of the Django AI SDK. It's a plain Python class that describes how your AI behaves, what it can do, and how it streams responses.
 
-This guide covers everything about defining agents. See the [Protocols](/protocols/) guide for how `Stream` and `Run` work, and [Views and Routing](/views-and-routing/) for wiring agents to HTTP endpoints.
+This guide covers everything about defining agents. See the [Protocols](protocols.md) guide for how `Stream` and `Run` work, and [Views and Routing](views-and-routing.md) for wiring agents to HTTP endpoints.
 
-{{< callout type="info" >}}
-Contributor? The [Developer Manual](/manual/) covers internals: [Agent](/manual/agent/), [Agent Registry](/manual/agent-registry/), [RAG](/manual/rag/).
-{{< /callout >}}
+:::note
+Contributor? The [Developer Manual](manual/index.md) covers internals: [Agent](manual/agent.md), [Agent Registry](manual/agent-registry.md), [RAG](manual/rag.md).
+:::
 
 ## Anatomy of an Agent
 
@@ -75,7 +75,7 @@ These class attributes configure an agent's behavior:
 | `name` | None | Display name |
 | `description` | `None` | Short description, surfaced in agent listings |
 | `model` | `None` | Model identifier passed to the generator |
-| `llm` | `openai_responses_chat` | Generator factory from [`django_ai_sdk.generators`](/manual/generators/), assigned uncalled |
+| `llm` | `openai_responses_chat` | Generator factory from [`django_ai_sdk.generators`](manual/generators.md), assigned uncalled |
 | `llm_kwargs` | `None` | Vendor generation parameters, e.g. `{"reasoning": {"effort": "low"}}` |
 | `instructions` | `"You are a helpful agent."` | System prompt, built with `prompt()` |
 | `protocol` | `VercelProtocolHandler` | Protocol handler for message conversion |
@@ -97,7 +97,7 @@ These class attributes configure an agent's behavior:
 | `file_pipelines` | `[]` | Per-file-type processing pipelines |
 | `citation_formatter_class` | `DefaultCitationFormatter` | How RAG sources are rendered to the model |
 | `suggestion_generator` | `None` | Generates follow-up suggestions after a reply |
-| `oversight` | `None` | The [oversight](/oversight/) policy every turn runs under: a `Policy` subclass, a policy's name, `None` (the `DEFAULT_POLICY`) or `False` (none) |
+| `oversight` | `None` | The [oversight](oversight.md) policy every turn runs under: a `Policy` subclass, a policy's name, `None` (the `DEFAULT_POLICY`) or `False` (none) |
 | `hidden` | `False` | Hide from registry listings |
 | `abstract` | `False` | Shared base, not registered |
 | `warmup_on_init` | `False` | Warm up RAG on agent initialization |
@@ -123,11 +123,11 @@ An agent exposes two adapter hooks. You implement them; the SDK uses them.
 - **`get_pipeline_adapter(thread_id, user)`**: returns a `Stream` for streaming chat. `Agent.as_view()` calls this.
 - **`get_run_adapter(thread_id, user)`**: returns a `Run` for non-streaming calls. `Agent.run()` calls this (title generation, structured extraction, background jobs). The default wraps the agent's own generator (`get_llm()`); override it only for something else.
 
-{{< callout type="info" >}}
+:::note
 Both have defaults: a `Stream` over a `ToolAgent` with the agent's generator, tools and limits, and a `Run` around the same generator. Override them for another pipeline or generator.
-{{< /callout >}}
+:::
 
-See the [Protocols guide](/protocols/) for the full `Stream` and `Run` API.
+See the [Protocols guide](protocols.md) for the full `Stream` and `Run` API.
 
 ---
 
@@ -288,7 +288,7 @@ To give the model a file's content without any tool call, override `format_attac
 
 ### Integration tools
 
-Declare `integrations = ["linear", "weather"]` and every tool that integration exposes reaches the model. Tools are namespaced (`linear_list_issues`) so unrelated integrations never collide. Unauthorized users' tools never reach the model. See the [Integrations guide](/integrations/).
+Declare `integrations = ["linear", "weather"]` and every tool that integration exposes reaches the model. Tools are namespaced (`linear_list_issues`) so unrelated integrations never collide. Unauthorized users' tools never reach the model. See the [Integrations guide](integrations.md).
 
 ### Artifact tools
 
@@ -332,7 +332,7 @@ When the stream sees the tool's result, the builder gets the tool's arguments an
 
 ### Tool receipts
 
-When [oversight](/oversight/) withholds an answer, every tool call's arguments and result are dropped with it: they could reveal what was withheld. A tool that starts something durable, such as a workflow run or a payout claim, can declare the keys of its result that identify it, its receipt. Those keys are kept, so the chat can still show the run and the person does not start a second one:
+When [oversight](oversight.md) withholds an answer, every tool call's arguments and result are dropped with it: they could reveal what was withheld. A tool that starts something durable, such as a workflow run or a payout claim, can declare the keys of its result that identify it, its receipt. Those keys are kept, so the chat can still show the run and the person does not start a second one:
 
 ```python
 from django_ai_sdk import with_receipt
@@ -400,7 +400,7 @@ Override `get_rag_pipeline()` to return one of the variants. You can factor each
 - **Warm up**: `Agent.warmup(agent, memory_id)` pre-builds and caches pipelines.
 - **Reindex**: `Agent.reindex(agent, memory_id, force_rebuild)` rebuilds indexes (persistent backends like Qdrant delete and recreate).
 - **Clear cache**: `Agent.clear_rag_cache(agent)` drops cached pipelines.
-- **CLI**: `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](/cli/)).
+- **CLI**: `python manage.py warmup_rag --agent <name>` warms up from the command line (see the [CLI guide](cli.md)).
 
 ### Citations
 
@@ -415,9 +415,9 @@ Conversations live in **threads** of **messages**. Two storage adapters ship wit
 - `MemoryStorageAdapter`: in-memory, useful for tests and prototypes
 - `DbStorageAdapter`: persists via the Django ORM
 
-{{< callout type="info" >}}
+:::note
 `MemoryStorageAdapter` is in-memory only: use `DbStorageAdapter` whenever conversations must survive a restart.
-{{< /callout >}}
+:::
 
 `get_storage_adapter(thread_id)` locates which adapter actually holds a thread (querying all registered adapters) and returns the right instance, falling back to the agent's configured `storage_adapter`.
 
@@ -459,11 +459,11 @@ integration, so a one-shot call (title generation, structured extraction, a work
 step) does not pay that cost unless it explicitly asks for it. Setting a
 `response_format` skips tools regardless of the flag - structured output and a tool
 loop together aren't supported yet, see
-[Structured output from a tool loop](/manual/generators/#structured-output-from-a-tool-loop).
+[Structured output from a tool loop](manual/generators.md#structured-output-from-a-tool-loop).
 
 This only ever applies to the SDK's own `Run` adapter - a `get_run_adapter()` override
 that returns something else is left alone, rather than a tool loop being forced onto
-it. See [Headless tool runs](/manual/stream-and-run/#headless-tool-runs) for the exact
+it. See [Headless tool runs](manual/stream-and-run.md#headless-tool-runs) for the exact
 call chain and the diagram: it's governed by *this* agent's own `max_agent_steps` and
 `max_tool_calls`, via the same assembly a streamed subagent delegation uses - never a
 generic default.
@@ -472,7 +472,7 @@ generic default.
 
 ## Oversight
 
-With the [oversight](/oversight/) app installed, every turn an agent with a policy runs through the SDK's entry points is checked and recorded under that policy: chat, `run()`, the HTTP run endpoints and workflow steps alike ([the paths it does not guard](/oversight/#limitations)).
+With the [oversight](oversight.md) app installed, every turn an agent with a policy runs through the SDK's entry points is checked and recorded under that policy: chat, `run()`, the HTTP run endpoints and workflow steps alike ([the paths it does not guard](oversight.md#limitations)).
 
 ```python
 from django_ai_sdk.errors import Blocked
@@ -493,7 +493,7 @@ except Blocked as blocked:
     answer = blocked.message           # the policy's text for the person asking
 ```
 
-`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](/manual/oversight/#agents-and-runs); what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked, in [the guide](/oversight/#every-sdk-entry-point-is-a-turn).
+`oversight`, `get_oversight()`, `run(channel=..., oversight=...)` and `Blocked` are documented in [the manual](manual/oversight.md#agents-and-runs); what a turn checks, how nested runs and subagents join it, and what an override of `run()` must do to stay checked, in [the guide](oversight.md#every-sdk-entry-point-is-a-turn).
 
 ---
 
@@ -509,7 +509,7 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-`Agent.as_view()` and `Agent.history()` check permissions before doing anything, raising `PermissionDenied` when the user lacks access. See the [Views and Routing guide](/views-and-routing/) for wiring.
+`Agent.as_view()` and `Agent.history()` check permissions before doing anything, raising `PermissionDenied` when the user lacks access. See the [Views and Routing guide](views-and-routing.md) for wiring.
 
 ---
 
@@ -528,7 +528,7 @@ class MyAgent(Agent):
     ]
 ```
 
-See the [Files reference](/manual/files/) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
+See the [Files reference](manual/files.md) for the shipped processors (Text, CSV, JSON, Docx, Pptx, Xlsx), transforms, the upload/processing lifecycle, and upload settings (`AI_SDK_MAX_UPLOAD_SIZE`, `AI_SDK_ALLOWED_FILES`, `AI_SDK_MEMORY_FILE_PIPELINE`).
 
 ---
 

@@ -1,16 +1,16 @@
 ---
 title: RAG
-type: docs
-weight: 112
+sidebar:
+  order: 112
 ---
 
 How RAG works in the SDK: the provider lifecycle and how retrieval is exposed to agents as tools.
 
-{{< callout type="info" >}}
-Pipeline variants, config, and the document model live on the [RAG Variants](../rag-variants/) page.
-{{< /callout >}}
+:::note
+Pipeline variants, config, and the document model live on the [RAG Variants](rag-variants.md) page.
+:::
 
-![RAG Architecture](/images/graphs/rag_architecture.png)
+![RAG Architecture](../images/graphs/rag_architecture.png)
 
 ## What is RAG?
 
@@ -107,9 +107,9 @@ async def get_pipeline_adapter(self, thread_id=None, user=None):
 | `reindex(agent, memory_id, force_rebuild=False)` | Drop the cache entry and rebuild (returns the new instance) |
 | `clear_cache()` | Drop all cached RAG instances |
 
-{{< callout type="important" >}}
+:::caution
 Warmups are serialized per cache key with a per-key `asyncio.Lock`: concurrent requests for the same memory don't double-build (important for backends like Qdrant that hold an exclusive file lock during warmup). A warm cache returns without acquiring any lock.
-{{< /callout >}}
+:::
 
 ## Integration: Tool Calling
 
@@ -140,7 +140,7 @@ Wire the same registry and formatter into both `get_rag_tools()` and the `Stream
 | Auto warm up | `warmup_on_init = True` | Schedules `rag_provider.warmup()` on instantiation |
 | Reindex | `Agent.reindex(agent, memory_id, force_rebuild)` | Drops the cache entry and rebuilds; persistent backends (Qdrant) delete and recreate |
 | Clear cache | `Agent.clear_rag_cache(agent)` | Drops all cached instances |
-| CLI | `python manage.py warmup_rag --agent <name>` | Warms up from the command line ([CLI](../cli/)) |
+| CLI | `python manage.py warmup_rag --agent <name>` | Warms up from the command line ([CLI](cli.md)) |
 
 ```python
 await MyAgent.warmup(agent, memory_id="mem-1")                 # build once
@@ -158,4 +158,4 @@ MyAgent.clear_rag_cache(agent)                                 # drop cache
 | Set `top_k` to match your context budget | `1` risks missing context; `50` floods the window. Start at `5` |
 | Reindex after document changes | Or use incremental `add_documents()` / `remove_documents()` |
 
-Next: [Storage](../storage/), where conversations persist.
+Next: [Storage](storage.md), where conversations persist.

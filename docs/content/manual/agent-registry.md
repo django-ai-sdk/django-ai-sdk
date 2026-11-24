@@ -1,7 +1,7 @@
 ---
 title: Agent Registry
-type: docs
-weight: 103
+sidebar:
+  order: 103
 ---
 
 How agents register themselves and get resolved by stable ID.
@@ -59,4 +59,4 @@ from django_ai_sdk.agents.services import AgentService
 agent = await AgentService.get(agent_id)
 ```
 
-Next: [Stream and Run](../stream-and-run/), the adapter hooks' return values.
+Next: [Stream and Run](stream-and-run.md), the adapter hooks' return values.

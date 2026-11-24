@@ -1,16 +1,16 @@
 ---
 title: Overriding Views
-type: docs
-weight: 6
+sidebar:
+  order: 6
 ---
 
-The [ready-made endpoints](/views-and-routing/#pick-a-starting-point) are meant to be bent, not forked. Each recipe below changes one thing and keeps the rest of the SDK's behaviour, including permission checks, which live in the services and not in the views.
+The [ready-made endpoints](views-and-routing.md#pick-a-starting-point) are meant to be bent, not forked. Each recipe below changes one thing and keeps the rest of the SDK's behaviour, including permission checks, which live in the services and not in the views.
 
 Rule of thumb: **extend, don't rewrite.** Call the SDK's own endpoint (Ninja) or `super()` (DRF) and adjust the result. Only drop down to the services when the response has to look completely different.
 
-{{< callout type="info" >}}
+:::note
 Every recipe on this page runs in the test suite (`tests/unit/test_overriding_views.py`), so it stays correct as the SDK changes.
-{{< /callout >}}
+:::
 
 ## django-ninja
 
@@ -52,9 +52,9 @@ async def list_threads(request, limit: int = 100, offset: int = 0):
 - Pass the same `operation_id` and response schema (all of them live in `django_ai_sdk.contrib.ninja.schemas`) to keep a generated frontend client unchanged.
 - Need a different response shape? Skip the wrapper and call the service (`ThreadService.threads(...)`) with your own schema.
 
-{{< callout type="warning" >}}
+:::caution
 Register the replacement on the router that `get_*_router(exclude=...)` returned, not on a separate `Router`: Ninja resolves a path per router, so a second router on a shared path answers `405 Method Not Allowed` for the other methods.
-{{< /callout >}}
+:::
 
 ### Remove an endpoint
 
@@ -80,7 +80,7 @@ The same keywords can go to the factory instead (`ai_sdk_routers.get_agents_rout
 
 ### Change error responses
 
-`register_error_handlers(api)` answers every exception with an [error code](/errors/). Ninja uses the most specific handler, so registering one for a narrower type overrides it for just that type:
+`register_error_handlers(api)` answers every exception with an [error code](errors.md). Ninja uses the most specific handler, so registering one for a narrower type overrides it for just that type:
 
 ```python
 from django_ai_sdk.errors import NotFound
@@ -92,7 +92,7 @@ def not_found(request, exc):
     return api.create_response(request, {"error": "gone"}, status=404)
 ```
 
-To change a code's message, status or `retryable` flag everywhere (chat streams included), use `register_error_code()` instead; see [Your own codes](/errors/#your-own-codes).
+To change a code's message, status or `retryable` flag everywhere (chat streams included), use `register_error_code()` instead; see [Your own codes](errors.md#your-own-codes).
 
 ## Django REST framework
 
@@ -215,7 +215,7 @@ class AdminWorkflowViewSet(WorkflowViewSet):
     throttle_classes = [UserRateThrottle]
 ```
 
-These classes are an extra gate in front of the SDK's own checks, not a replacement: a user who passes `IsAdminUser` still only sees the workflows the SDK's permission classes allow. To change *those* rules, configure `AI_SDK_PERMISSIONS` (see [Permissions](/manual/permissions/)).
+These classes are an extra gate in front of the SDK's own checks, not a replacement: a user who passes `IsAdminUser` still only sees the workflows the SDK's permission classes allow. To change *those* rules, configure `AI_SDK_PERMISSIONS` (see [Permissions](manual/permissions.md)).
 
 ### Change error responses
 
@@ -237,7 +237,7 @@ class MyThreadViewSet(ThreadViewSet):
 
 ## The chat view
 
-`ChatView` takes an `agent` (for URLs without a thread, see [Your own views](/views-and-routing/#your-own-views)) and has two hooks:
+`ChatView` takes an `agent` (for URLs without a thread, see [Your own views](views-and-routing.md#your-own-views)) and has two hooks:
 
 ```python
 from django.http import JsonResponse

@@ -1,7 +1,7 @@
 ---
 title: Command Line Interface
-type: docs
-weight: 9
+sidebar:
+  order: 9
 ---
 
 The SDK ships three management commands. **`warmup_rag`** pre-builds RAG pipelines so the first chat request doesn't pay the indexing cost, **`reindex_memories`** rebuilds every memory's index from scratch, and **`refresh_integrations`** refreshes MCP integration tool lists.
@@ -65,8 +65,8 @@ await Agent.reindex(agent, memory_id=None, force_rebuild=False)
 Agent.clear_rag_cache(agent)
 ```
 
-See the [RAG section of the Agents guide](/agents/#lifecycle) for the full lifecycle.
+See the [RAG section of the Agents guide](agents.md#lifecycle) for the full lifecycle.
 
-{{< callout type="info" >}}
-Contributor? The [CLI Implementation](/manual/cli/) manual page documents how the command works internally.
-{{< /callout >}}
+:::note
+Contributor? The [CLI Implementation](manual/cli.md) manual page documents how the command works internally.
+:::

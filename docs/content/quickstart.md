@@ -1,7 +1,7 @@
 ---
 title: Quick Start
-type: docs
-weight: 1
+sidebar:
+  order: 1
 ---
 
 Let's build your first AI agent in under 5 minutes.
@@ -27,7 +27,7 @@ only what you use:
 | `qdrant` / `chroma` | a vector store for RAG, plus fastembed | `chroma` also pulls kubernetes, grpc and uvicorn[standard] |
 | `rag` | both vector stores | |
 | `mcp`, `files` | MCP integrations, document extraction | small |
-| `anthropic`, `mistral`, `ollama`, `openrouter`, `huggingface` | one hosted provider each (see [Generators](/manual/generators/)) | small |
+| `anthropic`, `mistral`, `ollama`, `openrouter`, `huggingface` | one hosted provider each (see [Generators](manual/generators.md)) | small |
 | `providers` | all five of those | small |
 | `transformers` | runs a Hugging Face model locally | **pulls torch (~500 MB)** |
 | `all` | everything above | |
@@ -62,7 +62,7 @@ Ready-made HTTP endpoints are separate, so you only pull in the framework you us
 pip install "django-ai-sdk[ninja]"  # or: django-ai-sdk[drf]
 ```
 
-See [Views and Routing](/views-and-routing/#pick-a-starting-point).
+See [Views and Routing](views-and-routing.md#pick-a-starting-point).
 
 Optional extras you can install narrowly:
 
@@ -146,7 +146,7 @@ Three things to note:
 - **get_pipeline_adapter**: Returns the `Stream` that powers streaming chat
 - **llm**: The generator factory `get_llm()` builds - it defaults to `openai_responses_chat`, so you can leave it out for OpenAI
 
-`openai_responses_chat` works with any endpoint that speaks the OpenAI Responses API. Point `OPENAI_API_URL` at a local server (vLLM, llama.cpp) or leave it unset for OpenAI, and use `openai_chat` for a Chat Completions-only endpoint. Other providers get their own factory - see [Generators](/manual/generators/). Every `AI_SDK_*` setting is listed in the [Settings Reference](/manual/settings/).
+`openai_responses_chat` works with any endpoint that speaks the OpenAI Responses API. Point `OPENAI_API_URL` at a local server (vLLM, llama.cpp) or leave it unset for OpenAI, and use `openai_chat` for a Chat Completions-only endpoint. Other providers get their own factory - see [Generators](manual/generators.md). Every `AI_SDK_*` setting is listed in the [Settings Reference](manual/settings.md).
 
 That's it. No complex configuration. No framework setup.
 
@@ -248,17 +248,28 @@ data: [DONE]
 
 **You did it!** Your agent is live and streaming responses.
 
-{{< callout type="info" >}}
+:::note
 **What just happened?** `as_view()` converted the protocol messages to internal `ChatMessage`s, `get_pipeline_adapter()` built a `ToolAgent` pipeline and returned a `Stream`, Haystack streamed chunks normalized into `StreamEvent`s, and the events were serialized to the Vercel protocol over SSE. All in about 50 lines of code.
-{{< /callout >}}
+:::
 
 ## Next Steps
-
-{{< cards >}}
-  {{< card link="/agents" title="Give It Tools" icon="cog" subtitle="Let it call Python functions" >}}
-  {{< card link="/agents#retrieval-augmented-generation-rag" title="Add Knowledge" icon="search" subtitle="Connect a knowledge base with RAG" >}}
-  {{< card link="/integrations" title="Add Integrations" icon="collection" subtitle="GitHub, Linear, weather, MCP" >}}
-  {{< card link="/views-and-routing" title="Add Persistence" icon="database" subtitle="Threads and message history" >}}
-  {{< card link="/how-it-works" title="Go Deeper" icon="cube" subtitle="How requests flow through the SDK" >}}
-  {{< card link="/manual" title="Developer Manual" icon="book-open" subtitle="Architecture details for contributors" >}}
-{{< /cards >}}
+::::cards
+:::card[Give It Tools]{href="agents.md"}
+Let it call Python functions
+:::
+:::card[Add Knowledge]{href="agents.md#retrieval-augmented-generation-rag"}
+Connect a knowledge base with RAG
+:::
+:::card[Add Integrations]{href="integrations.md"}
+GitHub, Linear, weather, MCP
+:::
+:::card[Add Persistence]{href="views-and-routing.md"}
+Threads and message history
+:::
+:::card[Go Deeper]{href="how-it-works.md"}
+How requests flow through the SDK
+:::
+:::card[Developer Manual]{href="manual/index.md"}
+Architecture details for contributors
+:::
+::::

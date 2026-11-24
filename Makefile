@@ -51,10 +51,11 @@ publish:
 release: tag build publish
 
 docs-graphs:
-	uv run python docs/graph.py
+	uv run --group docs python docs/graph.py
 
 docs-build: docs-graphs
-	hugo --source docs --baseURL /docs/ --destination ../public/docs --gc --cleanDestinationDir
+	uv run --group docs dokk check --root docs
+	uv run --group docs dokk build --root docs
 
-docs-serve: docs-build
-	python3 -m http.server 1313 --directory public
+docs-serve:
+	uv run --group docs dokk serve --root docs
