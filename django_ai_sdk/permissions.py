@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from enum import StrEnum
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from django.db.models import Q
 from django.utils.module_loading import import_string
@@ -170,7 +170,7 @@ class IsInAllowedGroups(BasePermission):
             return False
         if not hasattr(user, "groups"):
             raise TypeError("IsInAllowedGroups requires a user model with groups support")
-        return await user.groups.filter(name__in=self.groups).aexists()  # ty: ignore[unresolved-attribute]
+        return await user.groups.filter(name__in=self.groups).aexists()  # ty: ignore[missing-attribute]
 
 
 class IsOwner(BasePermission):
@@ -618,7 +618,7 @@ class PermissionsMixin:
                 if attr.isupper() and isinstance(val, frozenset) and val:
                     key = attr.lower()
                     if key not in groups:
-                        groups[key] = cast("Operation", next(iter(val)))
+                        groups[key] = next(iter(val))
         result: dict[str, bool] = {}
         for name, op in groups.items():
             try:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from django.core.exceptions import ImproperlyConfigured
 from pydantic import BaseModel, Field, create_model
@@ -61,7 +61,7 @@ def model_from_fields(name: str, fields: dict[str, FieldDefinition]) -> type[Bas
                 annotation | None,
                 Field(default=None, description=field.description),
             )
-    return cast("type[BaseModel]", create_model(name, **built))
+    return create_model(name, **built)
 
 
 def compile_inputs(workflow: WorkflowDefinition) -> type[BaseModel] | None:

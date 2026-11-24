@@ -1022,6 +1022,7 @@ def _stream_with_handoffs(*handoff_tools: str) -> Stream:
                 "properties": {"task": {"type": "string"}},
                 "required": ["task"],
             },
+            inputs_from_state={"messages": "messages"},
         )
         for name in handoff_tools
     ]

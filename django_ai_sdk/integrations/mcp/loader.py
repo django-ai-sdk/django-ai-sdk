@@ -82,13 +82,13 @@ class DynamicMCPIntegration(Integration):
         return self.config.type
 
     @property
-    def connect_kind(self) -> str | None:  # ty: ignore[invalid-property-type-override]
+    def connect_kind(self) -> str | None:  # ty: ignore[incompatible-property-override]
         if isinstance(self.config, OAuthMCPIntegrationConfig):
             return "oauth"
         return None
 
     @property
-    def detail(self) -> str | None:  # ty: ignore[invalid-property-type-override]
+    def detail(self) -> str | None:  # ty: ignore[incompatible-property-override]
         return self._needs_setup
 
     async def get_tool_names(

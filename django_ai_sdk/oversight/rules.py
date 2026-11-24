@@ -197,10 +197,10 @@ class L:
         return self._test("disputed")
 
     # Returns a condition instead of a bool, so the signature differs from object's.
-    def __eq__(self, value: object) -> Condition:  # ty: ignore[invalid-method-override]
+    def __eq__(self, value: object) -> Condition:  # ty: ignore[incompatible-method-override]
         return self._test("eq", value)
 
-    def __ne__(self, value: object) -> Condition:  # ty: ignore[invalid-method-override]
+    def __ne__(self, value: object) -> Condition:  # ty: ignore[incompatible-method-override]
         return self._test("ne", value)
 
     def __gt__(self, value: float) -> Condition:

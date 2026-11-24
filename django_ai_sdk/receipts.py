@@ -32,7 +32,7 @@ SAFE_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
 def with_receipt(tool: Tool, *keys: str) -> Tool:
     """Declare the keys of `tool`'s result kept when the answer is withheld. Returns `tool`."""
-    tool.receipt_keys = tuple(keys)  # ty: ignore[unresolved-attribute]
+    tool.receipt_keys = tuple(keys)  # ty: ignore[missing-attribute]
     return tool
 
 
