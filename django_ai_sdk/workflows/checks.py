@@ -83,32 +83,9 @@ ACCEPTS: dict[str, tuple[Callable[[Any], bool], str]] = {
 
 def settings_errors() -> list[Error]:
     """E012: AI_SDK_WORKFLOWS is a dict of known keys, each of the kind it takes."""
-    from django_ai_sdk.oversight.conf import configured
+    from django_ai_sdk.checks import dict_setting_errors
 
-    user_settings = configured("AI_SDK_WORKFLOWS")
-    if not isinstance(user_settings, dict):
-        return [
-            Error(
-                f"AI_SDK_WORKFLOWS must be a dict, not a {type(user_settings).__name__}.",
-                hint="Set a dict, or remove it.",
-                id=f"{PREFIX}.E012",
-            )
-        ]
-    errors = []
-    for key, value in user_settings.items():
-        if key not in ACCEPTS:
-            errors.append(
-                Error(
-                    f"AI_SDK_WORKFLOWS has an unknown key {key!r}.",
-                    hint=f"The keys are {', '.join(ACCEPTS)}.",
-                    id=f"{PREFIX}.E012",
-                )
-            )
-        elif not ACCEPTS[key][0](value):
-            errors.append(
-                Error(f"AI_SDK_WORKFLOWS[{key!r}] must be {ACCEPTS[key][1]}.", id=f"{PREFIX}.E012")
-            )
-    return errors
+    return dict_setting_errors("AI_SDK_WORKFLOWS", ACCEPTS, PREFIX)
 
 
 __all__ = ["PREFIX", "check_workflows"]

@@ -1,23 +1,12 @@
-"""What starts a run besides a person asking: a cron schedule, or an event.
+"""What starts a run besides a person: a cron schedule, or an event.
 
-A workflow declares its triggers (`schemas.CronTrigger`, `schemas.EventTrigger`).
+- Cron: `sync_schedules()` keeps one DBOS schedule per trigger, "<workflow>:<trigger>";
+  `durable.fire_cron` opens the run. A paused schedule stays paused across deploys;
+  SCHEDULES_ENABLED off makes every occurrence start nothing.
+- Event: webhooks fire "<integration>.message"; hosts call `start_for_event`.
 
-- Cron: `sync_schedules()` keeps one DBOS schedule per cron trigger, named
-  "<workflow>:<trigger>". DBOS fires it once per occurrence across all workers,
-  and `workflows.durable.fire_cron` opens the run. An operator pauses and resumes a schedule at
-  runtime; a deploy keeps that choice. AI_SDK_WORKFLOWS['SCHEDULES_ENABLED'] off makes
-  every occurrence start nothing, without touching the schedules.
-- Event: every webhook delivery is "<integration>.message" (`start_for_webhook`);
-  the host reports others with `start_for_event(event, payload, idempotency_key=...)`.
-  Each enabled trigger on that event opens a run.
-
-Either way the run's id comes from what fired it (the occurrence, or the
-idempotency key), so firing twice opens one run.
-
-Who a run acts as: `run_as` on a workflow declared in code, or whoever last wrote a
-stored workflow's steps (`created_by`). A stored definition cannot name an account,
-and editing one makes the editor its account, or authoring a workflow would be a
-way to act as anyone.
+The run id derives from what fired it, so firing twice opens one run. A run acts as
+the code's `run_as`, or as a stored workflow's last editor (`created_by`).
 """
 
 from __future__ import annotations
@@ -27,7 +16,7 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from django.core.exceptions import ImproperlyConfigured
 from pydantic import ValidationError
 
@@ -158,10 +147,8 @@ def cron_schedules(only: str | None = None) -> dict[str, ClientScheduleInput]:
 def sync_schedules(only: str | None = None) -> list[str]:
     """Make the DBOS schedules match the declared cron triggers. Returns their names.
 
-    New and changed ones are written, and ones no longer declared (or switched off
-    in the definition) are deleted. A schedule an operator paused stays paused.
-    `only` touches just that workflow's schedules, so two web processes saving
-    different workflows at once cannot delete each other's.
+    Undeclared or disabled ones are deleted; paused ones stay paused. `only` limits it
+    to one workflow, so concurrent saves cannot delete each other's.
     """
     from django_ai_sdk.durable.runtime import client
 
@@ -181,8 +168,6 @@ def sync_schedules(only: str | None = None) -> list[str]:
 
 async def async_schedules(only: str | None = None) -> list[str]:
     """`sync_schedules`, from async code, after a stored workflow changed."""
-    from asgiref.sync import sync_to_async
-
     return await sync_to_async(sync_schedules)(only)
 
 
@@ -200,7 +185,7 @@ async def start_cron(
     from django_ai_sdk.workflows.models import WorkflowRun
     from django_ai_sdk.workflows.runs import queue_run
 
-    found = await _find_trigger(key, trigger_name, CronTrigger)
+    found = await _find_trigger(key, trigger_name)
     if found is None:
         return None
     definition, record, trigger = found
@@ -246,7 +231,7 @@ async def start_for_event(
     from django_ai_sdk.workflows.runs import queue_run
 
     started: list[WorkflowRun] = []
-    for key, definition, record in await _declared():
+    for key, definition, record in await sync_to_async(declared_workflows)():
         for trigger in definition.triggers:
             if not (
                 isinstance(trigger, EventTrigger) and trigger.enabled and trigger.event == event
@@ -289,15 +274,9 @@ async def start_for_webhook(sender: Any, event: InboundEvent, **kwargs: Any) -> 
         logger.exception("Could not start triggers for %s %s", event.integration, event.event_id)
 
 
-async def _declared() -> list[tuple[str, WorkflowDefinition, Workflow | None]]:
-    from asgiref.sync import sync_to_async
-
-    return await sync_to_async(declared_workflows)()
-
-
 async def _find_trigger(
-    key: str, name: str, kind: type[CronTrigger] | type[EventTrigger]
-) -> tuple[WorkflowDefinition, Workflow | None, Any] | None:
+    key: str, name: str
+) -> tuple[WorkflowDefinition, Workflow | None, CronTrigger] | None:
     declared, record = await afind(key)
     try:
         definition = declared if record is None else definition_of(record)
@@ -308,7 +287,7 @@ async def _find_trigger(
         logger.warning("Trigger %r fired for workflow %r, which no longer exists", name, key)
         return None
     for trigger in definition.triggers:
-        if isinstance(trigger, kind) and trigger.name == name and trigger.enabled:
+        if isinstance(trigger, CronTrigger) and trigger.name == name and trigger.enabled:
             return definition, record, trigger
     logger.info("Trigger %r on workflow %r is gone or off; nothing started", name, key)
     return None

@@ -102,12 +102,9 @@ class Command(BaseCommand):
     def take_worker_lock(self, stop: threading.Event) -> bool:
         """Wait until this is the only worker. False when stopped while waiting.
 
-        DBOS recovers every unfinished run of its executor ("local") at launch, so two
-        workers at once would both run them. A Postgres advisory lock, held by a
-        session of its own until the process exits, lets a deploy start the new worker
-        before the old one stops. It is not Django's connection, which may be closed
-        or replaced, releasing the lock unnoticed. SQLite is for development: one
-        worker, by hand.
+        DBOS recovers every unfinished run at launch, so two workers would both run them.
+        A Postgres advisory lock on its own session lets a deploy start the new worker
+        first. SQLite: one worker, by hand.
         """
         from django_ai_sdk.durable.conf import setting
 

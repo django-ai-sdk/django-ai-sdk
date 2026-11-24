@@ -22,7 +22,7 @@ from django_ai_sdk.durable.conf import database_url, setting
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from dbos import DBOSClient, DBOSConfig
+    from dbos import DBOSClient, DBOSConfig, EnqueueOptions
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,7 @@ def config() -> DBOSConfig:
 
 @asynccontextmanager
 async def fresh_connections() -> AsyncGenerator[None]:
-    """Close broken or expired database connections around a durable unit.
-
-    What Django does around a request, so a database restart fails the unit in
-    flight, not every unit after it. Async ORM calls share one thread, and so do
-    these closes.
-    """
+    """Close broken or expired DB connections around a durable unit, as Django does per request."""
     await sync_to_async(close_old_connections)()
     try:
         yield
@@ -70,16 +65,12 @@ async def fresh_connections() -> AsyncGenerator[None]:
         await sync_to_async(close_old_connections)()
 
 
-def register_workflows() -> None:
-    for module in WORKFLOW_MODULES:
-        import_module(module)
-
-
 def launch() -> None:
     """Start DBOS here: recover unfinished runs, dequeue, fire schedules. The worker's job."""
     from dbos import DBOS
 
-    register_workflows()
+    for module in WORKFLOW_MODULES:
+        import_module(module)
     DBOS(config=config())
     DBOS.launch()
     for name, options in setting("QUEUES").items():
@@ -114,21 +105,27 @@ def client() -> DBOSClient:
         return _client
 
 
-async def enqueue(workflow: str, *args: Any, workflow_id: str, queue: str) -> str:
+async def enqueue(
+    workflow: str,
+    *args: Any,
+    workflow_id: str,
+    queue: str,
+    delay_seconds: float | None = None,
+) -> str:
     """Queue a run of the DBOS workflow named `workflow`. Returns its workflow id.
 
     The id is the idempotency key: queueing an id that exists returns it and runs
     nothing.
     """
-    handle = await client().enqueue_async(
-        {
-            "queue_name": queue,
-            "workflow_name": workflow,
-            "workflow_id": workflow_id,
-            "app_version": setting("VERSION"),
-        },
-        *args,
-    )
+    options: EnqueueOptions = {
+        "queue_name": queue,
+        "workflow_name": workflow,
+        "workflow_id": workflow_id,
+        "app_version": setting("VERSION"),
+    }
+    if delay_seconds is not None:
+        options["delay_seconds"] = delay_seconds
+    handle = await client().enqueue_async(options, *args)
     return handle.get_workflow_id()
 
 

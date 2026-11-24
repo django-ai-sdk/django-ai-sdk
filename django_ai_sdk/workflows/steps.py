@@ -107,11 +107,8 @@ class WorkflowContext:
     def approval(self, name: str) -> dict[str, Any] | None:
         """The approval `{approved, by, note}` step `name` completed with, or None.
 
-        Check an approval with this, not with `step(name)`: any step can be named
-        "approve" and produce `{"approved": true}`, but only an `ApprovalStep`
-        completes by a person's decision through `WorkflowService.decide`, and only
-        when they approved. None for any other step, a rejection, a timeout, or a
-        step that did not run.
+        Use this, not `step(name)`: only an `ApprovalStep` is decided by a person. None for
+        any other step, a rejection, a timeout, or a step that did not run.
         """
         outcome = self.steps.get(name)
         if not isinstance(self.declared.get(name), ApprovalStep) or outcome is None:
@@ -125,15 +122,9 @@ class WorkflowContext:
 class Step:
     """One unit of work in a workflow.
 
-    A step runs once every step it `requires` has completed, and its result is
-    filed under `name`.
-
-    A step runs at least once, not exactly once. A worker that dies mid-step, or
-    before DBOS records the step as done, runs it again when the run is recovered,
-    and a resumed run runs again every step that did not complete. A step with a
-    side effect outside the run's own rows (a payment, a booking, a sent message)
-    must make it idempotent by `idempotency_key(ctx)`: pass it to the API as its
-    idempotency key, or store it with the effect and do nothing when it is there.
+    Runs once every step it `requires` completed; its result is filed under `name`.
+    At least once, not exactly once: recovery and resume may run it again, so a side
+    effect outside the run must be idempotent by `idempotency_key(ctx)`.
     """
 
     # The step's key in the run's record, and the name later steps require.
@@ -224,10 +215,13 @@ class Step:
             async with self.turn(ctx, "translation", input=chunk) as t:
                 text = await t.finish(await translate(await t.gate()))
         """
+        from django_ai_sdk.oversight.policy import Policy
         from django_ai_sdk.oversight.turns import turn
 
         # A policy given without an agent judges the turn as this step.
-        policy_only = isinstance(agent, str) or isinstance(agent, type) and _is_policy(agent)
+        policy_only = (
+            isinstance(agent, str) or isinstance(agent, type) and issubclass(agent, Policy)
+        )
         step_as_agent = SimpleNamespace(name=self.name or type(self).__name__, agent_id="")
         return turn(
             step_as_agent if policy_only else agent,
@@ -284,13 +278,8 @@ class AgentStep(Step):
     def transcript(self, ctx: WorkflowContext) -> list[ChatMessage]:
         """The inputs named in `history`, as ChatMessages.
 
-        What a history field holds is the author's choice: a bare string is one
-        user turn, a message dict is one message, and a list is a conversation
-        whose items are messages, message dicts, or strings.
-
-        Only user and assistant turns are allowed. Inputs come from whoever started the
-        run, and a system turn would speak with the agent's authority. A step that
-        needs one writes it in `system_prompt()`.
+        A string is a user turn, a dict one message, a list a conversation. Only user and
+        assistant turns: inputs must not speak with system authority.
         """
         transcript: list[ChatMessage] = []
         for name in self.history:
@@ -313,9 +302,7 @@ class AgentStep(Step):
         """The run's transcript, then this step's own turn."""
         turn = await self.user_message(ctx)
         history = self.transcript(ctx)
-        if not turn:
-            return history
-        return [*history, ChatMessage(role="user", content=turn)]
+        return [*history, ChatMessage(role="user", content=turn)] if turn else history
 
     async def run(self, ctx: WorkflowContext) -> StepOutcome:
         """Call the agent with this step's prompt and messages."""
@@ -426,12 +413,6 @@ def _as_message(item: Any) -> ChatMessage:
     if isinstance(item, str):
         return ChatMessage(role="user", content=item)
     return ChatMessage.model_validate(item)
-
-
-def _is_policy(cls: type) -> bool:
-    from django_ai_sdk.oversight.policy import Policy
-
-    return issubclass(cls, Policy)
 
 
 def _as_text(value: Any) -> str:

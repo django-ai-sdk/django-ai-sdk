@@ -181,11 +181,9 @@ class StepDefinition(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _refuse_a_system_prompt(cls, data: Any) -> Any:
-        """Refuse `system_prompt_override`. A definition cannot replace an agent's prompt.
+        """Refuse `system_prompt_override`: a definition cannot replace an agent's prompt.
 
-        Whoever writes a definition does not own the agent, and their prompt would
-        outrank the agent's own. Code steps can still set `AgentStep.instructions`. An
-        old stored definition that carries one is refused, not run without it.
+        Code steps can still set `AgentStep.instructions`.
         """
         if isinstance(data, dict) and data.get("system_prompt_override"):
             raise ValueError(

@@ -43,11 +43,7 @@ DJANGO_ONLY_OPTIONS = frozenset(
 def database_url() -> str:
     """Where DBOS keeps its tables: AI_SDK_DBOS['DATABASE_URL'], or the default database.
 
-    Postgres shares the project's database, in its own schema, with the same
-    connection parameters: DATABASES OPTIONS such as `sslmode` become query
-    parameters, and a HOST that is a socket directory becomes `?host=`. SQLite
-    gets a file next to the project's, since two writers in one file would lock
-    each other.
+    Postgres: same database and OPTIONS, own schema. SQLite: a file next to the project's.
     """
     if url := setting("DATABASE_URL"):
         return url

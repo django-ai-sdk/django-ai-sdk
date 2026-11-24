@@ -1,12 +1,7 @@
-"""A workflow run as a DBOS workflow: each unit of the walk a checkpoint.
+"""A workflow run as a DBOS workflow: each walk unit is a checkpointed step.
 
-The walk is `runner._StepRunner`'s, unchanged. Here each unit it hands over (a
-step, the run's start and end) is a DBOS step, so a run whose worker died is
-recovered by DBOS and replays the units that finished instead of doing them
-again. An approval step waits with `DBOS.recv`, durably, for days if need be.
-
-The run's id is the DBOS workflow id of its first attempt; a resumed run gets
-"<run id>:<attempt>". The WorkflowRun and StepRun rows stay the record a UI reads.
+A recovered run replays finished units instead of redoing them; approvals wait with
+`DBOS.recv`. Workflow id is the run id, or "<run id>:<attempt>" on resume.
 """
 
 from __future__ import annotations
@@ -53,17 +48,19 @@ def enqueue(run_id: str) -> str:
     return queued
 
 
-def runs_under_other_versions() -> dict[str, str]:
-    """Unfinished runs DBOS keeps under another AI_SDK_DBOS['VERSION']: {run id: version}.
+# DBOS workflow statuses under which DBOS still runs, recovers or dequeues the workflow.
+ACTIVE_STATUSES = frozenset({"PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"})
 
-    A worker recovers and dequeues only its own version's runs, so these wait until
-    a worker of their version runs, or until they are cancelled and resumed, which
-    queues them under the current one. The worker warns about them at start.
+
+def runs_under_other_versions() -> dict[str, str]:
+    """Unfinished runs under another AI_SDK_DBOS['VERSION']: {run id: version}.
+
+    Only a worker of that version picks them up; the worker warns about them at start.
     """
     current = runtime.setting("VERSION")
     unfinished = runtime.client().list_workflows(
         name=RUN_WORKFLOW,
-        status=["PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"],
+        status=list(ACTIVE_STATUSES),
         load_input=False,
         load_output=False,
     )
@@ -80,7 +77,9 @@ async def run_workflow(run_id: str) -> str:
     from django_ai_sdk.workflows.runs import execute_run
 
     try:
-        run = await execute_run(run_id, perform=perform, wait=wait, workflow_id=DBOS.workflow_id)
+        run = await execute_run(
+            run_id, perform=perform, wait=DBOS.recv_async, workflow_id=DBOS.workflow_id
+        )
     except (WorkflowStopped, RunSuperseded) as exc:
         # An outcome the rows already record, not a failure of the workflow.
         logger.info("Workflow run %s ended: %s", run_id, exc)
@@ -113,11 +112,6 @@ async def perform(label: str, unit: Callable[[], Awaitable[Any]]) -> Any:
             return _dump(await unit())
 
     return _load(await DBOS.run_step_async({"name": label}, checkpointed))
-
-
-async def wait(topic: str, seconds: float) -> Any:
-    """The runner's `Wait` under DBOS: the message sent to `topic`, or None after `seconds`."""
-    return await DBOS.recv_async(topic=topic, timeout_seconds=seconds)
 
 
 def _dump(value: Any) -> Any:

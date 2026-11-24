@@ -1,9 +1,6 @@
-"""The workflows app. On start it imports each app's `workflows.py` and registers
-the workflow system checks.
+"""Opt-in workflows app: imports each app's `workflows.py` and registers checks.
 
-Opt-in. Without it in INSTALLED_APPS there are no workflow tables or checks, and
-nothing from this package is imported. Runs execute on DBOS, so it needs
-'django_ai_sdk.durable' too.
+Needs 'django_ai_sdk.durable' too.
 """
 
 from __future__ import annotations
