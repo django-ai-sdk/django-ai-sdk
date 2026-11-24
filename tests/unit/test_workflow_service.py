@@ -89,6 +89,29 @@ class TestWorkflowServiceCRUD:
         )
         assert edited.created_by_id == other.pk
 
+    async def test_whoever_switches_it_back_on_is_who_its_runs_act_as(self, author):
+        # Its triggers start again, so they must not act as an author who switched
+        # it off.
+        from tests.factories.db import MANAGE_WORKFLOWS, UserFactory, agrant
+
+        record = await WorkflowService.create("WF", make_definition(), user=author)
+        await WorkflowService.update(str(record.id), user=author, active=False)
+        other = await agrant(await UserFactory.acreate(), MANAGE_WORKFLOWS)
+        still_off = await WorkflowService.update(str(record.id), user=other, active=False)
+        assert still_off.created_by_id == author.pk
+        switched_on = await WorkflowService.update(str(record.id), user=other, active=True)
+        assert switched_on.created_by_id == other.pk
+
+    async def test_two_workflows_with_one_name_get_two_slugs(self, author):
+        # The first slug lookup can find it free for both; the unique index then
+        # sends the second to the next one.
+        from django_ai_sdk.workflows.models import Workflow
+
+        first = await WorkflowService.create("Same", make_definition(), user=author)
+        with patch.object(Workflow, "_unique_slug", side_effect=["same", "same-2"]):
+            second = await WorkflowService.create("Same", make_definition(), user=author)
+        assert (first.slug, second.slug) == ("same", "same-2")
+
     async def test_update_active_flag(self, author):
         definition = make_definition()
         record = await WorkflowService.create("WF", definition, user=author)
@@ -274,6 +297,25 @@ class TestWorkflowServiceResume:
         with patch(ENQUEUE) as enqueue, pytest.raises(ValueError, match="no longer runs"):
             await WorkflowService.resume(str(run.id), user=author)
         enqueue.assert_not_called()
+
+    async def test_a_run_from_before_an_edit_does_not_resume(self, author):
+        # The edit may be the fix: an approval step added before a risky one.
+        run = await self._run(author, "failed")
+        await WorkflowService.update(
+            str(run.workflow_id), user=author, workflow=make_definition(step_name="gated")
+        )
+
+        with patch(ENQUEUE) as enqueue, pytest.raises(ValueError, match="changed since"):
+            await WorkflowService.resume(str(run.id), user=author)
+        enqueue.assert_not_called()
+
+    async def test_a_rename_does_not_stop_a_resume(self, author):
+        run = await self._run(author, "failed")
+        await WorkflowService.update(str(run.workflow_id), user=author, name="Renamed")
+
+        with patch(ENQUEUE):
+            resumed = await WorkflowService.resume(str(run.id), user=author)
+        assert resumed.status == "pending"
 
     @pytest.mark.parametrize("status", ["pending", "running", "completed"])
     async def test_any_other_run_is_refused(self, author, status):

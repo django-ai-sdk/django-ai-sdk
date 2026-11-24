@@ -21,9 +21,11 @@ def run_inline(monkeypatch: Any) -> None:
     from asgiref.sync import async_to_sync
 
     from django_ai_sdk.workflows import durable, runs, services, triggers
+    from django_ai_sdk.workflows.steps import RunSuperseded, WorkflowStopped
 
     def run_now(run_id: str) -> str:
-        with contextlib.suppress(Exception):
+        # Expected run endings; any other error fails the test.
+        with contextlib.suppress(WorkflowStopped, RunSuperseded):
             async_to_sync(runs.execute_run)(run_id)
         return durable.workflow_id(run_id, 0)
 

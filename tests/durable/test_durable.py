@@ -544,6 +544,47 @@ class TestTriggers:
         [listed] = await WorkflowService.list_triggers(user=admin)
         assert listed["paused"] and listed["next_run_at"] is None
 
+    async def test_the_listing_shows_each_triggers_latest_run(self, dbos):
+        from django_ai_sdk.workflows.triggers import start_cron, sync_schedules
+
+        admin = await user("admin@example.com", is_superuser=True)
+        self.hourly()
+        await sync_to_async(sync_schedules)()
+        await start_cron("hourly-echo", "hourly", "2026-11-14T10:05:00+00:00")
+        latest = await start_cron("hourly-echo", "hourly", "2026-11-14T11:05:00+00:00")
+
+        [listed] = await WorkflowService.list_triggers(user=admin)
+        assert str(listed["last_run"].pk) == str(latest)
+
+    async def test_only_a_manager_sees_who_a_trigger_acts_as(self, dbos):
+        from tests.factories.db import UserFactory
+
+        admin = await user("admin@example.com", is_superuser=True)
+        viewer = await UserFactory.acreate()
+        self.hourly(run_as="bot@example.com")
+
+        [managed] = await WorkflowService.list_triggers(user=admin)
+        [viewed] = await WorkflowService.list_triggers(user=viewer)
+        assert (managed["run_as"], viewed["run_as"]) == ("bot@example.com", "")
+
+    async def test_only_its_author_fires_a_stored_workflows_trigger(self, dbos):
+        # Its run acts as the author: another manager firing it would borrow them.
+        from django_ai_sdk.workflows.triggers import sync_schedules
+
+        author = await user("author@example.com", is_superuser=True)
+        other = await user("other@example.com", is_superuser=True)
+        stored = definition(
+            echo("a"), triggers=[CronTrigger(name="hourly", cron="5 * * * *")]
+        )
+        record = await WorkflowService.create("Stored hourly", stored, user=author)
+        await sync_to_async(sync_schedules)()
+
+        with pytest.raises(PermissionDenied, match="author"):
+            await WorkflowService.fire_trigger(record.slug, "hourly", user=other)
+        await WorkflowService.fire_trigger(record.slug, "hourly", user=author)
+        run = await settled((await WorkflowRun.objects.aget(trigger="cron:hourly")).pk)
+        assert (run.user_id, run.started_by_id) == (author.pk, author.pk)
+
     async def test_an_event_delivered_twice_starts_one_run(self, dbos):
         from django_ai_sdk.workflows.triggers import start_for_event
 

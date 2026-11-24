@@ -13,9 +13,9 @@ Needs ``pip install django-ai-sdk[ninja]``. Mount what you need::
     api.add_router("/integrations", ai_sdk_routers.get_integrations_router())
     api.add_router("/", ai_sdk_routers.get_oversight_router())
 
-The oversight router is imported only when requested and needs
-``django_ai_sdk.oversight`` in INSTALLED_APPS. It adds the authoring routes when that
-app is installed.
+The oversight and workflows routers are imported only when requested, and need
+``django_ai_sdk.oversight`` and ``django_ai_sdk.workflows`` in INSTALLED_APPS. The
+oversight router adds the authoring routes when that app is installed.
 
 Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
 ``exclude={"delete_all_threads"}`` and add your own on the result.
@@ -23,6 +23,7 @@ Each ``get_*_router()`` returns a new Router, so you can drop endpoints with
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 try:
@@ -39,15 +40,14 @@ from django_ai_sdk.contrib.ninja.integrations import get_integrations_router
 from django_ai_sdk.contrib.ninja.memories import get_memories_router
 from django_ai_sdk.contrib.ninja.routing import register_error_handlers
 from django_ai_sdk.contrib.ninja.threads import get_threads_router
-from django_ai_sdk.contrib.ninja.workflows import get_workflows_router
+
+# Imported on first use (PEP 562): each needs its own app installed.
+_LAZY_ROUTERS = {"get_oversight_router": "oversight", "get_workflows_router": "workflows"}
 
 
 def __getattr__(name: str) -> Any:
-    """Import the oversight router on first use (PEP 562): it needs its app installed."""
-    if name == "get_oversight_router":
-        from django_ai_sdk.contrib.ninja.oversight import get_oversight_router
-
-        return get_oversight_router
+    if name in _LAZY_ROUTERS:
+        return getattr(import_module(f"{__name__}.{_LAZY_ROUTERS[name]}"), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -65,8 +65,7 @@ def _run_out(run: Any, **extra: Any) -> dict[str, Any]:
 
 @routes.get("/workflows/listeners/", response=list[WorkflowListenerItem])
 async def list_workflow_listeners(request: HttpRequest) -> Any:
-    listeners = await WorkflowService.list_listeners(user=request.user)
-    return [WorkflowListenerItem(**item) for item in listeners]
+    return await WorkflowService.list_listeners(user=request.user)
 
 
 @routes.get("/workflows/triggers/", response=list[WorkflowTriggerItem])

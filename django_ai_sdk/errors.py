@@ -364,6 +364,20 @@ def describe_error(exc: BaseException) -> ErrorInfo:
     return ErrorInfo(code=classify_error(exc), ref=new_ref())
 
 
+def public_detail(exc: BaseException) -> str:
+    """Text a stored record may show a client for `exc`, such as a failed step.
+
+    The SDK's own errors were written for the caller and keep their message. Any
+    other exception text can hold hosts, SQL or an upstream body, so it goes to the
+    log under a ref and the record gets the error code's message and that ref.
+    """
+    if isinstance(exc, AiSdkError):
+        return str(exc)
+    info = describe_error(exc)
+    logger.warning("Recorded as error ref=%s: %s: %s", info.ref, type(exc).__name__, exc)
+    return f"{info.spec.message} (ref {info.ref})"
+
+
 # Malformed input from the caller. Only these, not any ValueError: a ValueError
 # from inside the SDK is a bug and should reach the error log.
 _BAD_INPUT = (ValidationError, DjangoValidationError, SuspiciousOperation)

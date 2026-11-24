@@ -115,7 +115,7 @@ class TestFailure:
         assert outcomes["nested"].status == "failed"
         assert outcomes["after"].status == "completed"
 
-    async def test_a_continue_failure_reaches_only_what_read_its_output(self):
+    async def test_a_continue_failure_reaches_only_what_read_its_output(self, caplog):
         """The triage case: a step nothing depends on must not cost the rest."""
         journal: list[str] = []
         steps = [
@@ -133,7 +133,12 @@ class TestFailure:
 
         outcomes = await run_steps(steps)
 
-        assert "provider 503" in outcomes["extract"].detail
+        # The exception text can hold hosts or an upstream body, so the step shows a
+        # ref and the text goes to the log.
+        detail = outcomes["extract"].detail
+        assert "provider 503" not in detail
+        assert "(ref " in detail
+        assert "provider 503" in caplog.text
         assert outcomes["match"].status == "skipped"
         assert outcomes["triage"].status == "completed"
         assert journal == ["ocr", "extract", "triage"]

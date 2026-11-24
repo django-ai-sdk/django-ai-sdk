@@ -16,7 +16,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from pydantic import ValidationError
 
-from django_ai_sdk.errors import UserError
+from django_ai_sdk.errors import UserError, public_detail
 from django_ai_sdk.permissions import user_pk
 from django_ai_sdk.utils import serialize
 from django_ai_sdk.workflows.definitions import compile_inputs, compile_listeners, compile_steps
@@ -63,8 +63,7 @@ async def open_run(
         key = workflow.name
     else:
         key = ADHOC
-    return await WorkflowRun.objects.acreate(
-        **({"id": run_id} if run_id is not None else {}),
+    run = WorkflowRun(
         trigger=trigger,
         workflow=record,
         workflow_key=key,
@@ -73,15 +72,20 @@ async def open_run(
         user_id=user_pk(user),
         started_by_id=user_pk(started_by),
     )
+    if run_id is not None:
+        run.id = run_id
+
+    def create() -> WorkflowRun:
+        # Savepoint: a duplicate run_id keeps the caller's transaction usable.
+        with transaction.atomic():
+            run.save(force_insert=True)
+        return run
+
+    return await sync_to_async(create)()
 
 
 def enqueue_run(run: WorkflowRun) -> None:
-    """Queue `run` for a worker once the current transaction commits.
-
-    On commit, so a worker never looks for a row that does not exist yet. If
-    queueing fails, the run is marked failed with the reason, so it never sits
-    pending forever.
-    """
+    """Queue `run` on commit; if queueing fails, the run is marked failed."""
     run_id = str(run.pk)
     transaction.on_commit(lambda: requeue(run_id))
 
@@ -103,12 +107,8 @@ async def queue_run(
 ) -> WorkflowRun:
     """Check the inputs, then create the run and queue it.
 
-    `user` is who the run acts as; `started_by` the person who asked for it, when
-    a person did. Neither may approve it.
-
-    The inputs are checked here rather than in the worker, so a caller who supplied
-    the wrong ones hears about it on the call that queued the run. A `run_id` that
-    exists returns that run and queues nothing.
+    `user` is who the run acts as, `started_by` who asked; neither may approve it.
+    Bad inputs fail this call, not the worker. An existing `run_id` returns that run.
     """
     # Only what the definition declares is stored: the schema is the contract.
     inputs = validate_inputs(workflow, inputs or {})
@@ -165,24 +165,15 @@ def requeue_pending() -> int:
     return len(pending)
 
 
-# DBOS workflow statuses under which DBOS still runs, recovers or dequeues the workflow.
-ACTIVE_STATUSES = frozenset({"PENDING", "ENQUEUED", "DELAYED", "SUSPENDED"})
-
-
 def fail_stale_runs() -> int:
     """Fail every running run whose DBOS workflow no longer runs. Returns how many.
 
-    A run is checked once its `heartbeat_at` is older than
-    AI_SDK_WORKFLOWS['STALE_AFTER_SECONDS']. One whose DBOS workflow ended, was
-    cancelled, ran out of recovery attempts or is gone would stay running forever,
-    so it is failed, and its unfinished step rows with it; `resume` takes it up
-    again. A run DBOS still runs is left alone, however old its heartbeat: a long
-    step, an approval waiting for days, a run waiting for a worker to recover it.
-
-    The worker calls it at start and every minute; a host may schedule it as well.
+    Checks runs whose heartbeat is older than STALE_AFTER_SECONDS; fails them and their
+    unfinished steps. A run DBOS still runs is left alone. Called by the worker.
     """
     from django_ai_sdk.durable import runtime
     from django_ai_sdk.workflows.conf import setting
+    from django_ai_sdk.workflows.durable import ACTIVE_STATUSES
 
     now = timezone.now()
     cutoff = now - timedelta(seconds=setting("STALE_AFTER_SECONDS"))
@@ -220,12 +211,9 @@ def fail_stale_runs() -> int:
 
 
 async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
-    """Claim a pending run for this worker. None when it is not pending.
+    """Claim a pending run (one conditional UPDATE). None when it is not pending.
 
-    One conditional UPDATE, so a duplicate delivery or a finished run claims nothing.
-    `workflow_id` is the DBOS workflow claiming it, stored as `task_id`. A run already
-    running under that id is this workflow's own: it claimed the run and its worker
-    died before DBOS recorded the claim, so the claim is taken up again, not refused.
+    A run already RUNNING under `workflow_id` is re-claimed: its worker died first.
     """
     now = timezone.now()
     claimed = await WorkflowRun.objects.filter(
@@ -272,8 +260,11 @@ async def execute_run(
         raise
     except Exception as exc:
         # Failed before the walk began, or while the recorder closed the run.
-        error = str(exc)
-        await perform("fail", lambda: fail_run(run, attempt, error))
+        error = public_detail(exc)
+        await perform(
+            "fail",
+            lambda: _close(run, attempt, status=WorkflowRun.Status.FAILED, error=error, quiet=True),
+        )
         raise
     return run
 
@@ -282,7 +273,11 @@ async def _claim(run_id: str, workflow_id: str | None) -> dict[str, Any] | None:
     run = await claim_run(run_id, workflow_id=workflow_id)
     if run is None:
         return None
-    return {"attempt": run.attempt, "completed": serialize(await _already_completed(run))}
+    completed = {
+        row.step_name: row.output
+        async for row in StepRun.objects.filter(run=run, status=StepRun.Status.COMPLETED)
+    }
+    return {"attempt": run.attempt, "completed": serialize(completed)}
 
 
 async def walk_run(
@@ -312,11 +307,6 @@ async def walk_run(
         perform=perform,
         wait=wait,
     )
-
-
-async def fail_run(run: WorkflowRun, attempt: int, error: str) -> None:
-    """Mark the run failed with `error`, unless the recorder already closed it."""
-    await _close(run, attempt, status=WorkflowRun.Status.FAILED, error=error, quiet=True)
 
 
 async def _close(run: WorkflowRun, attempt: int, *, quiet: bool = False, **fields: Any) -> None:
@@ -375,11 +365,8 @@ class RunRecorder(RunListener):
     async def on_step_start(self, ctx: WorkflowContext, step: Step) -> None:
         """Claim this step's row for this attempt.
 
-        The run claim already keeps other workers out, so a row left running by an
-        earlier attempt is taken over. A completed row never is: the walk skips the
-        steps earlier attempts completed, so a completed row here is this attempt's
-        own, written before its worker died and DBOS recorded the step. It raises
-        `StepRecorded` with what the row holds, and the step does not run again.
+        A completed row is this attempt's own (its worker died before DBOS recorded it):
+        raise `StepRecorded` with it, so the step does not run again.
         """
         await self.beat()
         sequence = self.sequence[step.name]
@@ -409,11 +396,9 @@ class RunRecorder(RunListener):
             )
 
     async def expire(self, step: Step) -> bool:
-        """End a waiting step's wait that ran out. False when a decision was taken first.
+        """End a timed-out wait. False when a decision was taken first.
 
-        The same conditional update on `waiting` as `WorkflowService.decide`'s, so
-        exactly one of them wins: a decision taken in time is never lost, and one
-        that comes too late is refused.
+        Same conditional update on WAITING as `WorkflowService.decide`, so exactly one wins.
         """
         rows = StepRun.objects.filter(run=self.run, sequence=self.sequence[step.name])
         if await rows.filter(status=StepRun.Status.WAITING).aupdate(
@@ -426,11 +411,10 @@ class RunRecorder(RunListener):
         return not await rows.filter(status=StepRun.Status.RUNNING).aexists()
 
     async def on_step_end(self, ctx: WorkflowContext, step: Step, outcome: StepOutcome) -> None:
-        """Write a step's outcome. Upserts, because a skipped step never started.
+        """Upsert a step's outcome (a skipped step never started).
 
-        A step that ran while its run was stopped (cancelled, or failed as stale)
-        still gets its outcome written, so a resume does not do it again; then
-        `RunSuperseded` stops the walk. Not once a later attempt took the run.
+        A stopped run still records it, so resume skips it; then `RunSuperseded`. Not once
+        a later attempt took the run.
         """
         if await self._alive():
             await self._write(step, outcome)
@@ -479,14 +463,6 @@ def validate_inputs(workflow: WorkflowDefinition, supplied: dict[str, Any]) -> d
         ) from exc
     # Drop undeclared extras. The schema is the contract.
     return {name: getattr(parsed, name) for name in model.model_fields}
-
-
-async def _already_completed(run: WorkflowRun) -> dict[str, Any]:
-    """Stored output of every step of this run that already finished."""
-    return {
-        row.step_name: row.output
-        async for row in StepRun.objects.filter(run=run, status=StepRun.Status.COMPLETED)
-    }
 
 
 def _published(outcomes: Mapping[str, StepOutcome]) -> dict[str, Any]:

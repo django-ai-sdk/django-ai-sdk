@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
 
+from django_ai_sdk.errors import public_detail
 from django_ai_sdk.oversight.calls import requires_turn
 from django_ai_sdk.oversight.guard import watching_turns
 from django_ai_sdk.workflows.steps import (
@@ -102,12 +103,7 @@ class _StepRunner:
     async def _notify(
         self, listeners: Sequence[RunListener], call: Callable[[RunListener], Awaitable[None]]
     ) -> None:
-        """Call the recorder, then each listener.
-
-        A listener only watches the run, so one that raises is logged and the walk
-        goes on. A recorder error stops the run, because a step must not run without
-        its row.
-        """
+        """Recorder first (its errors stop the run), then listeners (errors logged)."""
         if self.recorder is not None:
             await call(self.recorder)
         for listener in listeners:
@@ -181,7 +177,7 @@ class _StepRunner:
         except Exception as exc:
             logger.warning("Step %s failed: %s", step.name, exc)
             self.raised = exc
-            outcome = StepOutcome(status="failed", detail=str(exc))
+            outcome = StepOutcome(status="failed", detail=public_detail(exc))
         if opened and not outcome.turn_id:
             outcome.turn_id = opened[0]
         return await self._settle(step, outcome)

@@ -10,7 +10,7 @@ once DBOS recovers it, so a task must be safe to repeat, as with any queue.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +27,7 @@ from django_tasks.signals import task_enqueued
 from django_ai_sdk.durable import runtime
 
 if TYPE_CHECKING:
-    from dbos import EnqueueOptions, WorkflowStatus
+    from dbos import WorkflowStatus
 
 # The DBOS workflow every task runs as.
 TASK_WORKFLOW = "ai_sdk.task"
@@ -100,15 +100,18 @@ class DBOSTaskBackend(BaseTaskBackend):
             errors=[],
             worker_ids=[],
         )
-        options: EnqueueOptions = {
-            "queue_name": task.queue_name,
-            "workflow_name": TASK_WORKFLOW,
-            "workflow_id": result.id,
-            "app_version": runtime.setting("VERSION"),
-        }
+        delay = None
         if task.run_after is not None:
-            options["delay_seconds"] = max(0.0, (task.run_after - timezone.now()).total_seconds())
-        await runtime.client().enqueue_async(options, task.module_path, result.args, result.kwargs)
+            delay = max(0.0, (task.run_after - timezone.now()).total_seconds())
+        await runtime.enqueue(
+            TASK_WORKFLOW,
+            task.module_path,
+            result.args,
+            result.kwargs,
+            workflow_id=result.id,
+            queue=task.queue_name,
+            delay_seconds=delay,
+        )
         task_enqueued.send(type(self), task_result=result)
         return result
 
@@ -116,11 +119,12 @@ class DBOSTaskBackend(BaseTaskBackend):
         return async_to_sync(self.aget_result)(result_id)
 
     async def aget_result(self, result_id: str) -> TaskResult:
+        from dbos import error
         from django_tasks.exceptions import TaskResultDoesNotExist
 
         try:
             status = await runtime.status(result_id)
-        except Exception as exc:
+        except error.DBOSNonExistentWorkflowError as exc:
             raise TaskResultDoesNotExist(result_id) from exc
         if status is None or status.name != TASK_WORKFLOW:
             raise TaskResultDoesNotExist(result_id)
@@ -164,9 +168,7 @@ _DONE = {TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED}
 
 
 def _moment(epoch_ms: int | None) -> datetime | None:
-    if not epoch_ms:
-        return None
-    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(milliseconds=epoch_ms)
+    return datetime.fromtimestamp(epoch_ms / 1000, UTC) if epoch_ms else None
 
 
 def _error_path(error: Exception) -> str:

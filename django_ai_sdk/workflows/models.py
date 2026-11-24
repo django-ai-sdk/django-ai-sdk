@@ -4,7 +4,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils.text import slugify
 
 from django_ai_sdk.workflows.registry import ADHOC, NAME_MAX_LENGTH
@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from django.db.models import Manager
 
 APP_LABEL = "django_ai_sdk_workflows"
+
+# Tries at a free slug when saves race for the same name.
+SLUG_ATTEMPTS = 3
 
 
 class Workflow(models.Model):
@@ -53,8 +56,22 @@ class Workflow(models.Model):
         return self.name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if not self.slug:
+        if self.slug:
+            self._save_named(*args, **kwargs)
+            return
+        # Two rows with the same name, saved at once, can pick the same free slug;
+        # the unique index refuses the second, which then picks the next one.
+        for attempt in range(SLUG_ATTEMPTS):
             self.slug = self._unique_slug()
+            try:
+                with transaction.atomic():
+                    self._save_named(*args, **kwargs)
+                return
+            except IntegrityError:
+                if attempt == SLUG_ATTEMPTS - 1 or not self.has_slug(self.slug):
+                    raise
+
+    def _save_named(self, *args: Any, **kwargs: Any) -> None:
         # The definition's name is always the slug, so a row cannot claim another's name.
         if isinstance(self.definition, dict) and self.definition.get("name") != self.slug:
             self.definition = {**self.definition, "name": self.slug}
@@ -62,14 +79,17 @@ class Workflow(models.Model):
                 kwargs["update_fields"] = {*kwargs["update_fields"], "definition"}
         super().save(*args, **kwargs)
 
+    def has_slug(self, slug: str) -> bool:
+        """True when another row holds `slug`."""
+        return Workflow.objects.exclude(pk=self.pk).filter(slug=slug).exists()
+
     def _unique_slug(self) -> str:
         """A slug derived from `name`, suffixed until it is free."""
         base = (slugify(self.name) or f"workflow-{str(self.pk)[:8]}")[:NAME_MAX_LENGTH]
         slug, suffix = base, 2
-        taken = Workflow.objects.exclude(pk=self.pk)
         # A row may share a registered workflow's name, e.g. to show it in a studio:
         # the registered one wins at start, and the row is still reached by id.
-        while slug == ADHOC or taken.filter(slug=slug).exists():
+        while slug == ADHOC or self.has_slug(slug):
             tail = f"-{suffix}"
             slug = f"{base[: NAME_MAX_LENGTH - len(tail)]}{tail}"
             suffix += 1
@@ -159,6 +179,16 @@ class WorkflowRun(models.Model):
         ordering = ["-created_at"]
         verbose_name = "Workflow Run"
         verbose_name_plural = "Workflow Runs"
+        indexes = [
+            # A trigger's latest run: every cron fire, and the triggers listing.
+            models.Index(
+                fields=["workflow_key", "trigger", "-created_at"],
+                name="ai_sdk_wfrun_trigger_latest",
+            ),
+            # A stored workflow's runs, and one user's runs, newest first.
+            models.Index(fields=["workflow", "-created_at"], name="ai_sdk_wfrun_workflow_latest"),
+            models.Index(fields=["user", "-created_at"], name="ai_sdk_wfrun_user_latest"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.workflow_key} — {self.status} — {self.created_at}"
