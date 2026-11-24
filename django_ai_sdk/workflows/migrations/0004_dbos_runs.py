@@ -1,15 +1,11 @@
-"""Workflows on DBOS: the models renamed, and what durable runs record.
-
-Upgrades a v0.1.2a21 database in place. The tables keep their names and rows, so
-stored workflows and run history carry over. Existing runs get their workflow's
-slug as `workflow_key`; one with no stored workflow stays "adhoc".
-"""
+"""Workflows on DBOS. Upgrades a 0.1.2a21 database in place; rows carry over."""
 
 from __future__ import annotations
 
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
+from django.db.models import OuterRef, Subquery
 
 
 def backfill(apps, schema_editor):  # noqa: ANN001, ANN201
@@ -19,8 +15,8 @@ def backfill(apps, schema_editor):  # noqa: ANN001, ANN201
     for workflow in Workflow.objects.filter(slug="adhoc"):
         workflow.slug = f"adhoc-{str(workflow.pk)[:8]}"
         workflow.save(update_fields=["slug"])
-    for workflow in Workflow.objects.all().only("pk", "slug"):
-        WorkflowRun.objects.filter(workflow_id=workflow.pk).update(workflow_key=workflow.slug)
+    slug = Workflow.objects.filter(pk=OuterRef("workflow_id")).values("slug")[:1]
+    WorkflowRun.objects.exclude(workflow=None).update(workflow_key=Subquery(slug))
 
 
 class Migration(migrations.Migration):
@@ -122,5 +118,22 @@ class Migration(migrations.Migration):
                 condition=models.Q(("slug", "adhoc"), _negated=True),
                 name="django_ai_sdk_workflow_slug_not_adhoc",
             ),
+        ),
+        migrations.AddIndex(
+            model_name="workflowrun",
+            index=models.Index(
+                fields=["workflow_key", "trigger", "-created_at"],
+                name="ai_sdk_wfrun_trigger_latest",
+            ),
+        ),
+        migrations.AddIndex(
+            model_name="workflowrun",
+            index=models.Index(
+                fields=["workflow", "-created_at"], name="ai_sdk_wfrun_workflow_latest"
+            ),
+        ),
+        migrations.AddIndex(
+            model_name="workflowrun",
+            index=models.Index(fields=["user", "-created_at"], name="ai_sdk_wfrun_user_latest"),
         ),
     ]
