@@ -75,9 +75,9 @@ class DBOSTaskBackend(BaseTaskBackend):
     def validate_task(self, task: Task) -> None:
         super().validate_task(task)
         if task.takes_context:
-            from django_tasks.exceptions import InvalidTask
+            from django_tasks.exceptions import InvalidTaskError
 
-            raise InvalidTask("DBOSTaskBackend does not pass a TaskContext.")
+            raise InvalidTaskError("DBOSTaskBackend does not pass a TaskContext.")
 
     def enqueue(self, task: Task, args: Any, kwargs: Any) -> TaskResult:
         return async_to_sync(self.aenqueue)(task, args, kwargs)
