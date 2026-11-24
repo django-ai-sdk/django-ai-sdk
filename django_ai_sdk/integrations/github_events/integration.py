@@ -6,11 +6,8 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING
 
-import httpx
-
 from django_ai_sdk.integrations.github_events.verify import is_signed_by_github
 from django_ai_sdk.integrations.webhooks.base import (
-    REPLY_TIMEOUT_SECONDS,
     UNSIGNED_DEDUP_TTL,
     InboundEvent,
     WebhookIntegration,
@@ -44,6 +41,7 @@ class GitHubEventsIntegration(WebhookIntegration):
             "WEBHOOK_SECRET": env("GITHUB_WEBHOOK_SECRET"),
             "TOKEN": env("GITHUB_TOKEN"),
             "ALLOW_WORKSPACES": ["owner/repo"],
+            "ALLOW_FROM": ["octocat"],
             "AGENT": "myapp.agents.ReviewAgent",
         }}
 
@@ -59,13 +57,12 @@ class GitHubEventsIntegration(WebhookIntegration):
     thread_per_ref = True
 
     def missing_config(self) -> str | None:
-        missing = self._missing_secrets(
+        if missing := self._missing_secrets(
             "WEBHOOK_SECRET",
             "TOKEN",
             hint="the secret from the webhook settings, and a token that may comment on "
             "pull requests.",
-        )
-        if missing:
+        ):
             return missing
         # One webhook secret can cover a whole organization, so require an
         # explicit list of repositories.
@@ -74,7 +71,7 @@ class GitHubEventsIntegration(WebhookIntegration):
                 "No repositories. Set AI_SDK_INTEGRATIONS['github_events']"
                 f"['ALLOW_WORKSPACES'] to owner/repo names, or to {self.ANY!r}."
             )
-        return None
+        return self._missing_audience("GitHub logins")
 
     def verify(self, request: HttpRequest) -> bool:
         return is_signed_by_github(
@@ -93,7 +90,8 @@ class GitHubEventsIntegration(WebhookIntegration):
 
         action = body.get("action", "")
         pr = body.get("pull_request") or {}
-        if action not in self._actions() or (pr.get("draft") and action != "ready_for_review"):
+        actions = frozenset(self._config().get("ACTIONS") or DEFAULT_ACTIONS)
+        if action not in actions or (pr.get("draft") and action != "ready_for_review"):
             return None
 
         repository = (body.get("repository") or {}).get("full_name", "")
@@ -128,17 +126,16 @@ class GitHubEventsIntegration(WebhookIntegration):
     async def reply(self, event: InboundEvent, text: str) -> None:
         # PR comments are posted through the issues API.
         url = f"{API_BASE}/repos/{event.conversation_id}/issues/{event.thread_ref}/comments"
-        async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                url,
-                json={"body": text[:MAX_COMMENT_LENGTH]},
-                headers={
-                    "Authorization": f"Bearer {self.secret('TOKEN')}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-        if not response.is_success:
+        response = await self._post_reply(
+            url,
+            json={"body": text[:MAX_COMMENT_LENGTH]},
+            headers={
+                "Authorization": f"Bearer {self.secret('TOKEN')}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        if response is not None and not response.is_success:
             logger.error(
                 "GitHub refused a comment on %s#%s: %s %s",
                 event.conversation_id,
@@ -146,6 +143,3 @@ class GitHubEventsIntegration(WebhookIntegration):
                 response.status_code,
                 response.text,
             )
-
-    def _actions(self) -> frozenset[str]:
-        return frozenset(self._config().get("ACTIONS") or DEFAULT_ACTIONS)

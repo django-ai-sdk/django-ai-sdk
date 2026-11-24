@@ -12,6 +12,7 @@ from abc import abstractmethod
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from django.http import HttpResponse
 from pydantic import BaseModel
 
@@ -123,6 +124,18 @@ class WebhookIntegration(Integration):
     async def reply(self, event: InboundEvent, text: str) -> None:
         """Post `text` back to the event's conversation."""
 
+    async def _post_reply(
+        self, url: str, *, json: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> httpx.Response | None:
+        """POST a reply; None (logged) when the platform is unreachable."""
+        try:
+            async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
+                return await client.post(url, json=json, headers=headers)
+        except httpx.HTTPError as exc:
+            # Class only: the message may hold the URL, with Telegram's bot token.
+            logger.error("%s could not be reached to reply: %s", self.label, type(exc).__name__)
+            return None
+
     #: One thread per thread_ref (a Slack thread, a pull request) instead of one
     #: per conversation. An event without a thread_ref then keeps no history.
     thread_per_ref: bool = False
@@ -154,6 +167,15 @@ class WebhookIntegration(Integration):
         """True when ALLOW_FROM is set, to a list or to ANY."""
         return bool(self._config().get("ALLOW_FROM"))
 
+    def _missing_audience(self, senders: str) -> str | None:
+        """Why ALLOW_FROM must be set, or None when it is."""
+        if self.has_audience():
+            return None
+        return (
+            f"No audience. Set AI_SDK_INTEGRATIONS[{self.name!r}]['ALLOW_FROM'] "
+            f"to {senders}, or to {self.ANY!r}."
+        )
+
     def _admits(self, key: str, value: str) -> bool:
         # An unset list admits everyone the platform lets through.
         allowed = self._config().get(key) or []
@@ -171,9 +193,7 @@ class WebhookIntegration(Integration):
             )
             return False
         # Accept ANY inside a list too, since env.list(..., default=["*"]) gives that.
-        if self.ANY in allowed:
-            return True
-        return value in set(allowed)
+        return self.ANY in allowed or value in allowed
 
     # -- identity --
 

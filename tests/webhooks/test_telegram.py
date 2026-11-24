@@ -180,6 +180,16 @@ class TestReply:
             await telegram.reply(self._event(), "ahoy")
         assert "12345:AAtest" not in caplog.text
 
+    async def test_an_unreachable_api_keeps_the_token_out_of_the_log(self, telegram, caplog):
+        # httpx puts the URL, and so the bot token, in its error text.
+        import httpx
+
+        error = httpx.ConnectError("https://api.telegram.org/bot12345:AAtest/sendMessage")
+        with patch("httpx.AsyncClient.post", AsyncMock(side_effect=error)):
+            assert await telegram.send("42", "ahoy") is False
+        assert "ConnectError" in caplog.text
+        assert "12345:AAtest" not in caplog.text
+
     async def test_a_body_that_is_not_json_is_reported_by_status(self, telegram, caplog):
         response = Mock(status_code=502, json=Mock(side_effect=ValueError))
         with patch("httpx.AsyncClient.post", AsyncMock(return_value=response)):

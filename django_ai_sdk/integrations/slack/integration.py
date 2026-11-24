@@ -6,12 +6,10 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-import httpx
 from django.http import JsonResponse
 
 from django_ai_sdk.integrations.slack.verify import is_signed_by_slack
 from django_ai_sdk.integrations.webhooks.base import (
-    REPLY_TIMEOUT_SECONDS,
     InboundEvent,
     WebhookIntegration,
     json_body,
@@ -40,6 +38,7 @@ class SlackIntegration(WebhookIntegration):
         AI_SDK_INTEGRATIONS = {"slack": {
             "BOT_TOKEN": env("SLACK_BOT_TOKEN"),
             "SIGNING_SECRET": env("SLACK_SIGNING_SECRET"),
+            "ALLOW_FROM": ["U0123ABCD"],
             "AGENT": "myapp.agents.SupportAgent",
         }}
     """
@@ -56,7 +55,7 @@ class SlackIntegration(WebhookIntegration):
             "SIGNING_SECRET",
             hint="the bot token from the Slack app's Install page, the signing secret from "
             "its Basic Information page.",
-        )
+        ) or self._missing_audience("Slack member ids (U…)")
 
     def verify(self, request: HttpRequest) -> bool:
         return is_signed_by_slack(
@@ -79,11 +78,7 @@ class SlackIntegration(WebhookIntegration):
         if not self._is_answerable(event):
             return None
 
-        # Skip a bare mention so the agent never gets an empty prompt.
         text = _MENTION.sub("", event.get("text", "")).strip()
-        if not text:
-            return None
-
         return InboundEvent(
             integration=self.name,
             event_id=body.get("event_id", ""),
@@ -106,17 +101,13 @@ class SlackIntegration(WebhookIntegration):
         return event.get("type") == "message" and event.get("channel_type") == "im"
 
     async def reply(self, event: InboundEvent, text: str) -> None:
-        payload = {
-            "channel": event.conversation_id,
-            "text": text,
-            "thread_ts": event.thread_ref,
-        }
-        async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                POST_MESSAGE_URL,
-                json=payload,
-                headers={"Authorization": f"Bearer {self.secret('BOT_TOKEN')}"},
-            )
+        response = await self._post_reply(
+            POST_MESSAGE_URL,
+            json={"channel": event.conversation_id, "text": text, "thread_ts": event.thread_ref},
+            headers={"Authorization": f"Bearer {self.secret('BOT_TOKEN')}"},
+        )
+        if response is None:
+            return
         # Slack returns 200 with ok=false on errors like a revoked token,
         # so check the body, not the status code.
         body = json_body(response)

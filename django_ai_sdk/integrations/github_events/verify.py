@@ -9,12 +9,9 @@ PREFIX = "sha256="
 
 
 def is_signed_by_github(webhook_secret: str, signature: str, body: bytes) -> bool:
-    """Check the GitHub sha256 signature of `body`.
+    """Check the GitHub sha256 signature of `body`; sha1 is not accepted.
 
-    GitHub signs no timestamp, so this cannot catch a replay. The integration
-    dedups on a digest of the signed body, which drops a replay for the dedup
-    window (a week); after that a captured request is answered again. The
-    deprecated sha1 scheme is not accepted.
+    No timestamp is signed: replay protection is the integration's dedup window.
     """
     if not webhook_secret or not signature.startswith(PREFIX):
         return False

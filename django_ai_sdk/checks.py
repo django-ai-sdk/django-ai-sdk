@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from django.core.checks import Error
+from django.core.checks import Error, Warning  # noqa: A004
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 PREFIX = "ai_sdk"
 OVERSIGHT_APP = "django_ai_sdk.oversight"
@@ -50,6 +53,70 @@ def check_oversight_installed(app_configs: Any = None, **kwargs: Any) -> list[An
     return messages
 
 
+# Caches that each process keeps to itself, or that keep nothing.
+_UNSHARED_CACHES = (
+    "django.core.cache.backends.locmem.LocMemCache",
+    "django.core.cache.backends.dummy.DummyCache",
+)
+
+
+def check_webhook_dedup_cache(app_configs: Any = None, **kwargs: Any) -> list[Any]:
+    """Warn when webhooks dedup events in a cache other processes cannot see."""
+    from django.conf import settings
+
+    from django_ai_sdk.integrations.registry import _registry
+    from django_ai_sdk.integrations.webhooks.base import WebhookIntegration
+
+    configured = getattr(settings, "AI_SDK_INTEGRATIONS", None) or {}
+    webhooks = sorted(
+        name
+        for name, integration in _registry.items()
+        if isinstance(integration, WebhookIntegration) and name in configured
+    )
+    backend = settings.CACHES.get("default", {}).get("BACKEND", "")
+    if not webhooks or backend not in _UNSHARED_CACHES:
+        return []
+    return [
+        Warning(
+            f"Webhook integrations {', '.join(webhooks)} dedup events in the default cache, "
+            f"which is {backend.rsplit('.', 1)[-1]}: not shared between processes, so a "
+            "redelivered or replayed event can be answered twice.",
+            hint="Use a shared cache (Redis, Memcached or DatabaseCache) as CACHES['default'].",
+            id=f"{PREFIX}.W001",
+        )
+    ]
+
+
+def dict_setting_errors(
+    name: str, accepts: dict[str, tuple[Callable[[Any], bool], str]], prefix: str
+) -> list[Error]:
+    """E012: setting `name` is a dict of `accepts` keys, each of the kind it takes."""
+    from django.conf import settings
+
+    user_settings = getattr(settings, name, None) or {}
+    if not isinstance(user_settings, dict):
+        return [
+            Error(
+                f"{name} must be a dict, not a {type(user_settings).__name__}.",
+                hint="Set a dict, or remove it.",
+                id=f"{prefix}.E012",
+            )
+        ]
+    errors = []
+    for key, value in user_settings.items():
+        if key not in accepts:
+            errors.append(
+                Error(
+                    f"{name} has an unknown key {key!r}.",
+                    hint=f"The keys are {', '.join(accepts)}.",
+                    id=f"{prefix}.E012",
+                )
+            )
+        elif not accepts[key][0](value):
+            errors.append(Error(f"{name}[{key!r}] must be {accepts[key][1]}.", id=f"{prefix}.E012"))
+    return errors
+
+
 def _asks_for_policy(cls: type) -> bool:
     from django_ai_sdk.agents.base import Agent
 
@@ -58,4 +125,4 @@ def _asks_for_policy(cls: type) -> bool:
     return getattr(cls, "get_oversight", None) is not Agent.get_oversight
 
 
-__all__ = ["check_oversight_installed"]
+__all__ = ["check_oversight_installed", "check_webhook_dedup_cache", "dict_setting_errors"]

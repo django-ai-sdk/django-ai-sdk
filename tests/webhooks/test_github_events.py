@@ -27,6 +27,7 @@ CONFIG = {
         "TOKEN": "ghp_test",
         "BOT_USERNAME": "pirate-bot",
         "ALLOW_WORKSPACES": ["acme/widgets"],
+        "ALLOW_FROM": ["octocat"],
         "AGENT": "a.b.C",
     }
 }
@@ -226,6 +227,14 @@ class TestReply:
             await github.reply(self._event(), "ahoy")
         assert "403" in caplog.text
 
+    async def test_an_unreachable_api_is_logged_not_raised(self, github, caplog):
+        # The event is already claimed, so a raise would only lose the reply quietly.
+        import httpx
+
+        with patch("httpx.AsyncClient.post", AsyncMock(side_effect=httpx.ConnectTimeout("t"))):
+            await github.reply(self._event(), "ahoy")
+        assert "ConnectTimeout" in caplog.text
+
     async def test_the_token_is_never_logged(self, github, caplog):
         response = Mock(is_success=False, status_code=401, text="401: Bad credentials")
         with patch("httpx.AsyncClient.post", AsyncMock(return_value=response)):
@@ -250,6 +259,13 @@ class TestConfiguration:
         config = {"github_events": {k: v for k, v in CONFIG["github_events"].items() if k != "ALLOW_WORKSPACES"}}
         with override_settings(AI_SDK_INTEGRATIONS=config):
             assert "ALLOW_WORKSPACES" in GitHubEventsIntegration().detail
+
+    def test_the_audience_must_be_named(self):
+        # On a public repository anyone can open a pull request, and its body is
+        # what the agent reads, acting as RUN_AS.
+        config = {"github_events": {k: v for k, v in CONFIG["github_events"].items() if k != "ALLOW_FROM"}}
+        with override_settings(AI_SDK_INTEGRATIONS=config):
+            assert "ALLOW_FROM" in GitHubEventsIntegration().detail
 
     async def test_a_misconfigured_integration_reports_disconnected(self):
         with override_settings(AI_SDK_INTEGRATIONS={}):

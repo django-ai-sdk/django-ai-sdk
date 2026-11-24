@@ -23,6 +23,7 @@ CONFIG = {
     "slack": {
         "BOT_TOKEN": "xoxb-test",
         "SIGNING_SECRET": SECRET,
+        "ALLOW_FROM": "*",
         "AGENT": "apps.agents.pirate_basic.PirateBasicAgent",
     }
 }

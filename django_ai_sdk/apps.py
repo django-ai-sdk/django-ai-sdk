@@ -29,8 +29,9 @@ class DjangoAISDKConfig(AppConfig):
 
         registry.setup()
 
-        from django_ai_sdk.checks import check_oversight_installed
+        from django_ai_sdk.checks import check_oversight_installed, check_webhook_dedup_cache
 
         # Warn about policies that nothing enforces because the oversight app is
         # missing. The workflows app registers its own checks.
         register_check(check_oversight_installed)
+        register_check(check_webhook_dedup_cache)

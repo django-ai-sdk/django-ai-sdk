@@ -7,7 +7,6 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from asgiref.sync import async_to_sync
 from django.core.cache import cache
 from django_tasks import task
 
@@ -18,6 +17,7 @@ from django_ai_sdk.integrations.webhooks.base import (
     WebhookIntegration,
     current_event,
 )
+from django_ai_sdk.integrations.webhooks.signals import event_received
 from django_ai_sdk.memories.services import MemoryService
 from django_ai_sdk.storage.services import thread_metadata
 from django_ai_sdk.utils import resolve_setting
@@ -38,16 +38,15 @@ _THREAD_NAMESPACE = uuid.UUID("6b1f3c2e-9a84-4d1f-b7e0-2c8a5d9f1e44")
 
 
 @task(queue_name="default")
-def handle_inbound(payload: dict[str, Any]) -> None:
-    """Sync entry point for the worker."""
-    async_to_sync(run_inbound)(payload)
+async def handle_inbound(payload: dict[str, Any]) -> None:
+    """Entry point for the worker."""
+    await run_inbound(payload)
 
 
 async def run_inbound(payload: dict[str, Any]) -> None:
     """Answer one inbound event. Always replies once an agent is found."""
     event = InboundEvent.model_validate(payload)
-    integrations = await get_integrations([event.integration])
-    integration = integrations.get(event.integration)
+    integration = (await get_integrations([event.integration])).get(event.integration)
     # Check again here. The integration may have been removed since the request.
     if not isinstance(integration, WebhookIntegration):
         logger.warning(
@@ -63,6 +62,18 @@ async def run_inbound(payload: dict[str, Any]) -> None:
     if event.event_id and not await cache.aadd(key, 1, integration.dedup_ttl):
         logger.info("Dropping a repeat of %r event %s", event.integration, event.event_id)
         return
+
+    # Here, not in the view: receivers are too slow for the platform's ack window.
+    for receiver, outcome in await event_received.asend_robust(
+        sender=type(integration), event=event
+    ):
+        if isinstance(outcome, Exception):
+            logger.error(
+                "event_received receiver %r failed on a %r event",
+                receiver,
+                event.integration,
+                exc_info=outcome,
+            )
 
     agent = integration.resolve_agent()
     if agent is None:

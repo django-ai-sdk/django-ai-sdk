@@ -20,7 +20,14 @@ from django_ai_sdk.integrations.slack.verify import MAX_AGE_SECONDS, is_signed_b
 from django_ai_sdk.integrations.webhooks.base import InboundEvent
 
 SECRET = "8f742231b10e8888abcd99yyyzzz85a5"
-CONFIG = {"slack": {"BOT_TOKEN": "xoxb-test", "SIGNING_SECRET": SECRET, "AGENT": "a.b.C"}}
+CONFIG = {
+    "slack": {
+        "BOT_TOKEN": "xoxb-test",
+        "SIGNING_SECRET": SECRET,
+        "ALLOW_FROM": ["U024BE7LH"],
+        "AGENT": "a.b.C",
+    }
+}
 
 
 def _sign(body: bytes, timestamp: str | None = None) -> dict[str, str]:
@@ -117,10 +124,10 @@ class TestParse:
         # Without this the bot answers itself for as long as the workspace exists.
         assert slack.parse(_request(rf, _mention(bot_id="B024BE7LH"))) is None
 
-    def test_a_bare_mention_is_not_a_question(self, slack, rf):
-        # The mention is an address, not a question; answering it would run the
-        # agent on an empty prompt.
-        assert slack.parse(_request(rf, _mention(text="<@U0LAN0Z89>"))) is None
+    def test_a_bare_mention_leaves_no_text(self, slack, rf):
+        # The mention is an address, not a question; the view drops an event
+        # without text, so the agent never runs on an empty prompt.
+        assert slack.parse(_request(rf, _mention(text="<@U0LAN0Z89>"))).text == ""
 
     def test_an_edit_is_ignored(self, slack, rf):
         assert slack.parse(_request(rf, _mention(subtype="message_changed"))) is None
@@ -186,6 +193,13 @@ class TestConfiguration:
             detail = SlackIntegration().detail
         assert "BOT_TOKEN" in detail
         assert "SIGNING_SECRET" in detail
+
+    def test_the_audience_must_be_named(self):
+        # Every workspace member, guests included, can mention the app, and the run
+        # acts as RUN_AS.
+        config = {"slack": {k: v for k, v in CONFIG["slack"].items() if k != "ALLOW_FROM"}}
+        with override_settings(AI_SDK_INTEGRATIONS=config):
+            assert "ALLOW_FROM" in SlackIntegration().detail
 
     async def test_a_misconfigured_integration_reports_disconnected(self):
         with override_settings(AI_SDK_INTEGRATIONS={}):

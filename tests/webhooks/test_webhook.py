@@ -157,6 +157,14 @@ class TestParseOutcomes:
         assert payload["text"] == "hello"
         assert payload["integration"] == "demo"
 
+    @pytest.mark.parametrize("text", ["", "   "])
+    async def test_an_event_without_text_is_not_queued(self, rf, enqueue, text):
+        # A bare mention: answering it would run the agent on an empty prompt.
+        register(DemoWebhookIntegration())
+        response = await receive(_post(rf, text=text), "demo")
+        assert response.status_code == 200
+        enqueue.assert_not_awaited()
+
     async def test_the_acknowledgement_body_is_the_integrations_own(self, rf, enqueue):
         # A platform that shows the asker a placeholder needs a body in the ack.
         integration = DemoWebhookIntegration()
@@ -287,26 +295,66 @@ class TestRateLimit:
 
 
 class TestEventTriggers:
-    """Every delivery is reported as "<name>.message", keyed by its id."""
+    """Every event is reported as "<name>.message", keyed by its id, from the worker."""
 
-    async def test_a_delivery_starts_the_workflows_waiting_for_it(self, rf, enqueue):
-        register(DemoWebhookIntegration())
+    @staticmethod
+    async def _handle(event_id="Ev7", text="new invoice"):
+        integration = DemoWebhookIntegration()
+        register(integration)
+        agent = Mock(run=AsyncMock(return_value="ahoy"), storage_adapter=None)
+        payload = InboundEvent(
+            integration="demo", event_id=event_id, text=text, conversation_id="C1"
+        ).model_dump()
+        with patch.object(DemoWebhookIntegration, "resolve_agent", return_value=agent):
+            await run_inbound(payload)
+        return integration
+
+    async def test_an_event_starts_the_workflows_waiting_for_it(self):
         start = AsyncMock(return_value=[])
         with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
-            await receive(_post(rf, event_id="Ev7", text="new invoice"), "demo")
+            await self._handle()
         start.assert_awaited_once_with(
             "demo.message",
             {"text": "new invoice", "conversation_id": "C1"},
             idempotency_key="demo:Ev7",
         )
 
-    async def test_a_failing_trigger_still_answers(self, rf, enqueue):
+    async def test_the_request_starts_nothing(self, rf, enqueue):
+        # Finding the triggers loads every stored workflow: too slow for the
+        # platform's ack window, so the view only queues.
         register(DemoWebhookIntegration())
+        start = AsyncMock(return_value=[])
+        with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
+            await receive(_post(rf), "demo")
+        start.assert_not_awaited()
+        assert enqueue.await_count == 1
+
+    async def test_a_repeat_starts_nothing_again(self):
+        start = AsyncMock(return_value=[])
+        with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
+            await self._handle()
+            await self._handle()
+        assert start.await_count == 1
+
+    async def test_a_failing_trigger_still_answers(self):
         start = AsyncMock(side_effect=RuntimeError("queue down"))
         with patch("django_ai_sdk.workflows.triggers.start_for_event", start):
-            response = await receive(_post(rf), "demo")
-        assert response.status_code == 200
-        assert enqueue.await_count == 1
+            integration = await self._handle()
+        assert integration.replies == ["ahoy"]
+
+    async def test_a_failing_receiver_still_answers(self, caplog):
+        from django_ai_sdk.integrations.webhooks.signals import event_received
+
+        async def broken(sender, event, **kwargs):
+            raise RuntimeError("receiver bug")
+
+        event_received.connect(broken, dispatch_uid="test_broken_receiver")
+        try:
+            integration = await self._handle()
+        finally:
+            event_received.disconnect(dispatch_uid="test_broken_receiver")
+        assert integration.replies == ["ahoy"]
+        assert "receiver" in caplog.text
 
 
 class TestDeduplication:
@@ -352,6 +400,33 @@ class TestDeduplication:
         # An idless event has no key to claim, and a shared one would refuse every
         # other idless event. Only a custom integrator can produce these.
         assert await self._runs("", "") == 2
+
+
+class TestDedupCacheCheck:
+    """Dedup only holds in a cache every process shares; the check says so."""
+
+    @staticmethod
+    def _warnings(backend, configured=True):
+        from django_ai_sdk.checks import check_webhook_dedup_cache
+
+        register(DemoWebhookIntegration())
+        with override_settings(
+            CACHES={"default": {"BACKEND": backend}},
+            AI_SDK_INTEGRATIONS={"demo": {}} if configured else {},
+        ):
+            return check_webhook_dedup_cache()
+
+    def test_a_per_process_cache_is_warned_about(self):
+        [warning] = self._warnings("django.core.cache.backends.locmem.LocMemCache")
+        assert warning.id == "ai_sdk.W001"
+        assert "demo" in warning.msg
+
+    def test_a_shared_cache_passes(self):
+        assert self._warnings("django.core.cache.backends.db.DatabaseCache") == []
+
+    def test_an_integration_left_unconfigured_is_not_counted(self):
+        backend = "django.core.cache.backends.locmem.LocMemCache"
+        assert self._warnings(backend, configured=False) == []
 
 
 class TestDedupWindow:

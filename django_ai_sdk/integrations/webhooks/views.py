@@ -12,7 +12,6 @@ from django.views.decorators.csrf import csrf_exempt
 
 from django_ai_sdk.integrations.registry import get_integrations
 from django_ai_sdk.integrations.webhooks.base import WebhookIntegration
-from django_ai_sdk.integrations.webhooks.signals import event_received
 from django_ai_sdk.integrations.webhooks.tasks import handle_inbound
 from django_ai_sdk.utils import resolve_setting
 
@@ -23,8 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Integrations already warned about as unconfigured. Warn once per process, so
-# scanners hitting the path do not flood the log.
+# Integrations already warned about as unconfigured.
 _warned_unconfigured: set[str] = set()
 
 
@@ -48,9 +46,11 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
         return HttpResponse(status=401)
 
     parsed = integration.parse(request)
+
     if isinstance(parsed, HttpResponse):
         return parsed
-    if parsed is None:
+
+    if parsed is None or not parsed.text.strip():
         return HttpResponse(status=200)
 
     if not integration.allows(parsed):
@@ -66,7 +66,9 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
 
     if await _over_rate_limit(name, parsed):
         logger.info(
-            "Ignoring a %r event from %r: over the rate limit", name, parsed.external_user_id
+            "Ignoring a %r event from %r: over the rate limit",
+            name,
+            parsed.external_user_id,
         )
         return HttpResponse(status=200)
 
@@ -75,13 +77,15 @@ async def receive(request: HttpRequest, name: str) -> HttpResponse:
     max_text = resolve_setting("AI_SDK_WEBHOOK_MAX_TEXT", 4000)
     if len(parsed.text) > max_text:
         logger.info(
-            "Truncated a %r event from %d to %d characters", name, len(parsed.text), max_text
+            "Truncated a %r event from %d to %d characters",
+            name,
+            len(parsed.text),
+            max_text,
         )
     parsed.text = parsed.text[:max_text]
 
     # Every delivery is queued; the worker drops repeats, so a crash before the
     # queue write leaves nothing claimed and the platform's retry gets through.
-    await event_received.asend(sender=type(integration), event=parsed)
     await handle_inbound.aenqueue(parsed.model_dump())
     return integration.ack(parsed)
 

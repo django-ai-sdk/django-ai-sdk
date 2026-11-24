@@ -6,11 +6,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from django_ai_sdk.integrations.telegram.verify import is_sent_by_telegram
 from django_ai_sdk.integrations.webhooks.base import (
-    REPLY_TIMEOUT_SECONDS,
     UNSIGNED_DEDUP_TTL,
     InboundEvent,
     WebhookIntegration,
@@ -53,23 +50,13 @@ class TelegramIntegration(WebhookIntegration):
     dedup_ttl = UNSIGNED_DEDUP_TTL
 
     def missing_config(self) -> str | None:
-        missing = self._missing_secrets(
+        # Anyone who knows the bot's name can message it.
+        return self._missing_secrets(
             "BOT_TOKEN",
             "WEBHOOK_SECRET",
             hint="the bot token comes from @BotFather, the webhook secret is a value you "
             "choose and pass to setWebhook as secret_token.",
-        )
-        if missing:
-            return missing
-        # Anyone who knows the bot's name can message it, so require an explicit
-        # audience.
-        if not self.has_audience():
-            return (
-                f"No audience. Set AI_SDK_INTEGRATIONS['telegram']['ALLOW_FROM'] to the "
-                f"Telegram user ids that may ask, or to {self.ANY!r} to answer anyone who "
-                f"messages the bot."
-            )
-        return None
+        ) or self._missing_audience("Telegram user ids")
 
     def verify(self, request: HttpRequest) -> bool:
         return is_sent_by_telegram(
@@ -122,10 +109,11 @@ class TelegramIntegration(WebhookIntegration):
         if reply_to and str(reply_to).isdigit():
             payload["reply_parameters"] = {"message_id": int(reply_to)}
 
-        async with httpx.AsyncClient(timeout=REPLY_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                f"{API_BASE}/bot{self.secret('BOT_TOKEN')}/sendMessage", json=payload
-            )
+        response = await self._post_reply(
+            f"{API_BASE}/bot{self.secret('BOT_TOKEN')}/sendMessage", json=payload
+        )
+        if response is None:
+            return False
         # Read ok and description from the body, which says why a send failed.
         body = json_body(response)
         if not body.get("ok"):
