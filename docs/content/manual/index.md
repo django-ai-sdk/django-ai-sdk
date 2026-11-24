@@ -4,64 +4,66 @@ sidebar:
   order: 100
 ---
 
-Internal documentation for contributors and advanced users: how the SDK works, its extension points, and how to test it.
+This manual is for contributors and advanced users. It covers how the SDK works, its extension points and how to test it.
 
-If you're building an application with the SDK, start with the [Quick Start](../quickstart.md) and [Guides](../index.md) instead.
+If you're building an application with the SDK, start with the [Quick Start](../getting-started/quickstart.md) and [Guides](../index.md) instead.
 
-## Dev Setup
+## Dev setup
 
-### Clone and install
+:::steps
+1. Clone the repository and install the dependencies.
 
-```bash
-git clone https://github.com/django-ai-sdk/django-ai-sdk.git
-cd django-ai-sdk
-make setup      # runtime + demo extras only
-make setup-all  # every extra, including the torch-based transformers stack
-```
+   ```bash
+   git clone https://github.com/django-ai-sdk/django-ai-sdk.git
+   cd django-ai-sdk
+   make setup      # runtime + demo extras only
+   make setup-all  # every extra, including the torch-based transformers stack
+   ```
 
-### Run tests
+2. Run the tests.
 
-```bash
-make test
-```
+   ```bash
+   make test
+   ```
 
-### Regenerate docs diagrams
+3. Regenerate the docs diagrams after you change `docs/graph.py`.
 
-```bash
-make docs-graphs
-```
+   ```bash
+   make docs-graphs
+   ```
+:::
 
-## Repository Layout
+## Repository layout
 
-```
-django_ai_sdk/
-├── agent.py              # Agent coordinator class
-├── common.py             # ChatMessage, StreamWriter, MessageChunk
-├── events.py             # 13 normalized StreamEvent types
-├── responses.py          # stream_response()
-├── permissions.py        # BasePermission, built-ins, Operation enum
-├── adapters/             # Stream, Run
-├── agents/               # registry, services, runtime, config, ToolAgent + subagent engine
-├── protocols/            # Vercel + OpenAI handlers
-├── storage/              # memory + db adapters, ThreadService
-├── rags/                 # BM25, ChromaDB, Qdrant hybrid, provider
-├── integrations/         # mcp, github, linear, notion, weather
-├── conversation/         # Thread + Message models
-├── memories/             # MemoryService, Entry, documents
-├── files/                # processors, transforms, pipelines
-├── workflows/            # definitions, runs, listeners
-├── durable/              # workflow runs, triggers and tasks on DBOS (opt-in app)
-├── artifacts/            # ArtifactSchema
-├── citations/            # CitationRegistry, formatter
-├── suggestions/          # DefaultSuggestionGenerator
-├── tracing/              # opt-in Haystack spans persisted to the ORM
-└── management/commands/  # warmup_rag
-```
+:::filetree
+- `django_ai_sdk/`
+  - agent.py Agent coordinator class
+  - common.py ChatMessage, StreamWriter, MessageChunk
+  - events.py 13 normalized StreamEvent types
+  - responses.py stream_response()
+  - permissions.py BasePermission, built-ins, Operation enum
+  - adapters/ Stream, Run
+  - agents/ registry, services, runtime, config, ToolAgent + subagent engine
+  - protocols/ Vercel + OpenAI handlers
+  - storage/ memory + db adapters, ThreadService
+  - rags/ BM25, ChromaDB, Qdrant hybrid, provider
+  - integrations/ mcp, github, linear, notion, weather
+  - conversation/ Thread + Message models
+  - memories/ MemoryService, Entry, documents
+  - files/ processors, transforms, pipelines
+  - workflows/ definitions, runs, listeners
+  - durable/ workflow runs, triggers and tasks on DBOS (opt-in app)
+  - artifacts/ ArtifactSchema
+  - citations/ CitationRegistry, formatter
+  - suggestions/ DefaultSuggestionGenerator
+  - tracing/ opt-in Haystack spans persisted to the ORM
+  - `management/commands/` warmup_rag
+:::
 
-## Core Concepts
+## Core concepts
 ::::cards
 :::card[System Architecture]{href="architecture.md"}
-Components, data flow, design patterns
+Components, request flow and design patterns
 :::
 :::card[Agent]{href="agent.md"}
 Configuration, lifecycle hooks, as_view()
@@ -73,13 +75,13 @@ Registration and stable-ID resolution
 Haystack integration adapters
 :::
 :::card[Generators]{href="generators.md"}
-Per-vendor chat generator factories
+Chat generator factories for each vendor
 :::
 :::card[Stream Events]{href="stream-events.md"}
 The 13 normalized events, tool calls, errors
 :::
 :::card[ID Generation]{href="id-generation.md"}
-One message_id through SSE, storage, APIs
+One message_id shared by SSE, storage and the APIs
 :::
 ::::
 
@@ -89,7 +91,7 @@ One message_id through SSE, storage, APIs
 Handler interface, built-ins, stream_response
 :::
 :::card[Protocol Parts]{href="protocol-parts.md"}
-Wire format and event → part mapping
+Wire format and the mapping from events to parts
 :::
 ::::
 
@@ -122,7 +124,7 @@ BM25, ChromaDB, Qdrant + config
 Strategy, setup, structure, patterns
 :::
 :::card[Test Tooling]{href="test-tooling.md"}
-Fixtures, factories, and mocks
+Fixtures, factories and mocks
 :::
 :::card[Tracing]{href="tracing.md"}
 Haystack spans in the ORM, token accounting

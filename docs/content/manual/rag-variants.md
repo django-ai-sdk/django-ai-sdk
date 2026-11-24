@@ -19,7 +19,7 @@ All variants live in `django_ai_sdk.rags` and subclass `RAGBase`.
 ## Setup
 ::::tabs
 :::tab[BM25]
-Lightweight, fast, no GPU. Best for small to medium document sets. `BM25QueryExpanderRAGConfig` is a plain `RAGConfig`: no extra options.
+BM25 needs no GPU and no embedding model. It fits small and medium document sets. `BM25QueryExpanderRAGConfig` is a plain `RAGConfig` with no extra options.
 
 ```python
 from django_ai_sdk.rags import BM25QueryExpanderRAG, BM25QueryExpanderRAGConfig
@@ -43,7 +43,7 @@ rag = ChromaDBQueryExpanderRAG(
 ```
 :::
 :::tab[Qdrant]
-Hybrid retrieval: SPLADE sparse + BGE dense embeddings fused with Reciprocal Rank Fusion (RRF), stored in Qdrant.
+Hybrid retrieval with SPLADE sparse and BGE dense embeddings, fused with Reciprocal Rank Fusion (RRF) and stored in Qdrant.
 
 ```python
 from django_ai_sdk.rags import QdrantBM25HybridRAG, QdrantBM25HybridRAGConfig
@@ -56,7 +56,7 @@ rag = QdrantBM25HybridRAG(
 :::
 ::::
 
-## Choosing a Variant
+## Choosing a variant
 
 Override `get_rag_pipeline()` on your agent to return the variant you want. A common pattern is to factor each variant into its own method and dispatch from `get_rag_pipeline()`:
 
@@ -67,7 +67,7 @@ async def get_rag_pipeline(self, memory_id=None):
     return await self.get_rag_pipeline_qdrant(memory_id)
 ```
 
-The base `get_rag_pipeline()` returns `None` (RAG disabled). Override it to return a RAG instance built from one of the variants above.
+The base `get_rag_pipeline()` returns `None`, which disables RAG. Override it to return a RAG instance built from one of the variants above.
 
 | Use case | Variant |
 | --- | --- |
@@ -89,11 +89,11 @@ Base config for all variants:
 | `chunk_size` | `100` | Chunk size for document splitting |
 | `chunk_overlap` | `50` | Chunk overlap for document splitting |
 
-### Query Expansion
+### Query expansion
 
-Expansion generates several phrasings of the user's query to improve recall. The first query is always the original, verbatim; `n_expansions = 1` disables expansion. Expansion forces **same-language** queries so results match the user's language.
+Expansion generates several phrasings of the user's query to improve recall. The first query is always the original, verbatim. `n_expansions = 1` disables expansion. Expansion keeps every query in the user's language, so results match it.
 
-The expander is told what the documents are about (`{{context}}`: their most common keywords and some file names, see `expander_context`). Without it, it guesses: "SABRE" in a set of CVs became the airline booking system.
+The expander gets `{{context}}`, which says what the documents are about: their most common keywords and some file names (see `expander_context`). Without it, the expander guesses. In a set of CVs, it read "SABRE" as the airline booking system.
 
 ```
 User Query: "What is the pirate code?"
@@ -107,11 +107,17 @@ Query Expansion (via expander_model)
 Search All Variations (4 × top_k candidates each) → Fuse ranks → Return top-k
 ```
 
-**Fusing.** The results are merged by reciprocal rank fusion (`fuse_and_rank`): a document several queries find ranks high, whatever each query scored it (scores of different queries don't compare). One more ranking counts the words of the user's own query found verbatim in a candidate, weighing as much as all queries together, so an exact term the embeddings don't know (an acronym, a code, a name) lifts the document that contains it. Words in most candidates ("the", "is") don't count. Every search logs one line: the queries, hits per query, the exact terms and what was kept (`RAG search: ...`); one query means the expander fell back to the original.
+**Fusing.** Reciprocal rank fusion (`fuse_and_rank`) merges the results. A document that several queries find ranks high, whatever score each query gave it, because scores of different queries don't compare. One more ranking counts the words of the user's own query that appear verbatim in a candidate. It weighs as much as all queries together, so an exact term the embeddings don't know, such as an acronym, a code or a name, lifts the document that contains it. Words that appear in most candidates, such as "the" and "is", don't count.
 
-### Persistent Storage
+Every search logs one line (`RAG search: ...`) with the queries, the hits per query, the exact terms and what was kept. A line with one query means the expander fell back to the original.
 
-Chroma and Qdrant storage configs derive their backend from settings via `from_settings`: in-memory when unset, `AI_SDK_VECTOR_STORE_PATH` for local persistence, and `AI_SDK_VECTOR_STORE_URL` (Qdrant server) when set:
+### Persistent storage
+
+Chroma and Qdrant storage configs read their backend from settings with `from_settings`:
+
+- With neither setting, the store is in memory.
+- `AI_SDK_VECTOR_STORE_PATH` persists to a local path.
+- `AI_SDK_VECTOR_STORE_URL` points at a Qdrant server.
 
 ```python
 from django_ai_sdk.rags.config import QdrantStorageConfig
@@ -121,16 +127,16 @@ config = QdrantStorageConfig.from_settings(memory_id="mem-1")
 
 See the [Settings Reference](settings.md) for both settings.
 
-### Remote Embeddings
+### Remote embeddings
 
-Qdrant hybrid RAG embeds locally with FastEmbed by default. To send dense embeddings to an OpenAI-compatible endpoint instead (a hosted model, no local inference):
+Qdrant hybrid RAG embeds locally with FastEmbed by default. To compute dense embeddings with a hosted model on an OpenAI-compatible endpoint instead, with no local inference, set:
 
 ```python
 AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
 AI_SDK_EMBEDDINGS_DIM = 4096
 ```
 
-Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](../cli.md)).
+Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](../operations/cli.md)).
 
 ## Documents
 
@@ -153,10 +159,10 @@ RagDocument(
 
 ### From a Django QuerySet
 
-- `queryset_to_rag_documents()`: Django QuerySet → `RagDocument`s
-- `to_document()`: `RagDocument` → Haystack `Document`
-- `RagDocument.from_document()`: Haystack `Document` → `RagDocument`
+- `queryset_to_rag_documents()` turns a Django QuerySet into `RagDocument`s.
+- `to_document()` turns a `RagDocument` into a Haystack `Document`.
+- `RagDocument.from_document()` turns a Haystack `Document` into a `RagDocument`.
 
-The default `Agent.get_rag_documents(memory_id)` calls your `get_rag_queryset(memory_id)` and maps the results. Override either to control exactly what gets indexed.
+The default `Agent.get_rag_documents(memory_id)` calls your `get_rag_queryset(memory_id)` and maps the results. Override either one to choose what gets indexed.
 
 Next: [Storage](storage.md), where conversations persist.

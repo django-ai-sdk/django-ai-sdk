@@ -4,20 +4,20 @@ sidebar:
   order: 103
 ---
 
-How agents register themselves and get resolved by stable ID.
+How agents register and how the SDK resolves them by stable ID.
 
 ## Registration
 
-Every concrete `Agent` subclass registers in `django_ai_sdk.agents.registry` on definition via `__init_subclass__`. The two public mechanisms are just ways to ensure the module is imported:
+Every concrete `Agent` subclass registers in `django_ai_sdk.agents.registry` when the class is defined, through `__init_subclass__`. The two public mechanisms only make sure the module gets imported.
 
-**Settings-based** (recommended):
+**Settings.** This is the recommended mechanism.
 
 ```python
 # settings.py
 AI_SDK_AGENTS = ["myapp.agents.PirateAgent"]
 ```
 
-**Decorator**:
+**Decorator.**
 
 ```python
 from django_ai_sdk.agents import auto_register
@@ -27,11 +27,11 @@ class PirateAgent(Agent):
     ...
 ```
 
-Both work together. Skipped classes: abstract shared bases (`abstract = True`) and self-registering subclasses (e.g. runtime agents). A class is registered only once.
+Both mechanisms work together. The registry skips abstract shared bases (`abstract = True`) and self-registering subclasses, such as runtime agents. A class is registered only once.
 
 ## Stable IDs
 
-Each agent receives a **deterministic UUID5** derived from `module.ClassName`, so IDs never change between restarts or deployments:
+Each agent gets a deterministic UUID5 derived from `module.ClassName`, so its ID stays the same across restarts and deployments:
 
 ```python
 str(uuid.uuid5(NAMESPACE, "myapp.agents.PirateAgent"))
@@ -47,11 +47,11 @@ for agent_id in registry.ids():         # all registered agent IDs
     ...
 ```
 
-`registry.setup()` instantiates registered classes. It is populated when agent modules are imported (via `AI_SDK_AGENTS`, `@auto_register`, or your own `ready()` hook).
+`registry.setup()` instantiates registered classes. The registry fills up when agent modules are imported, through `AI_SDK_AGENTS`, `@auto_register` or your own `ready()` hook.
 
 ## AgentService
 
-Prefer `AgentService` over the raw registry: it also resolves runtime (DB-configured) agents:
+Use `AgentService` instead of the raw registry. It also resolves runtime agents, which are configured in the database:
 
 ```python
 from django_ai_sdk.agents.services import AgentService

@@ -6,7 +6,7 @@ sidebar:
 
 The reusable test infrastructure: shared fixtures, factories, and mock builders in `tests/`.
 
-## Shared Fixtures
+## Shared fixtures
 
 `tests/conftest.py` provides session-scoped fixtures used across the suite:
 
@@ -36,7 +36,7 @@ def mock_agents_registry():
 
 ## Factories
 
-Factories live in `tests/factories/`. Schema factories (`schemas.py`) use polyfactory; ORM factories (`db.py`) use factory_boy:
+Factories live in `tests/factories/`. Schema factories (`schemas.py`) use polyfactory. ORM factories (`db.py`) use factory_boy:
 
 ```python
 from tests.factories.schemas import ChatMessageFactory, ThreadInfoFactory, chat_message
@@ -50,9 +50,9 @@ payload = chat_message(role="user", text="Hello", message_id="msg-1")
 
 Django ORM factories live in `tests/factories/db.py`.
 
-## Mock Builders
+## Mock builders
 
-Reusable helpers in `tests/mocks/` keep tests declarative:
+The helpers in `tests/mocks/` set up agents, storage and permissions in one call each:
 
 ```python
 from tests.mocks.agent import create_agent_mock
@@ -79,7 +79,7 @@ with thread_permissions("apps.agents.permissions.DemoThreadPermission"):
 
 ### Mocking the model generator
 
-Never construct a real generator - not `openai_responses_chat()`, not the Haystack class behind it. In your own project's tests, `django_ai_sdk.testing.FakeLLM` is a generator factory that answers with canned replies, in order (the last one repeats; with none it echoes). It goes wherever an `llm` goes, on an agent or on an `LLMJudge`, and `calls` keeps the messages of every call:
+Never construct a real generator in tests, neither `openai_responses_chat()` nor the Haystack class behind it. In your own project's tests, use `django_ai_sdk.testing.FakeLLM`. It is a generator factory that answers with canned replies, in order. The last reply repeats, and with no replies it echoes. It goes wherever an `llm` goes, on an agent or on an `LLMJudge`, and `calls` keeps the messages of every call:
 
 ```python
 from unittest.mock import patch
@@ -92,7 +92,7 @@ with patch.object(SupportAgent, "llm", fake):
 assert len(fake.calls) == 1
 ```
 
-For the shape `Stream`/`Run` expect, a stub object also works:
+A stub object with the shape `Stream` and `Run` expect also works:
 
 ```python
 class FakeGenerator:
@@ -112,4 +112,4 @@ storage.store_chat_message = AsyncMock(return_value="msg_1")
 storage.get_messages = AsyncMock(return_value=[])
 ```
 
-Next: [CLI](cli.md), management command implementation.
+Next: [CLI](cli.md), the management command implementation.

@@ -4,11 +4,11 @@ sidebar:
   order: 106
 ---
 
-How a single `message_id` flows from generation → SSE → storage → later operations.
+How one `message_id` goes from generation to the SSE stream, to storage and to later operations.
 
 ![ID Generation Flow](../images/graphs/id_generation.svg)
 
-The `message_id` is generated **once** in `Stream.stream()`:
+`Stream.stream()` generates the `message_id` **once**:
 
 ```
 Stream.stream()
@@ -24,11 +24,11 @@ ChatMessage(id=message_id)          # Persisted message
 Rating / delete / restore endpoints use the same ID
 ```
 
-This is what lets the frontend track the message it renders while the backend rates, deletes, or restores the same record.
+So the frontend tracks the message it renders, and the backend rates, deletes or restores the same record.
 
 ## StreamWriter
 
-When `store=True` and a `storage_adapter` is provided, `Stream` creates a `StreamWriter` bound to the `message_id`. As chunks stream in, `stream_writer.add_chunk(...)` accumulates them:
+When `store=True` and you pass a `storage_adapter`, `Stream` creates a `StreamWriter` bound to the `message_id`. `stream_writer.add_chunk(...)` collects the chunks as they stream in:
 
 ```python
 writer = StreamWriter(message_id=message_id, role="assistant")
@@ -42,14 +42,14 @@ writer.add_chunk(MessageChunk(type="text", content=" world"))
 
 On completion, `Stream.get_final_message()`:
 
-1. Persists citation sources (reference fields only: `index`, `title`, `source_id`, `memory_id`, `page_number`; content is resolved fresh from the store).
+1. Persists citation sources. It stores only the reference fields `index`, `title`, `source_id`, `memory_id` and `page_number`, and resolves the content from the store when it is read.
 2. Calls `stream_writer.finalize("stop")`, which invokes `storage_adapter.storage_callback(...)` to save the message.
 
-The result is available as `stream.message_result`.
+The result is in `stream.message_result`.
 
-## Citations & Suggestions Wiring
+## Citations and suggestions wiring
 
 - With a `citation_registry`, `Stream` emits a `SourceEvent` per registered source after a retrieval tool runs, in cumulative-index order. `source_id` is `doc_id` or `doc_id:chunk_id`.
-- With `suggestion_generator`, `Stream` generates follow-up questions after the reply using the last six messages and the response. Generation runs under `AI_SDK_SUGGESTION_TIMEOUT` (default 5s); timeouts and errors are logged and skipped, never fatal.
+- With a `suggestion_generator`, `Stream` generates follow-up questions after the reply from the last six messages and the response. Generation runs under `AI_SDK_SUGGESTION_TIMEOUT`, 5 seconds by default. Timeouts and errors are logged and skipped, and never fail the request.
 
-Next: [Protocol Handler](protocol-handler.md), converting events to wire format.
+Next: [Protocol Handler](protocol-handler.md), which converts events to the wire format.

@@ -4,40 +4,31 @@ sidebar:
   order: 112
 ---
 
-How RAG works in the SDK: the provider lifecycle and how retrieval is exposed to agents as tools.
+How RAG works in the SDK: the provider lifecycle, and how agents get retrieval as tools.
 
 :::note
-Pipeline variants, config, and the document model live on the [RAG Variants](rag-variants.md) page.
+The [RAG Variants](rag-variants.md) page covers pipeline variants, config and the document model.
 :::
 
 ![RAG Architecture](../images/graphs/rag_architecture.svg)
 
 ## What is RAG?
 
-**Retrieval-Augmented Generation** grounds the model in facts:
+Retrieval-Augmented Generation gives the model documents to answer from:
 
-1. User asks a question
-2. Agent retrieves relevant documents from a memory
-3. Documents pass back to the model as retrieved context
-4. Model responds, citing numbered sources
+1. The user asks a question.
+2. The agent retrieves relevant documents from a memory.
+3. The documents pass back to the model as retrieved context.
+4. The model responds and cites numbered sources.
 
-## Enabling RAG on an Agent
+## Enabling RAG on an agent
 
-### Set the provider
-
-Set `rag_provider = RAGProvider()` on the agent.
-
-### Return the documents
-
-Override `get_rag_queryset()` (and/or `get_rag_documents()`) to select what gets indexed.
-
-### Return a pipeline
-
-Implement `get_rag_pipeline()` (or one of the named variants) to return a RAG pipeline.
-
-### Link memories to threads
-
-`get_rag_tools()` builds one retrieval tool per active memory.
+:::steps
+1. **Set the provider.** Set `rag_provider = RAGProvider()` on the agent.
+2. **Return the documents.** Override `get_rag_queryset()`, `get_rag_documents()` or both to select what gets indexed.
+3. **Return a pipeline.** Implement `get_rag_pipeline()`, or one of the named variants, to return a RAG pipeline.
+4. **Link memories to threads.** `get_rag_tools()` builds one retrieval tool per active memory.
+:::
 
 ```python
 from django_ai_sdk.memories.models import Entry
@@ -93,7 +84,7 @@ async def get_pipeline_adapter(self, thread_id=None, user=None):
 
 ## RAGProvider
 
-`RAGProvider` manages the RAG lifecycle: warmup (building indexes), an LRU cache of instances (`_MAX_CACHE_SIZE = 100`), and conversion of pipelines to tools.
+`RAGProvider` manages the RAG lifecycle. It warms up instances by building their indexes, keeps them in an LRU cache (`_MAX_CACHE_SIZE = 100`), and converts pipelines to tools.
 
 | Method | Purpose |
 | --- | --- |
@@ -108,29 +99,29 @@ async def get_pipeline_adapter(self, thread_id=None, user=None):
 | `clear_cache()` | Drop all cached RAG instances |
 
 :::caution
-Warmups are serialized per cache key with a per-key `asyncio.Lock`: concurrent requests for the same memory don't double-build (important for backends like Qdrant that hold an exclusive file lock during warmup). A warm cache returns without acquiring any lock.
+A per-key `asyncio.Lock` serializes warmups per cache key, so concurrent requests for the same memory don't build twice. This matters for backends like Qdrant that hold an exclusive file lock during warmup. A warm cache returns without acquiring any lock.
 :::
 
-## Integration: Tool Calling
+## Integration through tool calling
 
-RAG is exposed as a **per-memory retrieval tool** the model decides to call: there is no automatic context injection. Each memory linked to the thread produces one tool named after its `ToolSpec`:
+The agent gets RAG as one retrieval tool per memory, and the model decides when to call it. The SDK never injects context on its own. Each memory linked to the thread produces one tool, named after its `ToolSpec`:
 
 ```python
 spec = await memory.get_tool_spec()  # -> ToolSpec(name="search_documents", ...)
 ```
 
-Tool names are namespaced per memory so unrelated memories don't collide; if two memories produce the same name, the later one is suffixed with a short memory-ID hash and a warning is logged. Memories with zero documents are skipped with a warning. Retrieval results stream back as numbered `SourceEvent`s.
+Tool names are namespaced per memory, so unrelated memories don't collide. If two memories produce the same name, the SDK suffixes the later one with a short memory-ID hash and logs a warning. It skips memories with zero documents, also with a warning. Retrieval results stream back as numbered `SourceEvent`s.
 
 ## Citations
 
-Retrieved sources are rendered to the model as numbered citations and streamed to the frontend:
+The model sees retrieved sources as numbered citations, and the frontend receives them in the stream:
 
-- `get_citation_registry()`: a **fresh per-turn** `CitationRegistry` so indices reset between turns.
-- `get_citation_formatter()` / `citation_formatter_class`: how sources render for the model. `DefaultCitationFormatter` numbers sources so the model can reference them inline.
+- `get_citation_registry()` returns a new `CitationRegistry` for each turn, so indices reset between turns.
+- `get_citation_formatter()` and `citation_formatter_class` decide how sources render for the model. `DefaultCitationFormatter` numbers sources so the model can reference them inline.
 - `Stream` emits a `SourceEvent(index, title, content, source_id, ...)` per source after a retrieval tool runs, in cumulative-index order.
-- Protocol handlers translate these into the frontend's citation format (Vercel `source-document` parts carry the citation index in `providerMetadata`).
+- Protocol handlers translate these into the frontend's citation format. Vercel `source-document` parts carry the citation index in `providerMetadata`.
 
-Wire the same registry and formatter into both `get_rag_tools()` and the `Stream` so citations round-trip consistently.
+Pass the same registry and formatter to `get_rag_tools()` and to the `Stream`, so the numbers the model cites match the sources the frontend gets.
 
 ## Lifecycle
 
@@ -148,14 +139,14 @@ await MyAgent.reindex(agent, memory_id="mem-1")                # rebuild
 MyAgent.clear_rag_cache(agent)                                 # drop cache
 ```
 
-## Best Practices
+## Best practices
 
 | Practice | Why |
 | --- | --- |
 | Route through the provider (`get_rag_instance`) | Avoids rebuilding the index on every call |
 | Use `get_cached_rag_instance()` with Qdrant | Its local file lock is exclusive, so reuse the warmed instance |
 | Return `None` from `get_rag_pipeline()` with no documents | Provider caches `None`; `get_rag_tools()` skips the memory cleanly |
-| Set `top_k` to match your context budget | `1` risks missing context; `50` floods the window. Start at `5` |
+| Set `top_k` to match your context budget | `1` risks missing context; `50` fills the context window. Start at `5` |
 | Reindex after document changes | Or use incremental `add_documents()` / `remove_documents()` |
 
 Next: [Storage](storage.md), where conversations persist.

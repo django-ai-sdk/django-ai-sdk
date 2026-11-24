@@ -4,9 +4,9 @@ sidebar:
   order: 108
 ---
 
-Wire-format reference for protocol handlers. Primarily for contributors working on handlers or adapters.
+Wire-format reference for protocol handlers, for contributors who work on handlers or adapters.
 
-Protocol handlers convert internal `StreamEvent`s into wire-format parts. `VercelProtocolHandler` implements the **Vercel AI SDK Data Stream Protocol**; `OpenAIProtocolHandler` implements the OpenAI chat-completions streaming format. All Vercel parts are Pydantic models in `django_ai_sdk.protocols.vercel`, serialized as SSE `data:` lines with `exclude_none=True, by_alias=True`.
+Protocol handlers convert internal `StreamEvent`s into wire-format parts. `VercelProtocolHandler` implements the Vercel AI SDK Data Stream Protocol. `OpenAIProtocolHandler` implements the OpenAI chat-completions streaming format. All Vercel parts are Pydantic models in `django_ai_sdk.protocols.vercel`, serialized as SSE `data:` lines with `exclude_none=True, by_alias=True`.
 
 ## Message lifecycle
 
@@ -57,7 +57,7 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 | `SourceDocumentPart` | RAG document | `{"type":"source-document","sourceId":"doc-1","mediaType":"file","title":"Guide","providerMetadata":{"citation":{"index":1}}}` |
 | `FilePart` | File attachment | `{"type":"file","url":"...","mediaType":"image/png"}` |
 
-`SourceDocumentPart` carries the citation index in `providerMetadata.citation.index` so clients map inline citations to sources by index rather than emission order.
+`SourceDocumentPart` carries the citation index in `providerMetadata.citation.index` so clients map inline citations to sources by index, not by emission order.
 
 ## Steps and control
 
@@ -78,7 +78,7 @@ A reasoning block opens on the first `reasoning_chunk` event and closes when tex
 
 ## Oversight parts
 
-When an [oversight](../oversight.md) rule acts on a turn, the stream says so, and the notices are stored with the message:
+When an [oversight](../oversight/oversight.md) rule acts on a turn, the stream says so, and the notices are stored with the message:
 
 ```
 {"type":"data-oversight","data":{"turn_id":"...","stage":"gate","outcome":"masked","input":"Mail me at [EMAIL]"}}
@@ -86,11 +86,11 @@ When an [oversight](../oversight.md) rule acts on a turn, the stream says so, an
 {"type":"finish","finishReason":"content-filter"}
 ```
 
-`input` is the question as the gate masked it, `replace` the text to show instead of the streamed answer, `message` the policy's text when it blocked. A blocked question or withheld answer ends with finish reason `content-filter`. Rule names are sent only with `CLIENT_DETAIL` `full`; see [Client notices](oversight.md#client-notices).
+`input` is the question as the gate masked it. `replace` is the text to show instead of the streamed answer. `message` is the policy's text when it blocked. A blocked question or withheld answer ends with finish reason `content-filter`. The stream sends rule names only with `CLIENT_DETAIL` `full`. See [Client notices](oversight.md#client-notices).
 
 ## Warmup parts
 
-Before the reply streams, the chat opens its knowledge bases and loads its integrations. `Agent.warmup_progress()` names each one as it is opened, so a client can show what the wait is on. All warmup parts are transient (never stored with the message):
+Before the reply streams, the chat opens its knowledge bases and loads its integrations. `Agent.warmup_progress()` names each one as it is opened, so a client can show what the wait is on. All warmup parts are transient. The SDK never stores them with the message:
 
 ```
 {"type":"data-warmup","data":{"status":"start"}}
@@ -101,11 +101,12 @@ Before the reply streams, the chat opens its knowledge bases and loads its integ
 ```
 
 - `data-warmup` marks the wait: `start`, then `ready` or `failed`. A part with a `stage` (`knowledge` or `integrations`) and a `detail` says what is being opened now, and keeps `status: "start"` so a client that ignores `stage` still shows its wait indicator.
-- Knowledge bases open one after another, each named just before it opens. Integrations load together: one part names all that are still pending, such as `GitHub, Linear`, and is sent again with fewer names as each finishes. When the warmup is over, a plain `{"status":"start"}` follows so the build is not shown under the name of a step that is done.
-- `data-unavailable` names an integration whose `get_status()` is `DEGRADED`, so the reply goes without its tools. An integration that needs setup (`DISCONNECTED`) or whose credential lapsed (`EXPIRED`) is not reported. A degraded integration is reported on every message until it recovers.
+- Knowledge bases open one after another, each named before it opens.
+- Integrations load together. One part names all that are still pending, such as `GitHub, Linear`, and the stream sends it again with fewer names as each finishes. When the warmup is over, a plain `{"status":"start"}` follows, so the client does not show the build under the name of a finished step.
+- `data-unavailable` names an integration whose `get_status()` is `DEGRADED`, so the reply goes without its tools. The stream does not report an integration that needs setup (`DISCONNECTED`) or whose credential lapsed (`EXPIRED`). A degraded integration is reported on every message until it recovers.
 - What the warmup opens is cached, so the build that follows finds it ready. Integrations are opened with `get_status()`, which makes the real attempt when none is on file.
 
-## Event → Part Mapping
+## Event to part mapping
 
 `VercelProtocolHandler.handle_stream()` maps events to parts:
 
@@ -127,7 +128,7 @@ Before the reply streams, the chat opens its knowledge bases and loads its integ
 
 If the stream is interrupted, `sse()` emits closing `ReasoningEndPart` / `TextEndPart` for any open blocks before terminating.
 
-## SSE Format
+## SSE format
 
 `format_sse()` (in `django_ai_sdk.protocols.utils`) wraps each payload:
 
@@ -145,11 +146,15 @@ data: {"type":"finish","finishReason":"stop"}
 data: [DONE]
 ```
 
-Rules: each part on its own `data:` line (JSON with `ensure_ascii=False`); `\n\n` separates events; `[DONE]` terminates the stream.
+The format follows three rules:
 
-## Message Object Format
+- Each part is on its own `data:` line, as JSON with `ensure_ascii=False`.
+- `\n\n` separates events.
+- `[DONE]` terminates the stream.
 
-`from_chat_messages()` converts stored `ChatMessage`s back into the Vercel message shape (used for history endpoints):
+## Message object format
+
+`from_chat_messages()` converts stored `ChatMessage`s back into the Vercel message shape. The history endpoints use it:
 
 ```json
 {
@@ -169,9 +174,9 @@ Rules: each part on its own `data:` line (JSON with `ensure_ascii=False`); `\n\n
 }
 ```
 
-## OpenAI Protocol Handler
+## OpenAI protocol handler
 
-`OpenAIProtocolHandler` (in `django_ai_sdk.protocols.openai`) emits OpenAI-compatible `chat.completion.chunk` SSE lines instead of Data Stream Protocol parts, buffering text and tool calls into delta objects and terminating with `data: [DONE]`.
+`OpenAIProtocolHandler` (in `django_ai_sdk.protocols.openai`) emits OpenAI-compatible `chat.completion.chunk` SSE lines instead of Data Stream Protocol parts. It buffers text and tool calls into delta objects and ends the stream with `data: [DONE]`.
 
 ## References
 

@@ -6,11 +6,11 @@ sidebar:
 
 Reference for implementing custom storage adapters.
 
-Every storage adapter subclasses `BaseStorageAdapter` and registers itself in `StorageAdapterRegistry`. The registry powers cross-storage thread lookup, letting `Agent.get_storage_adapter()` and `ThreadService` operate across backends without knowing which one holds a thread.
+Every storage adapter subclasses `BaseStorageAdapter` and registers itself in `StorageAdapterRegistry`. The registry finds a thread across all storages, so `Agent.get_storage_adapter()` and `ThreadService` work across backends without knowing which one holds a thread.
 
 ## StorageType
 
-Adapters declare their operation cost so registry lookups check the fastest backends first:
+Adapters declare their operation cost, and registry lookups check the cheapest backends first:
 
 | Level | Cost | Example |
 | --- | --- | --- |
@@ -19,9 +19,9 @@ Adapters declare their operation cost so registry lookups check the fastest back
 | `DATABASE` | 3 | `DbStorageAdapter` |
 | `REST_API` | 4 | custom external-service adapter |
 
-## Implementing a Custom Adapter
+## Implementing a custom adapter
 
-Subclass `BaseStorageAdapter`, implement every abstract method, and register it. There is no automatic `__init_subclass__` registration: adapters register explicitly at module bottom.
+Subclass `BaseStorageAdapter`, implement every abstract method, and register it. The SDK has no automatic `__init_subclass__` registration. Each adapter registers itself explicitly at the bottom of its module.
 
 ```python
 from django_ai_sdk.common import ChatMessage
@@ -99,15 +99,15 @@ StorageAdapterRegistry.register(RedisStorageAdapter, StorageType.DATABASE)
 | `delete_message` | instance | `(message_id) -> bool` |
 | `restore_message` | instance | `(message_id) -> bool` |
 
-## Design Notes
+## Design notes
 
-- **Class methods for threads**: thread lookup (`get_thread`) must work before you know which adapter holds the thread; no instance exists yet. Instance methods operate on a bound thread.
-- **Enum for cost**: sorting by `StorageType` yields fastest-first lookup ordering without extra metadata.
-- **Edge cases**: multiple adapters of the same type follow registration order; a thread in multiple storages resolves to the fastest adapter; `clear()` exists for tests.
+- **Class methods for threads.** Thread lookup (`get_thread`) must work before you know which adapter holds the thread, so no instance exists yet. Instance methods operate on a bound thread.
+- **Enum for cost.** Sorting by `StorageType` puts the fastest adapters first without extra metadata.
+- **Edge cases.** Adapters of the same type are checked in registration order. A thread in several storages resolves to the fastest adapter. `clear()` exists for tests.
 
-## Testing a Custom Adapter
+## Testing a custom adapter
 
-All SDK adapters are tested against the same behavior. A useful test suite:
+All SDK adapters are tested against the same behavior. A round-trip test for a custom adapter looks like this:
 
 ```python
 import pytest

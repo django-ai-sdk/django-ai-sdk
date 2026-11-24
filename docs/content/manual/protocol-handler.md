@@ -4,10 +4,10 @@ sidebar:
   order: 107
 ---
 
-The interface that converts internal events to your frontend's wire format.
+The interface that converts internal events into your frontend's wire format.
 
 :::note
-Usage first? See the [Protocols guide](../protocols.md). This page is the API reference.
+Usage first? See the [Protocols guide](../serving/protocols.md). This page is the API reference.
 :::
 
 ## Interface
@@ -16,15 +16,15 @@ Usage first? See the [Protocols guide](../protocols.md). This page is the API re
 
 | Method | Direction | Purpose |
 | --- | --- | --- |
-| `to_chat_messages(protocol_messages)` | Inbound | Frontend format → internal `ChatMessage`s |
-| `from_chat_messages(chat_messages)` | Outbound | `ChatMessage`s → frontend format (history, ratings) |
+| `to_chat_messages(protocol_messages)` | Inbound | Frontend format to internal `ChatMessage`s |
+| `from_chat_messages(chat_messages)` | Outbound | `ChatMessage`s to frontend format, for history and ratings |
 | `sse(adapter, messages)` | Stream | Format a streamed run into SSE bytes |
 
-Agents instantiate the handler from the class-level `protocol` attribute (`Agent.__init__` calls `self.protocol()` → `self.protocol_handler`).
+Agents instantiate the handler from the class-level `protocol` attribute. `Agent.__init__` calls `self.protocol()` and stores the result in `self.protocol_handler`.
 
 ## VercelProtocolHandler (default)
 
-Implements the [Vercel AI SDK Data Stream Protocol](https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol), so any Vercel-compatible frontend (`@ai-sdk/react`'s `useChat`) works unchanged:
+Implements the [Vercel AI SDK Data Stream Protocol](https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol), so any Vercel-compatible frontend, such as `useChat` from `@ai-sdk/react`, works unchanged:
 
 ```python
 class MyAgent(Agent):
@@ -33,7 +33,7 @@ class MyAgent(Agent):
 
 ## OpenAIProtocolHandler
 
-Implements the OpenAI Chat Completions streaming format, useful when your frontend is built around OpenAI's protocol:
+Implements the OpenAI Chat Completions streaming format. Use it when your frontend expects OpenAI's protocol:
 
 ```python
 from django_ai_sdk.protocols.openai import OpenAIProtocolHandler
@@ -42,9 +42,9 @@ class MyAgent(Agent):
     protocol = OpenAIProtocolHandler
 ```
 
-## Custom Handler
+## Custom handler
 
-Subclass `BaseProtocolHandler` and implement the three methods. `StreamEvent`s are your inputs for `sse()`: render them into whatever stream format your frontend speaks:
+Subclass `BaseProtocolHandler` and implement the three methods. `sse()` receives `StreamEvent`s and renders them into the stream format your frontend reads:
 
 ```python
 from django_ai_sdk.protocols.base import BaseProtocolHandler
@@ -60,7 +60,7 @@ class MyProtocolHandler(BaseProtocolHandler):
         ...
 ```
 
-Assign the handler to `protocol` and every view picks it up automatically.
+Assign the handler to `protocol` and every view of the agent uses it.
 
 ## stream_response
 
@@ -76,6 +76,6 @@ response = await stream_response(
 )
 ```
 
-`agent.as_view()` uses this internally. Use it directly when a custom view assembles its own adapter, for example a one-off pipeline per request.
+`agent.as_view()` calls it internally. Call it directly when a custom view builds its own adapter, for example a one-off pipeline per request.
 
 Next: [Protocol Parts](protocol-parts.md), the wire format in detail.

@@ -7,7 +7,7 @@ sidebar:
 The two adapters an `Agent` uses to talk to a Haystack model: `Stream` (streaming chat) and `Run` (non-streaming calls).
 
 :::note
-Usage first? See the [Protocols guide](../protocols.md). This page is the API reference.
+For usage, see the [Protocols guide](../serving/protocols.md). This page is the API reference.
 :::
 
 ![Adapter Flow](../images/graphs/adapter_flow.svg)
@@ -17,7 +17,7 @@ Usage first? See the [Protocols guide](../protocols.md). This page is the API re
 | `Stream` | Streaming chat | A `haystack.Pipeline` (usually a `ToolAgent`) |
 | `Run` | Non-streaming calls | A generator with `.run()` |
 
-An agent exposes one of each via `get_pipeline_adapter()` and `get_run_adapter()`.
+An agent returns one of each from `get_pipeline_adapter()` and `get_run_adapter()`.
 
 ## Run
 
@@ -57,27 +57,26 @@ class MyAgent(Agent):
     # agent.run(messages) -> str
 ```
 
-`Run.get_messages()` keeps only `user` and `assistant` messages and converts them to Haystack `ChatMessage`s; a `system_prompt` passed to `run()` is prepended as a system message.
+`Run.get_messages()` keeps only `user` and `assistant` messages and converts them to Haystack `ChatMessage`s. A `system_prompt` passed to `run()` goes first as a system message.
 
 :::note
-`Run` only ever wraps a plain generator — it has no notion of tools, and never
-has. Two earlier shapes tried to give it one (`Run(agent=prebuilt_agent)`, then
-`Run(generator, tools=[...])`) and were both deleted: both had zero real
-callers, and the second built an *ungoverned* Haystack Agent from a generic
-step-cap setting instead of the calling agent's own limits — a real subagent
-class run headless would have silently lost its own `max_agent_steps`. See
-[Headless tool runs](#headless-tool-runs) below for the shape that replaced
-them.
+`Run` wraps a plain generator and has never taken tools. Two earlier shapes
+added them, `Run(agent=prebuilt_agent)` and then `Run(generator, tools=[...])`.
+Both were deleted because no code called them. The second also built an
+*ungoverned* Haystack Agent from a generic step-cap setting instead of the
+calling agent's own limits. A subagent class run headless would have lost its
+own `max_agent_steps` without any error. [Headless tool runs](#headless-tool-runs)
+below describes the shape that replaced them.
 :::
 
 ## Headless tool runs
 
 ![Headless Tool Run Flow](../images/graphs/headless_tool_run_flow.svg)
 
-An `Agent` can run its own tools to completion **without streaming** — no
-`Stream`, no SSE connection, no client reading chunks. One call in, one final
-answer out: a workflow step, a scheduled job, a management command — anything
-that needs tool access but has nobody watching a live response.
+An `Agent` can run its own tools to completion **without streaming**. There is
+no `Stream`, no SSE connection and no client reading chunks. One call returns
+one final answer. Use it for a workflow step, a scheduled job or a management
+command: code that needs tool access while nobody watches a live response.
 
 ```python
 answer = await agent.run(messages, tools=True)
@@ -90,10 +89,10 @@ resolved = self.response_format if response_format is self._UNSET else response_
 with_tools = tools and resolved is None
 ```
 
-- **`tools` is `True`** — opt-in. Resolving tools means calling `self.get_tools()`, which reaches every configured integration; a one-shot call (title generation, structured extraction) never pays that cost unless it explicitly asks for it.
-- **`resolved is None`** — no `response_format`. Structured output and a tool loop together aren't supported: see [Structured output from a tool loop](generators.md#structured-output-from-a-tool-loop). If both are set, `response_format` wins silently and tools are never resolved.
+- **`tools` is `True`.** This is opt-in. Resolving tools calls `self.get_tools()`, which reaches every configured integration. A one-shot call, such as title generation or structured extraction, pays that cost only when it asks for tools.
+- **`resolved is None`.** No `response_format` is set. The SDK does not support structured output and a tool loop together, see [Structured output from a tool loop](generators.md#structured-output-from-a-tool-loop). If both are set, `response_format` wins without a warning and tools are never resolved.
 
-`get_run_adapter()` must return a `Run`: oversight runs as hooks on its Haystack Agent, so anything else would go unchecked and raises `TypeError`. `Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
+`get_run_adapter()` must return a `Run`. Oversight runs as hooks on its Haystack Agent, so another adapter would run unchecked, and `Agent.run()` raises `TypeError` for it. `Agent.run()` then hands the loop to `Run`, which runs it as a Haystack Agent:
 
 ```python
 return await adapter.run(
@@ -107,41 +106,41 @@ return await adapter.run(
 )
 ```
 
-This is **the same assembly** `build_subagent()` uses to turn a subagent into
-a real Haystack `Agent` for streamed delegation (see [Subagent
-Delegation](agent.md#subagent-delegation)) — `default_hooks(self)` and
-`max_agent_steps=self.max_agent_steps` are the calling agent's own governance,
-not a generic constant. A class with `max_agent_steps = 4` gets 4 steps
-whether it's delegated to live or run headless by itself; one function,
-`default_hooks()`, is the single place that assembly exists.
+`build_subagent()` uses **the same assembly** to turn a subagent into a
+Haystack `Agent` for streamed delegation, see [Subagent
+Delegation](agent.md#subagent-delegation). `default_hooks(self)` and
+`max_agent_steps=self.max_agent_steps` come from the calling agent, not from a
+generic constant. A class with `max_agent_steps = 4` gets 4 steps when it is
+delegated to live and when it runs headless. The assembly exists in one
+function, `default_hooks()`.
 
-The return is just the last message's text — no digest, no synthesis-pass
-recovery if the loop got cut short. That machinery
-(`subagent_response()`) exists specifically for the coordinator/subagent
-handoff, where a lost result means a lost answer to the user mid-conversation.
-A headless run has no ongoing conversation to lose context from — the caller
-gets back whatever the last message says, cut short or not.
+The return value is the last message's text. There is no digest and no
+synthesis pass when the step cap cuts the loop short. `subagent_response()`
+does that for the coordinator and subagent handoff, where a lost result means
+a lost answer to the user in the middle of a conversation. A headless run has
+no ongoing conversation, so the caller gets the last message's text whether
+the loop finished or not.
 
 :::caution
-No shipped code calls `agent.run(tools=True)` yet — not in `django_ai_sdk`,
-not in the demo project. The mechanism is tested and correct, but there's no
-example to copy from; a workflow step that needs tool access is the obvious
-first real caller.
+No shipped code calls `agent.run(tools=True)` yet, in `django_ai_sdk` or in
+the demo project. Tests cover the mechanism, but there is no example to copy.
+A workflow step that needs tool access is the likely first caller.
 :::
 
 Under an [oversight](oversight.md#agents-and-runs) policy, `Agent.run()` is one
-turn, and oversight runs inside the Haystack Agent as hooks
-(`django_ai_sdk.oversight.plugin`), which `run_with_oversight` adds on every run. The
-`TurnRequest` says whose turn it is. `run_with_oversight` opens its
-turn, the gate judges the history and the question before the
-first model call (`GateQuestionHook`), every tool call is checked before it runs
-(`JudgeToolCallHook`), every result is masked before the model reads it
-(`MaskToolResultHook`), and finish judges what the loop wrote before the
-answer is returned (`JudgeAnswerHook`). A refusal raises
-`django_ai_sdk.errors.Blocked`.
+turn. Oversight runs inside the Haystack Agent as hooks from
+`django_ai_sdk.oversight.plugin`, and `run_with_oversight` adds them on every run.
+The `TurnRequest` says whose turn it is. `run_with_oversight` opens its turn, then:
 
-What oversight does not guard (`stream_response()` from your own view, an adapter
-other than `Stream`) is listed under [Limitations](../oversight.md#limitations).
+- `GateQuestionHook` judges the history and the question before the first model call.
+- `JudgeToolCallHook` checks every tool call before it runs.
+- `MaskToolResultHook` masks every result before the model reads it.
+- `JudgeAnswerHook` judges what the loop wrote before the answer is returned.
+
+A refusal raises `django_ai_sdk.errors.Blocked`.
+
+[Limitations](../oversight/oversight.md#limitations) lists what oversight does not
+guard, such as `stream_response()` from your own view or an adapter other than `Stream`.
 
 ## Stream
 
@@ -159,12 +158,12 @@ Stream(
 ```
 
 :::caution
-`pipeline` must be a real `haystack.Pipeline`: anything else raises `TypeError`. A `ToolAgent` exposes its pipeline via `tool_agent.pipeline()`.
+`pipeline` must be a `haystack.Pipeline`. Anything else raises `TypeError`. A `ToolAgent` returns its pipeline from `tool_agent.pipeline()`.
 :::
 
-### Pipeline vs Agent Component
+### Pipeline vs agent component
 
-If the pipeline's first component is a Haystack `Agent`, `Stream` calls `agent.run_async(...)` directly with the streaming callback. Otherwise it runs `pipeline.run_async({"messages": ...})`. Both paths stream chunks through a queue that `Stream.get_events()` consumes as events.
+If the pipeline's first component is a Haystack `Agent`, `Stream` calls `agent.run_async(...)` with the streaming callback. Otherwise it runs `pipeline.run_async({"messages": ...})`. Both paths put chunks on a queue, and `Stream.get_events()` reads them as events.
 
 ### `stream()`
 
@@ -175,13 +174,15 @@ async for event in stream.stream(messages: list[ChatMessage]):
     ...  # handle StreamEvent
 ```
 
-Order of operations:
+`stream()` runs these steps in order:
 
-1. Convert `ChatMessage`s to Haystack messages (`merge_messages` controls consecutive-message merging).
+:::steps
+1. Convert `ChatMessage`s to Haystack messages. `merge_messages` controls whether consecutive messages merge.
 2. Generate the `message_id` UUID exactly once.
 3. Create a `StreamWriter` (when `store` and a `storage_adapter` are set).
-4. Attach the streaming callback to the generator, warm it up if it has `warm_up`.
+4. Attach the streaming callback to the generator, and call `warm_up` if the generator has it.
 5. Yield `MessageStartEvent`, live events, `MessageEndEvent`, optional `SuggestionEvent`, then `StreamEndEvent`.
+:::
 
 ## Examples
 
@@ -197,7 +198,7 @@ stream = Stream(
 )
 ```
 
-### Stream a Bare Pipeline
+### Stream a bare pipeline
 
 ```python
 pipeline = Pipeline()

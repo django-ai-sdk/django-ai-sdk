@@ -4,7 +4,7 @@ sidebar:
   order: 105
 ---
 
-The normalized events `Stream.stream()` yields, and how tool calls and errors surface.
+The normalized events that `Stream.stream()` yields, and how tool calls and errors reach the client.
 
 All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 
@@ -25,10 +25,10 @@ All events live in `django_ai_sdk.events` and subclass `StreamEvent`.
 | `SuggestionEvent` | Follow-up questions | `suggestions` |
 | `TextEndEvent` | The answer's text is complete; citations may still follow | (none) |
 | `MessageEndEvent` | Message complete | `finish_reason` (`content-filter` when oversight blocked the question or withheld the answer) |
-| `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](../errors.md)) |
+| `ErrorEvent` | Error occurred | `error_code`, `ref` (see [Error Handling](../serving/errors.md)) |
 | `StreamEndEvent` | Stream terminated | (none) |
 
-## Handling Events
+## Handling events
 
 ```python
 async for event in stream.stream(messages):
@@ -51,22 +51,22 @@ async for event in stream.stream(messages):
             print("Done")
 ```
 
-## Tool Call Handling
+## Tool call handling
 
-Tool calls and results can arrive both as streaming chunks and in the final pipeline result. `Stream`:
+Tool calls and results can arrive as streaming chunks and in the final pipeline result. `Stream` handles both:
 
 - Emits `ToolCallStartEvent` / `ToolInputCompleteEvent` / `ToolOutputEvent` from chunks during streaming.
-- Runs `get_pipeline_result()` after the pipeline completes to capture tool calls that only appear in the final messages, converting them to `MessageChunk`s on the `StreamWriter` so they persist.
+- Runs `get_pipeline_result()` after the pipeline completes to capture tool calls that only appear in the final messages. It converts them to `MessageChunk`s on the `StreamWriter`, so they persist.
 
-Helpers: `parse_tool_input()` JSON-decodes tool arguments (falling back to the raw string); `parse_tool_output()` makes Haystack results JSON-serializable.
+Two helpers process tool data. `parse_tool_input()` JSON-decodes tool arguments and falls back to the raw string. `parse_tool_output()` makes Haystack results JSON-serializable.
 
-## Error Handling
+## Error handling
 
-`Stream.stream()` is defensive:
+`Stream.stream()` handles failures as follows:
 
-- Pipeline failures produce an `ErrorEvent` (with the message persisted with `finish_reason="error"`) followed by `StreamEndEvent`.
-- Unexpected exceptions yield an `ErrorEvent` too. It carries only the error code and a `ref`; the exception text is logged with that ref and stored for admins.
-- Cancellation (`pipeline_task.cancel()` in `finally`) persists the partial message with `finish_reason="cancelled"`.
-- `MessageEndEvent` and `StreamEndEvent` always terminate the stream cleanly.
+- A pipeline failure produces an `ErrorEvent` followed by `StreamEndEvent`. The message is persisted with `finish_reason="error"`.
+- An unexpected exception also yields an `ErrorEvent`. It carries only the error code and a `ref`. The SDK logs the exception text with that ref and stores it for admins.
+- On cancellation, `pipeline_task.cancel()` runs in `finally` and the partial message is persisted with `finish_reason="cancelled"`.
+- `MessageEndEvent` and `StreamEndEvent` always end the stream.
 
-Next: [ID Generation](id-generation.md), how the `message_id` flows through the system.
+Next: [ID Generation](id-generation.md), how one `message_id` passes through the system.

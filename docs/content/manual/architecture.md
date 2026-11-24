@@ -4,7 +4,7 @@ sidebar:
   order: 101
 ---
 
-The core abstractions, how a request flows through the system, and the design patterns behind them.
+This page covers the core abstractions, the path a request takes through the system, and the design patterns behind them.
 
 ![Overview](../images/graphs/overview_architecture.svg)
 
@@ -19,52 +19,15 @@ The core abstractions, how a request flows through the system, and the design pa
 | Storage | Conversation persistence | [Storage](storage.md) |
 | RAG | Knowledge retrieval as tools | [RAG](rag.md) |
 
-Each component has a base class defining its interface; implementations live in subclasses. The internal message type is `ChatMessage` (`django_ai_sdk.common`): protocol-agnostic, so any handler can consume it.
+Each component has a base class that defines its interface, and subclasses hold the implementations. The internal message type is `ChatMessage` (`django_ai_sdk.common`). It is protocol-agnostic, so any handler can consume it.
 
-## Request Data Flow
+## Request data flow
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. USER REQUEST                                             │
-│    POST /api/chat with messages                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 2. AGENT LAYER                                              │
-│    agent.as_view(protocol_messages, thread_id, user)        │
-│    ├─ Check CHAT permissions                                │
-│    ├─ Convert protocol → ChatMessage                        │
-│    ├─ Store last user message                               │
-│    └─ Get pipeline adapter (Stream)                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 3. STREAM LAYER                                             │
-│    stream.stream(chat_messages)                             │
-│    ├─ Generate UUID for message                             │
-│    ├─ Run Haystack pipeline (ToolAgent)                     │
-│    └─ Normalize chunks → StreamEvents                       │
-└──────────────────────┬──────────────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 4. HAYSTACK PIPELINE                                        │
-│    Streaming chunks + tool calls                            │
-└──────────────────────┬──────────────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 5. PROTOCOL CONVERSION                                      │
-│    Events → Vercel Protocol Parts (SSE)                     │
-└──────────────────────┬──────────────────────────────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 6. STORAGE                                                  │
-│    StreamWriter → ChatMessage → Storage (same UUID)         │
-└─────────────────────────────────────────────────────────────┘
-```
+A chat request passes through the agent, the `Stream` adapter, the Haystack pipeline and the protocol handler. Storage and post-processing run beside the main path.
 
 ![Data Flow](../images/graphs/data_flow.svg)
 
-## Design Patterns
+## Design patterns
 
 | Pattern | Idea | Where |
 | --- | --- | --- |

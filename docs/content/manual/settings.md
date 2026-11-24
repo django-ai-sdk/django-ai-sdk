@@ -4,16 +4,16 @@ sidebar:
   order: 117
 ---
 
-Every `AI_SDK_*` Django setting, with its default and purpose. Most are optional: the SDK works with sensible defaults out of the box.
+This page lists every `AI_SDK_*` Django setting with its default and purpose. Most settings are optional, and the defaults work without configuration.
 
-Settings are read via `getattr(settings, ...)` at call time (cached where noted), so none of them require a restart of the dev server beyond Django's normal settings reload.
+The SDK reads settings with `getattr(settings, ...)` at call time, and caches them where noted. No setting needs a dev server restart beyond Django's normal settings reload.
 
-## Agent Registration and Runtime Agents
+## Agent registration and runtime agents
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_AGENTS` | `[]` | Dotted module paths to import so their `Agent` subclasses auto-register. See the [Agents guide](../agents.md) and [Agent Registry](agent-registry.md). |
-| `AI_SDK_RUNTIME_AGENT_BASES` | `[]` | Base classes a DB-configured runtime agent can be built on, as dotted paths. See [Runtime-Configured Agents](../views-and-routing.md#runtime-configured-agents). |
+| `AI_SDK_AGENTS` | `[]` | Dotted module paths to import so their `Agent` subclasses auto-register. See the [Agents guide](../agents/agents.md) and [Agent Registry](agent-registry.md). |
+| `AI_SDK_RUNTIME_AGENT_BASES` | `[]` | Base classes a DB-configured runtime agent can be built on, as dotted paths. See [Runtime-Configured Agents](../serving/views-and-routing.md#runtime-configured-agents). |
 | `AI_SDK_RUNTIME_AGENT_TOOLS` | `{}` | Tools selectable in runtime agent configuration: `{"key": "path.to.provider"}`. |
 
 ## Models
@@ -24,7 +24,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_EXTRACTION_MODEL` | `None` | Model used by the document-extraction generator (`agents/utils.py`). Falls back to `AI_SDK_DEFAULT_MODEL` when unset. |
 | `AI_SDK_MODEL_PRICES` | `{}` | Per-million-token prices by model or model prefix: `{"gpt-4.1-mini": {"input": 0.4, "output": 1.6}}`. Fills the cost of traces, turns and judges. |
 
-## RAG and Vector Stores
+## RAG and vector stores
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `AI_SDK_EMBEDDINGS_MODEL` | `None` | Qdrant hybrid RAG: when set, dense embeddings come from this model through the OpenAI-compatible API (`OPENAI_API_KEY`, `OPENAI_API_URL`) instead of local FastEmbed. Sparse (BM42) embeddings stay local. Changing it needs `reindex_memories`. |
 | `AI_SDK_EMBEDDINGS_DIM` | `384` | Vector size of the Qdrant collection; must match the dense model (`Qwen/Qwen3-Embedding-8B`: `4096`). |
 
-## Files and Uploads
+## Files and uploads
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -49,7 +49,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 | `STORAGES["django_ai_sdk"]` | unset | A reserved `STORAGES` alias used for `EntryDocument.file` only. Define it like any other `STORAGES` entry (`BACKEND` + `OPTIONS`). Unset falls back to `STORAGES["default"]` See [Files](files.md). |
 | `AI_SDK_FILE_UPLOAD_TO` | `"memories/documents/"` | `upload_to` path for `EntryDocument.file`. Unset keeps the default (no migration needed); changing it requires running `makemigrations` in the host project, same as customizing any other third-party model field. See [Files](files.md). |
 
-## MCP Servers
+## MCP servers
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -65,7 +65,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_INTEGRATIONS` | `{}` | Per-integration configuration dict, keyed by registry name, in the shape of `DATABASES`/`CACHES`. Keys are upper-cased on read. Secrets are referenced inline, e.g. `{"github": {"TOKEN": env("GITHUB_MCP_TOKEN")}}`: there is no derived `AI_SDK_GITHUB_TOKEN` variable, because GitHub Actions already injects a conflicting `GITHUB_TOKEN`. See the [Integrations guide](../integrations.md). |
+| `AI_SDK_INTEGRATIONS` | `{}` | Per-integration configuration dict, keyed by registry name, in the shape of `DATABASES`/`CACHES`. Keys are upper-cased on read. Secrets are referenced inline, e.g. `{"github": {"TOKEN": env("GITHUB_MCP_TOKEN")}}`: there is no derived `AI_SDK_GITHUB_TOKEN` variable, because GitHub Actions already injects a conflicting `GITHUB_TOKEN`. See the [Integrations guide](../agents/integrations.md). |
 | `AI_SDK_INTEGRATION_TIMEOUT` | `3` | Seconds per integration tool call. |
 | `AI_SDK_INTEGRATION_CACHE_TTL` | `900` | Seconds tool lists and statuses are cached. |
 | `AI_SDK_INTEGRATION_CB_COOLDOWN` | `60` | Seconds a failed integration stays open-circuited before retry. |
@@ -80,8 +80,8 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own — the package ships none. The registry is the gate: a type that is not listed cannot be named by an author. See [Workflows](workflows.md). |
-| `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host’s own — the package ships none a definition can name. See [Workflows](workflows.md). |
+| `AI_SDK_WORKFLOWS["STEPS"]` | `{}` | Step classes a JSON workflow may compose: `{"gather_thread": "apps.agents.steps.GatherStep"}`. Every type is the host's own, and the package ships none. The registry decides: an author can only name a listed type. See [Workflows](workflows.md). |
+| `AI_SDK_WORKFLOWS["LISTENERS"]` | `{}` | Run listeners a definition may attach to the workflow or to one step: `{"console_log": "apps.agents.listeners.ConsoleLogListener"}`. Every listener is the host's own. The package ships none that a definition can name. See [Workflows](workflows.md). |
 | `AI_SDK_WORKFLOWS["SCHEDULES_ENABLED"]` | `True` | `False` makes every cron occurrence start nothing, such as on a staging copy of production; the schedules stay as they are. See [Triggers](workflows.md#triggers). |
 | `AI_SDK_WORKFLOWS["STALE_AFTER_SECONDS"]` | `900` | How long a `running` run may go without progress before the worker checks it against DBOS, and fails it when its DBOS workflow no longer runs. See [Durable runs on DBOS](workflows.md#durable-runs-on-dbos). |
 
@@ -89,7 +89,7 @@ Settings are read via `getattr(settings, ...)` at call time (cached where noted)
 
 One dict, `AI_SDK_OVERSIGHT`, every key optional. Its keys are listed in the [Oversight manual](oversight.md#settings).
 
-Every settings dict of the SDK (`AI_SDK_OVERSIGHT` and `AI_SDK_WORKFLOWS`) is checked on start: an unknown key or a value of the wrong kind is `<app>.E012`, which names the key and what it accepts. A value that is not a dict at all raises `ImproperlyConfigured` when the app reads it.
+A system check validates every settings dict of the SDK, `AI_SDK_OVERSIGHT` and `AI_SDK_WORKFLOWS`, on start. An unknown key or a value of the wrong kind is `<app>.E012`, which names the key and what it accepts. A value that is not a dict raises `ImproperlyConfigured` when the app reads it.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -111,14 +111,14 @@ Workflows need the `django_ai_sdk.durable` app and the `dbos` extra. One dict, `
 
 ## Webhooks
 
-For an integration a platform pushes events into. Per-platform keys (`AGENT`, `RUN_AS`, `ALLOW_FROM`, ...) live in `AI_SDK_INTEGRATIONS[<name>]`; see [Webhooks](webhooks.md).
+These settings apply to an integration that a platform pushes events into. Per-platform keys such as `AGENT`, `RUN_AS` and `ALLOW_FROM` live in `AI_SDK_INTEGRATIONS[<name>]`. See [Webhooks](webhooks.md).
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_WEBHOOK_TIMEOUT` | `120` | Seconds a webhook-triggered agent run may take before the channel gets a timeout reply instead. |
 | `AI_SDK_WEBHOOK_MAX_TEXT` | `4000` | Characters of the inbound question kept, so the prompt is bounded by the SDK rather than by whatever the platform accepts. |
 
-## Streaming and Titles
+## Streaming and titles
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -126,7 +126,7 @@ For an integration a platform pushes events into. Per-platform keys (`AGENT`, `R
 | `AI_SDK_SUGGESTION_TIMEOUT` | `5.0` | Seconds before suggestion generation is abandoned. |
 | `AI_SDK_TITLE_SANITY_LIMIT` | `80` | Character ceiling for auto-generated thread titles. |
 | `AI_SDK_SUBAGENT_DIGEST_LIMIT` | `6000` | Character budget for the digest of a subagent's tool results, used when its run ended without a written report. Shared across all results; `0` or below disables truncation. See [Handoff output](agent.md#handoff-output). |
-| `AI_SDK_TOOL_OUTPUT_LIMIT` | `100000` | Character cap per tool result the model gets within a run; the model is told it was cut. `ToolAgentConfig.max_tool_output_chars` overrides it per agent. `0` or below disables it. See [Error Handling](../errors.md#what-the-model-sees). |
+| `AI_SDK_TOOL_OUTPUT_LIMIT` | `100000` | Character cap per tool result the model gets within a run; the model is told it was cut. `ToolAgentConfig.max_tool_output_chars` overrides it per agent. `0` or below disables it. See [Error Handling](../serving/errors.md#what-the-model-sees). |
 | `AI_SDK_HISTORY_TOOL_OUTPUT_LIMIT` | `4000` | Character cap per subagent handoff result replayed into a later turn. `0` or below disables truncation. See [Subagent Delegation](agent.md#handoff-history). |
 
 ## Tracing
@@ -137,9 +137,9 @@ Requires the opt-in `django_ai_sdk.tracing` app in `INSTALLED_APPS`.
 | --- | --- | --- |
 | `AI_SDK_TRACING_EXCLUDED_TAGS` | `[]` | Span tag keys to drop before storing, by exact key (no wildcards). Useful for static configuration that repeats identically on every run and is large: `["haystack.agent.tools", "haystack.agent.state_schema"]`. Applies to content tags too, and excluding one never affects the token columns or the `agent_id`/`agent_name` columns. See [Tracing](tracing.md). |
 
-One Haystack environment variable shapes what the tracer records. Unlike the
-settings above, it is read **once**, when `haystack.tracing` is first imported:
-it must be a real environment variable set before the process starts, and
+One Haystack environment variable decides what the tracer records. Unlike the
+settings above, Haystack reads it **once**, when `haystack.tracing` is first imported.
+It must be a real environment variable, set before the process starts, and
 changing it needs a restart. Assigning it in `settings.py` does nothing.
 
 | Variable | Default | Purpose |
@@ -152,36 +152,34 @@ changing it needs a restart. Assigning it in `settings.py` does nothing.
 | --- | --- | --- |
 | `AI_SDK_ENABLE_LOGS` | `False` | When `True`, adds a DEBUG-level loguru handler to stderr. File logging to `logs/django_ai_sdk.log` runs regardless. Neither writes local variables into a traceback (`diagnose` is off). |
 
-## Background Tasks
+## Background tasks
 
-Document processing (`memories/tasks.py`) and oversight's reflection and notifications
-(`oversight/tasks.py`) are enqueued with [django-tasks](https://pypi.org/project/django-tasks/),
-which the SDK depends on directly. It is **not** an `AI_SDK_*` setting: the backend is
-Django's `TASKS` setting, and which one you pick is a deployment decision the SDK does
-not make for you. Workflow runs are not django-tasks: they run on DBOS, in
-`./manage.py ai_sdk_worker` (see [Workflows](workflows.md)).
+The SDK enqueues document processing (`memories/tasks.py`) and oversight's reflection
+and notifications (`oversight/tasks.py`) with [django-tasks](https://pypi.org/project/django-tasks/),
+a direct dependency. The backend is **not** an `AI_SDK_*` setting. It is
+Django's `TASKS` setting, and the SDK leaves that deployment decision to you.
+Workflow runs do not use django-tasks. They run on DBOS, in
+`./manage.py ai_sdk_worker`. See [Workflows](workflows.md).
 
-With no `TASKS` setting at all, django-tasks defaults to
-`django_tasks.backends.immediate.ImmediateBackend` - tasks run **inline, in the
-calling request**. That works out of the box and needs no extra package, but it means
-a document upload processes synchronously while the user waits.
+Without a `TASKS` setting, django-tasks defaults to
+`django_tasks.backends.immediate.ImmediateBackend`, which runs tasks **inline, in the
+calling request**. That needs no configuration and no extra package, but
+a document upload then processes synchronously while the user waits.
 
 For durable processing with a separate worker, install a backend that provides one.
 With the workflows app installed, `DBOSTaskBackend` runs every task on the DBOS queues
-that `ai_sdk_worker` already polls, so no second worker is needed:
+that `ai_sdk_worker` already polls, so you need no second worker:
 
 ```python
 TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
 ```
 
-Declare each task's `queue_name` in `AI_SDK_DBOS["QUEUES"]`: the worker polls only
-those, and a task on any other queue is never picked up.
+Declare each task's `queue_name` in `AI_SDK_DBOS["QUEUES"]`. The worker polls only
+those queues and never picks up a task on any other queue.
 
 Without the workflows app, the database backend ships separately:
 
-```bash
-pip install django-tasks-db
-```
+::install[django-tasks-db]{tools="uv pip"}
 
 ```python
 INSTALLED_APPS = [
@@ -201,14 +199,14 @@ TASKS = {
 }
 ```
 
-Then run the worker: `./manage.py db_worker`. The demo project uses exactly this
-split - immediate in `DEBUG`, the database backend otherwise.
+Then run the worker with `./manage.py db_worker`. The demo project uses this
+split: the immediate backend in `DEBUG`, the database backend otherwise.
 
-## Provider Credentials
+## Provider credentials
 
-Not `AI_SDK_*` prefixed, but part of the same surface: the [generator
-factories](/manual/generators/) read them at call time. Every key is optional - when
-one is unset the factory omits it, so Haystack falls back to its own environment
+These settings have no `AI_SDK_` prefix, but the [generator
+factories](generators.md) read them at call time like the rest. Every key is optional. When
+one is unset, the factory omits it and Haystack falls back to its own environment
 variable of the same name.
 
 | Setting | Used by | Purpose |

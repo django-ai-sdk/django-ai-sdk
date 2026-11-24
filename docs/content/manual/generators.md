@@ -14,8 +14,8 @@ from django_ai_sdk.generators import openai_responses_chat
 generator = openai_responses_chat(model="gpt-5-mini")
 ```
 
-Factory names follow the Haystack class name minus `Generator`:
-`OpenAIResponsesChatGenerator` → `openai_responses_chat`.
+Each factory name is the Haystack class name without `Generator`, in snake case. For example,
+`OpenAIResponsesChatGenerator` becomes `openai_responses_chat`.
 
 ## Available factories
 
@@ -38,7 +38,7 @@ for the settings each vendor reads.
 
 ## Using a generator on an agent
 
-Set `llm` to the factory itself — do not call it. `get_llm()` invokes it and supplies
+Set `llm` to the factory itself and do not call it. `get_llm()` calls it and passes
 the agent's model:
 
 ```python
@@ -56,7 +56,7 @@ class MyAgent(Agent):
 ```
 
 `llm` defaults to `openai_responses_chat`, so an agent that talks to OpenAI can omit
-it. Switching provider is one line:
+it. Switching provider takes one line:
 
 ```python
 class MyAgent(Agent):
@@ -66,7 +66,7 @@ class MyAgent(Agent):
 ## Reasoning and other generation parameters
 
 The factories never enable reasoning on their own. Put the vendor's own parameters in
-`llm_kwargs`; they are passed as Haystack's `generation_kwargs`:
+`llm_kwargs`. The SDK passes them as Haystack's `generation_kwargs`:
 
 ```python
 class MyAgent(Agent):
@@ -80,8 +80,8 @@ class MyAgent(Agent):
     llm_kwargs = {"thinking": {"type": "enabled", "budget_tokens": 2048}, "max_tokens": 4096}
 ```
 
-Ollama is the exception that proves the rule: `think` is an init parameter there, not a
-generation kwarg, so `ollama_chat` lifts it out for you and `llm_kwargs` stays uniform:
+Ollama is the exception. There `think` is an init parameter, not a generation kwarg.
+`ollama_chat` moves it out of `llm_kwargs`, so `llm_kwargs` works the same for every vendor:
 
 ```python
 class MyAgent(Agent):
@@ -89,8 +89,8 @@ class MyAgent(Agent):
     llm_kwargs = {"think": True}
 ```
 
-Keyword arguments passed to `get_llm()` win over `llm_kwargs`, which lets a single
-agent build a cheaper generator for a side task:
+Keyword arguments passed to `get_llm()` override `llm_kwargs`. One agent can use this to
+build a cheaper generator for a side task:
 
 ```python
 generator = self.get_llm(generation_kwargs={})
@@ -99,20 +99,20 @@ generator = self.get_llm(generation_kwargs={})
 ## Structured output
 
 `Agent.run(response_format=Schema)` and `Run.run(response_format=Schema)` are
-vendor-neutral, but providers disagree on how a schema is passed. `Run` resolves that
-through the `SCHEMA_KWARGS` table in `django_ai_sdk/generators/schema.py`, keyed by
-generator class name - so resolving one vendor imports none of them - and walked over
-the MRO, so subclasses inherit.
+vendor-neutral, but each provider takes the schema in a different way. `Run` looks the
+keyword up in the `SCHEMA_KWARGS` table in `django_ai_sdk/generators/schema.py`. The
+table is keyed by generator class name, so resolving one vendor imports none of them.
+`Run` walks it over the MRO, so subclasses inherit their parent's row.
 
 | Generator | How a schema is passed | Works with `response_format=` |
 | --- | --- | --- |
 | `OpenAIResponsesChatGenerator`, `AzureOpenAIResponsesChatGenerator` | `text_format` in `generation_kwargs`, a Pydantic model | yes |
 | `OpenAIChatGenerator`, `AzureOpenAIChatGenerator` | `response_format` in `generation_kwargs`, a Pydantic model | yes |
 | `MistralChatGenerator`, `OpenRouterChatGenerator` | inherited from `OpenAIChatGenerator` | yes |
-| `OllamaChatGenerator` | `response_format` **at construction**, a JSON schema | no - see below |
+| `OllamaChatGenerator` | `response_format` **at construction**, a JSON schema | no, see below |
 | `AnthropicChatGenerator`, `HuggingFaceAPIChatGenerator`, `TransformersChatGenerator` | no schema parameter | no |
 
-A generator in the last two rows raises `ValueError` rather than sending a keyword its
+A generator in the last two rows raises `ValueError` instead of sending a keyword its
 client would reject:
 
 ```
@@ -129,23 +129,23 @@ answer = Answer.model_validate_json(reply)
 ```
 
 For Anthropic and Hugging Face, ask for JSON in the prompt and validate the reply
-yourself, or route that one call through an OpenAI-compatible generator.
+yourself. You can also route that one call through an OpenAI-compatible generator.
 
-An unlisted generator class is assumed OpenAI-compatible and gets `response_format`.
+`Run` treats an unlisted generator class as OpenAI-compatible and passes it `response_format`.
 
 ### Structured output from a tool loop
 
-`agent.run(tools=True, response_format=Schema)` is not supported - deliberately, not
-a gap left unfinished. `response_format` is implemented as a generation kwarg (the
-table above), and a Haystack `Agent`'s tool loop applies its generation kwargs to
-*every* step, not just the final answer. Turning on structured output for the whole
-run would force early steps - "should I call `search_web`?" - into your final
-answer's schema too, and several generators (the last two rows above) accept no
-schema kwarg at all, at any step. Passing both does not raise: `response_format`
-wins and tools are skipped entirely - see [Tools](../protocols.md#tools).
+The SDK does not support `agent.run(tools=True, response_format=Schema)`, by design.
+`response_format` is a generation kwarg, as the table above shows. A Haystack `Agent`'s
+tool loop applies its generation kwargs to *every* step, including the steps before the
+final answer. Structured output for the whole run would force an early step, such as
+"should I call `search_web`?", into your final answer's schema. The generators in the
+last two rows of the table accept no schema kwarg at any step. Passing both does not
+raise. `response_format` wins and the run skips tools entirely, see
+[Tools](../serving/protocols.md#tools).
 
-The supported shape is two calls instead of one: run the tool loop free-form, then
-make one more tool-less call to shape the finished text:
+The supported approach uses two calls. Run the tool loop free-form, then make one more
+call without tools to put the finished text into the schema:
 
 ```python
 text = await agent.run(messages, tools=True)
@@ -157,10 +157,12 @@ report = await Run(generator=agent.get_llm()).run(
 
 ## Adding a vendor
 
-Everything a vendor needs lives in its own module. To add DeepSeek:
+Everything a vendor needs is in its own module. To add DeepSeek:
 
-1. Create `django_ai_sdk/generators/deepseek.py`. One module per vendor is what
-   makes the extra optional, so import the integration at the top:
+:::steps
+
+1. Create `django_ai_sdk/generators/deepseek.py`. One module per vendor keeps the
+   extra optional, so import the integration at the top:
 
    ```python
    from haystack_integrations.components.generators.deepseek import DeepSeekChatGenerator
@@ -187,18 +189,19 @@ Everything a vendor needs lives in its own module. To add DeepSeek:
    `django_ai_sdk/generators/__init__.py` so it resolves on first use, and add a
    `SCHEMA_KWARGS` row in `schema.py` only if DeepSeek's structured-output keyword
    differs from `response_format`.
+:::
 
 Nothing in `Run`, `Agent`, or the adapters changes.
 
 ## Token usage while streaming
 
-The adapters never reconfigure a generator: what the factory built is what runs. That
-matters for [token accounting](tracing.md), because the two OpenAI APIs differ:
+The adapters never reconfigure a generator. The generator the factory built is the one
+that runs. This matters for [token accounting](tracing.md), because the two OpenAI APIs differ:
 
-- `openai_responses_chat` reports usage on a streamed response without being asked.
-- `openai_chat` (Chat Completions) reports none unless `stream_options` is requested,
-  and that option is only valid on a streaming call - which is why it is not a factory
-  default. Declare it on the agents that stream:
+- `openai_responses_chat` reports usage on a streamed response by default.
+- `openai_chat` (Chat Completions) reports no usage unless you request `stream_options`.
+  That option is only valid on a streaming call, so it is not a factory default.
+  Declare it on the agents that stream:
 
   ```python
   class MyAgent(Agent):
@@ -206,13 +209,13 @@ matters for [token accounting](tracing.md), because the two OpenAI APIs differ:
       llm_kwargs = {"stream_options": {"include_usage": True}}
   ```
 
-Other vendors have no equivalent switch; a generator that reports no usage leaves the
+Other vendors have no equivalent switch. A generator that reports no usage leaves the
 token columns null.
 
 ## Custom factories
 
-A factory is a plain callable returning a Haystack chat generator, so any function
-works — including one that reads your own settings:
+A factory is a plain callable that returns a Haystack chat generator. Any function
+works, including one that reads your own settings:
 
 ```python
 from django.conf import settings
@@ -229,9 +232,9 @@ class MyAgent(Agent):
     llm = cheap_openai_chat
 ```
 
-A factory for a vendor that ships in its own package imports it at module scope,
-like the built-in ones - keep the factory in its own module so importing it is what
-requires the package:
+A factory for a vendor that ships in its own package imports that package at module
+scope, like the built-in factories. Keep the factory in its own module, so only
+importing that module requires the package:
 
 ```python
 # myapp/generators/vertex.py

@@ -4,17 +4,17 @@ sidebar:
   order: 109
 ---
 
-How conversations persist. Conversations are **threads** of **messages**; all adapters speak the same `ChatMessage` format.
+How conversations persist. A conversation is a thread of messages, and all adapters store the same `ChatMessage` format.
 
 ![Storage Architecture](../images/graphs/storage_architecture.svg)
 
 :::note
-Thread operations in views? Use [ThreadService](thread-service.md). Building a custom backend? See [Custom Storage Adapters](storage-registry.md).
+For thread operations in views, use [ThreadService](thread-service.md). To build a custom backend, see [Custom Storage Adapters](storage-registry.md).
 :::
 
-## Available Adapters
+## Available adapters
 
-| Adapter | Persistence | Speed | Best For |
+| Adapter | Persistence | Speed | Best for |
 | --- | --- | --- | --- |
 | `MemoryStorageAdapter` | In-memory | Fastest | Testing, development |
 | `DbStorageAdapter` | Django ORM | Slower | Production, long-term |
@@ -26,11 +26,11 @@ class MyAgent(Agent):
     storage_adapter = DbStorageAdapter  # or MemoryStorageAdapter
 ```
 
-Both use the same format and interface: switching is a one-line change.
+Both use the same format and interface, so switching is a one-line change.
 
-## The ChatMessage Format
+## The ChatMessage format
 
-`ChatMessage` (in `django_ai_sdk.common`) is the universal message format every adapter persists:
+`ChatMessage` (in `django_ai_sdk.common`) is the message format every adapter persists:
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ Both use the same format and interface: switching is a one-line change.
 | `processing_time_ms` | `int` | Total processing time |
 | `started_at` / `completed_at` | `float` | Unix timestamps |
 
-Helpers: `.text` (alias of `content`), `.duration`, `.has_tools`, `.has_errors`, `.finalize(finish_reason)`.
+It has these helpers: `.text` (alias of `content`), `.duration`, `.has_tools`, `.has_errors` and `.finalize(finish_reason)`.
 
 ## Adapter API
 
@@ -69,9 +69,9 @@ await DbStorageAdapter.update_thread(thread_id, title="New title")
 await DbStorageAdapter.delete_thread(thread_id)            # -> bool
 ```
 
-`list_threads` paginates with `limit`/`offset` and returns everything by default (`limit=None`).
+`list_threads` paginates with `limit` and `offset`. By default (`limit=None`) it returns everything.
 
-`ThreadInfo` carries `id`, `title`, `agent_id`, `model`, `user_id`, `created_at`, `updated_at`, `metadata`, `message_count`, `file_memory_id`.
+`ThreadInfo` has `id`, `title`, `agent_id`, `model`, `user_id`, `created_at`, `updated_at`, `metadata`, `message_count`, `file_memory_id`.
 
 ### Instance methods: thread-specific operations
 
@@ -87,16 +87,18 @@ await storage.restore_message(message_id)                   # undo delete
 
 ### `storage_callback`
 
-The async `storage_callback(chat_message)` is what `StreamWriter` calls to auto-persist streamed replies. `Agent.get_storage_adapter(thread_id)` finds which adapter actually holds a thread by querying all registered adapters, falling back to the agent's configured `storage_adapter`.
+`StreamWriter` calls the async `storage_callback(chat_message)` to persist streamed replies. `Agent.get_storage_adapter(thread_id)` queries all registered adapters to find the one that holds a thread. If none does, it falls back to the agent's configured `storage_adapter`.
 
-## How Streaming Persists Messages
+## How streaming persists messages
 
+:::steps
 1. `Stream.stream()` generates the `message_id` and creates a `StreamWriter` bound to it.
 2. As chunks stream, `stream_writer.add_chunk(chunk)` accumulates text, reasoning, tool calls, and errors.
 3. `Stream.get_final_message()` attaches citation sources, then calls `stream_writer.finalize("stop")`.
-4. `finalize()` invokes `storage_adapter.storage_callback(message)` to persist it.
+4. `finalize()` calls `storage_adapter.storage_callback(message)` to persist it.
+:::
 
-Failed or cancelled streams persist with `finish_reason="error"` / `"cancelled"`. The same `message_id` flows through SSE, storage, and API endpoints: see [ID Generation](id-generation.md).
+Failed streams persist with `finish_reason="error"`, cancelled ones with `"cancelled"`. SSE, storage and API endpoints all use the same `message_id`. See [ID Generation](id-generation.md).
 
 ## Examples
 

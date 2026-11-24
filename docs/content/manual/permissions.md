@@ -4,11 +4,11 @@ sidebar:
   order: 120
 ---
 
-How the SDK gates operations: the `Operation` enum, permission domains, the built-in classes, and how to write your own. Every service (`AgentService`, `ThreadService`, `MemoryService`, `WorkflowService`, `as_view()`, `history()`) checks permissions before acting and raises `PermissionDenied` on failure.
+How the SDK gates operations: the `Operation` enum, permission domains, the built-in classes, and how to write your own. Every service entry point (`AgentService`, `ThreadService`, `MemoryService`, `WorkflowService`, `as_view()`, `history()`) checks permissions before it acts and raises `PermissionDenied` when the check fails.
 
-## Operations and Domains
+## Operations and domains
 
-An **operation** is the unit of access control. A **domain** is the default permission chain for a group of operations:
+An operation is the unit of access control. A domain is the default permission chain for a group of operations:
 
 ```python
 from django_ai_sdk.permissions import Operation, PermissionDomain
@@ -26,7 +26,7 @@ PermissionDomain.MEMORY   # "memory"
 | `workflow` | `WorkflowDefaultPermission` |
 | `oversight` | `django_ai_sdk.oversight.permissions.OversightDefaultPermission` |
 
-Override a domain globally via `AI_SDK_PERMISSIONS`:
+Override a domain globally with `AI_SDK_PERMISSIONS`:
 
 ```python
 AI_SDK_PERMISSIONS = {
@@ -35,7 +35,7 @@ AI_SDK_PERMISSIONS = {
 }
 ```
 
-## The Operation Enum
+## The Operation enum
 
 ```python
 # Agent
@@ -61,7 +61,7 @@ VIEW_OVERSIGHT_METRICS, VIEW_OVERSIGHT_CONTENT, REVIEW_OVERSIGHT
 CHAT, REINDEX
 ```
 
-## Built-in Permission Classes
+## Built-in permission classes
 
 | Class | Behavior |
 | --- | --- |
@@ -70,19 +70,19 @@ CHAT, REINDEX
 | `IsAuthenticated` | Allows any authenticated user. |
 | `IsAdminUser` | Allows staff or superusers. |
 | `IsInAllowedGroups(groups=[...])` | Allows authenticated users in one of the named auth groups. |
-| `IsOwner(field="user_id")` | Allows the object's owner; `field` selects the ownership attribute. |
+| `IsOwner(field="user_id")` | Allows the object's owner. `field` selects the ownership attribute. |
 
 ### Tiered default permissions
 
-The domains' default classes. The first four expose `READ` / `WRITE` / `MANAGE` operation tiers:
+These are the domains' default classes. The first four expose `READ`, `WRITE` and `MANAGE` operation tiers:
 
-- **`ThreadDefaultPermission`**: authenticated users get full access to their own threads; anonymous users get none.
-- **`MemoryDefaultPermission`**: `can_manage` members get everything; `can_manage=False` members get read + write entries; public read-only is gated by `is_public`; anonymous is always blocked.
-- **`AgentDefaultPermission`**: `can_manage` members manage the agent; other members view and use it; `is_public` grants read and use to anyone; anonymous is otherwise blocked for agent operations and passes through everything else. Chat, thread and file operations have no object to check, so they are gated on the agent passed as the `agent` keyword.
-- **`WorkflowDefaultPermission`**: any authenticated user may run an active workflow; managing stored definitions (create, edit, delete) needs `change_workflow`, and whoever last changed a definition's steps becomes its `created_by`, the account its triggered runs act as; a run is read only by the principal it ran as, since its outputs are that person's content. Staff manage and read every one of both. It implements `get_queryset_perms`, so list endpoints are scoped in the database rather than filtered afterwards — see [Workflows](workflows.md#who-may-do-what).
-- **`OversightDefaultPermission`** (`django_ai_sdk.oversight.permissions`): one Django model permission per operation, never `is_staff`, narrowed by the `scope_turns` and `scope_reviews` hooks; the operations and their permissions are in [Oversight](oversight.md#review-api).
+- `ThreadDefaultPermission` gives authenticated users full access to their own threads. Anonymous users get none.
+- `MemoryDefaultPermission` gives `can_manage` members everything. `can_manage=False` members can read and write entries. `is_public` grants public read-only access. Anonymous users are always blocked.
+- `AgentDefaultPermission` lets `can_manage` members manage the agent. Other members view and use it. `is_public` lets anyone read and use it. Otherwise, anonymous users are blocked for agent operations and pass through everything else. Chat, thread and file operations have no object to check, so the class checks them against the agent passed as the `agent` keyword.
+- `WorkflowDefaultPermission` lets any authenticated user run an active workflow. Creating, editing and deleting stored definitions needs `change_workflow`. Whoever last changed a definition's steps becomes its `created_by`, the account its triggered runs act as. Only the principal a run ran as can read it, because its outputs are that person's content. Staff manage and read every definition and run. The class implements `get_queryset_perms`, so list endpoints filter in the database, not afterwards. See [Workflows](workflows.md#who-may-do-what).
+- `OversightDefaultPermission` (`django_ai_sdk.oversight.permissions`) requires one Django model permission per operation and never checks `is_staff`. The `scope_turns` and `scope_reviews` hooks narrow it. [Oversight](oversight.md#review-api) lists the operations and their permissions.
 
-`MemoryService.get_object_permissions_map()` and `agent_permissions()` auto-discover these `READ`/`WRITE`/`MANAGE` tiers and return an `ObjectPermissions` (`can_read` / `can_write` / `can_manage`) for the frontend.
+`MemoryService.get_object_permissions_map()` and `agent_permissions()` discover these `READ`, `WRITE` and `MANAGE` tiers and return an `ObjectPermissions` (`can_read`, `can_write`, `can_manage`) for the frontend.
 
 ## The BasePermission API
 
@@ -93,9 +93,9 @@ class BasePermission(ABC):
     def get_queryset_perms(self, user, operation, queryset) -> QuerySet: ...
 ```
 
-`has_permission` gates the operation itself; `has_object_permission` gates it on a specific object. Implementing `get_queryset_perms` lets list endpoints filter at the database level instead of post-checking every row: `MemoryDefaultPermission` uses it for `VIEW_MEMORY`.
+`has_permission` checks the operation itself. `has_object_permission` checks it on a specific object. With `get_queryset_perms`, list endpoints filter in the database instead of checking every row afterwards. `MemoryDefaultPermission` uses it for `VIEW_MEMORY`.
 
-## Writing a Custom Permission
+## Writing a custom permission
 
 ```python
 from django_ai_sdk.permissions import BasePermission, Operation
@@ -118,9 +118,9 @@ class IsInAllowedGroups(BasePermission):
         return user.is_authenticated and await user.groups.filter(name__in=self.groups).aexists()
 ```
 
-Declare them on agents (`permissions = [IsInAllowedGroups(groups=["eng"])]`), on integrations (`service.permissions`), or as a domain override in `AI_SDK_PERMISSIONS`. Both class and instance forms are accepted anywhere.
+Declare them on agents (`permissions = [IsInAllowedGroups(groups=["eng"])]`), on integrations (`service.permissions`), or as a domain override in `AI_SDK_PERMISSIONS`. Every place accepts both the class and the instance form.
 
-## PermissionsMixin and Helpers
+## PermissionsMixin and helpers
 
 Services subclass `PermissionsMixin` and set a `domain`:
 
@@ -132,8 +132,8 @@ class MyService(PermissionsMixin):
         await self.has_perms(user, Operation.VIEW_THREAD, obj, raise_on_deny=True)
 ```
 
-- `has_perms(user, operation, obj=None)`: the check used by the built-in services; `raise_on_deny=False` returns a boolean instead of raising.
-- `get_object_permissions_map(user, obj)`: returns `{"read": ..., "write": ..., "manage": ...}` from the tiered classes.
-- `has_queryset_perms(user, operation, queryset)`: runs `get_queryset_perms` across the domain chain.
+- `has_perms(user, operation, obj=None)` is the check the built-in services use. With `raise_on_deny=False` it returns a boolean instead of raising.
+- `get_object_permissions_map(user, obj)` returns `{"read": ..., "write": ..., "manage": ...}` from the tiered classes.
+- `has_queryset_perms(user, operation, queryset)` runs `get_queryset_perms` across the domain chain.
 
-The low-level `check_permissions()` / `check_object_permissions()` / `has_perms()` free functions power all of the above and are what you'd use outside a mixin.
+The low-level free functions `check_permissions()`, `check_object_permissions()` and `has_perms()` power all of the above. Use them outside a mixin.

@@ -4,23 +4,23 @@ sidebar:
   order: 116
 ---
 
-Internals of the `warmup_rag` management command. User-facing usage lives in the [CLI guide](../cli.md).
+Internals of the `warmup_rag` management command. The [CLI guide](../operations/cli.md) covers how to use it.
 
 File: `django_ai_sdk/management/commands/warmup_rag.py`. The SDK also ships `refresh_integrations` (`django_ai_sdk/integrations/mcp/management/commands/refresh_integrations.py`) for MCP integrations.
 
 ## Overview
 
-`warmup_rag` pre-builds RAG indexes for all registered agents and memories so the first chat request doesn't pay the warmup cost. It is a standard Django `BaseCommand` that runs async work via `asyncio.run()`.
+`warmup_rag` builds RAG indexes ahead of time for all registered agents and memories, so the first chat request doesn't wait for the warmup. It is a standard Django `BaseCommand` that runs async work with `asyncio.run()`.
 
 ## Arguments
 
 | Option | Type | Description |
 | --- | --- | --- |
-| `--agent` | `str` | Only warm up a specific agent (matched by **class name**) |
+| `--agent` | `str` | Only warm up a specific agent, matched by class name |
 | `--memory` | `str` | Only warm up a specific memory ID |
 | `--force-rebuild` | flag | Rebuild indexes from scratch, deleting existing ones |
 
-## Implementation Details
+## Implementation details
 
 ### Resolving memories
 
@@ -53,7 +53,7 @@ except RuntimeError:
 
 ### Filtering by agent
 
-`--agent` matches the **class name**, not the UUID:
+`--agent` matches the class name, not the UUID:
 
 ```python
 if agent_filter:
@@ -83,9 +83,9 @@ for aid, inst in agents.items():
             logger.exception("Warmup failed for %s memory %s", name, mid)
 ```
 
-Per-memory failures are logged and don't abort the run. Agents without a `rag_provider` are skipped. Empty states (no agents, no memories) exit with a warning.
+The command logs a failure for one memory and continues the run. It skips agents without a `rag_provider`. With no agents or no memories, it exits with a warning.
 
-## Code Equivalent
+## Code equivalent
 
 ```python
 from django_ai_sdk.agents.registry import registry
@@ -98,7 +98,7 @@ for aid, inst in agents.items():
         await inst.rag_provider.warmup(inst, mid, force_rebuild=False)
 ```
 
-## Manual Testing
+## Manual testing
 
 ```bash
 python manage.py warmup_rag --agent PirateBasicAgent --memory <memory-uuid> --force-rebuild

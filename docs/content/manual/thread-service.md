@@ -4,11 +4,11 @@ sidebar:
   order: 110
 ---
 
-The recommended entry point for thread operations in views: resolves the agent's storage, checks permissions, and works across all adapters.
+Use `ThreadService` for thread operations in views. It resolves the agent's storage, checks permissions and works with every storage adapter.
 
 All methods are async and take a `user` for permission checking.
 
-## Thread Operations
+## Thread operations
 
 ```python
 from django_ai_sdk.storage.services import ThreadService
@@ -23,9 +23,9 @@ await ThreadService.delete_all_threads(user=request.user)
 
 `threads()` merges every configured storage adapter, sorts newest first, then paginates with `limit`/`offset`. Pass `limit=None` to return every thread (`offset` still applies).
 
-`create_thread()` auto-populates `model`, `agent_name`, `agent_class`, and `created_via` in the thread metadata (caller-provided values take precedence) and auto-generates thread titles when `agent.title_generation` is enabled.
+`create_thread()` fills in `model`, `agent_name`, `agent_class` and `created_via` in the thread metadata. Values the caller passes take precedence. When `agent.title_generation` is enabled, it also generates the thread title.
 
-## Message Operations
+## Message operations
 
 ```python
 await ThreadService.rate_message(thread_id, message_id, rating=1, user=request.user)
@@ -33,9 +33,9 @@ await ThreadService.delete_message(thread_id, message_id, user=request.user)    
 await ThreadService.restore_message(thread_id, message_id, user=request.user)    # undo delete
 ```
 
-`rate_message` takes `rating=1 | -1 | None` (None unrates) and an optional `feedback`.
+`rate_message` takes `rating=1 | -1 | None` and an optional `feedback`. `None` removes the rating.
 
-## Storage Access
+## Storage access
 
 ```python
 storage = await ThreadService.storage_for_thread(thread_id, user=request.user)
@@ -43,6 +43,6 @@ storage = await ThreadService.storage_for_thread(thread_id, user=request.user)
 
 ## Permissions
 
-Each operation checks the user's permission via the agent's `permissions` classes and raises `PermissionDenied` when access is denied. See the [Views and Routing guide](../views-and-routing.md).
+Each operation checks the user's permission with the agent's `permissions` classes and raises `PermissionDenied` when access is denied. See the [Views and Routing guide](../serving/views-and-routing.md).
 
-Next: [Custom Storage Adapters](storage-registry.md), implementing your own storage.
+Next: [Custom Storage Adapters](storage-registry.md), to implement your own storage.
