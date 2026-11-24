@@ -53,7 +53,7 @@ rag = ["django-ai-sdk[chroma,qdrant]"]
 # Kept so the documented `django-ai-sdk[haystack]` keeps working; it is a core
 # dependency now.
 haystack = ["haystack-ai>=3.5.0"]
-mcp = ["mcp-haystack>=2.1.2", "mcp>=1.30.0,<2", "authlib>=1.9.10"]
+mcp = ["mcp-haystack>=2.1.2", "mcp>=2.3.0,<3", "authlib>=1.9.10"]
 # Ready-made HTTP layers (django_ai_sdk.contrib.*); bring the framework you use.
 ninja = ["django-ninja>=1.8.0"]
 drf = ["djangorestframework>=3.18.3"]
@@ -86,7 +86,7 @@ typesafe = ["typesafe-sdk>=0.5.7"]
 local = ["onnxruntime>=1.32.0", "tokenizers>=0.23.3", "huggingface-hub>=0.23", "numpy>=2.5.5"]
 # Durable workflows, their cron and event triggers, and the task queue on DBOS
 # (django_ai_sdk.durable): state in the project's own Postgres, no extra service.
-dbos = ["dbos>=3.5.0,<4"]
+dbos = ["dbos>=3.6.0,<4"]
 
 [dependency-groups]
 # Stack for the demo projects in demos/ (demos/base holds their shared settings).
