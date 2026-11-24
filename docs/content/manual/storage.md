@@ -6,7 +6,7 @@ sidebar:
 
 How conversations persist. Conversations are **threads** of **messages**; all adapters speak the same `ChatMessage` format.
 
-![Storage Architecture](../images/graphs/storage_architecture.png)
+![Storage Architecture](../images/graphs/storage_architecture.svg)
 
 :::note
 Thread operations in views? Use [ThreadService](thread-service.md). Building a custom backend? See [Custom Storage Adapters](storage-registry.md).

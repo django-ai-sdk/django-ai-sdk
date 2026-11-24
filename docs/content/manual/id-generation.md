@@ -6,7 +6,7 @@ sidebar:
 
 How a single `message_id` flows from generation → SSE → storage → later operations.
 
-![ID Generation Flow](../images/graphs/id_generation.png)
+![ID Generation Flow](../images/graphs/id_generation.svg)
 
 The `message_id` is generated **once** in `Stream.stream()`:
 

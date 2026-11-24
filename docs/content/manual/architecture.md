@@ -6,7 +6,7 @@ sidebar:
 
 The core abstractions, how a request flows through the system, and the design patterns behind them.
 
-![Overview](../images/graphs/overview_architecture.png)
+![Overview](../images/graphs/overview_architecture.svg)
 
 ## Components
 
@@ -62,7 +62,7 @@ Each component has a base class defining its interface; implementations live in 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-![Data Flow](../images/graphs/data_flow.png)
+![Data Flow](../images/graphs/data_flow.svg)
 
 ## Design Patterns
 

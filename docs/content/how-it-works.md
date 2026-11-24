@@ -6,7 +6,7 @@ sidebar:
 
 This page explains what happens under the hood when a request flows through the SDK. You don't need to know this to use it, but it helps when extending or debugging things.
 
-![Request flow](images/graphs/data_flow.png)
+![Request flow](images/graphs/data_flow.svg)
 
 :::note
 Contributor? The [System Architecture](manual/architecture.md) manual page goes deeper into components and design patterns.

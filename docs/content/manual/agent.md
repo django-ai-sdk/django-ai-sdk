@@ -93,7 +93,7 @@ The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get
 
 ## Subagent Delegation
 
-![Subagent Flow](../images/graphs/subagent_flow.png)
+![Subagent Flow](../images/graphs/subagent_flow.svg)
 
 Declaring `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent into a delegate-able Haystack `ComponentTool`. Only plain `Agent` subclasses can appear in that list — a `RuntimeAgent` (DB-configured) never can, since its `__init__` requires an `AgentSettings` row and `agents = [...]` holds bare classes with no way to pass one in. `hidden = True` on a subagent is a convention, not an enforcement.
 

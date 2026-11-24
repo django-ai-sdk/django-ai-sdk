@@ -12,7 +12,7 @@ Fixtures, factories, and mock builders are documented on [Test Tooling](test-too
 
 ## Strategy
 
-![Testing Pyramid](../images/graphs/testing_pyramid.png)
+![Testing Pyramid](../images/graphs/testing_pyramid.svg)
 
 | Component | Test type | Focus |
 | --- | --- | --- |

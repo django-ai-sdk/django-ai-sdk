@@ -10,7 +10,7 @@ How RAG works in the SDK: the provider lifecycle and how retrieval is exposed to
 Pipeline variants, config, and the document model live on the [RAG Variants](rag-variants.md) page.
 :::
 
-![RAG Architecture](../images/graphs/rag_architecture.png)
+![RAG Architecture](../images/graphs/rag_architecture.svg)
 
 ## What is RAG?
 

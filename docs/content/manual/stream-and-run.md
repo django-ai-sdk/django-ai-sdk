@@ -10,7 +10,7 @@ The two adapters an `Agent` uses to talk to a Haystack model: `Stream` (streamin
 Usage first? See the [Protocols guide](../protocols.md). This page is the API reference.
 :::
 
-![Adapter Flow](../images/graphs/adapter_flow.png)
+![Adapter Flow](../images/graphs/adapter_flow.svg)
 
 | Adapter | Purpose | Powered by |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ them.
 
 ## Headless tool runs
 
-![Headless Tool Run Flow](../images/graphs/headless_tool_run_flow.png)
+![Headless Tool Run Flow](../images/graphs/headless_tool_run_flow.svg)
 
 An `Agent` can run its own tools to completion **without streaming** — no
 `Stream`, no SSE connection, no client reading chunks. One call in, one final

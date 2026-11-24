@@ -13,67 +13,116 @@ from pathlib import Path
 
 OUTPUT_DIR = Path(__file__).parent / "content" / "images" / "graphs"
 
+# Neutral shadcn grays from the docs theme: black for the main path, gray for the rest.
+ACCENT = "#171717"  # neutral-900: primary-flow borders
+ACCENT_FILL = "#ffffff"
+ACCENT_TEXT = "#171717"
+CARD = "#fafafa"  # neutral-50: diagram background, a light card in both site modes
+SURFACE = "#ffffff"  # node fill
+SUBTLE = "#f5f5f5"  # neutral-100 (muted): clusters, notes
+BORDER = "#d4d4d4"  # neutral-300
+LINE = "#737373"  # neutral-500: edges
+TEXT = "#171717"  # neutral-900
+MUTED_TEXT = "#737373"  # neutral-500 (muted-foreground): notes, edge labels
+
+FONT = "Helvetica,Arial,sans-serif"  # the site uses the system sans stack
+
+# The page column is ~720 CSS px (7.5in at 96 px/in). Every diagram is padded to
+# this width, so all of them show at the same scale.
+COLUMN_WIDTH_IN = 7.5
+
 
 def create_graph(name: str, **attrs) -> graphviz.Digraph:
-    """Create a new directed graph with default styling."""
+    """Create a new directed graph with the docs-site styling."""
     dot = graphviz.Digraph(
         name=name,
-        format="png",
+        format="svg",
         graph_attr={
             "rankdir": "TB",
-            "bgcolor": "transparent",
-            "fontname": "Helvetica,Arial,sans-serif",
-            "nodesep": "0.5",
-            "ranksep": "0.75",
+            "bgcolor": CARD,
+            "fontname": FONT,
+            "fontsize": "11",
+            "fontcolor": MUTED_TEXT,
+            "nodesep": "0.25",
+            "ranksep": "0.35",
             "splines": "ortho",
-            "pad": "0.5",
-            "dpi": "150",
+            "pad": "0.2",
             **attrs.get("graph_attr", {}),
         },
         node_attr={
-            "fontname": "Helvetica,Arial,sans-serif",
+            "fontname": FONT,
             "fontsize": "11",
+            "fontcolor": TEXT,
             "shape": "box",
             "style": "rounded,filled",
-            "fillcolor": "#f5f5f5",
-            "color": "#333333",
-            "margin": "0.3,0.2",
+            "fillcolor": SURFACE,
+            "color": BORDER,
+            "penwidth": "0.8",
+            "margin": "0.12,0.06",
+            "height": "0.3",
         },
         edge_attr={
-            "fontname": "Helvetica,Arial,sans-serif",
+            "fontname": FONT,
             "fontsize": "10",
-            "color": "#666666",
-            "arrowhead": "vee",
-            "arrowsize": "0.8",
+            "fontcolor": MUTED_TEXT,
+            "color": LINE,
+            "penwidth": "0.8",
+            "arrowhead": "normal",
+            "arrowsize": "0.5",
         },
     )
     return dot
 
 
-def add_component(dot, name, label, fillcolor="#f5f5f5", **attrs) -> str:
-    """Add a component node with consistent styling."""
-    dot.node(name, label=label, fillcolor=fillcolor, **attrs)
+def add_component(dot, name, label, **attrs) -> str:
+    """Add a neutral component node."""
+    dot.node(name, label=label, **attrs)
     return name
 
 
-def add_flow_node(dot, name, label, fillcolor="#e3f2fd", **attrs) -> str:
-    """Add a flow/step node with blue styling."""
-    dot.node(name, label=label, fillcolor=fillcolor, color="#1565c0", fontcolor="#1565c0", **attrs)
+def add_flow_node(dot, name, label, **attrs) -> str:
+    """Add a primary-flow node in the accent color."""
+    dot.node(
+        name, label=label, fillcolor=ACCENT_FILL, color=ACCENT, fontcolor=ACCENT_TEXT, **attrs
+    )
     return name
 
 
 def add_note(dot, name, label, **attrs) -> str:
-    """Add an annotation note node."""
+    """Add a muted annotation note."""
     dot.node(
         name,
         label=label,
         shape="note",
-        fillcolor="#fff9c4",
-        color="#f57f17",
-        fontsize="9",
+        style="filled",
+        fillcolor=SUBTLE,
+        color=BORDER,
+        fontcolor=MUTED_TEXT,
+        fontsize="10",
         **attrs,
     )
     return name
+
+
+def style_cluster(c, label) -> None:
+    """Style a cluster as a muted rounded panel."""
+    c.attr(
+        label=label,
+        style="rounded,filled",
+        fillcolor=SUBTLE,
+        color=BORDER,
+        penwidth="0.8",
+        fontsize="10",
+        fontcolor=MUTED_TEXT,
+        margin="10",
+    )
+
+
+def fit_to_column(dot: graphviz.Digraph) -> None:
+    """Pad a narrow diagram out to the column width, so all display at one scale."""
+    width_in = float(dot.pipe(format="plain").split()[2])
+    side = max((COLUMN_WIDTH_IN - width_in) / 2, 0.2)
+    dot.graph_attr["pad"] = f"{side:.3f},0.2"
 
 
 def generate_overview_architecture() -> graphviz.Digraph:
@@ -82,58 +131,40 @@ def generate_overview_architecture() -> graphviz.Digraph:
 
     user = add_flow_node(dot, "user", "Client\nPOST /chat (Vercel protocol)")
 
-    agent = add_component(
+    agent = add_flow_node(
         dot,
         "agent",
         "Agent\n• as_view()\n• get_pipeline_adapter()\n• get_run_adapter()\n• get_tools()",
-        fillcolor="#fff3e0",
-        color="#e65100",
-        fontcolor="#e65100",
     )
 
-    stream = add_component(
+    stream = add_flow_node(
         dot,
         "stream",
         "Stream\n• haystack Pipeline\n• ToolAgent + generator\n• storage_adapter",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
-        fontcolor="#2e7d32",
     )
 
-    run = add_component(
+    run = add_flow_node(
         dot,
         "run",
         "Run\n• generator\n• response_format\n(structured output)",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
-        fontcolor="#2e7d32",
     )
 
     tools = add_component(
         dot,
         "tools",
         "Tools\n• haystack Tool objects\n• integrations\n• RAG retrieval\n• artifacts",
-        fillcolor="#fce4ec",
-        color="#c2185b",
-        fontcolor="#c2185b",
     )
 
     storage = add_component(
         dot,
         "storage",
         "Storage\nMemoryStorageAdapter / DbStorageAdapter\nThreads • Messages",
-        fillcolor="#f3e5f5",
-        color="#7b1fa2",
-        fontcolor="#7b1fa2",
     )
 
     protocol = add_component(
         dot,
         "protocol",
         "Protocol Handler\nVercelProtocolHandler (default)\nStreamEvents → SSE",
-        fillcolor="#e0f2f1",
-        color="#00695c",
-        fontcolor="#00695c",
     )
 
     dot.edge("user", "agent")
@@ -151,46 +182,40 @@ def generate_overview_architecture() -> graphviz.Digraph:
 def generate_data_flow() -> graphviz.Digraph:
     """Step-by-step lifecycle of a streaming chat request."""
     dot = create_graph(
-        "data_flow", graph_attr={"rankdir": "TB", "nodesep": "0.6", "ranksep": "1.0"}
+        "data_flow", graph_attr={"rankdir": "TB"}
     )
 
     step1 = add_flow_node(dot, "step1", "1. USER REQUEST\nPOST /chat (protocol messages)")
-    step2 = add_component(
+    step2 = add_flow_node(
         dot,
         "step2",
-        "2. AGENT LAYER\nas_view(messages, thread_id, user)\n• protocol_handler.to_chat_messages()\n• store last user message",
-        fillcolor="#fff3e0",
+        "2. AGENT LAYER\nas_view(messages, thread_id, user)\n• check CHAT permissions\n• protocol_handler.to_chat_messages()\n• store last user message",
     )
-    step3 = add_component(
+    step3 = add_flow_node(
         dot,
         "step3",
         "3. ADAPTER LAYER\nget_pipeline_adapter(thread_id, user)\n• get_tools() (class + integrations + RAG)\n• build ToolAgent pipeline\n• return Stream",
-        fillcolor="#e8f5e9",
     )
     step4 = add_flow_node(dot, "step4", "4. HAYSTACK PIPELINE\ngenerator streams chunks")
-    step5 = add_component(
+    step5 = add_flow_node(
         dot,
         "step5",
         "5. EVENT NORMALIZATION\nchunks → StreamEvents",
-        fillcolor="#e1f5fe",
     )
-    step6 = add_component(
+    step6 = add_flow_node(
         dot,
         "step6",
         "6. PROTOCOL CONVERSION\nevents → Vercel protocol SSE parts",
-        fillcolor="#e0f2f1",
     )
     step7 = add_component(
         dot,
         "step7",
         "7. STORAGE\nStreamWriter → ChatMessage\nsame message_id everywhere",
-        fillcolor="#fce4ec",
     )
     step8 = add_component(
         dot,
         "step8",
         "8. POST-PROCESSING\ncitations • suggestions",
-        fillcolor="#f3e5f5",
     )
 
     dot.edge("step1", "step2")
@@ -198,8 +223,13 @@ def generate_data_flow() -> graphviz.Digraph:
     dot.edge("step3", "step4")
     dot.edge("step4", "step5")
     dot.edge("step5", "step6")
-    dot.edge("step3", "step7", style="dashed", constraint="false")
-    dot.edge("step6", "step8", style="dashed", constraint="false")
+    dot.edge("step3", "step7", style="dashed")
+    dot.edge("step6", "step8", style="dashed")
+    for step, side in (("step3", "step7"), ("step6", "step8")):
+        with dot.subgraph() as same:
+            same.attr(rank="same")
+            same.node(step)
+            same.node(side)
 
     return dot
 
@@ -207,74 +237,51 @@ def generate_data_flow() -> graphviz.Digraph:
 def generate_subagent_flow() -> graphviz.Digraph:
     """Coordinator delegating to a subagent, in call order."""
     dot = create_graph(
-        "subagent_flow", graph_attr={"rankdir": "TB", "nodesep": "0.5", "ranksep": "0.6"}
+        "subagent_flow", graph_attr={"rankdir": "TB"}
     )
 
-    coordinator = add_component(
+    coordinator = add_flow_node(
         dot,
         "coordinator",
         "Coordinator's ToolAgent loop\nits own Haystack Agent, its own tools",
-        fillcolor="#fff3e0",
-        color="#e65100",
-        fontcolor="#e65100",
     )
     tool_call = add_flow_node(
         dot, "tool_call", 'LLM calls a subagent tool\ne.g. "research_planner"'
     )
-    component_tool = add_component(
+    component_tool = add_flow_node(
         dot,
         "component_tool",
         "ComponentTool\ncomponent = SubagentStreamFilter\n(built agent, name, agent_id)",
-        fillcolor="#e1f5fe",
-        color="#1565c0",
-        fontcolor="#1565c0",
     )
 
     with dot.subgraph(name="cluster_subagent") as c:
-        c.attr(
-            label="Subagent's OWN Haystack Agent loop  (built once, in build_subagent())",
-            style="rounded",
-            fillcolor="#f5f5f5",
-            color="#666666",
-        )
-        span = c.node(
+        style_cluster(c, "Subagent's OWN Haystack Agent loop  (built once, in build_subagent())")
+        span = add_note(
+            c,
             "span",
             "tracing span:\ndjango_ai_sdk.subagent.run",
-            fillcolor="#fff9c4",
-            color="#f57f17",
-            fontcolor="#f57f17",
         )
-        own_loop = c.node(
+        own_loop = add_flow_node(
+            c,
             "own_loop",
             "own tools · own hooks (default_hooks)\nown max_agent_steps · own generator",
-            fillcolor="#e1f5fe",
-            color="#1565c0",
         )
         recovery = c.node(
             "recovery",
             "no response yet?\nONE more tool-less call\n(FINAL_PROMPT)",
-            fillcolor="#fff9c4",
-            color="#f57f17",
-            fontcolor="#f57f17",
         )
         flush = c.node(
             "flush",
             "any tool result never streamed?\nflushed through the callback now",
-            fillcolor="#fff9c4",
-            color="#f57f17",
-            fontcolor="#f57f17",
         )
         c.edge("span", "own_loop")
-        c.edge("own_loop", "recovery", style="dashed", label="loop exits")
+        c.edge("own_loop", "recovery", style="dashed", xlabel="loop exits")
         c.edge("recovery", "flush")
 
-    response = add_component(
+    response = add_flow_node(
         dot,
         "response",
         "subagent_response(messages)\nresponse text (or a digest)\n+ Sources consulted",
-        fillcolor="#fce4ec",
-        color="#c2185b",
-        fontcolor="#c2185b",
     )
     tool_result = add_flow_node(
         dot,
@@ -285,17 +292,11 @@ def generate_subagent_flow() -> graphviz.Digraph:
         dot,
         "persist",
         'Stream persists everything\ntool_call["agent"/"handoff"] stored',
-        fillcolor="#f3e5f5",
-        color="#7b1fa2",
-        fontcolor="#7b1fa2",
     )
     replay = add_component(
         dot,
         "replay",
         "Next turn: replay_handoff()\nreal assistant(tool_calls) + tool(result)\nnot flattened to text",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
-        fontcolor="#2e7d32",
     )
 
     dot.edge("coordinator", "tool_call")
@@ -314,18 +315,15 @@ def generate_subagent_flow() -> graphviz.Digraph:
 def generate_headless_tool_run_flow() -> graphviz.Digraph:
     """Agent.run(tools=True): the unattended, non-streaming equivalent."""
     dot = create_graph(
-        "headless_tool_run_flow", graph_attr={"rankdir": "TB", "nodesep": "0.5", "ranksep": "0.6"}
+        "headless_tool_run_flow", graph_attr={"rankdir": "TB"}
     )
 
     call = add_flow_node(dot, "call", "await agent.run(messages, tools=True)")
 
-    agent_run = add_component(
+    agent_run = add_flow_node(
         dot,
         "agent_run",
         "Agent.run()\nresolved = response_format\nadapter = get_run_adapter()",
-        fillcolor="#fff3e0",
-        color="#e65100",
-        fontcolor="#e65100",
     )
 
     gate = add_note(
@@ -334,43 +332,32 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
         "tools=True\nAND response_format is None",
     )
 
-    own_tools = add_component(
+    own_tools = add_flow_node(
         dot,
         "own_tools",
         "Run.run(tools=...)\ntools = await self.get_tools()\nhooks = default_hooks(self)",
-        fillcolor="#fce4ec",
-        color="#c2185b",
-        fontcolor="#c2185b",
     )
 
-    build_agent = add_component(
+    build_agent = add_flow_node(
         dot,
         "build_agent",
         "Haystack Agent(\n  generator, tools,\n  max_agent_steps=self.max_agent_steps,\n  hooks=hooks,\n)\nrun_agent() adds oversight",
-        fillcolor="#e1f5fe",
-        color="#1565c0",
-        fontcolor="#1565c0",
     )
 
     run_async = add_flow_node(
         dot, "run_async", "run_agent(agent, ...)\nno streaming callback"
     )
 
-    result = add_component(
+    result = add_flow_node(
         dot,
         "result",
         'result["messages"][-1].text\nthe final answer, plain string',
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
-        fontcolor="#2e7d32",
     )
 
     not_run = add_component(
         dot,
         "not_run",
         "Run.run(...)\nplain / structured: the same\nrun_agent(), with no tools",
-        fillcolor="#f5f5f5",
-        color="#666666",
     )
 
     shared_note = add_note(
@@ -381,14 +368,16 @@ def generate_headless_tool_run_flow() -> graphviz.Digraph:
 
     dot.edge("call", "agent_run")
     dot.edge("agent_run", "gate")
-    dot.edge("gate", "own_tools", label="yes")
-    dot.edge("gate", "not_run", label="no", style="dashed")
+    dot.edge("gate", "own_tools", xlabel="yes")
+    dot.edge("gate", "not_run", xlabel="no", style="dashed")
     dot.edge("own_tools", "build_agent")
     dot.edge("build_agent", "run_async")
     dot.edge("run_async", "result")
-    dot.edge(
-        "build_agent", "shared_note", style="dotted", arrowhead="none", constraint="false"
-    )
+    dot.edge("build_agent", "shared_note", style="dotted", arrowhead="none")
+    with dot.subgraph() as same:
+        same.attr(rank="same")
+        same.node("build_agent")
+        same.node("shared_note")
 
     return dot
 
@@ -397,44 +386,34 @@ def generate_adapter_flow() -> graphviz.Digraph:
     """Stream/Run adapters over haystack components."""
     dot = create_graph("adapter_flow")
 
-    agent = add_component(
+    agent = add_flow_node(
         dot,
         "agent",
         "Agent\nget_pipeline_adapter() / get_run_adapter()",
-        fillcolor="#fff3e0",
-        color="#e65100",
     )
 
-    stream = add_component(
+    stream = add_flow_node(
         dot,
         "stream",
         "Stream\n• pipeline: haystack.Pipeline\n• generator\n• stream() → StreamEvents",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
     )
 
-    run = add_component(
+    run = add_flow_node(
         dot,
         "run",
         "Run\n• generator\n• run() → structured output\n(response_format)",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
     )
 
     tool_agent = add_component(
         dot,
         "tool_agent",
         "haystack ToolAgent\n• tools: haystack.Tool[]\n• system_prompt",
-        fillcolor="#e1f5fe",
-        color="#1565c0",
     )
 
     generator = add_component(
         dot,
         "generator",
         "Generator\ndjango_ai_sdk.generators (multi-vendor)",
-        fillcolor="#f3e5f5",
-        color="#7b1fa2",
     )
 
     note_stream = add_note(dot, "note_stream", "Stream requires a haystack.Pipeline")
@@ -445,8 +424,13 @@ def generate_adapter_flow() -> graphviz.Digraph:
     dot.edge("stream", "tool_agent")
     dot.edge("tool_agent", "generator")
     dot.edge("run", "generator", style="dashed")
-    dot.edge("stream", "note_stream", style="dotted", arrowhead="none", constraint="false")
-    dot.edge("run", "note_run", style="dotted", arrowhead="none", constraint="false")
+    dot.edge("stream", "note_stream", style="dotted", arrowhead="none")
+    dot.edge("run", "note_run", style="dotted", arrowhead="none")
+    for node, note in (("stream", "note_stream"), ("run", "note_run")):
+        with dot.subgraph() as same:
+            same.attr(rank="same")
+            same.node(node)
+            same.node(note)
 
     return dot
 
@@ -458,19 +442,12 @@ def generate_id_generation() -> graphviz.Digraph:
     dot.attr(compound="true")
 
     with dot.subgraph(name="cluster_flow") as c:
-        c.attr(
-            label="Stream.stream()",
-            style="rounded",
-            fillcolor="#f5f5f5",
-            color="#666666",
-        )
+        style_cluster(c, "Stream.stream()")
 
-        gen = c.node(
+        gen = add_flow_node(
+            c,
             "gen",
             "message_id = uuid.uuid4()\n← GENERATED",
-            fillcolor="#fff9c4",
-            color="#f57f17",
-            fontcolor="#f57f17",
         )
         start = c.node("start", "yield MessageStartEvent\n(message_id=...)")
         sse = c.node("sse", 'SSE Stream\n{"messageId": "..."}')
@@ -492,36 +469,26 @@ def generate_storage_architecture() -> graphviz.Digraph:
     dot = create_graph("storage_architecture")
 
     with dot.subgraph(name="cluster_storage") as c:
-        c.attr(label="Storage Layer", style="rounded", fillcolor="#f5f5f5", color="#666666")
+        style_cluster(c, "Storage Layer")
 
         memory = add_component(
             c,
             "memory",
             "MemoryStorageAdapter\n(In-Memory)",
-            fillcolor="#e3f2fd",
-            color="#1565c0",
         )
-        db = add_component(
-            c, "db", "DbStorageAdapter\n(Django ORM)", fillcolor="#e8f5e9", color="#2e7d32"
-        )
-        base = add_component(
-            c, "base", "BaseStorageAdapter\n(Abstract)", fillcolor="#fff3e0", color="#e65100"
-        )
+        db = add_component(c, "db", "DbStorageAdapter\n(Django ORM)")
+        base = add_flow_node(c, "base", "BaseStorageAdapter\n(Abstract)")
 
         c.edge("memory", "base", style="dashed")
         c.edge("db", "base", style="dashed")
 
-    format_node = add_component(
+    format_node = add_note(
         dot,
         "format",
         "ChatMessage\nsingle format for history, rating, threads",
-        fillcolor="#fce4ec",
-        color="#c2185b",
-        fontcolor="#c2185b",
-        shape="note",
     )
 
-    dot.edge("base", "format", style="dashed", color="#c2185b")
+    dot.edge("base", "format", style="dashed")
 
     return dot
 
@@ -530,52 +497,40 @@ def generate_rag_architecture() -> graphviz.Digraph:
     """RAG pipeline: provider, memories, retrieval tools, citations."""
     dot = create_graph("rag_architecture")
 
-    agent = add_component(
+    agent = add_flow_node(
         dot,
         "agent",
         "Agent\n• rag_provider = RAGProvider()\n• get_rag_queryset(memory_id)\n• get_rag_documents(memory_id)\n• get_rag_pipeline(memory_id)",
-        fillcolor="#fff3e0",
-        color="#e65100",
     )
 
-    provider = add_component(
+    provider = add_flow_node(
         dot,
         "provider",
         "RAGProvider\n• caches pipelines per agent + memory\n• warmup() / reindex() / clear_rag_cache()",
-        fillcolor="#e3f2fd",
-        color="#1565c0",
     )
 
-    pipelines = add_component(
+    pipelines = add_flow_node(
         dot,
         "pipelines",
         "RAG Pipelines\nBM25QueryExpanderRAG\nChromaDBQueryExpanderRAG\nQdrantBM25HybridRAG",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
     )
 
     memories = add_component(
         dot,
         "memories",
         "MemoryService\nthread ↔ memory links",
-        fillcolor="#f3e5f5",
-        color="#7b1fa2",
     )
 
     retrieval = add_component(
         dot,
         "retrieval",
         "get_rag_tools()\nretrieval tools on the agent",
-        fillcolor="#fce4ec",
-        color="#c2185b",
     )
 
     citations = add_component(
         dot,
         "citations",
         "CitationRegistry + CitationFormatter\nsource numbers streamed with the answer",
-        fillcolor="#fff9c4",
-        color="#f57f17",
     )
 
     dot.edge("agent", "provider")
@@ -596,8 +551,6 @@ def generate_testing_pyramid() -> graphviz.Digraph:
         dot,
         "e2e",
         "E2E Tests\nfull agent flow",
-        fillcolor="#fce4ec",
-        color="#c2185b",
         width="2",
     )
 
@@ -605,17 +558,13 @@ def generate_testing_pyramid() -> graphviz.Digraph:
         dot,
         "integration",
         "Integration Tests\nAdapter + Storage + Protocol",
-        fillcolor="#fff3e0",
-        color="#e65100",
         width="3",
     )
 
-    unit = add_component(
+    unit = add_flow_node(
         dot,
         "unit",
         "Unit Tests\nindividual components",
-        fillcolor="#e8f5e9",
-        color="#2e7d32",
         width="4",
     )
 
@@ -641,7 +590,7 @@ DIAGRAMS = {
 
 
 def generate_all():
-    """Generate all diagram images into the docs static dir."""
+    """Generate every diagram as SVG next to the docs pages."""
     print("Generating Django AI SDK documentation diagrams...")
     print(f"Output: {OUTPUT_DIR}")
     print()
@@ -655,6 +604,7 @@ def generate_all():
         try:
             print(f"Generating {name}...", end=" ")
             dot = generator_func()
+            fit_to_column(dot)
             path = OUTPUT_DIR / name
             dot.render(str(path), cleanup=True)
             generated.append(name)
