@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
+import time
 
 import pytest
 from django.db import connection, connections
@@ -65,5 +67,9 @@ async def test_every_durable_unit_runs_between_closes_of_stale_connections(dbos,
     run = await queue_run(WorkflowDefinition(steps=[StepDefinition(type="echo", name="a")]))
 
     assert (await settled(run.pk)).status == "completed"
-    # Before and after each of claim, run:start, step:a and run:end.
+    # Before and after each of claim, run:start, step:a and run:end. run:end marks the
+    # run completed inside the unit, so its closing call can land just after settled().
+    deadline = time.monotonic() + 5
+    while len(closes) < 8 and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
     assert len(closes) >= 8
