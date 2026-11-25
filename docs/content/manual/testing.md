@@ -12,7 +12,7 @@ This page describes the structure of the SDK test suite and how to write tests f
 
 ## Strategy
 
-![Testing Pyramid](../images/graphs/testing_pyramid.svg)
+::image[Testing Pyramid]{src="../images/graphs/testing_pyramid.svg" caption="The testing pyramid."}
 
 | Component | Test type | Focus |
 | --- | --- | --- |

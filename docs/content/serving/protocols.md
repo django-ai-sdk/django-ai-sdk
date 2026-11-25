@@ -70,6 +70,7 @@ Any Haystack pipeline works. The only requirement is that it accepts `messages` 
 
 `await stream.stream(messages)` is an async generator of `StreamEvent`s:
 
+:::steps
 1. **`MessageStartEvent`**: carries the `message_id`, generated once here as a UUID
 2. **`DataEvent` (`oversight`)**: what the oversight gate did to the question, when an [oversight](../oversight/oversight.md) rule acted
 3. **`TextChunkEvent`**: one per chunk from the model
@@ -81,6 +82,7 @@ Any Haystack pipeline works. The only requirement is that it accepts `messages` 
 9. **`SuggestionEvent`**: optional follow-up suggestions
 10. **`StreamEndEvent`**: the run is done
 11. **`ErrorEvent`**: pipeline failures, instead of a hanging stream
+:::
 
 Events carry structured data, so protocol handlers render them into their own format.
 
@@ -141,10 +143,15 @@ reply = await agent.run(messages, tools=True)   # -> str | None
 
 The flag defaults to `False` so a one-shot call (title generation, structured
 extraction) never reaches every configured integration unless it asks to.
+
+:::caution
 Passing a `response_format` skips tool resolution whatever `tools` says. The SDK
 doesn't support structured output and tool use together yet. See
 [Structured output from a tool loop](../manual/generators.md#structured-output-from-a-tool-loop)
-for the two-call alternative. See [Headless tool runs](../manual/stream-and-run.md#headless-tool-runs)
+for the two-call alternative.
+:::
+
+See [Headless tool runs](../manual/stream-and-run.md#headless-tool-runs)
 for the full call chain and a diagram.
 
 ---

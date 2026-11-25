@@ -10,8 +10,8 @@ This page covers exposing agents over HTTP: ready-made endpoints for django-ninj
 
 | You use | Install | Mount |
 | --- | --- | --- |
-| django-ninja | `pip install django-ai-sdk[ninja]` | `get_*_router()` from `django_ai_sdk.contrib.ninja` |
-| Django REST framework | `pip install django-ai-sdk[drf]` | `include("django_ai_sdk.contrib.drf.urls")` |
+| django-ninja :badge[beta]{variant="secondary"} | `pip install django-ai-sdk[ninja]` | `get_*_router()` from `django_ai_sdk.contrib.ninja` |
+| Django REST framework :badge[beta]{variant="secondary"} | `pip install django-ai-sdk[drf]` | `include("django_ai_sdk.contrib.drf.urls")` |
 | Neither / your own style | nothing extra | `ChatView` plus the services below |
 
 The SDK never imports Ninja or DRF itself; the `contrib` layers are optional. Both are thin. Every endpoint calls a service (`ThreadService`, `AgentService`, `MemoryService`, `WorkflowService`, `IntegrationService`, `TraceService`), and the services do the permission checks. So behaviour is the same whichever you choose.
@@ -222,9 +222,11 @@ async def add_message_to_thread(request, thread_id: str, payload: ChatRequest):
 
 When `thread_id` is provided, `as_view()`:
 
+:::steps
 1. Resolves the storage adapter that holds the thread
 2. Stores the incoming user message
 3. Streams the assistant reply, persisted with the same `message_id` the frontend saw
+:::
 
 ### History and file metadata
 

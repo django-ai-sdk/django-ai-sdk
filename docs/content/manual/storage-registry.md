@@ -85,6 +85,7 @@ StorageAdapterRegistry.register(RedisStorageAdapter, StorageType.DATABASE)
 
 ### Abstract method signatures
 
+:::details[Show all eleven signatures]
 | Method | Kind | Signature |
 | --- | --- | --- |
 | `create_thread` | class | `(title, metadata=None, user=None, thread_id=None) -> str` |
@@ -98,6 +99,7 @@ StorageAdapterRegistry.register(RedisStorageAdapter, StorageType.DATABASE)
 | `rate_message` | instance | `(message_id, rating, feedback="", user=None) -> bool` |
 | `delete_message` | instance | `(message_id) -> bool` |
 | `restore_message` | instance | `(message_id) -> bool` |
+:::
 
 ## Design notes
 

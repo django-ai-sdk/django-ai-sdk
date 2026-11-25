@@ -96,7 +96,9 @@ AI_SDK_ERROR_CLASSIFIERS = ["myapp.errors.classify_bedrock"]
 
 ## In a chat stream
 
-**Vercel protocol.** A failed turn sends a `data-error` part and then the standard `error` part:
+::::tabs{sync="protocol"}
+:::tab[Vercel protocol]
+A failed turn sends a `data-error` part and then the standard `error` part:
 
 ```json
 {"type": "data-error", "data": {"code": "rate_limited", "message": "Too many requests right now. Please try again in a moment.", "retryable": true, "ref": "3f9a1c02"}}
@@ -104,8 +106,12 @@ AI_SDK_ERROR_CLASSIFIERS = ["myapp.errors.classify_bedrock"]
 ```
 
 Show `message`, or your own copy keyed on `code`. The `data-error` part is stored with the reply, so a reloaded thread shows the same error. A failed tool call becomes a `tool-output-error` part with `errorText: "tool_failed"`.
+:::
 
-**OpenAI protocol.** The error body is `{"error": {"message": "<message>", "type": "server_error", "code": "rate_limited", "retryable": true, "ref": "3f9a1c02"}}`.
+:::tab[OpenAI protocol]
+The error body is `{"error": {"message": "<message>", "type": "server_error", "code": "rate_limited", "retryable": true, "ref": "3f9a1c02"}}`.
+:::
+::::
 
 ## In your API views
 
@@ -146,4 +152,8 @@ A pydantic `ValidationError` also returns its field `errors`. Ninja's and DRF's 
 
 ## Vector stores
 
-The process that opens a `persistent` (local path) Qdrant store locks it. `QdrantStorageConfig.lock_timeout` (default 10 seconds) is how long a chat turn or a document task waits for another process to release it. After that, the turn or task fails with `knowledge_unavailable`. Run a Qdrant server (`AI_SDK_VECTOR_STORE_URL`) whenever several processes serve requests or run tasks.
+The process that opens a `persistent` (local path) Qdrant store locks it. `QdrantStorageConfig.lock_timeout` (default 10 seconds) is how long a chat turn or a document task waits for another process to release it. After that, the turn or task fails with `knowledge_unavailable`.
+
+:::tip
+Run a Qdrant server (`AI_SDK_VECTOR_STORE_URL`) whenever several processes serve requests or run tasks.
+:::

@@ -273,7 +273,7 @@ as a real failure.
 
 ## Limitations
 
-Workflows are a beta: retries, timeouts, parallel steps, one worker, run data and snapshot semantics are listed once, under [Beta limitations](../manual/workflows.md#beta-limitations). What concerns writing steps in particular:
+:badge[Beta]{variant="secondary"} Workflows are a beta: retries, timeouts, parallel steps, one worker, run data and snapshot semantics are listed once, under [Beta limitations](../manual/workflows.md#beta-limitations). What concerns writing steps in particular:
 
 - **No re-run of one step.** A failed step runs again only when the whole run is resumed, which continues past whatever already completed.
 - **A blocked event loop blocks the worker.** A step that blocks the loop (sync work not wrapped in `sync_to_async`) stalls every other run in that worker until it returns.

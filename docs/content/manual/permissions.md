@@ -37,6 +37,7 @@ AI_SDK_PERMISSIONS = {
 
 ## The Operation enum
 
+:::details[Show every operation]
 ```python
 # Agent
 VIEW_AGENT, CREATE_AGENT, UPDATE_AGENT, DELETE_AGENT
@@ -60,6 +61,7 @@ VIEW_OVERSIGHT_METRICS, VIEW_OVERSIGHT_CONTENT, REVIEW_OVERSIGHT
 # Misc
 CHAT, REINDEX
 ```
+:::
 
 ## Built-in permission classes
 

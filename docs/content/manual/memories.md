@@ -88,6 +88,7 @@ await MemoryService.disconnect_memory_from_thread(thread_id, memory_id, user=req
 
 The contrib layers ship ready-made memory endpoints: `get_memories_router()` for django-ninja, mounted at `/memories`, and `MemoryViewSet` for DRF. See [Views and Routing](../serving/views-and-routing.md#pick-a-starting-point). List and detail responses include an `ObjectPermissions` block with `can_read`, `can_write` and `can_manage`, computed by `django_ai_sdk.views.permissions.memory_permissions()`.
 
+:::details[Show all memory endpoints]
 | Endpoint | Operation |
 | --- | --- |
 | `GET /memories/settings/` | Upload constraints (`max_upload_size`, `allowed_mime_types`) |
@@ -113,6 +114,7 @@ The contrib layers ship ready-made memory endpoints: `get_memories_router()` for
 | `GET /memories/source/document/?entry_id=&quote=` | The document behind a cited source (its `documentId`), and the page of the quotes |
 | `GET /memories/source/document/{doc_id}/file/` | The original file: a PDF inline in the browser's PDF viewer, anything else downloads |
 | `GET /memories/source/document/{doc_id}/page/{page}/?quote=` | That page as a PNG, the quotes marked |
+:::
 
 ### Cited document pages
 
@@ -125,14 +127,16 @@ A client can show a cited source as the real page. Every supported file goes the
 | `csv` | A one-sheet workbook, then as `xlsx`, so it shows as a table |
 | `md` · `txt`, `json` | `Pdf.from_markdown` · `Pdf.from_text` |
 
+:::details[Images, other files and known limits]
 Images (`png`, `jpg`, `jpeg`, `webp`, `gif`) have no text to mark, so the SDK doesn't convert them. `source/document` returns them with `page: null`. `file/` shows the image itself, inline and sandboxed like a thread file. `page/` returns a 404. Other files get a 404 on all three endpoints. A scanned PDF without a text layer renders without marks. Word tables get an extra "Col 1, Col 2" header row, and Markdown tables show as plain text.
+:::
 
 Pass the citation's passages as repeated `quote` parameters. At most 8 count, and each is cut to 400 characters.
 
 - `source/document` finds the page by comparing letters only, so line breaks and hyphenation don't matter. A sentence repeated on many pages doesn't decide the page alone. The page that most quotes share wins, and the first one wins a tie. It returns `{id, name, url, page, page_url}`, where `name` is the original file name. For a PDF, `page_url` is `url#page=N`, a link that opens the file on that page. For other files it is `null`, because only a PDF viewer knows `#page=`. Link to `url` instead, which downloads the original.
 - `source/document/{doc_id}/page/{page}` returns a PNG with the passages marked in yellow. Its `X-Mark` header gives the marked area as `top,left,bottom,right` fractions of the page, or `""` when nothing is marked, so a client can show that part of the page. Expose the header in CORS (`CORS_EXPOSE_HEADERS = ["X-Mark"]`) when the frontend runs on another origin.
 
-All three check `VIEW_DOCUMENT` on the document's memory. They need the `files` extra (`pdf-oxide`, `Pillow`, `openpyxl`). The SDK converts the file on every request, which takes about 0.1 s. For your own views, the helpers work on bytes, not memories. They are `django_ai_sdk.files.previews` (`to_pdf`, `quote_page`, `render_page`, `passage_areas`) and `django_ai_sdk.views.files` (`asource_file_response`, `asource_page_response`).
+All three check `VIEW_DOCUMENT` on the document's memory. They need the `files` extra :badge[optional extra]{variant="secondary"} (`pdf-oxide`, `Pillow`, `openpyxl`). The SDK converts the file on every request, which takes about 0.1 s. For your own views, the helpers work on bytes, not memories. They are `django_ai_sdk.files.previews` (`to_pdf`, `quote_page`, `render_page`, `passage_areas`) and `django_ai_sdk.views.files` (`asource_file_response`, `asource_page_response`).
 
 :::caution
 Calling pdf-oxide yourself? Call `pdf_oxide.disable_logging()` first, or use `files.previews`, which does. With its logging on, converting an Office file deadlocks.

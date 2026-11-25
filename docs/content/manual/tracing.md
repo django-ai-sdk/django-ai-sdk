@@ -17,6 +17,7 @@ INSTALLED_APPS = [
 
 Adding the app is the only switch. The app ships the `Trace` model and its migration, and its `AppConfig.ready()` enables the tracer at process startup.
 
+:::details[Enable the tracer without the AppConfig]
 To enable the tracer yourself instead of through the AppConfig:
 
 ```python
@@ -27,6 +28,7 @@ tracing.enable_tracing(DefaultTracer())
 ```
 
 `enable_tracing()` swaps a field on Haystack's process-global `ProxyTracer`, and pipelines resolve that field at run time. You can call it after your pipelines are built. Call it once at startup, never per request. The last call wins.
+:::
 
 ## What a span records
 
@@ -47,7 +49,9 @@ The tracer stores prompts and replies only when `HAYSTACK_CONTENT_TRACING_ENABLE
 
 The tracer records token counts and `model_name` either way. Haystack reports usage through the same content tags it gates. `TelemetrySpan.set_content_tag()` therefore harvests the numbers before it delegates to the base implementation, which decides whether to keep the payload itself.
 
+:::caution
 Haystack reads that environment variable **once**, when `haystack.tracing` is first imported (`ProxyTracer.__init__`). It must be a real environment variable, set before the process starts. Assigning it in `settings.py` does nothing, and changing it needs a restart.
+:::
 
 ### Dropping bulky tags
 
@@ -89,7 +93,9 @@ Haystack's `Tracer.trace` is a sync context manager even under `Pipeline.run_asy
 
 This has two consequences.
 
-**Spans appear only once the run completes.** A hung or still-running pipeline has no rows yet. The table is not a live view.
+:::note[Spans appear only once the run completes.]
+A hung or still-running pipeline has no rows yet. The table is not a live view.
+:::
 
 **The write is fire-and-forget on the loop.** When you need a barrier, in tests or at shutdown, use `await aflush()`:
 

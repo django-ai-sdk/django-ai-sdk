@@ -26,6 +26,7 @@ An app imports everything it uses from `django_ai_sdk.oversight`. Its submodules
 | Notifiers | `Notifier`, `LogNotifier`, `WebhookNotifier`, `send_to_notifiers` (sends an event to every notifier, or the named ones) |
 | Forgetting and retention | `forget_turns`, `forget_thread`, `forget_actor`, `prune` |
 
+:::details[Plumbing for code that runs a turn or builds hooks by hand]
 Code that runs a turn by hand, such as an adapter, imports its plumbing from the module that defines it:
 
 - `django_ai_sdk.oversight.guard`: `guarding`, `closing_turn`, which closes a guard when its block ends, and `outlived_turn`, for code that runs after its turn closed.
@@ -34,14 +35,17 @@ Code that runs a turn by hand, such as an adapter, imports its plumbing from the
 - `django_ai_sdk.oversight.judges.base`: `judge_label`, a spec's name.
 
 Code that builds a Haystack Agent's hooks by hand imports them from `django_ai_sdk.oversight.plugin` (`build_oversight_hooks`, `merge_oversight_hooks`) and `django_ai_sdk.oversight.plugin.hooks` (`OversightHook`, `GateQuestionHook`, `StopClosedTurnHook`, `LimitToolChoiceHook`, `JudgeToolCallHook`, `MaskToolResultHook`, `RecordUsageHook`, `JudgeAnswerHook`). Apps use `apply_oversight` and `run_with_oversight` instead. A judge that asks another judge imports `ask_judge` and `build_judge` from `django_ai_sdk.oversight.judges.base`. `ask_judge` asks one judge with its timeout, and `build_judge` builds a judge from an alias or a spec.
+:::
 
 ## Installing
 
 Add `"django_ai_sdk.oversight"` to `INSTALLED_APPS` and run `migrate`. The app needs no extra. It keeps content in the clear, masked as `CAPTURE` says.
 
+:::caution[Without the app]
 Without the app, nothing checks a turn. The core check `ai_sdk.E001` is an Error when an agent class still asks for a policy, by setting `oversight` or overriding `get_oversight()`, or when `AI_SDK_OVERSIGHT["DEFAULT_POLICY"]` is set. A missing app therefore never leaves those agents unguarded without a warning.
+:::
 
-The `typesafe` extra adds the client for the optional `TypeSafe` judge, a hosted commercial service:
+:badge[Optional extra]{variant="secondary"} The `typesafe` extra adds the client for the optional `TypeSafe` judge, a hosted commercial service:
 
 ::install[django-ai-sdk[typesafe]]{tools="uv pip"}
 
@@ -195,7 +199,13 @@ Finish judges the whole answer. Nothing judges it while it streams. A tool call 
 
 `Alert` and `Notify` both mark the turn at their severity, and `Notify` also sends the match to the notifiers. While a rule's review is still open on an earlier turn of the same thread, a new match of that rule is recorded and queued but sends nothing to the notifiers. Once the review is resolved, the next match notifies again. When the model sends a blocked tool call again unchanged, it gets the same refusal at once. A changed call, such as a note without the part that was refused, is judged again. A severity is `info`, `warning`, `high` or `critical` (`Severity`, or its string). A blocked turn is at least `high`. `Block.DEFAULT_MESSAGE` is "This request can't be answered here."
 
-`Mask` masks the spans of `lenses`, by default every lens the rule reads. It replaces each span with `template`, with the label in capitals (`[EMAIL]`). Every lens it masks must be an `Entities` lens on the question or the answer, so `input`, `output` or `exchange`. Otherwise the policy is refused when it is built. `sources` cannot be masked, and neither can `tool_call`: arguments are judged and never rewritten, so block the call or take the tool away instead. The gate's mask rules mask tool results. An enforced `Mask` that cannot point at what it should mask blocks instead. That happens when a lens it reads failed while the policy fails closed, or answered without spans. Reflect masks only the stored message, and only when the stored text is the text it judged. It appends a `reflect` notice to the message.
+`Mask` masks the spans of `lenses`, by default every lens the rule reads. It replaces each span with `template`, with the label in capitals (`[EMAIL]`). Every lens it masks must be an `Entities` lens on the question or the answer, so `input`, `output` or `exchange`. Otherwise the policy is refused when it is built. `sources` cannot be masked, and neither can `tool_call`: arguments are judged and never rewritten, so block the call or take the tool away instead. The gate's mask rules mask tool results.
+
+:::caution
+An enforced `Mask` that cannot point at what it should mask blocks instead. That happens when a lens it reads failed while the policy fails closed, or answered without spans.
+:::
+
+Reflect masks only the stored message, and only when the stored text is the text it judged. It appends a `reflect` notice to the message.
 
 ## Policies
 
@@ -257,12 +267,28 @@ Every turn passes through a `TurnGuard`. `Agent.run()`, chat and the SDK's entry
 
 `await TurnGuard.start(agent, *, channel=None, user=None, thread_id=None, messages=None, input=None, oversight=None)` returns an inert guard unless a policy applies. Every call on an inert guard returns at once and allows everything. `oversight` replaces the agent's own as in `run()`, and `False` opens no guard. The guard then has these methods:
 
-- `gate_history(earlier, question=None)` takes history the server did not store, and the question for its attachments, and returns a `StageResult`.
-- `gate()`
-- `add_text(chunk)` takes streamed answer text.
-- `tool_call(call)`, `mask_result(call_id, text)`, `set_sources(...)`, `add_tool_call(...)`, `add_usage(...)`
-- `finish(output)`
-- `close(error="")` writes the turn and never raises.
+::::trace[A turn through its guard]
+:::step[gate_history(earlier, question=None)]{icon="code"}
+`gate_history(earlier, question=None)` takes history the server did not store, and the question for its attachments, and returns a `StageResult`.
+:::
+
+:::step[gate()]{icon="code"}
+:::
+
+:::step[add_text(chunk)]{icon="code"}
+`add_text(chunk)` takes streamed answer text.
+:::
+
+:::step[tool_call(call), mask_result(call_id, text), set_sources(...), add_tool_call(...), add_usage(...)]{icon="wrench"}
+:::
+
+:::step[finish(output)]{icon="code"}
+:::
+
+:::step[close(error="")]{icon="code"}
+`close(error="")` writes the turn and never raises.
+:::
+::::
 
 When `gate()` ends, it writes the turn ahead as open (`write_ahead()`), and so does `gate_history()` when it blocks. `close` updates that row.
 
@@ -401,6 +427,8 @@ python manage.py check --deploy --database default
 `AI_SDK_OVERSIGHT["NOTIFIERS"]` lists notifiers: `LogNotifier()` and `WebhookNotifier(url, *, secret="", timeout=5.0)` from `django_ai_sdk.oversight.notifiers`, or your own `Notifier` subclass that implements `async send(event)`. Give each as an instance, a class name, or `{"class": ..., **kwargs}`, such as `"LogNotifier"`, `{"class": "WebhookNotifier", "url": ...}` or a dotted path to your own. Every notifier takes `name`, by default its class name without `Notifier` in lowercase (`log`, `webhook`). `Notify(to=[...])` sends to those names only. A `Notify` action sends `{"id", "type": "oversight.match", "turn_id", "rule", "stage", "severity", "outcome", "agent", "channel"}`, with no turn content. `id` is stable (`notifiers.event_id(turn_id, rule, stage)`), so a repeated delivery carries the same one.
 
 A `WebhookNotifier` sends the event's `id` as `webhook-id`. With a `secret`, it signs like [Standard Webhooks](https://www.standardwebhooks.com/), with the headers `webhook-timestamp` and `webhook-signature`. The signature is `v1,` followed by the base64 HMAC-SHA256 of `{id}.{timestamp}.{body}`.
+
+:::details[Verify a signature]
 To verify, recompute the HMAC over the raw body with the same secret, base64-decoded when it starts with `whsec_`, and compare in constant time.
 Refuse timestamps more than a few minutes old and ids you have seen, so nobody can replay a captured request:
 
@@ -415,6 +443,7 @@ def verified(headers, body: bytes, secret: bytes) -> bool:
     expected = "v1," + base64.b64encode(hmac.new(secret, signed, hashlib.sha256).digest()).decode()
     return any(hmac.compare_digest(expected, s) for s in headers["webhook-signature"].split())
 ```
+:::
 
 A notifier's `send(event)` may raise. The error is logged and the turn goes on.
 

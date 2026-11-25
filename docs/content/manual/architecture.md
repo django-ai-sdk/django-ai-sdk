@@ -6,7 +6,7 @@ sidebar:
 
 This page covers the core abstractions, the path a request takes through the system, and the design patterns behind them.
 
-![Overview](../images/graphs/overview_architecture.svg)
+::image[Overview]{src="../images/graphs/overview_architecture.svg" caption="The core abstractions and how they connect."}
 
 ## Components
 
@@ -25,7 +25,7 @@ Each component has a base class that defines its interface, and subclasses hold 
 
 A chat request passes through the agent, the `Stream` adapter, the Haystack pipeline and the protocol handler. Storage and post-processing run beside the main path.
 
-![Data Flow](../images/graphs/data_flow.svg)
+::image[Data Flow]{src="../images/graphs/data_flow.svg" caption="A chat request from the agent to the protocol handler, with storage and post-processing beside it."}
 
 ## Design patterns
 

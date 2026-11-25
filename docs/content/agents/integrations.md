@@ -22,10 +22,12 @@ get_integrations(["linear", "weather"])   ← integrations registry
 
 ## How it works
 
+:::steps
 1. **Each integration is a Django app.** Add it to `INSTALLED_APPS`. On `ready()`, its `IntegrationAppConfig` constructs the `Integration` subclass and registers it in the process registry.
 2. **`AI_SDK_INTEGRATIONS` configures it** (like `DATABASES` or `CACHES`): credentials and options, keyed by integration name. A missing credential degrades the integration ("needs setup") instead of crashing boot.
 3. **Agents opt in** with the `integrations` class attribute.
 4. **Tools are loaded per request.** `Agent.get_tools()` resolves the listed integrations, filters by user permissions, and namespaces each tool (`linear_list_issues`) so unrelated integrations never collide.
+:::
 
 ---
 
@@ -39,6 +41,22 @@ get_integrations(["linear", "weather"])   ← integrations registry
 | `notion` | MCP-backed | Wiki and documents: connect to a Notion MCP server |
 
 `weather` needs no setup and works as soon as it is installed. The MCP-backed ones connect to an MCP server you configure (see below).
+
+The `weather` tool, as the integration declares it (it reaches the model as `weather_get_current_weather`):
+
+:::tool
+```json
+{
+  "name": "get_current_weather",
+  "description": "Get the current weather for a place name (e.g. 'Rotterdam' or 'Paris, France').",
+  "parameters": {
+    "type": "object",
+    "properties": {"location": {"type": "string"}},
+    "required": ["location"]
+  }
+}
+```
+:::
 
 :::note
 `weather` requires no credentials. Add it to `INSTALLED_APPS` and an agent's `integrations` list and it works.

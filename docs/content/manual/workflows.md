@@ -8,6 +8,8 @@ The workflow engine runs multi-step agent tasks. Steps pass results forward, and
 
 ## Installing
 
+:badge[Beta]{variant="secondary"} :badge[dbos extra]{variant="outline"}
+
 Workflows are an opt-in app. Runs execute on DBOS, so the app needs `"django_ai_sdk.durable"` too, from the `dbos` extra. Add both after the core app, run `migrate`, and run `manage.py ai_sdk_worker`. See [Durable runs on DBOS](#durable-runs-on-dbos).
 
 ```python
@@ -16,7 +18,9 @@ INSTALLED_APPS = [..., "django_ai_sdk", "django_ai_sdk.workflows", "django_ai_sd
 
 On start the app reads every installed app's `workflows.py` and registers the [system checks](#system-checks). It reads them after the core app has set up the agents, so a step can name `MyAgent().agent_id`. Without the app the SDK has no workflow tables, checks or endpoints. The DRF router leaves `workflows/` out, and you do not mount the Ninja `get_workflows_router()`.
 
+:::details[Upgrading from 0.1.2a21 or earlier]
 When you upgrade from 0.1.2a21 or earlier, `migrate` updates the tables in place with `django_ai_sdk_workflows.0004_dbos_runs`. Stored workflows and run history carry over, and each old run gets its workflow's slug as `workflow_key`. A stored workflow whose slug was `adhoc` is renamed to `adhoc-<id>`, because `adhoc` now names runs of no stored workflow. A run that the old runner left running has no DBOS workflow, so the worker's stale-run check fails it on its first pass. Resume it to finish it on DBOS.
+:::
 
 ## The definition
 
@@ -127,7 +131,11 @@ AI_SDK_WORKFLOWS = {
 
 The definition names and wires the step with `name`, `requires`, `on_error` and `listeners`, and the class supplies the behaviour. A key whose path does not import is left out with a warning and system check E002, so the site keeps working. A definition that names an unregistered type is refused with an `ImproperlyConfigured` error that lists the registered types.
 
-The engine checks `Operation.CHAT` for every agent step against the user the run acts as. That covers a code `AgentStep` and a JSON `type: "agent"` step. It never checks permissions for a registered Python step, because registering it is a deployment decision. The engine does **not** check object ids in step inputs against any ACL. A host that needs object authorization must enforce it inside the step, or not register those step types.
+The engine checks `Operation.CHAT` for every agent step against the user the run acts as. That covers a code `AgentStep` and a JSON `type: "agent"` step. It never checks permissions for a registered Python step, because registering it is a deployment decision.
+
+:::caution
+The engine does **not** check object ids in step inputs against any ACL. A host that needs object authorization must enforce it inside the step, or not register those step types.
+:::
 
 ### Three registries
 
@@ -249,13 +257,27 @@ The run row keeps a copy of the definition in `workflow_definition`, taken when 
 
 In the worker, the DBOS workflow calls `execute_run(run_id)` and checkpoints each unit, as described below. `execute_run` does the following:
 
-:::steps
-1. **Claims** the run with one conditional update: `pending` becomes `running`, `attempt` goes up by one and `heartbeat_at` is set. A second delivery of the same run, or a delivery of a run that already finished, claims nothing and stops there. The claim stores the DBOS workflow id as `task_id`. If the worker dies after the claim but before DBOS records it, the recovered workflow finds the run running under its own id and continues it.
-2. Validates the run's inputs against the definition's `input_fields`, when it declares any.
-3. Compiles the definition to `Step` objects and listeners, and runs them through `run_steps` with a `RunRecorder`. JSON and code definitions share this path.
-4. **Replays** completed steps from a previous attempt, so a resumed run continues where it stopped and keeps the timestamps of the rows it reuses.
-5. Marks the run `completed` with `{step name: output}` for every completed step. A failed step whose `on_error` is `stop` marks the run `failed`.
+::::trace[execute_run(run_id)]
+:::step[Claims the run]{icon="square-terminal"}
+**Claims** the run with one conditional update: `pending` becomes `running`, `attempt` goes up by one and `heartbeat_at` is set. A second delivery of the same run, or a delivery of a run that already finished, claims nothing and stops there. The claim stores the DBOS workflow id as `task_id`. If the worker dies after the claim but before DBOS records it, the recovered workflow finds the run running under its own id and continues it.
 :::
+
+:::step[Validates the inputs]{icon="search"}
+Validates the run's inputs against the definition's `input_fields`, when it declares any.
+:::
+
+:::step[Compiles and runs the steps]{icon="code"}
+Compiles the definition to `Step` objects and listeners, and runs them through `run_steps` with a `RunRecorder`. JSON and code definitions share this path.
+:::
+
+:::step[Replays completed steps]{icon="file-text"}
+**Replays** completed steps from a previous attempt, so a resumed run continues where it stopped and keeps the timestamps of the rows it reuses.
+:::
+
+:::step[Marks the run completed]
+Marks the run `completed` with `{step name: output}` for every completed step. A failed step whose `on_error` is `stop` marks the run `failed`.
+:::
+::::
 
 At every step the recorder refreshes `heartbeat_at` and checks that the run is still `running` under the attempt this worker claimed. When the run was cancelled, or resumed and claimed again, the recorder raises `RunSuperseded` before it writes anything, and the walk stops. A step whose row this attempt already completed does not run again, and the engine uses the row's outcome. That happens when the worker died after writing the row but before DBOS recorded the step.
 
@@ -295,7 +317,9 @@ The built-in step type `approval` waits for a person:
 
 The step is set to `waiting` with the prompt as its `detail`, and the run waits durably with `DBOS.recv` across restarts and deploys. A decision comes from `WorkflowService.decide` or `POST /workflows/runs/{id}/steps/{step}/decision/` (`{"approved": true, "note": "..."}`). It needs the `approve_steprun` permission. The engine refuses it on a run that acts as the approver or that the approver started, such as a trigger they fired by hand that runs as a bot. The first decision wins. A decision that arrives after the wait timed out raises `DecisionConflict`, and so does a decision for a step already decided or cancelled. `DecisionConflict` (`django_ai_sdk.workflows.services`) is a `UserError` with code `conflict`, and the SDK's views answer it with 409. The timeout and a decision race on the same conditional update, so the timeout never discards an accepted decision. When approved, the step completes with `{approved, by, note}`. When rejected, or without a decision within `timeout_seconds` (one week by default), the step fails and its `on_error` decides what follows.
 
+:::caution[Read an approval with ctx.approval]
 A step that acts on the approval reads it with `ctx.approval("approve")`, never with `ctx.step("approve")`. `ctx.approval` returns the `{approved, by, note}` decision only when the step of that name is an `ApprovalStep` that a person approved, and None otherwise. Anyone who may compose a definition could add another step named `approve` whose output is `{"approved": true}`.
+:::
 
 ```python
 class PayStep(Step):

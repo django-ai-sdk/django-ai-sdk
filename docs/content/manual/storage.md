@@ -6,7 +6,7 @@ sidebar:
 
 How conversations persist. A conversation is a thread of messages, and all adapters store the same `ChatMessage` format.
 
-![Storage Architecture](../images/graphs/storage_architecture.svg)
+::image[Storage Architecture]{src="../images/graphs/storage_architecture.svg" caption="Adapters persist the same ChatMessage format."}
 
 :::note
 For thread operations in views, use [ThreadService](thread-service.md). To build a custom backend, see [Custom Storage Adapters](storage-registry.md).

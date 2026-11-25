@@ -114,6 +114,14 @@ instructions = prompt("""\
 """)
 ```
 
+With the indentation stripped, the model reads:
+
+:::prompt[Pirate instructions]{role="system"}
+You are a helpful AI agent who always responds like a pirate.
+Use pirate language, expressions, and mannerisms in all your responses.
+- Be creative with pirate slang but keep responses helpful and informative.
+:::
+
 ---
 
 ## Adapters: Stream and Run
@@ -204,10 +212,33 @@ When the coordinator builds its tools, each subagent becomes a native Haystack `
 
 - The subagent runs its own agent loop, with its own generator, tools and system prompt. Its final message goes back to the coordinator as the tool output. Subagents are ephemeral and stateless. The coordinator's `Stream` remains the single source of streamed *text*, but the subagent's tool calls stream too (see [Observability](#observability)). So the UI shows sub-agent activity while the report text stays single-sourced.
 - The tool schema is a single `task` parameter. The SDK instructs the coordinator to delegate with a self-contained task description.
-- The SDK derives subagent tool names from the subagent display name (slugified) and dedupes them with a numeric suffix on collision.
+- The SDK derives subagent tool names from the subagent display name (slugified) and dedupes them on collision by appending the first 6 hex characters of the agent id (`_a1b2c3`).
 - The SDK skips subagents the user lacks `VIEW_AGENT` permission on.
 - The SDK detects cyclic crews (A delegates to B, B back to A) at build time and skips the back-edge.
 - The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
+
+The tool `PirateSwarmAgent` gets for `TreasureHunterAgent`, which sets no `description`:
+
+:::tool
+```json
+{
+  "name": "treasure_hunter",
+  "description": "Delegate this task to TreasureHunterAgent.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task": {
+        "type": "string",
+        "description": "A self-contained description of the task to delegate to this subagent. Copy the user's request verbatim, do not paraphrase, autocorrect, or expand it."
+      }
+    },
+    "required": ["task"]
+  }
+}
+```
+:::
+
+A subagent with a `description` gets that as the tool's description instead.
 
 Subagents are ordinary `Agent` subclasses with `hidden = True`. They keep the `name`/`description`/`model`/`tools`/`instructions` attributes, so they only need a `tools` list and an instructions prompt:
 
@@ -231,7 +262,22 @@ Each `Agent` sets its own guardrails. A subagent caps its own loop with `max_age
 config = ToolAgentConfig(..., hooks={"before_tool": [LogToolCallsHook()]})
 ```
 
-The two swarm demos wire it into both the coordinator and (through `build_subagent`) each subagent, so you'll see lines like `Armed subagent tool 'treasure_hunter' ...`, `Tool call: treasure_hunter args={...}` (coordinator delegating), then `Tool call: find_treasure args={...}` (the subagent running its own tool). Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls and for the subagent's calls. The coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default). `SubagentStreamFilter` passes only tool-related chunks through and drops the subagent's raw text tokens, so the report isn't streamed twice. The SDK persists those forwarded chunks into the conversation history as they happen, in the order the calls start. So the stored history matches the streamed one, and subagent tool activity survives a page reload.
+The two swarm demos wire it into both the coordinator and (through `build_subagent`) each subagent, so you'll see lines like these:
+
+::::trace[A delegation in the server console]
+:::step[Armed subagent tool 'treasure_hunter' ...]{icon="wrench"}
+:::
+
+:::step[Tool call: treasure_hunter args={...}]{icon="square-terminal"}
+The coordinator delegating.
+:::
+
+:::step[Tool call: find_treasure args={...}]{icon="square-terminal"}
+The subagent running its own tool.
+:::
+::::
+
+Streaming clients receive `tool_call_start` / `tool_input` / `tool_output` SSE events for the coordinator's own calls and for the subagent's calls. The coordinator forwards its streaming callback into subagent tools (`stream_subagent_tools`, on by default). `SubagentStreamFilter` passes only tool-related chunks through and drops the subagent's raw text tokens, so the report isn't streamed twice. The SDK persists those forwarded chunks into the conversation history as they happen, in the order the calls start. So the stored history matches the streamed one, and subagent tool activity survives a page reload.
 
 Subagent loop limits are per-subagent class attributes, not only coordinator settings. `max_agent_steps` caps total loop iterations and `max_tool_calls` (through `ToolCallBudgetHook`) hard-caps tool calls, both defaulting to `6` on the subagent's own `Agent` class. The coordinator's `ToolAgentConfig` (`max_agent_steps`, `max_tool_calls`) caps its own turn the same way. See the demo `demos/studio/apps/agents/agent_swarm.py` (pirate crew) and `demos/studio/apps/agents/deep_research.py` (web-research worker using `duckduckgo-api-haystack` and `trafilatura`).
 
@@ -265,7 +311,11 @@ Two hooks answer two questions:
 
 `required_tools` (a class attribute) lists names that are required on every run; `get_run_required_tools()` adds names for one turn.
 
-The SDK does not run a required tool for you. The model supplies the arguments, so the model calls it. When the model tries to answer without having called a required tool, the SDK tells it to call the tool now and gives it another turn. That happens at most twice per run. The SDK ignores a required name the run has no tool for, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
+The SDK does not run a required tool for you. The model supplies the arguments, so the model calls it. When the model tries to answer without having called a required tool, the SDK tells it to call the tool now and gives it another turn. That happens at most twice per run.
+
+:::caution
+The SDK ignores a required name the run has no tool for, so a tool you require must also be added (`tools = [...]` or `get_attachment_tools()`).
+:::
 
 For example, always read an attached PDF with your own tool:
 
@@ -342,7 +392,11 @@ start_run_tool = with_receipt(
 )
 ```
 
-`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON). The SDK trusts the declared keys, because you, the tool's author, chose them. It still screens their values. It keeps only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters), and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key). It leaves anything else out. The stored call and its released card get `{**receipt, "withheld": true}` as the result. Arguments stay dropped. A failed call keeps nothing. The SDK reads receipts from the streaming agent's tools and its subagents', at any depth (`Stream`).
+`with_receipt(tool, *keys)` sets `tool.receipt_keys` and returns the tool; setting the attribute yourself works the same. The result must be a dict (or its JSON).
+
+:::details[How the receipt's values are screened]
+The SDK trusts the declared keys, because you, the tool's author, chose them. It still screens their values. It keeps only whole numbers and short id-like strings (letters, digits, `_ . : -`, up to 128 characters), and none that the built-in personal data or secret patterns find (an IBAN, a BSN, an API key). It leaves anything else out. The stored call and its released card get `{**receipt, "withheld": true}` as the result. Arguments stay dropped. A failed call keeps nothing. The SDK reads receipts from the streaming agent's tools and its subagents', at any depth (`Stream`).
+:::
 
 ---
 
@@ -352,10 +406,12 @@ RAG connects documents stored in memories to your agent. The `RAGProvider` cache
 
 ### Enabling RAG
 
+:::steps
 1. Set `rag_provider = RAGProvider()` on the agent.
 2. Override `get_rag_queryset()` to return the documents to index.
 3. Implement `get_rag_pipeline()` (or one of the named variants) to return a RAG pipeline.
 4. Link memories to threads. `get_rag_tools()` builds one tool per active memory.
+:::
 
 ```python
 from django_ai_sdk.memories.models import Entry
@@ -456,10 +512,14 @@ Pass `response_format=None` explicitly to `run()` to disable structured output f
 its own `get_tools()` and runs them to completion headless: no streaming, one call in,
 one final answer out. The flag is opt-in, not opt-out. Resolving tools reaches every
 configured integration, so a one-shot call (title generation, structured extraction, a
-workflow step) does not pay that cost unless it asks for it. Setting a
+workflow step) does not pay that cost unless it asks for it.
+
+:::caution
+Setting a
 `response_format` skips tools whatever the flag says. The SDK doesn't support
 structured output and a tool loop together yet. See
 [Structured output from a tool loop](../manual/generators.md#structured-output-from-a-tool-loop).
+:::
 
 This applies only to the SDK's own `Run` adapter. The SDK leaves a `get_run_adapter()`
 override that returns something else alone and doesn't force a tool loop onto it. See

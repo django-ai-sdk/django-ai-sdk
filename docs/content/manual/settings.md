@@ -98,7 +98,7 @@ A system check validates every settings dict of the SDK, `AI_SDK_OVERSIGHT` and 
 
 ## Durable runs (DBOS)
 
-Workflows need the `django_ai_sdk.durable` app and the `dbos` extra. One dict, `AI_SDK_DBOS`, every key optional. See [Durable runs on DBOS](workflows.md#durable-runs-on-dbos).
+:badge[dbos extra]{variant="outline"} Workflows need the `django_ai_sdk.durable` app and the `dbos` extra. One dict, `AI_SDK_DBOS`, every key optional. See [Durable runs on DBOS](workflows.md#durable-runs-on-dbos).
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -131,20 +131,24 @@ These settings apply to an integration that a platform pushes events into. Per-p
 
 ## Tracing
 
-Requires the opt-in `django_ai_sdk.tracing` app in `INSTALLED_APPS`.
+:badge[Opt-in app]{variant="secondary"} Requires the opt-in `django_ai_sdk.tracing` app in `INSTALLED_APPS`.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `AI_SDK_TRACING_EXCLUDED_TAGS` | `[]` | Span tag keys to drop before storing, by exact key (no wildcards). Useful for static configuration that repeats identically on every run and is large: `["haystack.agent.tools", "haystack.agent.state_schema"]`. Applies to content tags too, and excluding one never affects the token columns or the `agent_id`/`agent_name` columns. See [Tracing](tracing.md). |
 
-One Haystack environment variable decides what the tracer records. Unlike the
+One Haystack environment variable decides what the tracer records.
+
+:::caution[An environment variable, read once]
+Unlike the
 settings above, Haystack reads it **once**, when `haystack.tracing` is first imported.
 It must be a real environment variable, set before the process starts, and
 changing it needs a restart. Assigning it in `settings.py` does nothing.
+:::
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HAYSTACK_CONTENT_TRACING_ENABLED` | `false` | When `true`, prompts, documents and replies are stored in the `tags` JSON column. Token counts and `model_name` are recorded either way. Treat the stored content as sensitive. |
+:::env
+HAYSTACK_CONTENT_TRACING_ENABLED=false  # When true, prompts, documents and replies are stored in the tags JSON column. Token counts and model_name are recorded either way. Treat the stored content as sensitive.
+:::
 
 ## Logging
 
@@ -161,12 +165,17 @@ Django's `TASKS` setting, and the SDK leaves that deployment decision to you.
 Workflow runs do not use django-tasks. They run on DBOS, in
 `./manage.py ai_sdk_worker`. See [Workflows](workflows.md).
 
+:::caution[The default backend runs tasks inline]
 Without a `TASKS` setting, django-tasks defaults to
 `django_tasks.backends.immediate.ImmediateBackend`, which runs tasks **inline, in the
 calling request**. That needs no configuration and no extra package, but
 a document upload then processes synchronously while the user waits.
+:::
 
 For durable processing with a separate worker, install a backend that provides one.
+
+::::tabs
+:::tab[With the workflows app]
 With the workflows app installed, `DBOSTaskBackend` runs every task on the DBOS queues
 that `ai_sdk_worker` already polls, so you need no second worker:
 
@@ -176,7 +185,9 @@ TASKS = {"default": {"BACKEND": "django_ai_sdk.durable.tasks.DBOSTaskBackend"}}
 
 Declare each task's `queue_name` in `AI_SDK_DBOS["QUEUES"]`. The worker polls only
 those queues and never picks up a task on any other queue.
+:::
 
+:::tab[Without the workflows app]
 Without the workflows app, the database backend ships separately:
 
 ::install[django-tasks-db]{tools="uv pip"}
@@ -201,6 +212,8 @@ TASKS = {
 
 Then run the worker with `./manage.py db_worker`. The demo project uses this
 split: the immediate backend in `DEBUG`, the database backend otherwise.
+:::
+::::
 
 ## Provider credentials
 

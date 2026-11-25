@@ -79,7 +79,11 @@ with thread_permissions("apps.agents.permissions.DemoThreadPermission"):
 
 ### Mocking the model generator
 
-Never construct a real generator in tests, neither `openai_responses_chat()` nor the Haystack class behind it. In your own project's tests, use `django_ai_sdk.testing.FakeLLM`. It is a generator factory that answers with canned replies, in order. The last reply repeats, and with no replies it echoes. It goes wherever an `llm` goes, on an agent or on an `LLMJudge`, and `calls` keeps the messages of every call:
+:::caution
+Never construct a real generator in tests, neither `openai_responses_chat()` nor the Haystack class behind it.
+:::
+
+In your own project's tests, use `django_ai_sdk.testing.FakeLLM`. It is a generator factory that answers with canned replies, in order. The last reply repeats, and with no replies it echoes. It goes wherever an `llm` goes, on an agent or on an `LLMJudge`, and `calls` keeps the messages of every call:
 
 ```python
 from unittest.mock import patch

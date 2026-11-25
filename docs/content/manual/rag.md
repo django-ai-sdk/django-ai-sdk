@@ -10,16 +10,18 @@ How RAG works in the SDK: the provider lifecycle, and how agents get retrieval a
 The [RAG Variants](rag-variants.md) page covers pipeline variants, config and the document model.
 :::
 
-![RAG Architecture](../images/graphs/rag_architecture.svg)
+::image[RAG Architecture]{src="../images/graphs/rag_architecture.svg" caption="The provider lifecycle and retrieval as tools."}
 
 ## What is RAG?
 
 Retrieval-Augmented Generation gives the model documents to answer from:
 
+:::steps
 1. The user asks a question.
 2. The agent retrieves relevant documents from a memory.
 3. The documents pass back to the model as retrieved context.
 4. The model responds and cites numbered sources.
+:::
 
 ## Enabling RAG on an agent
 
@@ -111,6 +113,23 @@ spec = await memory.get_tool_spec()  # -> ToolSpec(name="search_documents", ...)
 ```
 
 Tool names are namespaced per memory, so unrelated memories don't collide. If two memories produce the same name, the SDK suffixes the later one with a short memory-ID hash and logs a warning. It skips memories with zero documents, also with a warning. Retrieval results stream back as numbered `SourceEvent`s.
+
+:::tool[search_documents]
+The parameters every retrieval tool takes. The name and description come from the memory's `ToolSpec`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "The search query to retrieve relevant documents."
+    }
+  },
+  "required": ["query"]
+}
+```
+:::
 
 ## Citations
 

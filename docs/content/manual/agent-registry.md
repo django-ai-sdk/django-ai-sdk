@@ -10,13 +10,17 @@ How agents register and how the SDK resolves them by stable ID.
 
 Every concrete `Agent` subclass registers in `django_ai_sdk.agents.registry` when the class is defined, through `__init_subclass__`. The two public mechanisms only make sure the module gets imported.
 
+::::tabs
+:::tab[Settings]
 **Settings.** This is the recommended mechanism.
 
 ```python
 # settings.py
 AI_SDK_AGENTS = ["myapp.agents.PirateAgent"]
 ```
+:::
 
+:::tab[Decorator]
 **Decorator.**
 
 ```python
@@ -26,6 +30,8 @@ from django_ai_sdk.agents import auto_register
 class PirateAgent(Agent):
     ...
 ```
+:::
+::::
 
 Both mechanisms work together. The registry skips abstract shared bases (`abstract = True`) and self-registering subclasses, such as runtime agents. A class is registered only once.
 

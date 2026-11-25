@@ -6,7 +6,7 @@ sidebar:
 
 This page explains what happens inside the SDK when a request flows through it. You don't need to know this to use the SDK, but it helps when you extend or debug it.
 
-![Request flow](../images/graphs/data_flow.svg)
+::image[Request flow]{src="../images/graphs/data_flow.svg" caption="A chat request, from the Django view to the streamed reply."}
 
 :::note
 Contributor? The [System Architecture](../manual/architecture.md) manual page goes deeper into components and design patterns.
@@ -16,30 +16,64 @@ Contributor? The [System Architecture](../manual/architecture.md) manual page go
 
 When a client sends a chat message:
 
-```
-1. Django view receives POST with protocol messages + thread_id
-2. View calls: agent.as_view(payload.messages, thread_id=..., user=...)
-3. as_view() checks CHAT permissions
-4. Protocol handler converts messages:  VercelProtocolHandler.to_chat_messages()
-5. If thread_id provided:
-   - Resolves the storage adapter for the thread
-   - Stores the newest user message
-6. get_pipeline_adapter(thread_id, user) builds a Stream (Haystack pipeline)
-7. stream_response(adapter, messages, protocol_handler) returns StreamingHttpResponse
-8. Client starts receiving events as they stream
-```
+::::trace[1–8: before the first event]
+:::step[1. Django view receives POST with protocol messages + thread_id]{icon="globe"}
+:::
+
+:::step[2. View calls: agent.as_view(payload.messages, thread_id=..., user=...)]{icon="code"}
+:::
+
+:::step[3. as_view() checks CHAT permissions]{icon="search"}
+:::
+
+:::step[4. Protocol handler converts messages: VercelProtocolHandler.to_chat_messages()]{icon="code"}
+:::
+
+:::step[5. If thread_id provided: storage]{icon="file-text"}
+- Resolves the storage adapter for the thread
+- Stores the newest user message
+:::
+
+:::step[6. get_pipeline_adapter(thread_id, user) builds a Stream (Haystack pipeline)]{icon="wrench"}
+:::
+
+:::step[7. stream_response(adapter, messages, protocol_handler) returns StreamingHttpResponse]{icon="code"}
+:::
+
+:::step[8. Client starts receiving events as they stream]{icon="globe"}
+:::
+::::
 
 Inside the streaming response:
 
+::::trace[9–15: inside the streaming response]
+:::step[9. protocol_handler.sse(adapter, messages) starts iterating]{icon="code"}
+:::
+
+:::step[10. adapter.stream(messages) yields StreamEvent objects]{icon="brain"}
+:::
+
+:::step[11. Protocol handler converts each event to its wire format (Vercel SSE)]{icon="code"}
+:::
+
+:::step[12. Each event is serialized]{icon="square-terminal"}
+```text
+"data: {...}\n\n"
 ```
-9.  protocol_handler.sse(adapter, messages) starts iterating
-10. adapter.stream(messages) yields StreamEvent objects
-11. Protocol handler converts each event to its wire format (Vercel SSE)
-12. Each event is serialized: "data: {...}\n\n"
-13. StreamWriter aggregates chunks into a complete ChatMessage
-14. On completion, StreamWriter.finalize() persists the assistant message
-15. Stream terminates with "data: [DONE]\n\n"
+:::
+
+:::step[13. StreamWriter aggregates chunks into a complete ChatMessage]{icon="file-text"}
+:::
+
+:::step[14. On completion, StreamWriter.finalize() persists the assistant message]{icon="file-text"}
+:::
+
+:::step[15. Stream terminates]{icon="square-terminal"}
+```text
+"data: [DONE]\n\n"
 ```
+:::
+::::
 
 ---
 
@@ -154,11 +188,13 @@ The `django_ai_sdk.conversation` app provides two models:
 
 You don't store messages yourself. When you pass `thread_id` to `as_view()`:
 
+:::steps
 1. `get_storage_adapter(thread_id)` locates the adapter that holds the thread (querying all registered adapters) and falls back to the agent's configured `storage_adapter`.
 2. `storage_adapter.store_chat_message()` stores the newest user message right away.
 3. `as_view()` hands the storage adapter to `get_pipeline_adapter()`, which sets it on the returned `Stream`.
 4. `Stream.stream()` creates a `StreamWriter` with `storage_callback=storage_adapter.storage_callback`.
 5. When streaming finishes, `StreamWriter.finalize()` calls the callback, which stores the assistant message.
+:::
 
 If you don't pass `thread_id`, nothing is stored. Messages stream through and are gone.
 

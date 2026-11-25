@@ -10,7 +10,7 @@ The two adapters an `Agent` uses to talk to a Haystack model: `Stream` (streamin
 For usage, see the [Protocols guide](../serving/protocols.md). This page is the API reference.
 :::
 
-![Adapter Flow](../images/graphs/adapter_flow.svg)
+::image[Adapter Flow]{src="../images/graphs/adapter_flow.svg" caption="An agent's two adapters: Stream and Run."}
 
 | Adapter | Purpose | Powered by |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ class MyAgent(Agent):
 
 `Run.get_messages()` keeps only `user` and `assistant` messages and converts them to Haystack `ChatMessage`s. A `system_prompt` passed to `run()` goes first as a system message.
 
-:::note
+:::details[Earlier shapes of Run]
 `Run` wraps a plain generator and has never taken tools. Two earlier shapes
 added them, `Run(agent=prebuilt_agent)` and then `Run(generator, tools=[...])`.
 Both were deleted because no code called them. The second also built an
@@ -71,7 +71,7 @@ below describes the shape that replaced them.
 
 ## Headless tool runs
 
-![Headless Tool Run Flow](../images/graphs/headless_tool_run_flow.svg)
+::image[Headless Tool Run Flow]{src="../images/graphs/headless_tool_run_flow.svg" caption="agent.run(tools=True): one call, one final answer."}
 
 An `Agent` can run its own tools to completion **without streaming**. There is
 no `Stream`, no SSE connection and no client reading chunks. One call returns
@@ -132,10 +132,23 @@ turn. Oversight runs inside the Haystack Agent as hooks from
 `django_ai_sdk.oversight.plugin`, and `run_with_oversight` adds them on every run.
 The `TurnRequest` says whose turn it is. `run_with_oversight` opens its turn, then:
 
-- `GateQuestionHook` judges the history and the question before the first model call.
-- `JudgeToolCallHook` checks every tool call before it runs.
-- `MaskToolResultHook` masks every result before the model reads it.
-- `JudgeAnswerHook` judges what the loop wrote before the answer is returned.
+::::trace[An overseen run]
+:::step[GateQuestionHook]{icon="eye"}
+Judges the history and the question before the first model call.
+:::
+
+:::step[JudgeToolCallHook]{icon="wrench"}
+Checks every tool call before it runs.
+:::
+
+:::step[MaskToolResultHook]{icon="text-cursor-input"}
+Masks every result before the model reads it.
+:::
+
+:::step[JudgeAnswerHook]{icon="scale"}
+Judges what the loop wrote before the answer is returned.
+:::
+::::
 
 A refusal raises `django_ai_sdk.errors.Blocked`.
 
@@ -176,13 +189,26 @@ async for event in stream.stream(messages: list[ChatMessage]):
 
 `stream()` runs these steps in order:
 
-:::steps
-1. Convert `ChatMessage`s to Haystack messages. `merge_messages` controls whether consecutive messages merge.
-2. Generate the `message_id` UUID exactly once.
-3. Create a `StreamWriter` (when `store` and a `storage_adapter` are set).
-4. Attach the streaming callback to the generator, and call `warm_up` if the generator has it.
-5. Yield `MessageStartEvent`, live events, `MessageEndEvent`, optional `SuggestionEvent`, then `StreamEndEvent`.
+::::trace[stream()]
+:::step[Convert ChatMessages to Haystack messages]{icon="braces"}
+`merge_messages` controls whether consecutive messages merge.
 :::
+
+:::step[Generate the message_id UUID exactly once]{icon="key-round"}
+:::
+
+:::step[Create a StreamWriter]{icon="database"}
+When `store` and a `storage_adapter` are set.
+:::
+
+:::step[Attach the streaming callback to the generator]{icon="zap"}
+And call `warm_up` if the generator has it.
+:::
+
+:::step[Yield the events]{icon="message-square-text"}
+`MessageStartEvent`, live events, `MessageEndEvent`, optional `SuggestionEvent`, then `StreamEndEvent`.
+:::
+::::
 
 ## Examples
 

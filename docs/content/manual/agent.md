@@ -93,7 +93,7 @@ The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get
 
 ## Subagent delegation
 
-![Subagent Flow](../images/graphs/subagent_flow.svg)
+::image[Subagent Flow]{src="../images/graphs/subagent_flow.svg" caption="A coordinator delegating tasks to its subagents."}
 
 `agents = [SubagentA, SubagentB]` on an `Agent` turns each subagent into a Haystack `ComponentTool` the coordinator can delegate to. Only plain `Agent` subclasses can appear in that list. A `RuntimeAgent`, configured in the database, cannot: its `__init__` requires an `AgentSettings` row, and `agents = [...]` holds bare classes with no way to pass one in. `hidden = True` on a subagent is a convention, and the SDK does not enforce it.
 
@@ -106,6 +106,27 @@ The default `get_pipeline_adapter()` is this Stream over a `ToolAgent` with `get
 - `build_subagent(cls, thread_id, user)` in `django_ai_sdk.agents.subagent` builds the subagent with its own generator, tools and prompt, plus a `task` user variable. It has a second cycle guard: a `ContextVar` that tracks the chain of classes being built on this asyncio task. This guard catches a graph cycle the declaration-level check misses, such as A delegating to B and B delegating to A several hops apart. Loop limits and hooks come from `default_hooks(subagent)` in `agents/tool_agent.py`. It always adds `LogToolCallsHook`, adds `ToolCallBudgetHook(subagent.max_tool_calls)` when that is set (default `6`, `None` disables the cap), and sets `max_agent_steps=subagent.max_agent_steps` (default `6`). [`Agent.run(tools=True)`](stream-and-run.md#headless-tool-runs) uses the same function for a headless run, so a subagent class gets the same limits when it is delegated to live and when it runs by itself. A `FinalResponseHook` (`after_run`) asks for a written response when the loop ended without one. When the subagent runs, `run_with_oversight` adds the oversight hooks, and oversight's finish runs after `FinalResponseHook`, so finish judges the written response.
 - `outputs_to_string` turns the subagent's response into the tool output. [Handoff output](#handoff-output) describes what it contains and how the SDK recovers a run that was cut short. Only the coordinator streams *text*. The subagent's tool calls and results stream to the client through `stream_subagent_tools` (on by default) and are persisted in the conversation history. `SubagentStreamFilter` forwards only tool chunks, in the order they happen.
 - The coordinator's `get_system_prompt()` appends an `Available subagents:` roster.
+
+The tool for a subagent named Research Planner, as `get_agent_tools()` builds it. The description is the subagent's `description`, or `Delegate this task to <ClassName>.` without one:
+
+:::tool
+```json
+{
+  "name": "research_planner",
+  "description": "Delegate this task to ResearchPlanner.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task": {
+        "type": "string",
+        "description": "A self-contained description of the task to delegate to this subagent. Copy the user's request verbatim, do not paraphrase, autocorrect, or expand it."
+      }
+    },
+    "required": ["task"]
+  }
+}
+```
+:::
 
 ### Handoff output
 
@@ -125,12 +146,19 @@ have reached the maximum of N tool calls" notice and drop every result.
    the digest (default `6000` characters, `0` disables). The limit is shared
    across all results, so one large page cannot push out the rest.
 
-Before it falls back to the digest, `SubagentStreamFilter` makes **one LLM call
+Before it falls back to the digest, `FinalResponseHook` makes **one LLM call
 without tools** that asks the subagent to write its response from what it
 already gathered. With this call, the outcome does not depend on
 `max_agent_steps` leaving a spare step after the tool budget runs out. The call
 runs once and only on that path. If it fails, the SDK uses the digest and does
-not raise the error.
+not raise the error. It adds `FINAL_PROMPT` (`django_ai_sdk/agents/subagent.py`)
+as a user message:
+
+:::prompt[FINAL_PROMPT]{role="user" open="false"}
+You are not able to continue due to agent limitations.
+Write your final response now, from what you have already gathered above.
+Do not ask for more tools.
+:::
 
 `ToolCallBudgetHook` helps here: it *answers* a call it refuses instead of
 erasing it. The pending `assistant(tool_calls)` message stays, and each call gets
@@ -161,6 +189,7 @@ from the tracing span's `agent_id` and `agent_name` columns, see
 stable lookups and are keyed by id to avoid the name collisions that display
 attribution accepts.
 
+:::details[The same keys in the browser]
 The browser gets the same keys. The Vercel handler sends them as AI SDK
 provider metadata on `tool-input-start` and `tool-input-available`, and the
 client stores them as `callProviderMetadata`. That value stays through the
@@ -174,6 +203,7 @@ until it finishes:
 `from_chat_messages` sends it again as `callProviderMetadata`, so the label stays
 after a page reload. A tool the coordinator called itself carries no such key, and its
 payload is unchanged.
+:::
 
 ### Handoff history
 
@@ -183,12 +213,23 @@ the next turn would get the coordinator's restatement of the report instead of
 the report. So `Stream.get_messages` rebuilds each handoff as the original
 assistant and tool message pair:
 
-```
-user       "Research Example Company B.V."
-assistant  (tool_calls=[research_planner(task=…)])
-tool       "Full report: …"          <- the subagent's findings, verbatim
-user       "Which city?"
-```
+::::chat[A replayed handoff]
+:::user
+Research Example Company B.V.
+:::
+
+:::assistant[assistant]
+`(tool_calls=[research_planner(task=…)])`
+:::
+
+:::assistant[tool]
+Full report: …  (the subagent's findings, verbatim)
+:::
+
+:::user
+Which city?
+:::
+::::
 
 Only calls marked `handoff` replay. A subagent's own tool calls stay in history
 for the UI and traces, but the model does not get them again because the report
@@ -228,11 +269,13 @@ These classmethods delegate to `rag_provider` and do nothing without a provider:
 
 `as_view(protocol_messages, thread_id=None, user=None)`:
 
+:::steps
 1. Checks `CHAT` permissions.
 2. Converts protocol messages with `self.protocol_handler.to_chat_messages()`.
 3. Resolves attachments against the thread's files, and there are none without a thread. When a policy applies, it then opens the oversight turn on channel `chat`. Under a policy that masks the question, a stored thread's history replaces the client's copy. A client copy that matches the stored thread stays. `gate_history` judges any other history. The gate then judges the question and may refuse it, in which case nothing is stored, or mask it. A failure before the stream takes over the turn still closes the turn.
 4. Stores the newest user message when a thread is active.
 5. Builds the pipeline adapter and returns a `StreamingHttpResponse`.
+:::
 
 `run(messages, system_prompt=None, response_format=..., thread_id=None, user=None, tools=False, *, channel=None, oversight=<the agent's own>)` is also one turn under the agent's policy. It is recorded on `channel`, a name you pick, and `None` records `default`. It raises `django_ai_sdk.errors.Blocked` when the policy refuses. `messages` are `ChatMessage`s or dicts such as `{"role": "user", "content": "..."}`, and an override of `run()` gets `ChatMessage`s either way. `async get_oversight(*, channel, user, **kwargs)` chooses the policy per turn and returns `oversight` by default. The turn opens inside `super().run()`. Oversight checks an override that calls `super().run()`, and does not check one that calls its own model. Run such a model call through `run_with_oversight()`.
 

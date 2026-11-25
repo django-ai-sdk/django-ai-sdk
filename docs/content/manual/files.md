@@ -130,7 +130,28 @@ AI_SDK_FILE_UPLOAD_TO = "my/custom/path/"
 
 An uploaded image goes through `ImageCaptionProcessor`, which asks your vision agent for a description and a transcription of any visible text. That caption makes the image searchable, and an agent without vision sees only the caption. Agents also get the `ask_image` tool for questions the caption doesn't answer.
 
-Both need `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`. Your own agent answers every image question, so you choose the model, the instructions and the generator, including provider and reasoning settings. Without the setting, the SDK does not caption images and there is no `ask_image`.
+:::tool
+```json
+{
+  "name": "ask_image",
+  "description": "Look at an image uploaded to this thread and answer a question about it. Use this for anything about an image's visual content (what it shows, colours, text in it, details) that its description doesn't already answer.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "image": {"type": "string", "description": "The image's document id, or its filename."},
+      "question": {"type": "string", "description": "What to find out about the image, self-contained."}
+    },
+    "required": ["image", "question"]
+  }
+}
+```
+:::
+
+Both need `AI_SDK_VISION_AGENT = "myapp.agents.ImageAgent"`. Your own agent answers every image question, so you choose the model, the instructions and the generator, including provider and reasoning settings.
+
+:::note
+Without the setting, the SDK does not caption images and there is no `ask_image`.
+:::
 
 ```python
 # myapp/agents.py
@@ -179,7 +200,11 @@ The demo connects this to `GET /threads/{id}/files/meta/` (`aget_thread_file_met
 
 ## Fonts
 
-pdf-oxide renders cited document pages with the system's fonts. A PDF that doesn't embed its fonts needs them, and so does every converted Word, Excel or text file. On a server without fonts, pdf-oxide draws every letter as a box.
+pdf-oxide renders cited document pages with the system's fonts. A PDF that doesn't embed its fonts needs them, and so does every converted Word, Excel or text file.
+
+:::caution
+On a server without fonts, pdf-oxide draws every letter as a box.
+:::
 
 On Linux and in Docker, install Liberation:
 

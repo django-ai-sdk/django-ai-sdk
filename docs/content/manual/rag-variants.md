@@ -107,9 +107,11 @@ Query Expansion (via expander_model)
 Search All Variations (4 × top_k candidates each) → Fuse ranks → Return top-k
 ```
 
+:::details[Fusing and the search log]
 **Fusing.** Reciprocal rank fusion (`fuse_and_rank`) merges the results. A document that several queries find ranks high, whatever score each query gave it, because scores of different queries don't compare. One more ranking counts the words of the user's own query that appear verbatim in a candidate. It weighs as much as all queries together, so an exact term the embeddings don't know, such as an acronym, a code or a name, lifts the document that contains it. Words that appear in most candidates, such as "the" and "is", don't count.
 
 Every search logs one line (`RAG search: ...`) with the queries, the hits per query, the exact terms and what was kept. A line with one query means the expander fell back to the original.
+:::
 
 ### Persistent storage
 
@@ -136,7 +138,9 @@ AI_SDK_EMBEDDINGS_MODEL = "Qwen/Qwen3-Embedding-8B"
 AI_SDK_EMBEDDINGS_DIM = 4096
 ```
 
+:::caution
 Vectors of different models don't compare, so after changing the model run `python manage.py reindex_memories` (see [CLI](../operations/cli.md)).
+:::
 
 ## Documents
 

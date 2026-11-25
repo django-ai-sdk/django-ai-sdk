@@ -35,14 +35,31 @@ The view verifies and queues the event. A `django_tasks` worker runs the agent a
 
 ## How an event is handled
 
-:::steps
-1. **Verify.** `verify(request)` checks the platform's signature. A failure is a 401. The endpoint is `csrf_exempt` and unauthenticated, so the signature is the only gate. Only a code-registered `WebhookIntegration` is reachable. An `MCPServerConfig` row builds a different type and gets a 404.
-2. **Parse.** `parse(request)` returns one of three things. An `InboundEvent` is an event to answer. `None` acknowledges and drops the event, such as a ping, an edit or the bot's own message. An `HttpResponse` is returned verbatim, such as Slack's URL handshake.
-3. **Admit.** `ALLOW_FROM` (sender ids) and `ALLOW_WORKSPACES` (installations) must both admit the event, and the sender must be within `AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE`. A refused event still gets a 200, so the platform does not redeliver it. The SDK logs it with the ids to add.
-4. **Queue and acknowledge.** The SDK drops an event with no text left, such as a bare mention. Otherwise the event goes to the worker, and the platform gets `ack(event)`, an empty 200 by default.
-5. **Deduplicate.** The worker claims the event id with `cache.aadd` for `dedup_ttl` seconds, so it drops a redelivery or a second run of the task. In production, use a cache that every process shares. The check `ai_sdk.W001` warns when the default cache is `LocMemCache` or `DummyCache`. The worker then sends `event_received` (`django_ai_sdk.integrations.webhooks.signals`). With `django_ai_sdk.workflows` installed, that signal starts the workflow event triggers on `<name>.message`. The SDK logs a failing receiver, and the agent still answers. The claim stays when the run fails, because its tools may have acted. An event therefore runs at most once, and a worker that dies mid-run leaves the event unanswered.
-6. **Run.** The worker loads the conversation's thread and runs the agent as `RUN_AS` with `AI_SDK_WEBHOOK_TIMEOUT`. It persists the turn and calls `reply(event, text)`. A failing or slow run still replies, with an error or timeout message.
+::::trace[How an event is handled]
+:::step[Verify]{icon="key-round"}
+`verify(request)` checks the platform's signature. A failure is a 401. The endpoint is `csrf_exempt` and unauthenticated, so the signature is the only gate. Only a code-registered `WebhookIntegration` is reachable. An `MCPServerConfig` row builds a different type and gets a 404.
 :::
+
+:::step[Parse]{icon="braces"}
+`parse(request)` returns one of three things. An `InboundEvent` is an event to answer. `None` acknowledges and drops the event, such as a ping, an edit or the bot's own message. An `HttpResponse` is returned verbatim, such as Slack's URL handshake.
+:::
+
+:::step[Admit]{icon="user"}
+`ALLOW_FROM` (sender ids) and `ALLOW_WORKSPACES` (installations) must both admit the event, and the sender must be within `AI_SDK_WEBHOOK_RATE_LIMIT_PER_MINUTE`. A refused event still gets a 200, so the platform does not redeliver it. The SDK logs it with the ids to add.
+:::
+
+:::step[Queue and acknowledge]{icon="layers"}
+The SDK drops an event with no text left, such as a bare mention. Otherwise the event goes to the worker, and the platform gets `ack(event)`, an empty 200 by default.
+:::
+
+:::step[Deduplicate]{icon="copy"}
+The worker claims the event id with `cache.aadd` for `dedup_ttl` seconds, so it drops a redelivery or a second run of the task. In production, use a cache that every process shares. The check `ai_sdk.W001` warns when the default cache is `LocMemCache` or `DummyCache`. The worker then sends `event_received` (`django_ai_sdk.integrations.webhooks.signals`). With `django_ai_sdk.workflows` installed, that signal starts the workflow event triggers on `<name>.message`. The SDK logs a failing receiver, and the agent still answers. The claim stays when the run fails, because its tools may have acted. An event therefore runs at most once, and a worker that dies mid-run leaves the event unanswered.
+:::
+
+:::step[Run]{icon="bot"}
+The worker loads the conversation's thread and runs the agent as `RUN_AS` with `AI_SDK_WEBHOOK_TIMEOUT`. It persists the turn and calls `reply(event, text)`. A failing or slow run still replies, with an error or timeout message.
+:::
+::::
 
 The run is `agent.run(history + [question], tools=True, user=<RUN_AS>, thread_id=...)`. The history is the thread's stored messages, cut to the agent's `max_history`.
 

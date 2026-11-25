@@ -6,9 +6,32 @@ sidebar:
 
 How one `message_id` goes from generation to the SSE stream, to storage and to later operations.
 
-![ID Generation Flow](../images/graphs/id_generation.svg)
+::image[ID Generation Flow]{src="../images/graphs/id_generation.svg" caption="One message_id, from generation to the SSE stream, storage and later operations."}
 
 `Stream.stream()` generates the `message_id` **once**:
+
+::::trace[One message_id, start to finish]
+:::step[Stream.stream() generates the message_id once]{icon="code"}
+`message_id = str(uuid.uuid4())`
+:::
+
+:::step[MessageStartEvent sends it over SSE]{icon="globe"}
+`yield MessageStartEvent(message_id)`, on the wire as `{"messageId": "..."}`
+:::
+
+:::step[StreamWriter is bound to it for the storage callback]{icon="file-text"}
+`StreamWriter(message_id=message_id)`
+:::
+
+:::step[The persisted ChatMessage carries it]{icon="file-text"}
+`ChatMessage(id=message_id)`
+:::
+
+:::step[Rating, delete and restore endpoints use the same ID]{icon="wrench"}
+:::
+::::
+
+:::details[The same flow as text]
 
 ```
 Stream.stream()
@@ -23,6 +46,7 @@ ChatMessage(id=message_id)          # Persisted message
     ↓
 Rating / delete / restore endpoints use the same ID
 ```
+:::
 
 So the frontend tracks the message it renders, and the backend rates, deletes or restores the same record.
 
@@ -42,8 +66,10 @@ writer.add_chunk(MessageChunk(type="text", content=" world"))
 
 On completion, `Stream.get_final_message()`:
 
+:::steps
 1. Persists citation sources. It stores only the reference fields `index`, `title`, `source_id`, `memory_id` and `page_number`, and resolves the content from the store when it is read.
 2. Calls `stream_writer.finalize("stop")`, which invokes `storage_adapter.storage_callback(...)` to save the message.
+:::
 
 The result is in `stream.message_result`.
 

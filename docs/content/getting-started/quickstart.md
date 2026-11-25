@@ -39,10 +39,12 @@ is missing and you get the import error naming the package, for example
 says which extra provides it.
 ::::
 
+:::caution[Streaming needs an ASGI server]
 Streaming needs an ASGI server, but the SDK does not choose one for you. Install
 daphne, uvicorn or hypercorn yourself. The SDK doesn't depend on the packages the
 demo project happens to use either: allauth, DRF, django-cors-headers or a
 `django-tasks` backend.
+:::
 
 ::install[django-ai-sdk[haystack]]{tools="uv pip"}
 
@@ -249,11 +251,37 @@ data: {"type":"finish"}
 data: [DONE]
 ```
 
-Your agent now streams responses.
+Your agent now streams responses. Put together, the exchange reads:
 
-:::note
-**What just happened?** `as_view()` converted the protocol messages to internal `ChatMessage`s. `get_pipeline_adapter()` built a `ToolAgent` pipeline and returned a `Stream`. Haystack streamed chunks, normalized into `StreamEvent`s. The protocol handler serialized the events to the Vercel protocol over SSE. All of this takes about 50 lines of code.
+::::chat[Shakespeare Bot]
+:::system
+You are a helpful assistant who speaks in Shakespearean English. Use thee, thou, and other Elizabethan expressions. Be poetic but always answer the user's question.
 :::
+
+:::user
+Hello!
+:::
+
+:::assistant[Shakespeare Bot]
+Hark! Good morrow to thee!
+:::
+::::
+
+::::trace[What just happened?]
+:::step[as_view() converted the protocol messages to internal ChatMessages.]{icon="code"}
+:::
+
+:::step[get_pipeline_adapter() built a ToolAgent pipeline and returned a Stream.]{icon="wrench"}
+:::
+
+:::step[Haystack streamed chunks, normalized into StreamEvents.]{icon="brain"}
+:::
+
+:::step[The protocol handler serialized the events to the Vercel protocol over SSE.]{icon="globe"}
+:::
+::::
+
+All of this takes about 50 lines of code.
 
 ## Next steps
 ::::cards

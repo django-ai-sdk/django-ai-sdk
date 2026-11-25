@@ -68,18 +68,24 @@ class MyAgent(Agent):
 The factories never enable reasoning on their own. Put the vendor's own parameters in
 `llm_kwargs`. The SDK passes them as Haystack's `generation_kwargs`:
 
+::::tabs
+:::tab[OpenAI]
 ```python
 class MyAgent(Agent):
     llm = openai_responses_chat
     llm_kwargs = {"reasoning": {"effort": "low", "summary": "auto"}}
 ```
+:::
 
+:::tab[Anthropic]
 ```python
 class MyAgent(Agent):
     llm = anthropic_chat
     llm_kwargs = {"thinking": {"type": "enabled", "budget_tokens": 2048}, "max_tokens": 4096}
 ```
+:::
 
+:::tab[Ollama]
 Ollama is the exception. There `think` is an init parameter, not a generation kwarg.
 `ollama_chat` moves it out of `llm_kwargs`, so `llm_kwargs` works the same for every vendor:
 
@@ -88,6 +94,8 @@ class MyAgent(Agent):
     llm = ollama_chat
     llm_kwargs = {"think": True}
 ```
+:::
+::::
 
 Keyword arguments passed to `get_llm()` override `llm_kwargs`. One agent can use this to
 build a cheaper generator for a side task:

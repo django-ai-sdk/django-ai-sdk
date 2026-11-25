@@ -6,6 +6,8 @@ sidebar:
 
 Define a whole policy without a deploy: its lenses, its rules and what it builds on.
 
+:badge[Opt-in app]{variant="secondary"}
+
 Runtime authoring is an opt-in app on top of [oversight](oversight.md) and its [review API](../manual/oversight.md#review-api). An operator saves a policy definition. Every process turns it into an ordinary `Policy` class and runs it like one declared in code.
 
 The line between the two is fixed. A lens or rule declared in code changes only with a deploy. What an operator authors (a policy, its rules, its lenses) can be changed and turned on or off at runtime.
