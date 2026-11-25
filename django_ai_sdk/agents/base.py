@@ -519,7 +519,7 @@ class Agent(ABC, AgentInfoMixin, InlineFileCapability):
                                 "type": "string",
                                 "description": (
                                     "A self-contained description of the task to delegate "
-                                    "to this subagent. Copy the user's request verbatim"
+                                    "to this subagent. Copy the user's request verbatim, "
                                     "do not paraphrase, autocorrect, or expand it."
                                 ),
                             }
