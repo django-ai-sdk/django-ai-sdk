@@ -1952,6 +1952,48 @@
       opacity: 1;
       color: #1f9d5c;
     }
+    /* Mobile menu: a bottom drawer that pushes the page back, like Vaul's. */
+    #page {
+      min-height: 100vh;
+      transform-origin: 50% 0;
+      transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1), border-radius 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    body.drawer-shown { background: #0a0a0a; overflow: hidden; }
+    body.drawer-shown #page { transform: scale(0.94) translateY(12px); border-radius: 12px; overflow: hidden; }
+    .drawer {
+      margin: auto 0 0;
+      width: 100%;
+      max-width: 100%;
+      max-height: 85vh;
+      padding: 0 0 env(safe-area-inset-bottom);
+      border: 0;
+      border-radius: 16px 16px 0 0;
+      background: #fff;
+      color: #14140f;
+      transform: translateY(100%);
+      transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .drawer.is-shown { transform: translateY(0); }
+    .drawer::backdrop { background: rgba(0, 0, 0, 0); transition: background 0.4s ease; }
+    .drawer.is-shown::backdrop { background: rgba(0, 0, 0, 0.4); }
+    .drawer-handle { outline: none; width: 2.5rem; height: 0.375rem; margin: 0.75rem auto 0.5rem; border-radius: 999px; background: #e4e1d8; }
+    .drawer nav { display: flex; flex-direction: column; padding: 0.25rem 0 1rem; }
+    .drawer nav a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.95rem 1.5rem;
+      font-size: 1.05rem;
+      font-weight: 500;
+      border-top: 1px solid #f0eee8;
+    }
+    .drawer nav a:first-child { border-top: 0; }
+    .drawer nav a i { color: #8a877e; font-size: 0.9rem; }
+    .drawer nav a:active { background: #fbfaf7; }
+    .drawer nav a:focus:not(:focus-visible) { outline: none; }
+    @media (prefers-reduced-motion: reduce) {
+      #page, .drawer, .drawer::backdrop { transition: none; }
+    }
     .install-field {
       display: flex;
       align-items: center;
@@ -2462,11 +2504,12 @@
   </style>
 </head>
 <body class="bg-surface text-text antialiased">
+<div id="page" class="bg-surface">
 
   <!-- Nav -->
   <header>
     <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-      <a href="/" class="flex items-center gap-2.5">
+      <a href="./" class="flex items-center gap-2.5">
         <span class="font-display font-semibold text-base tracking-tight">django-ai-sdk</span>
         <span class="font-mono text-[10px] uppercase tracking-widest text-accent border border-accent/30 rounded-full px-2 py-0.5">Beta</span>
       </a>
@@ -2475,7 +2518,11 @@
         <a href="#features" class="hover:text-text transition">Features</a>
         <a href="docs/" class="hover:text-text transition">Docs</a>
         <a href="https://github.com/django-ai-sdk/django-ai-sdk" class="hover:text-text transition">GitHub</a>
+        <a href="https://pypi.org/project/django-ai-sdk/" class="hover:text-text transition">PyPI</a>
       </nav>
+      <button type="button" class="drawer-open md:hidden flex items-center justify-center w-9 h-9 rounded-lg border border-border text-text-secondary" aria-label="Menu" aria-controls="menu-drawer">
+        <i class="ph-bold ph-list"></i>
+      </button>
     </div>
   </header>
 
@@ -2798,11 +2845,63 @@ async def chat(request, payload: ChatRequest):
       <span class="text-sm text-text-secondary font-mono">BSD-3-Clause</span>
     </div>
   </footer>
+</div>
+
+  <dialog id="menu-drawer" class="drawer" aria-label="Menu">
+    <div class="drawer-handle" tabindex="-1" autofocus aria-hidden="true"></div>
+    <nav>
+      <a href="#setup">Setup<i class="ph-bold ph-caret-right"></i></a>
+      <a href="#features">Features<i class="ph-bold ph-caret-right"></i></a>
+      <a href="docs/">Docs<i class="ph-bold ph-caret-right"></i></a>
+      <a href="https://github.com/django-ai-sdk/django-ai-sdk">GitHub<i class="ph-bold ph-caret-right"></i></a>
+      <a href="https://pypi.org/project/django-ai-sdk/">PyPI<i class="ph-bold ph-caret-right"></i></a>
+    </nav>
+  </dialog>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/bash.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/python.min.js"></script>
   <script>hljs.highlightAll();</script>
   <script>
+    (function () {
+      var drawer = document.getElementById('menu-drawer');
+      var startY = null;
+
+      function open() {
+        drawer.showModal();
+        requestAnimationFrame(function () {
+          drawer.classList.add('is-shown');
+          document.body.classList.add('drawer-shown');
+        });
+      }
+      function close() {
+        drawer.style.transform = '';
+        drawer.classList.remove('is-shown');
+        document.body.classList.remove('drawer-shown');
+        setTimeout(function () { drawer.close(); }, 400);
+      }
+
+      document.querySelector('.drawer-open').addEventListener('click', open);
+      drawer.addEventListener('cancel', function (event) { event.preventDefault(); close(); });
+      drawer.addEventListener('click', function (event) {
+        if (event.target === drawer || event.target.closest('a')) close();
+      });
+      // Swipe down to close.
+      drawer.addEventListener('touchstart', function (event) { startY = event.touches[0].clientY; }, { passive: true });
+      drawer.addEventListener('touchmove', function (event) {
+        var dy = event.touches[0].clientY - startY;
+        if (startY !== null && dy > 0) {
+          drawer.style.transition = 'none';
+          drawer.style.transform = 'translateY(' + dy + 'px)';
+        }
+      }, { passive: true });
+      drawer.addEventListener('touchend', function (event) {
+        var dy = event.changedTouches[0].clientY - startY;
+        drawer.style.transition = '';
+        startY = null;
+        if (dy > 80) close(); else drawer.style.transform = '';
+      });
+    })();
+
     (function () {
       var cmd = document.getElementById('install-cmd');
       var tabs = document.querySelectorAll('.install-tabs button');
