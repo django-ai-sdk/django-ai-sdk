@@ -1343,7 +1343,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.107" },
 ]
 docs = [
-    { name = "dokk", extras = ["format", "search", "serve"], specifier = ">=0.0.4" },
+    { name = "dokk", extras = ["format", "search", "serve"], specifier = ">=0.0.5" },
     { name = "graphviz", specifier = ">=0.21" },
 ]
 studio = [
@@ -1505,7 +1505,7 @@ wheels = [
 
 [[package]]
 name = "dokk"
-version = "0.0.4"
+version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -1514,9 +1514,9 @@ dependencies = [
     { name = "pygments" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/44/64/4d573907648d145632b437a706908d51fc03c872d447c11ab7d0b6ac32ad/dokk-0.0.4.tar.gz", hash = "sha256:79020530222f4af2b35f1344c52f3af33d9df61798d78beae5ac38550b30e22e", size = 265068, upload-time = "2026-10-19T21:31:28.953Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/95/2774aebc022e8ab80488d47504d6e9893476c3071fa4f400e6207891a892/dokk-0.0.5.tar.gz", hash = "sha256:20e006f887f5b222cb203b907c4968018426c634a50d4350d51184d60f2a0a14", size = 265371, upload-time = "2026-11-25T08:57:58.2Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/cb/2fb52c980ebbe209c4c5273501f7d02a338fe28c311763f4be68bb9af5e5/dokk-0.0.4-py3-none-any.whl", hash = "sha256:c6177825edb1efeca03fb136d555458eeb111145960eff04bbd08bf9f73b6d61", size = 306939, upload-time = "2026-10-19T21:31:27.453Z" },
+    { url = "https://files.pythonhosted.org/packages/69/40/a95ed12bc8036964d5c5cdcb1d72efa9def618e44cc7930d6556b0969411/dokk-0.0.5-py3-none-any.whl", hash = "sha256:34b948dd9428170274d2e96dfa8085197faf49f10e5979cf955a815e148bf9c2", size = 307819, upload-time = "2026-11-25T08:57:56.697Z" },
 ]
 
 [package.optional-dependencies]

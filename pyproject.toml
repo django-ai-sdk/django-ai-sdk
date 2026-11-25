@@ -118,7 +118,7 @@ dev = [
   "ty>=0.0.107",
 ]
 # The docs site (docs/), built with dokk.
-docs = ["dokk[format,search,serve]>=0.0.4", "graphviz>=0.21"]
+docs = ["dokk[format,search,serve]>=0.0.5", "graphviz>=0.21"]
 
 [tool.uv.sources]
 ai-sdk-demo-base = { path = "demos/base", editable = true }
