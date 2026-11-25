@@ -7,6 +7,8 @@ out_dir = "../public/docs"
 
 [links]
 github = "https://github.com/django-ai-sdk/django-ai-sdk"
+website = "https://django-ai-sdk.github.io/django-ai-sdk/"
+pypi = "https://pypi.org/project/django-ai-sdk/"
 edit_url = "https://github.com/django-ai-sdk/django-ai-sdk/edit/dev/docs/content/{path}"
 
 [theme]
