@@ -355,6 +355,16 @@ class TestQdrantServerCollectionRace:
         assert [c.kwargs["recreate_index"] for c in store.call_args_list] == [True, False]
 
 
+class TestQdrantCollectionDeletedExternally:
+    def test_a_missing_collection_counts_as_no_index(self):
+        rag = QdrantBM25HybridRAG(documents=[], config=QdrantBM25HybridRAGConfig())
+        store = rag._create_document_store()
+        store.count_documents()
+        store._client.delete_collection(store.index)
+
+        assert rag._has_existing_index(store) is False
+
+
 class TestQdrantRealFileLock:
     @staticmethod
     def rag(path, lock_timeout):

@@ -20,6 +20,7 @@ from haystack_integrations.components.embedders.fastembed import (
 )
 from haystack_integrations.components.retrievers.qdrant import QdrantHybridRetriever
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+from haystack_integrations.document_stores.qdrant.document_store import QdrantStoreError
 from pydantic import Field
 from tenacity import (
     Retrying,
@@ -47,6 +48,12 @@ DEFAULT_DENSE_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-
 def _created_meanwhile(exc: BaseException) -> bool:
     """Qdrant's 409 for a collection another worker created after this one looked."""
     return getattr(exc, "status_code", None) == 409 and "already exists" in str(exc)
+
+
+def _collection_missing(exc: QdrantStoreError) -> bool:
+    # count_documents wraps a local client's ValueError or a server's 404.
+    cause = exc.__cause__
+    return isinstance(cause, ValueError) or getattr(cause, "status_code", None) == 404
 
 
 def _openai_kwargs(**kwargs: Any) -> dict[str, Any]:
@@ -217,6 +224,10 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
             return document_store.count_documents() > 0
         except ValueError:
             return False
+        except QdrantStoreError as exc:
+            if _collection_missing(exc):
+                return False
+            raise
 
     async def add_documents(self, documents: list[RagDocument]) -> None:
         if self._cached_document_store is None:
