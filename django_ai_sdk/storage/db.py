@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from asgiref.sync import sync_to_async
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, models
+from django.db import DatabaseError, models, transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -117,17 +118,20 @@ class DbStorageAdapter(BaseStorageAdapter):
         cls, thread_id: str, title: str | None = None, metadata: dict | None = None
     ) -> bool:
         try:
-            thread = await Thread.objects.aget(id=thread_id)
+            await sync_to_async(cls._update_thread_locked)(thread_id, title, metadata)
+            return True
+        except (Thread.DoesNotExist, ValidationError):
+            return False
 
+    @staticmethod
+    def _update_thread_locked(thread_id: str, title: str | None, metadata: dict | None) -> None:
+        with transaction.atomic():
+            thread = Thread.objects.select_for_update().get(id=thread_id)
             if title is not None:
                 thread.title = title[:THREAD_TITLE_MAX_LENGTH]
             if metadata is not None:
                 thread.metadata.update(metadata)
-
-            await thread.asave(update_fields=["title", "metadata", "updated_at"])
-            return True
-        except (Thread.DoesNotExist, ValidationError):
-            return False
+            thread.save(update_fields=["title", "metadata", "updated_at"])
 
     @classmethod
     async def delete_thread(cls, thread_id: str) -> bool:
