@@ -87,7 +87,6 @@ These class attributes configure an agent's behavior:
 | `integrations` | `[]` | Integration names whose tools reach this agent |
 | `artifacts` | `[]` | `ArtifactSchema` subclasses exposed as submission tools |
 | `rag_provider` | `None` | `RAGProvider` instance to enable RAG |
-| `rag_document_limit` | `10000` | Intended cap on documents fetched for RAG indexing (not yet enforced) |
 | `memories` | `[]` | Default connected memories |
 | `permissions` | `None` | Permission classes gating agent operations; `None` or `[]` uses the `agent` domain default |
 | `max_history` | `None` | Cap on messages sent to the model |
