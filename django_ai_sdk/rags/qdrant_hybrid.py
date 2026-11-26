@@ -33,7 +33,7 @@ from django_ai_sdk.generators.base import build_kwargs, resolve_secret
 from django_ai_sdk.logger import get_logger
 from django_ai_sdk.rags.base import RAGBase, RAGConfig
 from django_ai_sdk.rags.components import CANDIDATES_PER_QUERY, MultiQueryDeduplicationMixin
-from django_ai_sdk.rags.config import QdrantStorageConfig
+from django_ai_sdk.rags.config import DEFAULT_EMBEDDING_DIM, QdrantStorageConfig
 from django_ai_sdk.rags.utils import to_document
 from django_ai_sdk.utils import resolve_setting
 
@@ -96,9 +96,9 @@ class QdrantBM25HybridRAGConfig(RAGConfig):
     )
     embedding_dim: int = Field(
         default_factory=lambda: (
-            resolve_setting("AI_SDK_EMBEDDINGS_DIM", 384)
+            resolve_setting("AI_SDK_EMBEDDINGS_DIM", DEFAULT_EMBEDDING_DIM)
             if resolve_setting("AI_SDK_EMBEDDINGS_MODEL")
-            else 384
+            else DEFAULT_EMBEDDING_DIM
         ),
         ge=1,
     )
