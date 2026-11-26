@@ -203,6 +203,7 @@ class Stream:
         self._persisted_tool_ids: set[str] = set()
         self._persisted_tool_output_ids: set[str] = set()
         self._artifact_ids: list[str] = []
+        self.tool_artifacts = dict(self.tool_artifacts)
         self.message_result: ChatMessage | None = None
         self.first_component = list(pipeline.graph.nodes())[0] if pipeline.graph.nodes() else None
 
