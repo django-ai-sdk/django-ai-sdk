@@ -6,6 +6,7 @@ import pytest
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
 from django_ai_sdk.integrations.mcp.models import MCPServerConfig
+from django_ai_sdk.integrations.mcp.schemas import StaticMCPIntegrationConfig
 from django_ai_sdk.integrations.registry import (
     get_all_integrations,
     get_integrations,
@@ -52,6 +53,15 @@ class TestToIntegration:
         integration = row.to_integration()
 
         assert integration._needs_setup is not None
+
+    def test_detail_can_be_set_like_on_any_integration(self):
+        integration = DynamicMCPIntegration(
+            "zendesk-x", StaticMCPIntegrationConfig(url="https://x", label="Zendesk")
+        )
+
+        integration.detail = "token revoked"
+
+        assert integration.detail == "token revoked"
 
 
 class TestRegistryMerge:

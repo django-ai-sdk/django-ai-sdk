@@ -67,6 +67,7 @@ class DynamicMCPIntegration(Integration):
         self.hint = config.hint
         self.config = config
         self.supports_connect = isinstance(config, OAuthMCPIntegrationConfig)
+        self.connect_kind = "oauth" if self.supports_connect else None
         self._needs_setup = needs_setup
         self._intended_kind = intended_kind
 
@@ -77,14 +78,12 @@ class DynamicMCPIntegration(Integration):
         return self.config.type
 
     @property
-    def connect_kind(self) -> str | None:  # ty: ignore[incompatible-property-override]
-        if isinstance(self.config, OAuthMCPIntegrationConfig):
-            return "oauth"
-        return None
-
-    @property
-    def detail(self) -> str | None:  # ty: ignore[incompatible-property-override]
+    def detail(self) -> str | None:
         return self._needs_setup
+
+    @detail.setter
+    def detail(self, value: str | None) -> None:
+        self._needs_setup = value
 
     async def get_tool_names(
         self, user: AbstractBaseUser | AnonymousUser | None = None
