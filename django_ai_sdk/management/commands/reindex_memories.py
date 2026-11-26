@@ -4,7 +4,9 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import sync_to_async
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 from django.utils import timezone
 
 from django_ai_sdk.logger import get_logger
@@ -55,13 +57,18 @@ def get_embeddings() -> str:
 
 
 async def store_signature(memory: Memory, signature: dict[str, Any], **extra: Any) -> None:
+    await sync_to_async(write_signature)(memory.id, signature | extra)
+
+
+def write_signature(memory_id: Any, signature: dict[str, Any]) -> None:
     from django_ai_sdk.memories.models import Memory
 
-    rows = Memory.objects.filter(id=memory.id)
-    metadata = await rows.values_list("metadata", flat=True).afirst() or {}
-    sdk = metadata.get("sdk", {})
-    sdk["rag"] = signature | extra | {"indexed_at": timezone.now().isoformat()}
-    await rows.aupdate(metadata=metadata | {"sdk": sdk})
+    with transaction.atomic():
+        rows = Memory.objects.select_for_update().filter(id=memory_id)
+        metadata = rows.values_list("metadata", flat=True).first() or {}
+        sdk = metadata.get("sdk", {})
+        sdk["rag"] = signature | {"indexed_at": timezone.now().isoformat()}
+        rows.update(metadata=metadata | {"sdk": sdk})
 
 
 class Command(BaseCommand):

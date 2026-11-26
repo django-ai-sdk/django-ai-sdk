@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -7,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from django.core.management import CommandError, call_command
 from django.db import connection
+from django.db.models import QuerySet
+from django_ai_sdk.management.commands.reindex_memories import store_signature
 from django_ai_sdk.memories.models import Memory
 from django_ai_sdk.rags.provider import RAGProvider
 
@@ -116,6 +119,17 @@ class TestReindexMemories:
             "dim": 384,
         }
         assert memory.metadata["owner"] == "hr"
+
+    def test_storing_keeps_metadata_written_meanwhile(self):
+        memory = Memory.objects.create(name="Test Me", metadata={"owner": "hr"})
+        Memory.objects.filter(id=memory.id).update(metadata={"owner": "hr", "pinned": True})
+
+        with patch.object(QuerySet, "afirst", AsyncMock(return_value={"owner": "hr"})):
+            asyncio.run(store_signature(memory, {"rag": "FakeRag"}))
+
+        memory.refresh_from_db()
+        assert memory.metadata["pinned"] is True
+        assert memory.metadata["sdk"]["rag"]["rag"] == "FakeRag"
 
     def test_an_up_to_date_memory_is_skipped(self):
         Memory.objects.create(name="Test Me")
