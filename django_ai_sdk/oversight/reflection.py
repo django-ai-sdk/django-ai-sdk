@@ -51,7 +51,7 @@ logger = get_logger(__name__)
 REFLECT_LEASE = timedelta(minutes=10)
 REFLECT_ATTEMPTS = 3
 
-MaskGroup = tuple[Matched, tuple[list[Any], str]]
+MatchedMaskGroup = tuple[Matched, tuple[list[Any], str]]
 
 
 def answers_from(answer_rows: list[Any], lenses: Mapping[str, Lens]) -> dict[str, Answer]:
@@ -159,7 +159,7 @@ def commit_reflection(
     answered: list[Answered],
     matched: list[Matched],
     found: dict[str, str],
-    masks: list[MaskGroup],
+    masks: list[MatchedMaskGroup],
     *,
     lease: Any,
 ) -> bool:
@@ -205,7 +205,12 @@ async def judge_stored_turn(
     turn: Turn,
 ) -> (
     tuple[
-        ResolvedPolicy, TurnContext, list[Answered], list[Matched], dict[str, str], list[MaskGroup]
+        ResolvedPolicy,
+        TurnContext,
+        list[Answered],
+        list[Matched],
+        dict[str, str],
+        list[MatchedMaskGroup],
     ]
     | None
 ):
@@ -260,7 +265,7 @@ async def judge_reflect_stage(
     content: dict[str, Any] | None = None,
     has_text: bool = True,
     sample: bool = True,
-) -> tuple[list[Answered], list[Matched], list[MaskGroup]]:
+) -> tuple[list[Answered], list[Matched], list[MatchedMaskGroup]]:
     has_answer = bool(context.output.strip()) or outcome != Outcome.BLOCKED
     lenses, late = reflect_lenses(
         policy, retry, answered=has_answer, content=content, has_text=has_text
@@ -309,7 +314,7 @@ def reflect_lenses(
 
 def _reflect_masks(
     context: TurnContext, answered: list[Answered], matched: list[Matched], *, closed: bool
-) -> list[MaskGroup]:
+) -> list[MatchedMaskGroup]:
     groups, unpointed = collect_masks(
         matched, answered, subject=Subject.ANSWER, context=context, closed=closed
     )
@@ -352,7 +357,7 @@ def _judgeable(
 
 
 def apply_reflect_actions(
-    turn: Turn, context: TurnContext, matched: list[Matched], groups: list[MaskGroup]
+    turn: Turn, context: TurnContext, matched: list[Matched], groups: list[MatchedMaskGroup]
 ) -> list[tuple[dict[str, Any], list[str]]]:
     masks = [group for _, group in groups]
     rules = [match.rule.name for match, _ in groups]
