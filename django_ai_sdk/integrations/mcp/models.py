@@ -4,6 +4,7 @@ import base64
 import hashlib
 import ipaddress
 import logging
+import socket
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
@@ -25,12 +26,21 @@ def _validate_public_url(url: str) -> None:
     host = (urlparse(url).hostname or "").lower()
     if host in _BLOCKED_HOSTNAMES or host.endswith(_BLOCKED_HOSTNAME_SUFFIXES):
         raise UserError(f"{url!r} points at a local/internal hostname ({host!r})")
+    for ip in _resolve(host):
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise UserError(f"{url!r} resolves to a non-public address ({ip})")
+
+
+def _resolve(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     try:
-        ip = ipaddress.ip_address(host)
+        return [ipaddress.ip_address(host)]
     except ValueError:
-        return
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-        raise UserError(f"{url!r} resolves to a non-public address ({ip})")
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return []
+    return [ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos]
 
 
 def _get_fernet() -> Fernet:

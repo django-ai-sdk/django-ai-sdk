@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
 from django_ai_sdk.integrations.api.base import APIIntegration
 from django_ai_sdk.integrations.mcp.loader import DynamicMCPIntegration
@@ -212,6 +214,17 @@ class TestUrlValidation:
                 name="ssrf-4",
                 url="http://169.254.169.254/latest/meta-data/",
                 auth="static",
+            )
+
+    async def test_rejects_a_hostname_that_resolves_to_a_private_ip(self, monkeypatch):
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0))],
+        )
+        with pytest.raises(ValueError):
+            await MCPServerConfig.objects.acreate(
+                name="ssrf-6", url="https://rebind.example.com/mcp", auth="static"
             )
 
     async def test_allows_a_public_hostname(self):
