@@ -393,6 +393,20 @@ class TestQdrantRealFileLock:
         assert raised.value.code == ErrorCode.KNOWLEDGE_UNAVAILABLE
 
 
+class TestQdrantIndexMismatch:
+    @staticmethod
+    def store(path, dim):
+        storage = QdrantStorageConfig(backend="persistent", persist_path=str(path))
+        config = QdrantBM25HybridRAGConfig(storage=storage, embedding_dim=dim)
+        return QdrantBM25HybridRAG(documents=[], config=config)._create_document_store()
+
+    def test_an_index_of_another_dimension_surfaces(self, tmp_path):
+        self.store(tmp_path, 3).close()
+
+        with pytest.raises(ValueError, match="vector size"):
+            self.store(tmp_path, 4)
+
+
 class TestQdrantMissingEmbeddings:
     @staticmethod
     def _store():

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -139,8 +138,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                     similarity=storage.similarity,
                     **extra,
                 )
-                with contextlib.suppress(ValueError):
-                    store.count_documents()
+                store.count_documents()
                 return store
 
             try:
@@ -178,8 +176,7 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
                         similarity=storage.similarity,
                         **extra,
                     )
-                    with contextlib.suppress(ValueError):
-                        store.count_documents()
+                    store.count_documents()
                     return store
             raise RuntimeError("Failed to create QdrantDocumentStore after retries")
         else:
