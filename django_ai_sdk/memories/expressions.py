@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from django.db import DatabaseError
+from django.db import DataError, OperationalError
 from django.db.models import BooleanField, F, Func
 
 if TYPE_CHECKING:
@@ -39,6 +39,18 @@ class LineRegex(Func):
         return f"{text} REGEXP %s", [*params, f"{flags}{self.pattern}"]
 
 
+REGEX_REJECTED = (
+    "no such function: regexp",
+    "user-defined function raised exception",
+    "invalid regular expression",
+)
+
+
+def is_regex_rejected(error: DataError | OperationalError) -> bool:
+    message = str(error).lower()
+    return any(reason in message for reason in REGEX_REJECTED)
+
+
 async def agrep(
     queryset: QuerySet, regex: re.Pattern[str], *, field: str = "content"
 ) -> AsyncIterator[tuple[Model, int, str]]:
@@ -50,7 +62,9 @@ async def agrep(
                 LineRegex(field, regex.pattern, ignore_case=ignore_case)
             )
         ]
-    except DatabaseError:
+    except (DataError, OperationalError) as error:
+        if not is_regex_rejected(error):
+            raise
         rows = [row async for row in queryset]
     for row in rows:
         for number, line in enumerate((getattr(row, field) or "").splitlines(), 1):

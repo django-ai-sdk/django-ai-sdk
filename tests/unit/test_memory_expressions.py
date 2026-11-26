@@ -1,4 +1,8 @@
+import re
+from unittest.mock import patch
+
 import pytest
+from django.db import OperationalError
 from django_ai_sdk.memories.expressions import LineRegex, agrep, get_pattern
 from django_ai_sdk.memories.models import Entry, Memory
 
@@ -39,6 +43,25 @@ class TestLineRegex:
             ("incident.md", 2, "Spill at the loading dock."),
             ("incident.md", 3, "line 3"),
         ]
+
+    async def test_agrep_scans_in_python_when_the_database_rejects_the_regex(self):
+        entries = await self._entries()
+
+        with patch(
+            "django.db.backends.sqlite3._functions.re_search", side_effect=re.error("bad")
+        ):
+            hits = [(e.name, n) async for e, n, _ in agrep(entries, get_pattern("dock"))]
+
+        assert hits == [("incident.md", 2)]
+
+    async def test_agrep_raises_a_database_error_unrelated_to_the_regex(self):
+        entries = await self._entries()
+
+        with (
+            patch.object(LineRegex, "as_sqlite", return_value=("no_such_column REGEXP %s", ["x"])),
+            pytest.raises(OperationalError, match="no_such_column"),
+        ):
+            [hit async for hit in agrep(entries, get_pattern("dock"))]
 
 
 def test_an_invalid_regex_is_literal_text():
