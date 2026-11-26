@@ -8,7 +8,8 @@ from django_ai_sdk.files.previews import get_pdf_engine
 
 __all__ = ["markdown_to_pdf"]
 
-WIDTH = 80
+LINE_WIDTH = 80
+CAPS_LINE_WIDTH_PERCENT = 80
 TABLE_RULE = re.compile(r"^\|?[\s:|-]+\|?$")
 INLINE = re.compile(r"(\*\*|\*|`)(\S(?:.*?\S)?)\1")
 
@@ -36,13 +37,13 @@ def keep_lines(markdown: str, width: int) -> list[str]:
             indent = " " * (len(line) - len(line.lstrip()))
             item = re.match(r"\s*(?:[-*+]|\d+\.)\s+", line)
             follow = " " * len(item.group()) if item else indent
-            fits = width * 4 // 5 if line.isupper() else width
+            fits = width * CAPS_LINE_WIDTH_PERCENT // 100 if line.isupper() else width
             lines += textwrap.wrap(line, fits, subsequent_indent=follow)
     return lines
 
 
 # ponytail: Markdown, prepared by keep_lines, until pdf_oxide's HTML+CSS pipeline
 # wraps text (https://github.com/yfedoseev/pdf_oxide/issues/2082).
-def markdown_to_pdf(markdown: str, *, title: str | None = None, width: int = WIDTH) -> bytes:
+def markdown_to_pdf(markdown: str, *, title: str | None = None, width: int = LINE_WIDTH) -> bytes:
     pdf = get_pdf_engine().Pdf.from_markdown("\n".join(keep_lines(markdown, width)), title=title)
     return bytes(pdf.to_bytes())
