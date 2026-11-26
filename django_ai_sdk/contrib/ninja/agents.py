@@ -9,7 +9,7 @@ from django.http import HttpRequest
 from ninja import Router
 
 from django_ai_sdk import Agent
-from django_ai_sdk.agents.services import AgentService, AgentUpdateData
+from django_ai_sdk.agents.services import AgentCreateData, AgentService, AgentUpdateData
 from django_ai_sdk.contrib.ninja.routing import ApiRouter, Limit, Offset
 from django_ai_sdk.contrib.ninja.schemas import (
     AgentGroupOut,
@@ -101,7 +101,7 @@ async def list_runtime_agents(request: HttpRequest) -> Any:
 @routes.post("/agents/runtimes/", response=AgentSettingsOut)
 async def create_runtime_agent(request: HttpRequest, payload: AgentSettingsCreateIn) -> Any:
     config = await AgentService.create_runtime_agent(
-        payload.model_dump(exclude={"users", "groups"}),  # ty: ignore[invalid-argument-type]
+        cast("AgentCreateData", payload.model_dump(exclude={"users", "groups"})),
         user=request.user,
     )
     for entry in payload.users:
