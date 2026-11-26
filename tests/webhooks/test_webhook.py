@@ -569,7 +569,7 @@ class TestInboundTask:
             storage_adapter=MemoryStorageAdapter,
             run=AsyncMock(return_value="still here"),
         )
-        agent.__class__._agent_id = "agent-demo"
+        agent.agent_id = "agent-demo"
         with (
             patch.object(DemoWebhookIntegration, "resolve_agent", return_value=agent),
             patch("django_ai_sdk.memories.services.MemoryService.link_memories", AsyncMock()),
@@ -611,7 +611,7 @@ class TestInboundTask:
             storage_adapter=MemoryStorageAdapter,
             run=AsyncMock(return_value="ahoy"),
         )
-        agent.__class__._agent_id = "agent-demo"
+        agent.agent_id = "agent-demo"
         link = AsyncMock()
         with (
             patch.object(DemoWebhookIntegration, "resolve_agent", return_value=agent),
@@ -643,7 +643,7 @@ class TestInboundTask:
             storage_adapter=RaceLosingAdapter,
             run=AsyncMock(return_value="still here"),
         )
-        agent.__class__._agent_id = "agent-demo"
+        agent.agent_id = "agent-demo"
         with patch.object(DemoWebhookIntegration, "resolve_agent", return_value=agent):
             await run_inbound(self._payload())
         assert integration.replies == ["still here"]
