@@ -10,7 +10,7 @@ from django_ai_sdk.errors import Blocked
 from django_ai_sdk.oversight.calls import settled
 from django_ai_sdk.oversight.guard import TurnGuard, closing_turn, current_guard, guarding
 from django_ai_sdk.oversight.plugin import open_turn, settled_outside_a_turn
-from django_ai_sdk.oversight.plugin.hooks import JOINED, withhold_unfit
+from django_ai_sdk.oversight.plugin.hooks import JOINED_QUESTION_CALL_ID, withhold_unfit
 from django_ai_sdk.oversight.types import Stage
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class OpenTurn:
         self._gated = True
         if guard is None:
             if (outer := current_guard()) is not None and self.input:
-                masked = await outer.mask_result(JOINED, self.input)
+                masked = await outer.mask_result(JOINED_QUESTION_CALL_ID, self.input)
                 if masked != self.input and (asked := last_user_message(self.messages)):
                     asked.content = masked
                 self.input = masked

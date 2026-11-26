@@ -170,7 +170,7 @@ class TestRecordingFailures:
             guard = await start(name, "now")
             checked = await guard.gate_history(messages[:-1], messages[-1])
         assert not checked.blocked and messages[0].content == "earlier a@b.nl"
-        assert [o.lens.name for o in guard.answered if o.aside and o.errored] == ["pii"]
+        assert [o.lens.name for o in guard.answered if o.on_other_text and o.errored] == ["pii"]
 
     async def test_history_that_could_not_be_checked_is_withheld_when_closed(self):
         name = policy(

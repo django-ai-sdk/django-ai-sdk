@@ -45,7 +45,7 @@ class TurnMasks:
     def __init__(self, guard: TurnGuard) -> None:
         self.guard = guard
         self.results: dict[str, asyncio.Future[str]] = {}
-        self.answered_here: set[str] = set()
+        self.blocked_call_ids: set[str] = set()
         self.sources: dict[str, str] = {}
 
     def mask_groups(self, matched: list[Matched], subject: Subject) -> list[MaskGroup]:
@@ -141,14 +141,14 @@ class TurnMasks:
             if judged.blocked:
                 judged.text = str(BLOCKED_TEXT)
             if judged.matched or any(o.errored for o in judged.answered):
-                guard.record_aside(Stage.TOOL, judged.answered, judged.matched)
+                guard.record_other_text_findings(Stage.TOOL, judged.answered, judged.matched)
             return judged.text
         except Exception:
             withhold = guard.record_stage_error("tool result masking failed", block_turn=False)
             return str(UNCHECKED_TEXT) if withhold else text
 
     async def mask_result(self, call_id: str, text: str) -> str:
-        if call_id in self.answered_here:
+        if call_id in self.blocked_call_ids:
             return text
         if not call_id:
             return await self.mask_text(text)
@@ -218,7 +218,7 @@ def _moved(item: Answered, offset: int) -> Answered:
         for s in item.answer.spans
     ]
     answer = item.answer.model_copy(update={"spans": spans})
-    return Answered(item.lens, item.stage, answer, item.failed, item.aside)
+    return Answered(item.lens, item.stage, answer, item.failed, item.on_other_text)
 
 
 def gate_masking_lenses(policy: ResolvedPolicy) -> list[Lens]:
@@ -281,7 +281,7 @@ def collect_masks(
 def _latest(answered: Iterable[Answered], names: set[str]) -> list[Answered]:
     latest: dict[str, Answered] = {}
     for item in answered:
-        if item.lens.name in names and not item.aside:
+        if item.lens.name in names and not item.on_other_text:
             latest[item.lens.name] = item
     return list(latest.values())
 

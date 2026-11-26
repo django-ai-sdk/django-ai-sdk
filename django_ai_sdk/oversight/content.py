@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from django_ai_sdk.oversight.models import Turn, TurnContent
 
 
-SIDE_SECTIONS = frozenset({"texts"})
+SECTIONS_DROPPED_WHEN_EMPTY = frozenset({"texts"})
 
 FOUND = "[found]"
 
@@ -225,7 +225,9 @@ def add_to_content(turn: Turn, *, texts: dict[str, Any] | None = None) -> bool:
             **content,
             "texts": {**(content.get("texts") or {}), **(texts or {})},
         }
-        content = {k: v for k, v in content.items() if v != {} or k not in SIDE_SECTIONS}
+        content = {
+            k: v for k, v in content.items() if v != {} or k not in SECTIONS_DROPPED_WHEN_EMPTY
+        }
         TurnContent.objects.filter(pk=row.pk).update(stored=content)
     return True
 

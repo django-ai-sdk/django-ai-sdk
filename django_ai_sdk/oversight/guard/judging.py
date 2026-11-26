@@ -45,7 +45,7 @@ class Answered:
     stage: Stage
     answer: Answer
     failed: bool = False
-    aside: bool = False
+    on_other_text: bool = False
 
     @property
     def errored(self) -> bool:
@@ -57,7 +57,7 @@ class Answered:
 
     @property
     def about_turn(self) -> bool:
-        return not self.aside and self.lens.subject is not Subject.TOOL_CALL
+        return not self.on_other_text and self.lens.subject is not Subject.TOOL_CALL
 
 
 NO_JUDGE = "no judge can run here"
@@ -70,7 +70,7 @@ class Matched:
     rule: Rule
     stage: Stage
     acted: list[Action] = field(default_factory=list)
-    aside: bool = False
+    on_other_text: bool = False
     failed: bool = False
 
     def outcome(self, *, report: bool = False) -> Outcome:
@@ -276,7 +276,7 @@ async def judge_stage(
         guard.resolved,
         guard.context.answers,
         stage,
-        done={m.rule.name for m in guard.matched if not m.aside},
+        done={m.rule.name for m in guard.matched if not m.on_other_text},
         errored=guard.errored_lenses(),
         fail_closed=guard.fails_closed,
     )
