@@ -14,7 +14,7 @@ from tests.mocks.workflow import AGENT_GET, ENQUEUE, fake_agent, two_steps
 from tests.oversight.helpers import race
 
 
-def opened() -> str:
+def create_pending_run() -> str:
     return str(WorkflowRun.objects.create(workflow_definition=two_steps().model_dump()).pk)
 
 
@@ -22,7 +22,7 @@ def opened() -> str:
 @pytest.mark.usefixtures("postgres_only")
 class TestRacesOnPostgres:
     def test_one_of_many_claims_wins(self):
-        run_id = opened()
+        run_id = create_pending_run()
 
         claims = race(*[lambda: async_to_sync(claim_run)(run_id)] * 8)
 
@@ -31,7 +31,7 @@ class TestRacesOnPostgres:
         assert (run.status, run.attempt) == ("running", 1)
 
     def test_many_deliveries_run_each_step_once(self):
-        run_id = opened()
+        run_id = create_pending_run()
         model = fake_agent("ok")
 
         with patch(AGENT_GET, AsyncMock(return_value=model)):
@@ -54,7 +54,7 @@ class TestRacesOnPostgres:
         from django_ai_sdk.workflows.registry import register_workflow, reset_registry
 
         user = UserFactory.create()
-        run_id = opened()
+        run_id = create_pending_run()
         payroll = two_steps().model_copy(update={"name": "payroll"})
         register_workflow(payroll)
         WorkflowRun.objects.filter(pk=run_id).update(

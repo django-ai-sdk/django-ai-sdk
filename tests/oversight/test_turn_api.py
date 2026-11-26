@@ -21,10 +21,10 @@ from django_ai_sdk.workflows.runner import run_steps
 from django_ai_sdk.workflows.steps import Step, StepOutcome, WorkflowContext
 from haystack.utils import Secret
 
-from tests.oversight.helpers import INJECTION, log_lines, make_agent, opened
+from tests.oversight.helpers import INJECTION, log_lines, make_agent, fail_open_mode
 
 
-class Model:
+class CountingModel:
     def __init__(self) -> None:
         self.calls = 0
 
@@ -109,7 +109,7 @@ class TestTurn:
         messages = [ChatMessage(role="user", content="hi"), ChatMessage(role="user", content="go")]
         inert = await TurnGuard.start(agent, channel="api", messages=messages)
         assert not inert.active and (await inert.gate()).text == "go"
-        with opened():
+        with fail_open_mode():
             unknown = await TurnGuard.start(agent, channel="api", input="hi", oversight="fc-none")
         assert not unknown.active and (await unknown.gate()).text == "hi"
 
@@ -135,15 +135,15 @@ class TestTurn:
 class TestWatched:
     def test_a_call_outside_where_a_turn_is_required_is_not_checked(self):
         with refusing():
-            assert watched(Model()).run([]) == {"replies": ["sync"]}
+            assert watched(CountingModel()).run([]) == {"replies": ["sync"]}
 
     async def test_refuse_is_the_default(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with requires_turn("workflow:x:default"), pytest.raises(UnguardedModelCall):
             await model.run_async([])
 
     async def test_a_call_where_a_turn_is_required_warns_once_per_place(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         warning = override_settings(AI_SDK_OVERSIGHT={"UNGUARDED_MODEL_CALLS": "warn"})
         with warning, log_lines("WARNING") as lines, requires_turn("workflow:once:translate"):
             await model.run_async([])
@@ -151,16 +151,16 @@ class TestWatched:
         assert model.calls == 2
         warned = [line for line in lines if "workflow:once:translate" in line]
         assert len(warned) == 1
-        assert "Model was called in workflow:once:translate outside an oversight turn" in warned[0]
+        assert "CountingModel was called in workflow:once:translate outside an oversight turn" in warned[0]
 
     async def test_refuse_raises_before_the_model_is_called(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing(), requires_turn("workflow:x:y"), pytest.raises(UnguardedModelCall):
             await model.run_async([])
         assert model.calls == 0
 
     def test_allow_lets_it_be(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with (
             override_settings(AI_SDK_OVERSIGHT={"UNGUARDED_MODEL_CALLS": "allow"}),
             requires_turn("workflow:x:y"),
@@ -170,7 +170,7 @@ class TestWatched:
 
     def test_unguarded_code_is_not_checked(self):
         with refusing(), requires_turn("workflow:x:y"), unguarded():
-            watched(Model()).run([])
+            watched(CountingModel()).run([])
 
     def test_nothing_is_checked_with_oversight_off(self):
         with (
@@ -179,11 +179,11 @@ class TestWatched:
             ),
             requires_turn("workflow:x:y"),
         ):
-            watched(Model()).run([])
+            watched(CountingModel()).run([])
 
     @pytest.mark.django_db(transaction=True)
     async def test_a_call_inside_a_turn_is_the_turns(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing(), requires_turn("workflow:x:y"):
             async with turn(make_agent([], None), channel="api", input="hello") as t:
                 await model.run_async([await t.gate()])
@@ -195,7 +195,7 @@ class TestWatched:
 
     @pytest.mark.django_db(transaction=True)
     async def test_a_call_in_a_turn_before_its_gate_is_refused(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing(), requires_turn("workflow:x:y"):
             async with turn(make_agent([], None), channel="api", input="hello"):
                 with pytest.raises(UnguardedModelCall):
@@ -214,7 +214,7 @@ class TestWatched:
         assert not opened_own
 
     def test_a_copy_stays_watched_and_calls_itself(self):
-        copied = copy.deepcopy(watched(Model()))
+        copied = copy.deepcopy(watched(CountingModel()))
         copied.run([])
         assert copied.calls == 1
         with refusing(), requires_turn("workflow:x:y"), pytest.raises(UnguardedModelCall):
@@ -246,13 +246,13 @@ class Translate(Step):
 @pytest.mark.django_db(transaction=True)
 class TestWorkflowSteps:
     async def test_a_step_calling_a_model_outside_a_turn_is_refused(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing(), pytest.raises(UnguardedModelCall, match="workflow:docs:translate"):
             await run_steps([Translate(model)], workflow="docs")
         assert model.calls == 0
 
     async def test_a_step_opens_its_own_turn_on_its_channel(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing():
             outcomes = await run_steps([Translate(model, make_agent([], None))], workflow="docs")
         assert outcomes["translate"].output == "Vertaal [EMAIL]"
@@ -260,7 +260,7 @@ class TestWorkflowSteps:
         assert (row.channel, row.outcome) == ("workflow:docs:translate", "masked")
 
     async def test_a_step_may_name_a_policy_instead_of_an_agent(self):
-        model = watched(Model())
+        model = watched(CountingModel())
         with refusing():
             outcomes = await run_steps([Translate(model, "test-guard")], workflow="docs")
         assert outcomes["translate"].output == "Vertaal [EMAIL]"

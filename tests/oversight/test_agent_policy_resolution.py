@@ -21,11 +21,11 @@ from tests.oversight.helpers import (
     INJECTION,
     RunPolicy,
     agent_with,
-    closed,
+    fail_closed_mode,
     closed_turn,
     log_lines,
     make_agent,
-    opened,
+    fail_open_mode,
 )
 
 
@@ -53,7 +53,7 @@ class TestOpeningATurn:
 
     async def test_an_unknown_policy_runs_unguarded_when_open_and_logs(self):
         agent = make_agent([], None, policy="fx-no-such-policy")
-        with log_lines() as lines, opened():
+        with log_lines() as lines, fail_open_mode():
             guard = await TurnGuard.start(agent, channel="api", input="hello")
         assert not guard.active
         assert any("unguarded" in line for line in lines)
@@ -65,9 +65,9 @@ class TestOpeningATurn:
             raise RuntimeError("no database")
 
         agent.get_oversight = get_oversight
-        with opened():
+        with fail_open_mode():
             assert not (await TurnGuard.start(agent, channel="api", input="x")).active
-        with closed():
+        with fail_closed_mode():
             guard = await TurnGuard.start(agent, channel="api", input="x")
             assert (await guard.gate()).blocked
             turn = await closed_turn(guard)
@@ -80,7 +80,7 @@ class TestOpeningATurn:
             return ""
 
         agent.get_oversight = get_oversight
-        with closed():
+        with fail_closed_mode():
             guard = await TurnGuard.start(agent, channel="api", input="x")
             assert (await guard.gate()).blocked
 

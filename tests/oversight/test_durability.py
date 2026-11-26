@@ -385,7 +385,7 @@ class TestParseAge:
 
 @pytest.mark.django_db(transaction=True)
 class TestReflectLease:
-    async def closed(self, output: str = "a bad answer") -> str:
+    async def close_turn_for_reflection(self, output: str = "a bad answer") -> str:
         guard = await start("test-durable-reflect", "hello")
         await guard.gate()
         await guard.finish(output)
@@ -394,7 +394,7 @@ class TestReflectLease:
         return str(turn.id)
 
     async def test_a_reflected_turn_is_done_once(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             assert await run_reflection(turn_id) == 1
             assert await run_reflection(turn_id) == 0
@@ -404,20 +404,20 @@ class TestReflectLease:
         assert await LensAnswer.objects.filter(turn_id=turn_id, lens="later").acount() == 1
 
     async def test_two_deliveries_at_once_reflect_it_once(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             results = await asyncio.gather(run_reflection(turn_id), run_reflection(turn_id))
         assert sorted(results) == [0, 1]
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
 
     async def test_a_claim_held_by_a_live_worker_is_not_taken(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         assert await claim_for_reflect(turn_id) is not None
         assert await run_reflection(turn_id) == 0
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "running"
 
     async def test_a_lease_that_ran_out_is_claimed_again(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         assert await claim_for_reflect(turn_id) is not None
         await expire_lease(turn_id)
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
@@ -428,7 +428,7 @@ class TestReflectLease:
     async def test_a_run_that_lost_its_lease_writes_nothing(self):
         from django_ai_sdk.oversight.reflection import commit_reflection, judge_stored_turn
 
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         stale_lease = await claim_for_reflect(turn_id)
         turn = await Turn.objects.select_related("content").aget(id=turn_id)
         judged = await judge_stored_turn(turn)
@@ -441,7 +441,7 @@ class TestReflectLease:
         assert await RuleMatch.objects.filter(turn_id=turn_id, rule="tell_later").acount() == 1
 
     async def test_a_run_that_fails_gives_its_claim_back(self):
-        turn_id = await self.closed("fine")
+        turn_id = await self.close_turn_for_reflection("fine")
         with patch("django_ai_sdk.oversight.reflection.record_answers", side_effect=RuntimeError("db")):
             with pytest.raises(RuntimeError):
                 await run_reflection(turn_id)
@@ -449,7 +449,7 @@ class TestReflectLease:
         assert await run_reflection(turn_id) == 1
 
     async def test_an_after_effect_that_fails_writes_nothing_and_is_retried(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         with (
             patch("django_ai_sdk.oversight.reflection.apply_reflect_actions", side_effect=RuntimeError("x")),
             pytest.raises(RuntimeError),
@@ -463,14 +463,14 @@ class TestReflectLease:
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "done"
 
     async def test_a_policy_that_did_not_load_gives_the_claim_back(self):
-        turn_id = await self.closed("fine")
+        turn_id = await self.close_turn_for_reflection("fine")
         with patch("django_ai_sdk.oversight.reflection.get_resolved_policy", return_value=None):
             assert await run_reflection(turn_id) == 0
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
         assert await run_reflection(turn_id) == 1
 
     async def test_a_turn_that_cannot_be_read_gives_the_claim_back(self):
-        turn_id = await self.closed("fine")
+        turn_id = await self.close_turn_for_reflection("fine")
         with (
             patch.object(Turn.objects, "select_related", side_effect=OperationalError("db")),
             pytest.raises(OperationalError),
@@ -479,7 +479,7 @@ class TestReflectLease:
         assert (await Turn.objects.aget(id=turn_id)).reflect_state == "pending"
 
     async def test_a_turn_that_keeps_failing_is_marked_failed(self):
-        turn_id = await self.closed()
+        turn_id = await self.close_turn_for_reflection()
         with patch("django_ai_sdk.oversight.reflection.record_answers", side_effect=RuntimeError("db")):
             for _ in range(REFLECT_ATTEMPTS):
                 with pytest.raises(RuntimeError):
@@ -655,7 +655,7 @@ class TestTaskBackendCheck:
 class TestRacesOnPostgres:
     """Claims race on separate connections; SQLite cannot show it (`DATABASE_URL`)."""
 
-    def closed(self) -> str:
+    def close_turn_for_reflection(self) -> str:
         from asgiref.sync import async_to_sync
 
         async def make() -> str:
@@ -669,7 +669,7 @@ class TestRacesOnPostgres:
     def test_one_of_many_claims_wins(self):
         from asgiref.sync import async_to_sync
 
-        turn_id = self.closed()
+        turn_id = self.close_turn_for_reflection()
         leases = race(*[lambda: async_to_sync(claim_for_reflect)(turn_id)] * 8)
         assert sum(lease is not None for lease in leases) == 1
         turn = Turn.objects.get(id=turn_id)
@@ -678,7 +678,7 @@ class TestRacesOnPostgres:
     def test_many_deliveries_reflect_once(self):
         from asgiref.sync import async_to_sync
 
-        turn_id = self.closed()
+        turn_id = self.close_turn_for_reflection()
         with patch("django_ai_sdk.oversight.tasks.enqueue_notifications"):
             added = race(*[lambda: async_to_sync(run_reflection)(turn_id)] * 6)
         assert sorted(added) == [0, 0, 0, 0, 0, 1]
@@ -688,13 +688,13 @@ class TestRacesOnPostgres:
     def test_a_sweep_and_a_close_at_once_end_closed(self):
         from asgiref.sync import async_to_sync
 
-        async def opened() -> TurnGuard:
+        async def open_finished_guard() -> TurnGuard:
             guard = await start("test-durable", "hello")
             await guard.gate()
             await guard.finish("Fine.")
             return guard
 
-        guard = async_to_sync(opened)()
+        guard = async_to_sync(open_finished_guard)()
         Turn.objects.filter(id=guard.id).update(created_at=timezone.now() - timedelta(hours=1))
 
         race(lambda: async_to_sync(sweep)(), lambda: async_to_sync(close)(guard))
