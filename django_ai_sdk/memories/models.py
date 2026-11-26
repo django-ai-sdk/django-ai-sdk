@@ -98,7 +98,7 @@ class MemoryUser(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    memory_id: int
+    memory_id: uuid.UUID
     user_id: int
 
     objects = NaturalKeyManager("memory", "user")
@@ -125,7 +125,7 @@ class MemoryGroup(models.Model):
     can_manage = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    memory_id: int
+    memory_id: uuid.UUID
     group_id: int
 
     objects = NaturalKeyManager("memory", "group")
