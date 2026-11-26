@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -316,6 +316,8 @@ StreamChunk = (
 
 
 class VercelProtocolHandler(BaseProtocolHandler):
+    response_headers: ClassVar[dict[str, str]] = {"x-vercel-ai-ui-message-stream": "v1"}
+
     def __init__(self) -> None:
         self.message_id: str | None = None
         self.text_id: str | None = None

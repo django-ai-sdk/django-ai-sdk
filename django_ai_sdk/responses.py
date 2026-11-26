@@ -114,7 +114,8 @@ async def stream_response(
         response["Access-Control-Allow-Origin"] = cors_origin
     response["Access-Control-Allow-Headers"] = "Cache-Control"
 
-    response["x-vercel-ai-ui-message-stream"] = "v1"
+    for key, value in protocol_handler.response_headers.items():
+        response[key] = value
 
     if extra_headers:
         logger.debug(f"Adding {len(extra_headers)} extra headers")

@@ -403,5 +403,5 @@ AI_SDK_WORKFLOWS = {
 ## CORS and streaming
 
 :::note
-`stream_response()` (used by `as_view()`) sets SSE headers and a `x-vercel-ai-ui-message-stream: v1` header for Vercel-compatible frontends. Configure CORS for the streaming endpoint with `django-cors-headers` (already a dependency) or `AI_SDK_STREAM_CORS_ORIGIN`.
+`stream_response()` (used by `as_view()`) sets SSE headers, plus the `x-vercel-ai-ui-message-stream: v1` header when it streams the Vercel protocol. Configure CORS for the streaming endpoint with `django-cors-headers` (already a dependency) or `AI_SDK_STREAM_CORS_ORIGIN`.
 :::
