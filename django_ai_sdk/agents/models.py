@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
     from django.contrib.auth.models import Group
     from django.db.models.base import ModelBase
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class AgentSettings(models.Model):
@@ -36,8 +37,8 @@ class AgentSettings(models.Model):
     active = models.BooleanField(default=True, db_index=True)
     is_public = models.BooleanField(default=False)
 
-    agent_users: models.Manager[AgentUser]
-    agent_groups: models.Manager[AgentGroup]
+    agent_users: RelatedManager[AgentUser]
+    agent_groups: RelatedManager[AgentGroup]
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

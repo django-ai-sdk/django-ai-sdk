@@ -56,7 +56,7 @@ class AllowAnonymousMemoryPermission(BasePermission):
         if user is None or not user.is_authenticated:
             return operation in self.READ and obj.is_public
 
-        ownership = await obj.memory_users.filter(user=user).afirst()  # ty: ignore[invalid-attribute-access]
+        ownership = await obj.memory_users.filter(user=user).afirst()
         if ownership is None:
             if operation in self.READ | self.WRITE and obj.is_public:
                 return True

@@ -10,7 +10,7 @@ from django.utils.text import slugify
 from django_ai_sdk.workflows.registry import ADHOC, NAME_MAX_LENGTH
 
 if TYPE_CHECKING:
-    from django.db.models import Manager
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 APP_LABEL = "django_ai_sdk_workflows"
 
@@ -142,7 +142,7 @@ class WorkflowRun(models.Model):
     objects: ClassVar[WorkflowRunQuerySet] = WorkflowRunQuerySet.as_manager()  # ty: ignore[invalid-assignment]
 
     if TYPE_CHECKING:
-        steps: Manager[StepRun]
+        steps: RelatedManager[StepRun]
         user_id: Any
         started_by_id: Any
         workflow_id: Any

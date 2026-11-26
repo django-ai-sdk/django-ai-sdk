@@ -159,7 +159,7 @@ class DbStorageAdapter(BaseStorageAdapter):
         thread = await self.load_thread()
 
         messages_list = []
-        qs = thread.messages.filter(is_deleted=False).order_by("created_at")  # ty: ignore[invalid-attribute-access]
+        qs = thread.messages.filter(is_deleted=False).order_by("created_at")
         async for msg in qs:
             messages_list.append(msg)
 

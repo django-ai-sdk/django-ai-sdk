@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.db import models
@@ -10,6 +10,9 @@ from django.utils import timezone
 from django_ai_sdk.common import THREAD_TITLE_MAX_LENGTH, ChatMessage
 
 from .managers import MessageManager, ThreadManager
+
+if TYPE_CHECKING:
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class Thread(models.Model):
@@ -33,7 +36,7 @@ class Thread(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     metadata = models.JSONField(default=dict, blank=True)
 
-    messages: models.Manager[Message]
+    messages: RelatedManager[Message]
     user_id: str | None
     file_memory_id: str | None
 
@@ -55,11 +58,11 @@ class Thread(models.Model):
 
     @property
     def message_count(self) -> int:
-        return self.messages.count()  # ty: ignore[invalid-attribute-access]
+        return self.messages.count()
 
     @property
     def last_message(self) -> Message | None:
-        return self.messages.order_by("-created_at").first()  # ty: ignore[invalid-attribute-access]
+        return self.messages.order_by("-created_at").first()
 
     def add_user_message(self, chat_message: ChatMessage) -> Message:
         message = Message.from_chat_message(self, chat_message)
