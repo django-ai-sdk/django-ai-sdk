@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from ninja import Router
 from pydantic import Field
 
+from django_ai_sdk.common import MAX_PAGE_SIZE
 from django_ai_sdk.errors import NotFound, error_response
 from django_ai_sdk.views.schemas import ErrorResponse
 
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
     from ninja import NinjaAPI
 
 
-MAX_PAGE_SIZE = 100
 Limit = Annotated[int, Field(ge=1, le=MAX_PAGE_SIZE)]
 Offset = Annotated[int, Field(ge=0)]
 

@@ -8,6 +8,7 @@ from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
+from django_ai_sdk.common import MAX_PAGE_SIZE
 from django_ai_sdk.errors import error_response
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
 
 class ApiPagination(LimitOffsetPagination):
     default_limit = 100
-    max_limit = 100
+    max_limit = MAX_PAGE_SIZE
 
 
 class ApiViewSet(viewsets.GenericViewSet):

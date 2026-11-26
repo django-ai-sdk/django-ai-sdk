@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 Prompt = NewType("Prompt", str)
 
 THREAD_TITLE_MAX_LENGTH = 255
+MAX_PAGE_SIZE = 100
 
 
 def prompt(text: str) -> Prompt:
