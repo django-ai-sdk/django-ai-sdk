@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import sync_to_async
@@ -179,21 +179,27 @@ def fail_stale_runs() -> int:
     return failed
 
 
-async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
-    now = timezone.now()
-    claimed = await WorkflowRun.objects.filter(
-        pk=run_id, status=WorkflowRun.Status.PENDING
-    ).aupdate(
+async def _start_pending_run(run_id: str, workflow_id: str | None, now: datetime) -> int:
+    return await WorkflowRun.objects.filter(pk=run_id, status=WorkflowRun.Status.PENDING).aupdate(
         status=WorkflowRun.Status.RUNNING,
         attempt=F("attempt") + 1,
         heartbeat_at=now,
         started_at=Coalesce(F("started_at"), now),
         **({"task_id": workflow_id} if workflow_id else {}),
     )
+
+
+async def _renew_own_claim(run_id: str, workflow_id: str, now: datetime) -> int:
+    return await WorkflowRun.objects.filter(
+        pk=run_id, status=WorkflowRun.Status.RUNNING, task_id=workflow_id
+    ).aupdate(heartbeat_at=now)
+
+
+async def claim_run(run_id: str, *, workflow_id: str | None = None) -> WorkflowRun | None:
+    now = timezone.now()
+    claimed = await _start_pending_run(run_id, workflow_id, now)
     if not claimed and workflow_id:
-        claimed = await WorkflowRun.objects.filter(
-            pk=run_id, status=WorkflowRun.Status.RUNNING, task_id=workflow_id
-        ).aupdate(heartbeat_at=now)
+        claimed = await _renew_own_claim(run_id, workflow_id, now)
     if not claimed:
         return None
     return await WorkflowRun.objects.aget(pk=run_id)

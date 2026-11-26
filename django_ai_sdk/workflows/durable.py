@@ -22,7 +22,8 @@ QUEUE = "workflows"
 
 
 def workflow_id(run_id: str, attempt: int) -> str:
-    return run_id if attempt == 0 else f"{run_id}:{attempt + 1}"
+    next_attempt = attempt + 1
+    return run_id if attempt == 0 else f"{run_id}:{next_attempt}"
 
 
 def enqueue(run_id: str) -> str:
