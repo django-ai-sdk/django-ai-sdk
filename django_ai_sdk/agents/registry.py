@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 from django_ai_sdk.utils import resolve_setting
 
+from .mixins import AGENT_NAMESPACE
+
 if TYPE_CHECKING:
     from .base import Agent
 
 
 T = TypeVar("T", bound="Agent")
-
-AGENT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 
 class AgentRegistrationError(Exception):
