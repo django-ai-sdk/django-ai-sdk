@@ -393,7 +393,8 @@ class QdrantBM25HybridRAG(RAGBase[QdrantBM25HybridRAGConfig]):
     async def refresh_documents(self, documents: list[RagDocument]) -> None:
         """Update the indexed documents without releasing the Qdrant file lock.
 
-        Safe to call on a warmed-up instance.
+        Safe to call on a warmed-up instance. Reuses the open store: Qdrant's local
+        file lock is non-blocking, so a second client on the same folder raises.
         """
         self.documents = documents
         logger.info(f"[refresh_documents] Refreshing Qdrant index with {len(documents)} documents")
