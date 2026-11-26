@@ -18,7 +18,7 @@ from django_ai_sdk.integrations.registry import (
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture(autouse=True)
