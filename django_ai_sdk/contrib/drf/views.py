@@ -82,12 +82,7 @@ class ThreadViewSet(ApiViewSet):
 
     def retrieve(self, request: Request, thread_id: str) -> Response:
         data = thread_services.get_thread_history(thread_id, user=request.user)
-        user_pk = str(request.user.pk) if request.user.is_authenticated else None
-        for message in data.get("messages", []):
-            feedbacks = message.pop("feedbacks", [])
-            message["feedback"] = next(
-                (fb for fb in feedbacks if fb.get("user_id") == user_pk), None
-            )
+        thread_services.keep_own_feedback(data, request.user)
         data["permissions"] = object_permissions.thread_permissions(request.user, thread_id)
         return Response(s.ThreadDetailSerializer(data).data)
 
