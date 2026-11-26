@@ -90,6 +90,16 @@ class WorkflowRunQuerySet(models.QuerySet):
         return self.filter(pk=pk, attempt=attempt, status=WorkflowRun.Status.RUNNING)
 
 
+if TYPE_CHECKING:
+
+    class WorkflowRunManager(models.Manager["WorkflowRun"]):
+        def get_queryset(self) -> WorkflowRunQuerySet: ...
+        def held(self, pk: Any, attempt: int) -> WorkflowRunQuerySet: ...
+
+else:
+    WorkflowRunManager = models.Manager.from_queryset(WorkflowRunQuerySet)
+
+
 class WorkflowRun(models.Model):
     id = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
 
@@ -139,7 +149,7 @@ class WorkflowRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    objects: ClassVar[WorkflowRunQuerySet] = WorkflowRunQuerySet.as_manager()  # ty: ignore[invalid-assignment]
+    objects: ClassVar[WorkflowRunManager] = WorkflowRunManager()
 
     if TYPE_CHECKING:
         steps: RelatedManager[StepRun]
