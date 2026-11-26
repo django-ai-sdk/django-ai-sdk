@@ -547,6 +547,7 @@ class TestInboundTask:
 
     async def test_an_uninstalled_integration_is_dropped(self):
         await run_inbound(self._payload())
+        assert await cache.aget("ai_sdk:webhook:demo:Ev1") is None
 
     async def test_an_unresolvable_agent_still_replies(self):
         integration = DemoWebhookIntegration()
