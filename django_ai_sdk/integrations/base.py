@@ -230,8 +230,13 @@ class ResilientCache:
         return IntegrationStatus.ACTIVE if ok else IntegrationStatus.DEGRADED
 
     async def invalidate(self, key: Any) -> None:
-        """Drop cached values and reset the breaker, forcing a retry now.
-        Clears the whole backend (one integration's keys)."""
-        await self._cache.clear()
-        self._last_ok.pop(self._norm(key), None)
-        self._breaker_open.discard(self._norm(key))
+        """Drop key's cached value and reset its breaker, forcing a retry now."""
+        k = self._norm(key)
+        breaker = f"circuit_breaker:cb:{k}"
+        await self._cache.delete_many(
+            f"early:v2:v:{k}",
+            f"early:v2:v:{k}:lock",
+            *(f"{breaker}:{state}" for state in ("total", "fails", "open", "halfopen")),
+        )
+        self._last_ok.pop(k, None)
+        self._breaker_open.discard(k)
